@@ -37,7 +37,11 @@ export class EventReplayStore {
 
     // 异步通知订阅者，慢客户端不阻塞事件发布
     for (const subscriber of this.subscribers) {
-      setImmediate(() => subscriber(event));
+      setImmediate(() => {
+        if (this.subscribers.has(subscriber)) {
+          subscriber(event);
+        }
+      });
     }
   }
 

@@ -5,6 +5,7 @@ import { A2uiCatalog } from "./catalog.js";
 export interface A2uiMessage {
   readonly version: string;
   readonly surfaceId: string;
+  readonly catalogId?: string;
   readonly updateComponents?: Record<string, unknown>[];
 }
 
@@ -46,6 +47,7 @@ export class A2uiProjector {
         return {
           version: "v0.9.1",
           surfaceId,
+          catalogId: this.catalog.getCatalogId(),
           updateComponents: [
             {
               id: payload.toolCallId ?? `tool-${event.sequence}`,
@@ -67,6 +69,7 @@ export class A2uiProjector {
         return {
           version: "v0.9.1",
           surfaceId,
+          catalogId: this.catalog.getCatalogId(),
           updateComponents: [
             {
               id: payload.toolCallId ?? `tool-${event.sequence}`,
@@ -84,6 +87,7 @@ export class A2uiProjector {
         return {
           version: "v0.9.1",
           surfaceId,
+          catalogId: this.catalog.getCatalogId(),
           updateComponents: [
             {
               id: `turn-${payload.turnId ?? event.sequence}`,
@@ -101,6 +105,7 @@ export class A2uiProjector {
         return {
           version: "v0.9.1",
           surfaceId,
+          catalogId: this.catalog.getCatalogId(),
           updateComponents: [
             {
               id: `error-${event.sequence}`,

@@ -82,15 +82,16 @@ export class SessionHandler {
 
     if (command.type === "session.compact") {
       try {
-        void this.promptService.compact(command.sessionId).then(() => {
-          this.ws.send(
-            serializeMessage({
-              type: "ack",
-              requestId: command.requestId,
-              status: "accepted",
-            }),
-          );
-        });
+        this.promptService.compact(command.sessionId).then(
+          () => {
+            this.ws.send(serializeMessage({
+              type: "ack", requestId: command.requestId, status: "accepted",
+            }));
+          },
+          (err) => {
+            this.sendError(`Compact 失败: ${err instanceof Error ? err.message : "未知错误"}`, command.requestId);
+          },
+        );
       } catch {
         this.sendError("Session 不存在", command.requestId);
       }
