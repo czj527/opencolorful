@@ -9,9 +9,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "check:pi-imports": "node scripts/verify-pi-sdk-imports.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "check": "npm run check:pi-imports && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.10",
