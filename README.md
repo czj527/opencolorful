@@ -2,9 +2,9 @@
 
 基于 PI SDK 构建的本地优先 Agent 平台。
 
-Phase 0 基础骨架已经完成：项目可以构建、测试和启动本地 Server，并具备平台事件、
-SQLite Session 元数据索引和 PI SDK Adapter。下一步进入 Phase 1，完成 Provider 设置、
-PI JSONL Session、流式事件和首个 TUI 客户端。
+Phase 0 基础骨架已经完成。Phase 1 正在实施，已完成 Provider/凭据持久化、PI JSONL
+Session 生命周期，以及基于真实 PI AgentSession + faux provider 的 Prompt、流式事件
+归一化和 Abort。下一步是 Replay Store 与可恢复 SSE，然后进入 WebSocket 和 TUI。
 
 ## 开始开发
 
@@ -37,6 +37,7 @@ npm run cli -- server start --foreground
 - [基础设施设计](docs/superpowers/specs/2026-07-21-agent-platform-foundation-design.md)
 - [Phase 0 计划](plans/phase-00.md)
 - [Phase 1 计划](plans/phase-01.md)
+- [Agent 协作指南](AGENTS.md)
 
 ## 参考项目
 
@@ -54,7 +55,8 @@ npm run cli -- server start --foreground
 
 ## 当前限制
 
-- 尚未接入真实 Provider 和持久化凭据；
-- 尚未创建真实 PI Agent Session；
-- SSE、WebSocket、TUI、A2UI/TokUI 和 Web UI 从 Phase 1 开始实现；
+- Provider 设置和凭据已可持久化，但真实 Provider Prompt 的生产组合尚未接入；
+- 当前 AgentSession Prompt 闭环使用 faux provider；
+- 生产 Server 尚未组装新增 Service，直接启动仍只开放健康检查；
+- SSE、WebSocket、TUI、A2UI/TokUI 和 Web UI 尚未完成；
 - 当前 Server 仅面向本机 loopback，不提供远程认证。

@@ -1,5 +1,32 @@
 # Phase 1：Runtime、Session 和 TUI 垂直闭环
 
+## 实施状态
+
+**进行中（2026-07-21）**
+
+当前分支：`phase-1-core-infrastructure`
+
+| 任务 | 状态 | 提交/下一步 |
+|---|---|---|
+| P1-01 Provider 和凭据设置 | 已完成 | `1f78ad2` |
+| Git ignore 边界修复 | 已完成 | `5701bf6` |
+| P1-02 Session 生命周期 | 已完成 | `6eada4b` |
+| P1-03 Prompt、Abort 和事件归一化 | 已完成 | `c6635cc` |
+| P1-04 Replay Store 和 SSE | 下一步 | 从失败测试开始 |
+| P1-05 WebSocket 订阅和控制 | 未开始 | 依赖 P1-04 |
+| P1-06 TUI 协议客户端 | 未开始 | 依赖 Server 流协议 |
+| P1-07 A2UI 投影和 Action 验证 | 未开始 | 独立于正式 Web UI |
+| P1-08 TokUI Web 投影 Spike | 未开始 | 只做安全 Spike |
+| P1-09 重启恢复端到端验证 | 未开始 | 最终组装和文档 |
+
+最近一次完整验证（提交 `c6635cc`）：10 个测试文件、42 个测试用例通过。接手时
+必须重新验证。
+
+当前代码有两个明确边界：生产 `startForegroundServer()` 尚未组装数据库和各类
+Service，因此直接启动仍只有健康检查；`SessionRuntime.create()` 当前只完成 faux
+AgentSession 闭环，持久化 Provider 到真实 Prompt 的组合留待后续任务完成。详细交接
+规则见根目录 `AGENTS.md`。
+
 ## 目标
 
 完成一个真实可用的基础闭环：用户配置 Provider，创建 PI Session，通过 TUI 与
