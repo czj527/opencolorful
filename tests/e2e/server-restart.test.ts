@@ -20,7 +20,7 @@ afterAll(() => {
 function readWithTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("等待 Prompt 完成超时")), timeoutMs);
     void reader.read().then(
