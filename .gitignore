@@ -1,0 +1,25 @@
+# Node / TypeScript dependencies and build output.
+node_modules/
+dist/
+dist-*/
+.vite/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Local runtime state, logs, and credentials.
+.env
+.env.*
+!.env.example
+*.log
+runtime/
+data/
+.local/
+.tmp/
+
+# Editor and operating-system files.
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
