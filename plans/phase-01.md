@@ -18,14 +18,17 @@
 | P1-07 A2UI 投影和 Action 验证 | 已完成 | `740340a` |
 | P1-08 TokUI Web 投影 Spike | 已完成 | `740340a` |
 | P1-09 重启恢复端到端验证 | 已完成 | `9f6e5fc` |
+| Phase 1 验收缺口修复 | 已完成 | `2a71636` |
 
-最近一次完整验证（提交 `9f6e5fc`）：17 个测试文件、82 个测试用例通过。
+最近一次完整验证（提交 `2a71636`）：18 个测试文件、96 个测试用例通过；
+`node scripts/smoke-foundation.mjs` 通过，独立 CLI Server 双进程重启验证通过。
 
 已完成所有基础设施目标：Server 启动自动组装数据库 + 全部 Service、SSE 可恢复流、
 WebSocket 订阅控制、TUI 客户端（不 import PI SDK）、A2UI 投影 + Action 校验、
 TokUI 安全投影、重启恢复 E2E。`startForegroundServer()` 不再只有健康检查；
 生产启动即可获得全部 API 路由。`SessionRuntime.create()` 当前仍为 faux 专用路径，
-持久化 Provider 到真实 Prompt 的组合留待后续 Phase 完成。
+但与 `SessionService` 共享同一个 PI SessionManager；持久化 Provider 到真实 Prompt 的
+组合留待后续 Phase 完成。
 
 ## 目标
 

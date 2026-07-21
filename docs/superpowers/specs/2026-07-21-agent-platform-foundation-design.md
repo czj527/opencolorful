@@ -462,7 +462,7 @@ TUI，发送 Prompt，看到流式文本和工具事件，中断一次运行，�
   `openhanako/server/ws-scope.ts`。
 - A2UI：<https://a2ui.org/>，当前实现基线为 v0.9.1，v1.0 作为后续升级目标。
 - A2UI GitHub：<https://github.com/a2ui-project/a2ui>，Apache 2.0。
-- TokUI：<https://tokui.jboltai.com/>，当前 npm 版本为 0.1.7，MIT。
+- TokUI：<https://tokui.jboltai.com/>，npm 包为 `@jboltai/tokui`，当前版本为 0.1.8，MIT。
 - TokUI GitHub：<https://github.com/jboltai/tokui>。
 - Flutter GenUI：<https://github.com/flutter/genui>，作为 A2UI 客户端 SDK 参考，
   不作为本平台后端协议。

@@ -6,6 +6,7 @@ Phase 0 基础骨架已经完成。Phase 1 已完成，包含 Provider/凭据持
 Session 生命周期、基于真实 PI AgentSession + faux provider 的 Prompt、流式事件
 归一化、Abort、Replay Store、SSE 可恢复流、WebSocket 订阅和控制、TUI 客户端、
 A2UI 投影、TokUI Web 投影和安全 Spike，以及 Server 重启恢复端到端验证。
+TokUI Spike 使用官方 `@jboltai/tokui@0.1.8` UMD/CSS，并已通过真实浏览器渲染检查。
 
 当前已打标签 `phase-1-complete`。
 

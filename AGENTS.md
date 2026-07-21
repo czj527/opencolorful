@@ -27,9 +27,10 @@ Git 历史。
 - P1-06 TUI 协议客户端已完成：`56af238`；
 - P1-07 A2UI 投影 + P1-08 TokUI Web 投影已完成：`740340a`；
 - P1-09 重启恢复 E2E 和文档已完成：`9f6e5fc`；
+- Phase 1 验收缺口修复已完成：`2a71636`；
 - 下一项任务是 Phase 2（尚未定义）。
 
-截至 `9f6e5fc`，最近一次完整验证为 17 个测试文件、82 个测试用例通过。该数字只是
+截至 `2a71636`，最近一次完整验证为 18 个测试文件、96 个测试用例通过。该数字只是
 交接快照；接手后必须重新运行验证，不得直接复述为当前结果。
 
 ## 当前实现边界
@@ -47,13 +48,16 @@ Git 历史。
 - 真实 PI `AgentSession` + faux provider 的 Prompt、流式事件和 Abort 测试闭环；
 - 平台事件 Envelope、严格 sequence、陈旧 Abort 拒绝；
 - Provider、Models、Sessions、Messages、Abort 和 Events（SSE）路由模块；
-- EventReplayStore 环形缓存（1000 事件/stream）、可恢复 SSE（Last-Event-ID）；
+- EventReplayStore 有界缓存（1000 事件/stream、100 streams）、可恢复 SSE
+  （`streamId:sequence` Last-Event-ID）；
 - WebSocket 订阅/取消订阅、Abort/Compact/Resume 控制、ClientRegistry；
-- TUI 协议客户端（readline + fetch + ANSI），不 import PI SDK；
-- A2UI v0.9.1 投影（ToolCall/Plan/Status）和 Action 校验；
-- TokUI Web 投影策略（组件白名单、禁止 raw HTML/脚本、Handler 白名单）；
+- TUI 协议客户端（readline + fetch + ANSI），支持跨网络 chunk 的 SSE 解析和断线续传，
+  不 import PI SDK；
+- A2UI v0.9.1 投影（Text/Card/ToolCall/Plan/Attachment/Status）和 Action 校验；
+- TokUI `@jboltai/tokui@0.1.8` Web 投影策略（组件白名单、禁止 raw HTML/脚本、
+  精确命名 Handler）；
 - 生产 Server Service 组合根（自动装配数据库 + 全部 Service）；
-- 重启恢复 E2E 测试通过（17 测试文件、82 用例）。
+- 生产组合根重启恢复 E2E 测试通过（18 测试文件、96 用例）。
 
 尚未具备：
 
