@@ -16,15 +16,20 @@ Git 历史。
 ## 当前开发状态
 
 - `main` 已完成 Phase 0，标签为 `phase-0-complete`；
-- Phase 1 当前分支：`phase-1-core-infrastructure`；
+- Phase 1 已完成，标签为 `phase-1-complete`；
+- 当前分支：`phase-1-core-infrastructure`；
 - P1-01 Provider 和凭据设置已完成：`1f78ad2`；
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；
-- 下一项任务是 P1-04 Replay Store 和 SSE；
-- P1-05 至 P1-09 尚未开始，Phase 1 尚未完成，也没有 `phase-1-complete` 标签。
+- P1-04 Replay Store 和 SSE 已完成：`a587d91`；
+- P1-05 WebSocket 订阅和控制已完成：`fd917e8`；
+- P1-06 TUI 协议客户端已完成：`56af238`；
+- P1-07 A2UI 投影 + P1-08 TokUI Web 投影已完成：`740340a`；
+- P1-09 重启恢复 E2E 和文档已完成：`9f6e5fc`；
+- 下一项任务是 Phase 2（尚未定义）。
 
-截至 `c6635cc`，最近一次完整验证为 10 个测试文件、42 个测试用例通过。该数字只是
+截至 `9f6e5fc`，最近一次完整验证为 17 个测试文件、82 个测试用例通过。该数字只是
 交接快照；接手后必须重新运行验证，不得直接复述为当前结果。
 
 ## 当前实现边界
@@ -41,20 +46,24 @@ Git 历史。
 - PI JSONL Session 的创建、打开、继续、列表和归档；
 - 真实 PI `AgentSession` + faux provider 的 Prompt、流式事件和 Abort 测试闭环；
 - 平台事件 Envelope、严格 sequence、陈旧 Abort 拒绝；
-- Provider、Models、Sessions、Messages 和 Abort 路由模块。
+- Provider、Models、Sessions、Messages、Abort 和 Events（SSE）路由模块；
+- EventReplayStore 环形缓存（1000 事件/stream）、可恢复 SSE（Last-Event-ID）；
+- WebSocket 订阅/取消订阅、Abort/Compact/Resume 控制、ClientRegistry；
+- TUI 协议客户端（readline + fetch + ANSI），不 import PI SDK；
+- A2UI v0.9.1 投影（ToolCall/Plan/Status）和 Action 校验；
+- TokUI Web 投影策略（组件白名单、禁止 raw HTML/脚本、Handler 白名单）；
+- 生产 Server Service 组合根（自动装配数据库 + 全部 Service）；
+- 重启恢复 E2E 测试通过（17 测试文件、82 用例）。
 
 尚未具备：
 
-- `startForegroundServer()` 尚未创建数据库和 Service 组合根；新增路由目前只在测试中
-  通过 `createServerApp({ ...services })` 注入，直接启动 Server 仍只有健康检查；
+- 真实 Provider Prompt 的生产组合（当前为 faux provider 闭环）；
 - `SessionRuntime.create()` 当前是 faux 专用创建路径，尚未从持久化 Provider 设置构造
   生产模型运行时；
-- Replay Store、SSE、WebSocket、TUI、A2UI、TokUI 和重启 E2E 尚未实现；
 - 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 不在 Phase 1
   范围内。
 
-不要把“路由文件存在”误判为“生产 Server 已开放该路由”，也不要把 faux 测试运行时
-当作真实 Provider 已完成端到端接入。
+不要把 faux 测试运行时当作真实 Provider 已完成端到端接入。
 
 ## 架构硬约束
 
@@ -170,20 +179,3 @@ git ls-files | Select-String -Pattern '\.env|\.sqlite|sessions|\.log'
 
 默认测试不得请求真实 Provider 网络，不得依赖开发者本机已有 API Key。使用 PI faux
 provider 和临时 `PERSON_AGENT_HOME`，并在测试结束后关闭数据库、Runtime 和订阅。
-
-## P1-04 接手说明
-
-下一位 Agent 应从 `plans/phase-01.md` 的 P1-04 开始：
-
-1. 新建 `EventReplayStore`，按 stream 保存有限数量 Envelope；
-2. `publish()` 必须先入缓存，再异步通知订阅者，慢客户端不能阻塞 PI stream；
-3. 定义 `sinceSeq`、`Last-Event-ID`、缓存截断和 `reset` 的唯一语义；
-4. 将 `SessionRuntime` 的 publish 回调接到 Replay Store；
-5. SSE 使用 sequence 作为 SSE `id`，断线重连只补缺失事件；
-6. 为 P1-05 保留同一个订阅接口，WebSocket 不得另建缓存或序号；
-7. 完成 `tests/integration/sse-replay.test.ts` 后运行完整检查并提交
-   `feat: add resumable SSE streams`。
-
-P1-04 不要顺手实现 WebSocket 或 TUI。生产 Server 的 Service 组合根可以在 P1-09
-统一完成；若 P1-04 为 SSE 路由需要临时注入 Store，继续沿用 `createServerApp()` 的
-显式依赖注入方式。

@@ -2,9 +2,12 @@
 
 基于 PI SDK 构建的本地优先 Agent 平台。
 
-Phase 0 基础骨架已经完成。Phase 1 正在实施，已完成 Provider/凭据持久化、PI JSONL
-Session 生命周期，以及基于真实 PI AgentSession + faux provider 的 Prompt、流式事件
-归一化和 Abort。下一步是 Replay Store 与可恢复 SSE，然后进入 WebSocket 和 TUI。
+Phase 0 基础骨架已经完成。Phase 1 已完成，包含 Provider/凭据持久化、PI JSONL
+Session 生命周期、基于真实 PI AgentSession + faux provider 的 Prompt、流式事件
+归一化、Abort、Replay Store、SSE 可恢复流、WebSocket 订阅和控制、TUI 客户端、
+A2UI 投影、TokUI Web 投影和安全 Spike，以及 Server 重启恢复端到端验证。
+
+当前已打标签 `phase-1-complete`。
 
 ## 开始开发
 
@@ -57,6 +60,6 @@ npm run cli -- server start --foreground
 
 - Provider 设置和凭据已可持久化，但真实 Provider Prompt 的生产组合尚未接入；
 - 当前 AgentSession Prompt 闭环使用 faux provider；
-- 生产 Server 尚未组装新增 Service，直接启动仍只开放健康检查；
-- SSE、WebSocket、TUI、A2UI/TokUI 和 Web UI 尚未完成；
-- 当前 Server 仅面向本机 loopback，不提供远程认证。
+- Server 重启恢复已验证通过（E2E 测试）；
+- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 不在 Phase 1
+  范围内。
