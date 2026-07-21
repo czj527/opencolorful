@@ -220,7 +220,7 @@ PI Runtime Event
 | 组件安全边界 | Catalog 白名单 | Renderer/Handler 白名单 | A2UI 做默认安全基线 |
 | Web 视觉表现力 | 依赖客户端 Renderer | 内置丰富 AI 组件 | TokUI 做 Web 投影 |
 | 本地交互状态 | Data Model + Action | 命名 Handler | A2UI 用于正式交互，TokUI 限定命名动作 |
-| 协议成熟度 | Google 主导，v0.9.1 可用 | MIT，v0.1.7 | 都隔离适配，不让版本泄漏到 Runtime |
+| 协议成熟度 | Google 主导，v0.9.1 可用 | MIT，v0.1.8 | 都隔离适配，不让版本泄漏到 Runtime |
 
 这不是二选一：A2UI 定义“客户端应该渲染什么”，TokUI 优化“Web 如何快速、
 有表现力地展示它”。同一个平台事件可以只投影为 A2UI，也可以同时投影为 TokUI。
@@ -253,7 +253,10 @@ PI Runtime Event
 
 ### A2UI 设计
 
-A2UI 消息使用 JSONL 语义，平台在 Envelope 的 `payload` 中传递单条 A2UI 消息。
+A2UI 消息使用 JSONL 语义。平台 `UiMessagePayload.messages` 可以承载一个有序批次，
+客户端发送给 Renderer 时必须将批次中的每一项分别按官方 v0.9.1 Envelope 定帧；
+每项只能包含 `createSurface`、`updateComponents`、`updateDataModel` 或
+`deleteSurface` 之一。
 第一阶段只支持经过平台审核的基础 Catalog：
 
 - Text、Markdown、Card；
@@ -269,7 +272,7 @@ A2UI 用户操作映射为平台命令：
 
 ```json
 {
-  "version": "v0.9",
+  "version": "v0.9.1",
   "action": {
     "name": "submit_settings",
     "surfaceId": "settings",
