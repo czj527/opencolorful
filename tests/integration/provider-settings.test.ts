@@ -52,7 +52,7 @@ describe("provider settings", () => {
   it("persists provider settings and PI credentials separately", async () => {
     const paths = createPaths();
     const firstService = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
-    const firstApp = createServerApp({ modelService: firstService });
+    const { app: firstApp } = createServerApp({ modelService: firstService });
 
     const putResponse = await firstApp.request("http://local/api/settings/providers", {
       method: "PUT",
@@ -74,7 +74,7 @@ describe("provider settings", () => {
     expect(fs.readFileSync(paths.authFile, "utf8")).toContain(API_KEY);
 
     const reopenedService = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
-    const reopenedApp = createServerApp({ modelService: reopenedService });
+    const { app: reopenedApp } = createServerApp({ modelService: reopenedService });
     const providers = await (await reopenedApp.request("http://local/api/settings/providers")).json();
     expect(providers).toEqual([
       expect.objectContaining({ providerId: "local-openai", credentialConfigured: true }),
@@ -106,7 +106,7 @@ describe("provider settings", () => {
   ])("rejects %s without leaking submitted secrets", async (_name, provider) => {
     const paths = createPaths();
     const service = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
-    const app = createServerApp({ modelService: service });
+    const { app } = createServerApp({ modelService: service });
 
     const response = await app.request("http://local/api/settings/providers", {
       method: "PUT",

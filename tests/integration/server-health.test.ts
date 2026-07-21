@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe("server health", () => {
   it("returns a stable health response without starting a listener", async () => {
-    const app = createServerApp({ version: PLATFORM_VERSION, pid: 1234, startedAt: Date.now() });
+    const { app } = createServerApp({ version: PLATFORM_VERSION, pid: 1234, startedAt: Date.now() });
     const response = await app.request("http://127.0.0.1/api/health");
 
     expect(response.status).toBe(200);

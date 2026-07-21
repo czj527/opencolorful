@@ -1,7 +1,7 @@
 import { serve, type ServerType } from "@hono/node-server";
 
 import type { RuntimePaths } from "../config/paths.js";
-import { createServerApp } from "./app.js";
+import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
   markServerStopped,
@@ -14,6 +14,7 @@ export interface StartServerOptions {
   readonly port: number;
   readonly paths: RuntimePaths;
   readonly version: string;
+  readonly appOptions?: Omit<ServerAppOptions, "version" | "pid" | "startedAt">;
 }
 
 export interface RunningServer {
@@ -48,7 +49,12 @@ export async function startForegroundServer(options: StartServerOptions): Promis
   });
 
   try {
-    const app = createServerApp({ version: options.version, pid: process.pid, startedAt });
+    const { app, nodeWebSocket } = createServerApp({
+      version: options.version,
+      pid: process.pid,
+      startedAt,
+      ...options.appOptions,
+    });
     const { server, port } = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
       let settled = false;
       const server = serve(
@@ -64,6 +70,8 @@ export async function startForegroundServer(options: StartServerOptions): Promis
         }
       });
     });
+
+    nodeWebSocket.injectWebSocket(server);
 
     writeRuntimeState(options.paths, {
       pid: process.pid,

@@ -86,7 +86,7 @@ describe("SSE event replay", () => {
     const run = runtime.prompt("reconnect");
     await run.completed;
 
-    const app = createServerApp({ promptService, replayStore });
+    const { app } = createServerApp({ promptService, replayStore });
 
     // SSE 端点返回有效的 text/event-stream 响应
     const controller = new AbortController();
@@ -230,7 +230,7 @@ describe("SSE event replay", () => {
   it("returns 404 for SSE on non-existent session", async () => {
     const replayStore = new EventReplayStore();
     const promptService = new PromptService();
-    const app = createServerApp({ promptService, replayStore });
+    const { app } = createServerApp({ promptService, replayStore });
 
     const response = await app.request(
       "http://local/api/sessions/missing-session/events",

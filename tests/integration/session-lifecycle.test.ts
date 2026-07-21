@@ -64,7 +64,7 @@ describe("session lifecycle", () => {
     const created = context.service.create({ title: "唯一运行态", cwd: process.cwd() });
     expect(context.service.open(created.id)).toBe(created);
 
-    const app = createServerApp({ sessionService: context.service });
+    const { app } = createServerApp({ sessionService: context.service });
     expect((await (await app.request("http://local/api/sessions")).json() as unknown[]).length).toBe(1);
 
     const archiveResponse = await app.request(`http://local/api/sessions/${created.id}`, {

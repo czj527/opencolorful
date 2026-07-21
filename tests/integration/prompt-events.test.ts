@@ -82,7 +82,7 @@ describe("prompt event normalization", () => {
     const { runtime } = await createRuntime({ response: "route reply", tokensPerSecond: 10 });
     const promptService = new PromptService();
     promptService.register(runtime);
-    const app = createServerApp({ promptService });
+    const { app } = createServerApp({ promptService });
     const response = await app.request("http://local/api/sessions/session-prompt/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },

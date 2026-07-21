@@ -81,6 +81,10 @@ export class SessionRuntime {
     return this.executions.abort(this.sessionId, streamId);
   }
 
+  activeStream(): string | undefined {
+    return this.executions.activeStream(this.sessionId);
+  }
+
   async compact(): Promise<void> {
     await this.agent.compact();
   }
