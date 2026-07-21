@@ -17,6 +17,22 @@ export class ClientRegistry {
     this.subscriptions.delete(clientId);
   }
 
+  closeAll(): void {
+    for (const client of this.clients.values()) {
+      try {
+        if (client.raw !== undefined) {
+          client.raw.terminate();
+        } else {
+          client.close(1001, "Server stopping");
+        }
+      } catch {
+        // 连接可能已经关闭。
+      }
+    }
+    this.clients.clear();
+    this.subscriptions.clear();
+  }
+
   subscribe(clientId: string, sessionId: string): void {
     const sessions = this.subscriptions.get(clientId);
     if (sessions) {

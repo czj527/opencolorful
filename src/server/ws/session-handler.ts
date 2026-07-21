@@ -3,6 +3,7 @@ import type { WebSocket } from "ws";
 
 import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
+import type { SessionService } from "../../runtime/session-service.js";
 import { isClientCommand } from "../../contracts/commands.js";
 import { ClientRegistry } from "./client-registry.js";
 import { serializeMessage } from "./protocol.js";
@@ -16,6 +17,7 @@ export class SessionHandler {
     private readonly registry: ClientRegistry,
     private readonly promptService: PromptService,
     private readonly replayStore: EventReplayStore,
+    private readonly sessionService?: SessionService,
   ) {
     this.clientId = clientId;
   }
@@ -37,7 +39,7 @@ export class SessionHandler {
     const command = data;
 
     if (command.type === "session.subscribe") {
-      if (!this.promptService.hasRuntime(command.sessionId)) {
+      if (!this.sessionExists(command.sessionId)) {
         this.sendError("Session 不存在", command.requestId);
         return;
       }
@@ -140,6 +142,18 @@ export class SessionHandler {
 
   handleClose(): void {
     this.registry.remove(this.clientId);
+  }
+
+  private sessionExists(sessionId: string): boolean {
+    if (this.sessionService === undefined) {
+      return this.promptService.hasRuntime(sessionId);
+    }
+    try {
+      this.sessionService.getView(sessionId);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private sendError(message: string, requestId?: string): void {

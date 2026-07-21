@@ -16,6 +16,7 @@ import type {
   PiAgentSessionHandle,
   PiFauxAgentOptions,
 } from "./types.js";
+import { getSessionManager } from "./session-manager-registry.js";
 
 function messageText(message: unknown): string {
   const content = (message as { content?: unknown }).content;
@@ -150,8 +151,8 @@ export async function createPiFauxAgentSession(
     compaction: { enabled: false },
     retry: { enabled: false },
   });
-  const sessionManager = options.sessionPath
-    ? SessionManager.open(options.sessionPath, options.sessionDir)
+  const sessionManager = options.sessionHandle
+    ? getSessionManager(options.sessionHandle)
     : SessionManager.create(options.cwd, options.sessionDir, {
         id: options.sessionId,
       });

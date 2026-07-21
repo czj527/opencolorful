@@ -136,6 +136,112 @@ describe("SSE event replay", () => {
     promptService.dispose();
   });
 
+  it("uses the stream prefix in Last-Event-ID to replay only that stream", async () => {
+    const replayStore = new EventReplayStore();
+    const promptService = new PromptService();
+    for (const streamId of ["stream-a", "stream-b"]) {
+      for (let sequence = 1; sequence <= 2; sequence += 1) {
+        replayStore.publish({
+          protocolVersion: 1,
+          eventId: `${streamId}-${sequence}`,
+          sessionId: "session-cursor",
+          streamId,
+          sequence,
+          timestamp: new Date().toISOString(),
+          type: "message.delta",
+          payload: { role: "assistant", delta: `${streamId}-${sequence}` },
+        } as PlatformEventEnvelope);
+      }
+    }
+
+    const { app } = createServerApp({ promptService, replayStore });
+    const controller = new AbortController();
+    const response = await app.request(
+      "http://local/api/sessions/session-cursor/events",
+      {
+        headers: {
+          accept: "text/event-stream",
+          "Last-Event-ID": "stream-b:1",
+        },
+        signal: controller.signal,
+      },
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let body = "";
+    try {
+      while (!body.includes("stream-b-2")) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        body += decoder.decode(value, { stream: true });
+      }
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    }
+
+    expect(body).toContain("stream-b-2");
+    expect(body).not.toContain("stream-b-1");
+    expect(body).not.toContain("stream-a-");
+  });
+
+  it("does not lose an event published between the replay snapshot and live delivery", async () => {
+    const liveEvent = {
+      protocolVersion: 1,
+      eventId: "race-2",
+      sessionId: "session-race",
+      streamId: "stream-race",
+      sequence: 2,
+      timestamp: new Date().toISOString(),
+      type: "message.delta",
+      payload: { role: "assistant", delta: "live" },
+    } as PlatformEventEnvelope;
+    class RacingReplayStore extends EventReplayStore {
+      private injected = false;
+
+      override getSince(streamId: string, sinceSeq: number) {
+        const result = super.getSince(streamId, sinceSeq);
+        if (!this.injected) {
+          this.injected = true;
+          this.publish(liveEvent);
+        }
+        return result;
+      }
+    }
+
+    const replayStore = new RacingReplayStore();
+    replayStore.publish({ ...liveEvent, eventId: "race-1", sequence: 1 });
+    const { app } = createServerApp({
+      promptService: new PromptService(),
+      replayStore,
+    });
+    const controller = new AbortController();
+    const response = await app.request(
+      "http://local/api/sessions/session-race/events",
+      { headers: { accept: "text/event-stream" }, signal: controller.signal },
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let body = "";
+    try {
+      const deadline = Date.now() + 100;
+      while (Date.now() < deadline && !body.includes("race-2")) {
+        const read = await Promise.race([
+          reader.read(),
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 20)),
+        ]);
+        if (read === undefined || read.done) continue;
+        body += decoder.decode(read.value, { stream: true });
+      }
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    }
+
+    expect(body).toContain("race-1");
+    expect(body).toContain("race-2");
+  });
+
   it("reports reset when cache overflows for a stream", async () => {
     const replayStore = new EventReplayStore();
 
@@ -169,6 +275,25 @@ describe("SSE event replay", () => {
     const lateResult = replayStore.getSince("stream-overflow", 1_100);
     expect(lateResult.reset).toBe(false);
     expect(lateResult.events.length).toBe(100); // 1200 - 1100 = 100
+  });
+
+  it("bounds the number of retained streams", () => {
+    const replayStore = new EventReplayStore();
+    for (let index = 0; index < 101; index += 1) {
+      replayStore.publish({
+        protocolVersion: 1,
+        eventId: `stream-event-${index}`,
+        sessionId: "session-bounded",
+        streamId: `stream-${index}`,
+        sequence: 1,
+        timestamp: new Date().toISOString(),
+        type: "session.status",
+        payload: { status: "idle" },
+      } as PlatformEventEnvelope);
+    }
+
+    expect(replayStore.listSessionStreams("session-bounded")).toHaveLength(100);
+    expect(replayStore.getSince("stream-0", 0).reset).toBe(true);
   });
 
   it("publish does not block when no subscribers are connected", async () => {
@@ -229,6 +354,29 @@ describe("SSE event replay", () => {
     await new Promise((r) => setImmediate(r));
     // unsubscribe 后不再收到事件
     expect(received.length).toBe(1);
+  });
+
+  it("isolates subscriber exceptions", async () => {
+    const replayStore = new EventReplayStore();
+    const received: string[] = [];
+    replayStore.subscribe(() => {
+      throw new Error("subscriber failed");
+    });
+    replayStore.subscribe((event) => received.push(event.eventId));
+
+    replayStore.publish({
+      protocolVersion: 1,
+      eventId: "isolated-event",
+      sessionId: "session-isolated",
+      streamId: "stream-isolated",
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      type: "session.status",
+      payload: { status: "idle" },
+    } as PlatformEventEnvelope);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(received).toEqual(["isolated-event"]);
   });
 
   it("returns 404 for SSE on non-existent session when sessionService is provided", async () => {

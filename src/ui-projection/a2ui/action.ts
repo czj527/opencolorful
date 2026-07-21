@@ -1,10 +1,30 @@
-import type { A2uiAction } from "../../contracts/ui-message.js";
+import { Value } from "typebox/value";
+
+import {
+  A2uiActionSchema,
+  type A2uiAction,
+} from "../../contracts/ui-message.js";
 import { A2uiCatalog } from "./catalog.js";
 
 export interface ValidationResult {
   readonly ok: boolean;
   readonly issues: readonly string[];
 }
+
+export interface A2uiActionValidationContext {
+  readonly sessionId: string;
+  readonly surfaceId: string;
+  readonly components: Readonly<Record<string, string>>;
+}
+
+const ALLOWED_ACTIONS = new Set([
+  "submit",
+  "cancel",
+  "retry",
+  "refresh",
+  "select",
+  "toggle",
+]);
 
 export class A2uiActionValidator {
   private readonly catalog: A2uiCatalog;
@@ -13,47 +33,47 @@ export class A2uiActionValidator {
     this.catalog = catalog ?? new A2uiCatalog();
   }
 
-  validate(action: A2uiAction, knownSurfaceId: string): ValidationResult {
+  validate(value: unknown, context: A2uiActionValidationContext): ValidationResult {
+    if (!Value.Check(A2uiActionSchema, value)) {
+      return { ok: false, issues: ["Action 结构无效"] };
+    }
+    const action = value as A2uiAction;
     const issues: string[] = [];
 
-    if (!action.actionName || action.actionName.trim() === "") {
-      issues.push("Action 名称不能为空");
+    if (action.sessionId !== context.sessionId) {
+      issues.push("Session ID 不匹配");
     }
-
-    if (!action.surfaceId || action.surfaceId.trim() === "") {
-      issues.push("Surface ID 不能为空");
-    }
-
-    if (action.surfaceId !== knownSurfaceId) {
+    if (action.surfaceId !== context.surfaceId) {
       issues.push("Surface ID 不匹配当前会话");
     }
 
-    if (!action.sourceComponentId || action.sourceComponentId.trim() === "") {
-      issues.push("组件 ID 不能为空");
+    const componentType = context.components[action.sourceComponentId];
+    if (componentType === undefined) {
+      issues.push("组件不存在");
+    } else if (!this.catalog.isAllowed(componentType)) {
+      issues.push(`未知组件类型: ${componentType}`);
     }
 
-    // 校验 timestamp 是有效日期
-    if (isNaN(Date.parse(action.timestamp))) {
+    if (Number.isNaN(Date.parse(action.timestamp))) {
       issues.push("timestamp 格式无效");
     }
-
-    // 校验已知安全的 action 名称
-    const allowedActions = new Set([
-      "submit",
-      "cancel",
-      "retry",
-      "refresh",
-      "select",
-      "toggle",
-    ]);
-    if (!allowedActions.has(action.actionName)) {
+    if (!ALLOWED_ACTIONS.has(action.actionName)) {
       issues.push(`未知 Action: ${action.actionName}`);
     }
 
-    return {
-      ok: issues.length === 0,
-      issues,
-    };
+    const parameter = action.context?.value;
+    if (
+      action.actionName === "select" &&
+      typeof parameter !== "string" &&
+      typeof parameter !== "number"
+    ) {
+      issues.push("select Action 需要字符串或数字 value");
+    }
+    if (action.actionName === "toggle" && typeof parameter !== "boolean") {
+      issues.push("toggle Action 需要布尔 value");
+    }
+
+    return { ok: issues.length === 0, issues };
   }
 
   getCatalog(): A2uiCatalog {

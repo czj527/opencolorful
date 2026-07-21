@@ -13,6 +13,9 @@ import { PromptService } from "../../src/runtime/prompt-service.js";
 import { startForegroundServer } from "../../src/server/start.js";
 import { ClientRegistry } from "../../src/server/ws/client-registry.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
+import { SessionService } from "../../src/runtime/session-service.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -33,6 +36,7 @@ async function startWsServer(
     replayStore: EventReplayStore;
     promptService: PromptService;
     registry: ClientRegistry;
+    sessionService?: SessionService;
   },
 ) {
   return startForegroundServer({
@@ -46,6 +50,9 @@ async function startWsServer(
       wsRegistry: options.registry,
       wsPromptService: options.promptService,
       wsReplayStore: options.replayStore,
+      ...(options.sessionService !== undefined
+        ? { sessionService: options.sessionService }
+        : {}),
     },
   });
 }
@@ -102,6 +109,43 @@ afterEach(() => {
 });
 
 describe("WebSocket session control", () => {
+  it("subscribes to a persisted session before its Runtime is created", async () => {
+    const { paths, replayStore, promptService, registry } = createWsContext();
+    const database = openMetadataDatabase(paths.database);
+    const sessionService = new SessionService(paths, new SessionIndex(database));
+    const session = sessionService.create({ title: "WS 新会话", cwd: process.cwd() });
+    const server = await startWsServer(paths, {
+      replayStore,
+      promptService,
+      registry,
+      sessionService,
+    });
+    let client: Awaited<ReturnType<typeof connectWs>> | undefined;
+
+    try {
+      client = await connectWs(server.port);
+      client.ws.send(JSON.stringify({
+        protocolVersion: 1,
+        requestId: "before-runtime",
+        type: "session.subscribe",
+        sessionId: session.id,
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(client.received.map((raw) => JSON.parse(raw))).toContainEqual({
+        type: "ack",
+        requestId: "before-runtime",
+        status: "accepted",
+      });
+    } finally {
+      client?.close();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await server.stop();
+      sessionService.closeAll();
+      database.close();
+    }
+  });
+
   it("allows client to subscribe and receive events for a session", async () => {
     const { paths, replayStore, promptService, registry } = createWsContext();
     const runtime = await createWsRuntime(promptService, replayStore, paths);
@@ -304,5 +348,21 @@ describe("WebSocket session control", () => {
     } finally {
       await server.stop();
     }
+  });
+
+  it("stops promptly while a WebSocket client is still connected", async () => {
+    const { paths, replayStore, promptService, registry } = createWsContext();
+    const server = await startWsServer(paths, { replayStore, promptService, registry });
+    const client = await connectWs(server.port);
+
+    const stopPromise = server.stop();
+    const stoppedPromptly = await Promise.race([
+      stopPromise.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
+    ]);
+    if (!stoppedPromptly) client.close();
+    await stopPromise;
+
+    expect(stoppedPromptly).toBe(true);
   });
 });

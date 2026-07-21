@@ -58,4 +58,22 @@ describe("server health", () => {
 
     expect(readRuntimeState(paths)).toMatchObject({ status: "stopped" });
   });
+
+  it("releases runtime state and lock when production service construction fails", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-server-fail-"));
+    temporaryDirectories.push(directory);
+    const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+    fs.mkdirSync(path.dirname(paths.providerSettings), { recursive: true });
+    fs.writeFileSync(paths.providerSettings, "{not-json", "utf8");
+
+    await expect(startForegroundServer({
+      host: "127.0.0.1",
+      port: 0,
+      paths,
+      version: PLATFORM_VERSION,
+    })).rejects.toBeInstanceOf(Error);
+
+    expect(readRuntimeState(paths)).toMatchObject({ status: "stopped" });
+    expect(fs.existsSync(paths.serverLock)).toBe(false);
+  });
 });

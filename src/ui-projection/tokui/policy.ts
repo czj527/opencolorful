@@ -18,8 +18,10 @@ const ALLOWED_COMPONENTS = new Set([
   "progress",
   "btn",
   "alert",
+  "callout",
   "icon",
   "upd",
+  "plan-step",
 ]);
 
 const FORBIDDEN_ATTRIBUTES = new Set([
@@ -32,11 +34,12 @@ const FORBIDDEN_ATTRIBUTES = new Set([
   "onerror",
 ]);
 
-const ALLOWED_HANDLER_PREFIXES = new Set([
-  "action:",
-  "nav:",
-  "toggle:",
-  "select:",
+const DEFAULT_ALLOWED_HANDLERS = new Set([
+  "action:submit",
+  "action:cancel",
+  "action:retry",
+  "action:refresh",
+  "nav:home",
 ]);
 
 export const TOKUI_MAX_BUFFER = 1_048_576; // 1MB
@@ -49,6 +52,15 @@ export interface ValidationResult {
 }
 
 export class TokuiPolicy {
+  private readonly allowedHandlers: ReadonlySet<string>;
+
+  constructor(additionalHandlers: Iterable<string> = []) {
+    this.allowedHandlers = new Set([
+      ...DEFAULT_ALLOWED_HANDLERS,
+      ...additionalHandlers,
+    ]);
+  }
+
   validateChunk(chunk: string): ValidationResult {
     const issues: string[] = [];
 
@@ -93,20 +105,31 @@ export class TokuiPolicy {
       match = componentPattern.exec(chunk);
     }
 
-    // 检查 handler 白名单
-    const handlerPattern = /clk:([a-zA-Z][a-zA-Z0-9._:-]*)/g;
+    // 检查 clk/sub 命名 handler。
+    const handlerPattern = /\b(?:clk|sub):([a-zA-Z][a-zA-Z0-9._:-]*)/g;
     let hMatch = handlerPattern.exec(chunk);
     while (hMatch !== null) {
       const handler = hMatch[1];
       if (handler !== undefined) {
-        const hasAllowedPrefix = [...ALLOWED_HANDLER_PREFIXES].some((prefix) =>
-          handler.startsWith(prefix),
-        );
-        if (!hasAllowedPrefix) {
+        if (!this.allowedHandlers.has(handler)) {
           issues.push(`未注册的 Handler: ${handler}`);
         }
       }
       hMatch = handlerPattern.exec(chunk);
+    }
+
+    // on:"event:handler,event:handler" 使用第一个冒号分隔事件名与 handler。
+    const onPattern = /\bon:"([^"]*)"/g;
+    let onMatch = onPattern.exec(chunk);
+    while (onMatch !== null) {
+      for (const binding of (onMatch[1] ?? "").split(",")) {
+        const separator = binding.indexOf(":");
+        const handler = separator === -1 ? "" : binding.slice(separator + 1);
+        if (handler === "" || !this.allowedHandlers.has(handler)) {
+          issues.push(`未注册的 Handler: ${handler || binding}`);
+        }
+      }
+      onMatch = onPattern.exec(chunk);
     }
 
     // 禁止 raw HTML
@@ -122,8 +145,6 @@ export class TokuiPolicy {
   }
 
   validateHandler(name: string): boolean {
-    return [...ALLOWED_HANDLER_PREFIXES].some((prefix) =>
-      name.startsWith(prefix),
-    );
+    return this.allowedHandlers.has(name);
   }
 }

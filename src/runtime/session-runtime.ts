@@ -51,7 +51,7 @@ export class SessionRuntime {
       providerId: options.providerId,
       modelId: options.modelId,
       response: options.faux.response,
-      ...(options.sessionHandle ? { sessionPath: options.sessionHandle.path } : {}),
+      ...(options.sessionHandle ? { sessionHandle: options.sessionHandle } : {}),
       ...(options.faux.tokensPerSecond
         ? { tokensPerSecond: options.faux.tokensPerSecond }
         : {}),

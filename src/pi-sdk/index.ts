@@ -20,6 +20,7 @@ import type {
   PiSessionHandle,
   WorkspaceToolMode,
 } from "./types.js";
+import { registerSessionManager } from "./session-manager-registry.js";
 
 export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./version.js";
 export { createPiModelRuntime } from "./model-runtime.js";
@@ -87,7 +88,7 @@ function wrapSessionManager(manager: SessionManager): PiSessionHandle {
     }
     return null;
   };
-  return {
+  const handle: PiSessionHandle = {
     get id() {
       return manager.getSessionId();
     },
@@ -139,6 +140,8 @@ function wrapSessionManager(manager: SessionManager): PiSessionHandle {
       manager.getEntries();
     },
   };
+  registerSessionManager(handle, manager);
+  return handle;
 }
 
 export function createInMemoryCredentialStore(): PiCredentialStore {

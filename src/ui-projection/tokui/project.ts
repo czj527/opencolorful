@@ -3,7 +3,7 @@ import type { UiMessagePayload } from "../../contracts/ui-message.js";
 import { TokuiPolicy, TOKUI_MAX_BUFFER, TOKUI_MAX_CHUNK_LENGTH } from "./policy.js";
 
 /** 转义 DSL 中的特殊字符，防止动态值注入 TokUI 语法 */
-function escapeDsValue(value: string): string {
+function escapeDslValue(value: string): string {
   return value
     .replace(/"/g, "&quot;")
     .replace(/\[/g, "&#91;")
@@ -37,9 +37,9 @@ export class TokuiProjector {
           toolName?: string;
           toolCallId?: string;
         };
-        return `[card tt:"工具调用" id:"${escapeDsValue(payload.toolCallId ?? "tool")}"]` +
-          `[desc]${escapeDsValue(payload.toolName ?? "未知工具")}[/desc]` +
-          `[badge v:info]运行中...[/badge]`;
+        return `[tool-call id:"${escapeDslValue(payload.toolCallId ?? "tool")}" ` +
+          `name:"${escapeDslValue(payload.toolName ?? "未知工具")}" status:running]` +
+          `[p "工具调用进行中"][/tool-call]`;
       }
 
       case "tool.delta": {
@@ -47,27 +47,36 @@ export class TokuiProjector {
           delta?: string;
           toolCallId?: string;
         };
-        const safeDelta = escapeDsValue((payload.delta ?? "").slice(0, 200));
-        return `[upd id:"${payload.toolCallId ?? "tool"}"][p]${safeDelta}[/p][/upd]`;
+        const safeDelta = escapeDslValue((payload.delta ?? "").slice(0, 200));
+        return `[p v:muted "${safeDelta}"]`;
       }
 
       case "tool.completed": {
         const p = event.payload as Record<string, unknown>;
         const toolCallId = p.toolCallId as string | undefined;
         const isError = p.isError as boolean | undefined;
-        const variant = isError ? "v:danger" : "v:success";
-        return `[upd id:"${toolCallId ?? "tool"}"][badge ${variant}]${isError ? "失败" : "完成"}[/badge][/upd]`;
+        return `[upd id:"${escapeDslValue(toolCallId ?? "tool")}" ` +
+          `status:${isError ? "error" : "done"}]`;
       }
 
       case "turn.completed": {
-        return `[desc]Turn 完成[/desc]`;
+        return `[callout t:success tx:"Turn 完成"]`;
+      }
+
+      case "plan.updated": {
+        const payload = event.payload as { items?: unknown };
+        const items = Array.isArray(payload.items)
+          ? payload.items.filter((item): item is string => typeof item === "string").slice(0, 20)
+          : [];
+        return `[plan tt:"执行计划"]${items.map((item) =>
+          `[plan-step status:pending tt:"${escapeDslValue(item.slice(0, 200))}"]`
+        ).join("")}[/plan]`;
       }
 
       case "error": {
         const payload = event.payload as { message?: string };
         return `[card tt:"错误"]` +
-          `[badge v:danger]错误[/badge]` +
-          `[p]${escapeDsValue((payload.message ?? "未知错误").slice(0, 200))}[/p]` +
+          `[callout t:danger tx:"${escapeDslValue((payload.message ?? "未知错误").slice(0, 200))}"]` +
           `[/card]`;
       }
 

@@ -1,6 +1,7 @@
 import type { PlatformEventEnvelope } from "../contracts/events.js";
 
 const MAX_EVENTS_PER_STREAM = 1_000;
+const MAX_RETAINED_STREAMS = 100;
 
 export interface ReplayResult {
   readonly events: readonly PlatformEventEnvelope[];
@@ -25,6 +26,11 @@ export class EventReplayStore {
 
     let buffer = this.streams.get(event.streamId);
     if (!buffer) {
+      while (this.streams.size >= MAX_RETAINED_STREAMS) {
+        const oldestStreamId = this.streams.keys().next().value as string | undefined;
+        if (oldestStreamId === undefined) break;
+        this.streams.delete(oldestStreamId);
+      }
       buffer = { events: [], truncated: false };
       this.streams.set(event.streamId, buffer);
     }
@@ -39,7 +45,11 @@ export class EventReplayStore {
     for (const subscriber of this.subscribers) {
       setImmediate(() => {
         if (this.subscribers.has(subscriber)) {
-          subscriber(event);
+          try {
+            subscriber(event);
+          } catch {
+            // 一个客户端的同步写入失败不能影响其他订阅者或 Provider stream。
+          }
         }
       });
     }

@@ -22,6 +22,7 @@ describe("A2UI projection", () => {
     if (result === null) return;
     expect(result.format).toBe("a2ui");
     const msg = (result as { message: Record<string, unknown> }).message;
+    expect(msg.catalogId).toBe("person-agent/v1");
     const uc = msg.updateComponents as { type: string }[] | undefined;
     expect(uc?.[0]?.type).toBe("ToolCall");
   });
@@ -61,33 +62,76 @@ describe("A2UI projection", () => {
     if (result === null) return;
     expect(result.format).toBe("a2ui");
   });
+
+  it("projects plan and attachment platform events", () => {
+    const projector = new A2uiProjector();
+    const plan = projector.project({
+      ...toolStarted(),
+      eventId: "evt-plan",
+      type: "plan.updated",
+      payload: { items: ["分析", "实现"] },
+    } as never);
+    const attachment = projector.project({
+      ...toolStarted(),
+      eventId: "evt-attachment",
+      type: "attachment.available",
+      payload: { attachmentId: "a1", name: "report.txt", mimeType: "text/plain" },
+    } as never);
+
+    expect(plan?.format).toBe("a2ui");
+    expect(attachment?.format).toBe("a2ui");
+    if (plan?.format !== "a2ui" || attachment?.format !== "a2ui") return;
+    const planComponents = plan.message.updateComponents as { type: string }[];
+    const attachmentComponents = attachment.message.updateComponents as { type: string }[];
+    expect(planComponents[0]?.type).toBe("Plan");
+    expect(attachmentComponents[0]?.type).toBe("Attachment");
+  });
 });
 
 describe("A2UI action validation", () => {
+  const validationContext = {
+    sessionId: "session-a2ui",
+    surfaceId: "session-a2ui",
+    components: { "btn-1": "Button", "select-1": "Input" },
+  } as const;
+
   it("accepts valid submit action", () => {
     const validator = new A2uiActionValidator();
     const result = validator.validate({
-      actionName: "submit", surfaceId: "session-a2ui",
+      actionName: "submit", sessionId: "session-a2ui", surfaceId: "session-a2ui",
       sourceComponentId: "btn-1", timestamp: "2026-07-21T12:00:00.000Z",
-    }, "session-a2ui");
+    }, validationContext);
     expect(result.ok).toBe(true);
   });
 
   it("rejects action with mismatched surface ID", () => {
     const validator = new A2uiActionValidator();
     const result = validator.validate({
-      actionName: "submit", surfaceId: "other-session",
+      actionName: "submit", sessionId: "session-a2ui", surfaceId: "other-session",
       sourceComponentId: "btn-1", timestamp: "2026-07-21T12:00:00.000Z",
-    }, "session-a2ui");
+    }, validationContext);
     expect(result.ok).toBe(false);
   });
 
   it("rejects unknown action names", () => {
     const validator = new A2uiActionValidator();
     const result = validator.validate({
-      actionName: "execute_code", surfaceId: "session-a2ui",
+      actionName: "execute_code", sessionId: "session-a2ui", surfaceId: "session-a2ui",
       sourceComponentId: "btn-1", timestamp: "2026-07-21T12:00:00.000Z",
-    }, "session-a2ui");
+    }, validationContext);
     expect(result.ok).toBe(false);
+  });
+
+  it("rejects unknown components and invalid action parameters", () => {
+    const validator = new A2uiActionValidator();
+    expect(validator.validate({
+      actionName: "submit", sessionId: "session-a2ui", surfaceId: "session-a2ui",
+      sourceComponentId: "missing", timestamp: "2026-07-21T12:00:00.000Z",
+    }, validationContext).ok).toBe(false);
+    expect(validator.validate({
+      actionName: "select", sessionId: "session-a2ui", surfaceId: "session-a2ui",
+      sourceComponentId: "select-1", timestamp: "2026-07-21T12:00:00.000Z",
+      context: { value: false },
+    }, validationContext).ok).toBe(false);
   });
 });

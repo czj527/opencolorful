@@ -12,6 +12,8 @@ export const EVENT_TYPES = [
   "tool.completed",
   "turn.started",
   "turn.completed",
+  "plan.updated",
+  "attachment.available",
   "error",
 ] as const;
 
@@ -28,6 +30,12 @@ const EventPayloadSchema = Type.Union([
   Type.Object({ toolCallId: Type.String(), result: Type.Unknown() }),
   Type.Object({ turnId: Type.String() }),
   Type.Object({ turnId: Type.String(), usage: Type.Optional(Type.Unknown()) }),
+  Type.Object({ items: Type.Array(Type.String()) }),
+  Type.Object({
+    attachmentId: Type.String(),
+    name: Type.String(),
+    mimeType: Type.Optional(Type.String()),
+  }),
   Type.Object({ code: Type.String(), message: Type.String(), retryable: Type.Boolean() }),
 ]);
 

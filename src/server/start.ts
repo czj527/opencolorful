@@ -31,6 +31,11 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
+interface ProductionResources {
+  readonly appOptions: Omit<ServerAppOptions, "version" | "pid" | "startedAt">;
+  dispose(): void;
+}
+
 function closeServer(server: ServerType): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error?: Error) => {
@@ -46,20 +51,23 @@ function closeServer(server: ServerType): Promise<void> {
 export async function startForegroundServer(options: StartServerOptions): Promise<RunningServer> {
   acquireServerLock(options.paths);
   const startedAt = Date.now();
-  writeRuntimeState(options.paths, {
-    pid: process.pid,
-    host: options.host,
-    port: options.port,
-    version: options.version,
-    status: "starting",
-    startedAt: new Date(startedAt).toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  const appOptions = options.appOptions ?? await buildProductionAppOptions(options.paths);
-  const productionDatabase = options.appOptions ? undefined : (appOptions as Awaited<ReturnType<typeof buildProductionAppOptions>>).database;
-
+  let productionResources: ProductionResources | undefined;
+  let server: ServerType | undefined;
   try {
+    writeRuntimeState(options.paths, {
+      pid: process.pid,
+      host: options.host,
+      port: options.port,
+      version: options.version,
+      status: "starting",
+      startedAt: new Date(startedAt).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    productionResources = options.appOptions === undefined
+      ? await buildProductionResources(options.paths)
+      : undefined;
+    const appOptions = options.appOptions ?? productionResources!.appOptions;
     const { app, nodeWebSocket } = createServerApp({
       version: options.version,
       pid: process.pid,
@@ -67,7 +75,7 @@ export async function startForegroundServer(options: StartServerOptions): Promis
       paths: options.paths,
       ...appOptions,
     });
-    const { server, port } = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
+    const started = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
       let settled = false;
       const server = serve(
         { fetch: app.fetch, hostname: options.host, port: options.port },
@@ -82,13 +90,14 @@ export async function startForegroundServer(options: StartServerOptions): Promis
         }
       });
     });
+    server = started.server;
 
     nodeWebSocket.injectWebSocket(server);
 
     writeRuntimeState(options.paths, {
       pid: process.pid,
       host: options.host,
-      port,
+      port: started.port,
       version: options.version,
       status: "online",
       startedAt: new Date(startedAt).toISOString(),
@@ -98,51 +107,69 @@ export async function startForegroundServer(options: StartServerOptions): Promis
     let stopped = false;
     return {
       host: options.host,
-      port,
+      port: started.port,
       async stop() {
         if (stopped) {
           return;
         }
         stopped = true;
-        await closeServer(server);
-        markServerStopped(options.paths);
-        releaseServerLock(options.paths);
-        if (productionDatabase) {
-          productionDatabase.close();
+        try {
+          appOptions.wsRegistry?.closeAll();
+          await closeServer(server!);
+        } finally {
+          try {
+            productionResources?.dispose();
+          } finally {
+            markServerStopped(options.paths);
+            releaseServerLock(options.paths);
+          }
         }
       },
     };
   } catch (error) {
-    markServerStopped(options.paths);
-    releaseServerLock(options.paths);
+    if (server !== undefined) await closeServer(server).catch(() => {});
+    try {
+      productionResources?.dispose();
+    } finally {
+      markServerStopped(options.paths);
+      releaseServerLock(options.paths);
+    }
     throw error;
   }
 }
 
-async function buildProductionAppOptions(
-  paths: RuntimePaths,
-): Promise<
-  Omit<ServerAppOptions, "version" | "pid" | "startedAt"> & {
-    database: ReturnType<typeof openMetadataDatabase>;
-  }
-> {
+async function buildProductionResources(paths: RuntimePaths): Promise<ProductionResources> {
   const database = openMetadataDatabase(paths.database);
-  const sessionIndex = new SessionIndex(database);
-  const providerStore = new ProviderStore(paths.providerSettings);
-  const modelService = await ModelService.create(paths, providerStore);
-  const sessionService = new SessionService(paths, sessionIndex);
-  const promptService = new PromptService();
-  const replayStore = new EventReplayStore();
-  const wsRegistry = new ClientRegistry();
+  try {
+    const sessionIndex = new SessionIndex(database);
+    const providerStore = new ProviderStore(paths.providerSettings);
+    const modelService = await ModelService.create(paths, providerStore);
+    const sessionService = new SessionService(paths, sessionIndex);
+    const promptService = new PromptService();
+    const replayStore = new EventReplayStore();
+    const wsRegistry = new ClientRegistry();
+    let disposed = false;
 
-  return {
-    modelService,
-    sessionService,
-    promptService,
-    replayStore,
-    wsRegistry,
-    wsPromptService: promptService,
-    wsReplayStore: replayStore,
-    database,
-  };
+    return {
+      appOptions: {
+        modelService,
+        sessionService,
+        promptService,
+        replayStore,
+        wsRegistry,
+        wsPromptService: promptService,
+        wsReplayStore: replayStore,
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        promptService.dispose();
+        sessionService.closeAll();
+        database.close();
+      },
+    };
+  } catch (error) {
+    database.close();
+    throw error;
+  }
 }

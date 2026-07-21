@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { ProviderStore } from "../../src/config/provider-store.js";
 import { SessionService } from "../../src/runtime/session-service.js";
+import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
+import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -75,6 +77,37 @@ describe("session lifecycle", () => {
     expect(await (await app.request("http://local/api/sessions")).json()).toEqual([]);
     context.service.closeAll();
     context.database.close();
+  });
+
+  it("keeps SessionView current while Runtime writes through the same session handle", async () => {
+    const context = createContext();
+    const created = context.service.create({ title: "运行中会话", cwd: process.cwd() });
+    const runtime = await SessionRuntime.create({
+      sessionId: created.id,
+      cwd: process.cwd(),
+      sessionDir: context.paths.sessions,
+      authPath: context.paths.authFile,
+      providerId: "faux",
+      modelId: "faux-1",
+      faux: { response: "运行时回复" },
+      publish: () => {},
+      replayStore: new EventReplayStore(),
+      sessionHandle: created,
+    });
+
+    try {
+      const run = runtime.prompt("运行时消息");
+      await run.completed;
+
+      expect(context.service.getView(created.id).messages).toEqual([
+        "运行时消息",
+        "运行时回复",
+      ]);
+    } finally {
+      runtime.dispose();
+      context.service.closeAll();
+      context.database.close();
+    }
   });
 
   it("rejects path traversal and missing sessions", () => {

@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>person-Agent TokUI Spike</title>
-<script src="https://unpkg.com/tokui@0.1.8/dist/tokui.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/@jboltai/tokui@0.1.8/dist/tokui.css">
+<script src="https://unpkg.com/@jboltai/tokui@0.1.8/dist/tokui.umd.js"></script>
 </head>
 <body>
 <h1>person-Agent TokUI 投影验证</h1>
@@ -22,29 +23,26 @@ const testEvents = [
 
 // 对应上述事件的 TokUI DSL chunks
 const testChunks = [
-  '[card tt:"工具调用" id:"t1"][desc]search_files[/desc][badge v:info]运行中...[/badge]',
-  '[upd id:"t1"][p]正在搜索...[/p][/upd]',
-  '[upd id:"t1"][badge v:success]完成[/badge][/upd]',
-  '[desc]Turn 完成[/desc]',
-  '[card tt:"错误"][badge v:danger]错误[/badge][p]演示错误消息[/p][/card]',
+  '[tool-call id:"t1" name:"search_files" status:running][p "工具调用进行中"][/tool-call]',
+  '[p v:muted "正在搜索..."]',
+  '[upd id:"t1" status:done]',
+  '[callout t:success tx:"Turn 完成"]',
+  '[card tt:"错误"][callout t:danger tx:"演示错误消息"][/card]',
 ];
 
 const container = document.getElementById("output");
-const tokui = new TokUI();
+const tokui = new TokUI.TokUI({ container });
 
 tokui.startStream();
-container.innerHTML = "";
 
 for (const [i, chunk] of testChunks.entries()) {
   setTimeout(() => {
     tokui.feed(chunk);
-    container.innerHTML = tokui.getHTML();
   }, i * 800);
 }
 
 setTimeout(() => {
   tokui.endStream();
-  container.innerHTML = tokui.getHTML();
 }, testChunks.length * 800 + 100);
 </script>
 </body>

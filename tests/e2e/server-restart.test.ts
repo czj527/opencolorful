@@ -6,106 +6,187 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { PLATFORM_VERSION } from "../../src/index.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
-import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
-import { SessionRuntime } from "../../src/runtime/session-runtime.js";
-import { PromptService } from "../../src/runtime/prompt-service.js";
-import { openMetadataDatabase } from "../../src/storage/database.js";
-import { SessionIndex } from "../../src/storage/session-index.js";
-import { SessionService } from "../../src/runtime/session-service.js";
-import { ProviderStore } from "../../src/config/provider-store.js";
+import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 import { startForegroundServer } from "../../src/server/start.js";
 
 const temporaryDirectories: string[] = [];
 
 afterAll(() => {
   for (const directory of temporaryDirectories.splice(0)) {
-    try { fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 忽略 */ }
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
+function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("等待 Prompt 完成超时")), timeoutMs);
+    void reader.read().then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+async function sendPromptAndCollect(
+  baseUrl: string,
+  sessionId: string,
+  content: string,
+): Promise<{ streamId: string; events: PlatformEventEnvelope[] }> {
+  const abortController = new AbortController();
+  const eventsResponsePromise = fetch(`${baseUrl}/api/sessions/${sessionId}/events`, {
+    headers: { accept: "text/event-stream" },
+    signal: abortController.signal,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const promptResponse = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  expect(promptResponse.status).toBe(202);
+  const accepted = (await promptResponse.json()) as { streamId: string };
+
+  const eventsResponse = await eventsResponsePromise;
+  expect(eventsResponse.status).toBe(200);
+  if (eventsResponse.body === null) throw new Error("SSE 响应缺少 body");
+
+  const reader = eventsResponse.body.getReader();
+  const decoder = new TextDecoder();
+  const events: PlatformEventEnvelope[] = [];
+  let buffer = "";
+  const deadline = Date.now() + 5_000;
+
+  try {
+    while (Date.now() < deadline) {
+      const read = await readWithTimeout(reader, 5_000);
+      if (read.done) break;
+      buffer += decoder.decode(read.value, { stream: true });
+
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const data = frame
+          .split("\n")
+          .filter((line) => line.startsWith("data: "))
+          .map((line) => line.slice(6))
+          .join("\n");
+        if (data !== "") {
+          const event = JSON.parse(data) as PlatformEventEnvelope;
+          if (event.streamId === accepted.streamId) events.push(event);
+        }
+        boundary = buffer.indexOf("\n\n");
+      }
+
+      const completed = events.some(
+        (event) =>
+          event.type === "session.status" &&
+          (event.payload as { status?: string }).status === "idle",
+      );
+      if (completed) break;
+    }
+  } finally {
+    abortController.abort();
+    await reader.cancel().catch(() => {});
+  }
+
+  expect(events.at(-1)).toMatchObject({
+    streamId: accepted.streamId,
+    type: "session.status",
+    payload: { status: "idle" },
+  });
+  expect(events.map((event) => event.sequence)).toEqual(
+    events.map((_, index) => index + 1),
+  );
+  return { streamId: accepted.streamId, events };
+}
+
 describe("server restart recovery", () => {
-  it("rebuilds services from disk and continues a persisted session", async () => {
+  it("rebuilds production services and continues persisted history", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-e2e-"));
     temporaryDirectories.push(directory);
     const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
 
-    // ─── 第一次启动 ───
-    const db1 = openMetadataDatabase(paths.database);
-    const index1 = new SessionIndex(db1);
-    const store1 = new ProviderStore(paths.providerSettings);
-    const sessionService1 = new SessionService(paths, index1);
-    const promptService1 = new PromptService();
-    const replayStore1 = new EventReplayStore();
-
     const server1 = await startForegroundServer({
-      host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION,
-      appOptions: { promptService: promptService1, replayStore: replayStore1, sessionService: sessionService1 },
+      host: "127.0.0.1",
+      port: 0,
+      paths,
+      version: PLATFORM_VERSION,
     });
     const base1 = `http://127.0.0.1:${server1.port}`;
 
-    // 创建 Session（通过 HTTP）
-    const r1 = await fetch(`${base1}/api/sessions`, {
-      method: "POST", headers: { "content-type": "application/json" },
+    const createResponse = await fetch(`${base1}/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "重启测试", cwd: process.cwd() }),
     });
-    expect(r1.status).toBe(201);
-    const session = (await r1.json()) as { id: string; title: string };
-    const sessionId = session.id;
-
-    // 创建 Runtime（使用 SessionService 打开的句柄，确保 JSONL 路径一致）
-    const sessionHandle = sessionService1.open(sessionId);
-    const runtime = await SessionRuntime.create({
-      sessionId, cwd: process.cwd(), sessionDir: paths.sessions,
-      authPath: paths.authFile, providerId: "faux", modelId: "faux-1",
-      faux: { response: "第一条回复" },
-      publish: () => {}, replayStore: replayStore1,
-      sessionHandle,
-    });
-    promptService1.register(runtime);
-    const runResp = await fetch(`${base1}/api/sessions/${sessionId}/messages`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "你好" }),
-    });
-    expect(runResp.status).toBe(202);
-
-    // 停止
-    await server1.stop();
-    runtime.dispose();
-    sessionService1.closeAll();
-    db1.close();
-
-    // ─── 第二次启动（全新服务实例）───
-    const db2 = openMetadataDatabase(paths.database);
-    const index2 = new SessionIndex(db2);
-    const sessionService2 = new SessionService(paths, index2);
-    const promptService2 = new PromptService();
-    const replayStore2 = new EventReplayStore();
-
-    const server2 = await startForegroundServer({
-      host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION,
-      appOptions: { promptService: promptService2, replayStore: replayStore2, sessionService: sessionService2 },
-    });
+    expect(createResponse.status).toBe(201);
+    const session = (await createResponse.json()) as { id: string };
 
     try {
-      const base2 = `http://127.0.0.1:${server2.port}`;
+      await sendPromptAndCollect(base1, session.id, "第一条消息");
+      const beforeRestart = await (await fetch(`${base1}/api/sessions/${session.id}`)).json() as {
+        messages: string[];
+        model: { providerId: string; modelId: string } | null;
+      };
+      expect(beforeRestart.messages).toEqual(["第一条消息", "已收到您的消息"]);
+      expect(beforeRestart.model).toEqual({ providerId: "faux", modelId: "faux-1" });
+    } finally {
+      await server1.stop();
+    }
 
-      // Session 重启后可读
-      const getResp = await fetch(`${base2}/api/sessions/${sessionId}`);
-      expect(getResp.status).toBe(200);
-      const reopened = (await getResp.json()) as { id: string };
-      expect(reopened.id).toBe(sessionId);
+    const server2 = await startForegroundServer({
+      host: "127.0.0.1",
+      port: 0,
+      paths,
+      version: PLATFORM_VERSION,
+    });
+    const base2 = `http://127.0.0.1:${server2.port}`;
 
-      // 继续发送 Prompt
-      const msgResp = await fetch(`${base2}/api/sessions/${sessionId}/messages`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: "继续" }),
-      });
-      expect(msgResp.status).toBe(202);
+    try {
+      const reopenedResponse = await fetch(`${base2}/api/sessions/${session.id}`);
+      expect(reopenedResponse.status).toBe(200);
+      const reopened = await reopenedResponse.json() as {
+        id: string;
+        messages: string[];
+        model: { providerId: string; modelId: string } | null;
+      };
+      expect(reopened.id).toBe(session.id);
+      expect(reopened.messages).toEqual(["第一条消息", "已收到您的消息"]);
+      expect(reopened.model).toEqual({ providerId: "faux", modelId: "faux-1" });
 
-      sessionService2.closeAll();
+      await sendPromptAndCollect(base2, session.id, "继续消息");
+      const continued = await (await fetch(`${base2}/api/sessions/${session.id}`)).json() as {
+        messages: string[];
+      };
+      expect(continued.messages).toEqual([
+        "第一条消息",
+        "已收到您的消息",
+        "继续消息",
+        "已收到您的消息",
+      ]);
+
+      const sessionJsonl = fs.readFileSync(
+        fs.readdirSync(paths.sessions).map((file) => path.join(paths.sessions, file))[0]!,
+        "utf8",
+      );
+      expect(sessionJsonl).not.toContain("faux-key");
+      expect(fs.readFileSync(paths.authFile, "utf8")).not.toContain("faux-key");
+      if (fs.existsSync(paths.providerSettings)) {
+        expect(fs.readFileSync(paths.providerSettings, "utf8")).not.toContain("faux-key");
+      }
     } finally {
       await server2.stop();
-      db2.close();
     }
   }, 20_000);
 });

@@ -10,6 +10,7 @@ import {
   isProcessRunning,
   markServerStopped,
   readRuntimeState,
+  releaseServerLock,
 } from "../server/runtime-state.js";
 
 export async function runServerCommand(args: readonly string[]): Promise<void> {
@@ -26,7 +27,7 @@ export async function runServerCommand(args: readonly string[]): Promise<void> {
     return;
   }
   if (command === "stop") {
-    stopServer(paths);
+    await stopServer(paths);
     return;
   }
   if (command === "status") {
@@ -80,21 +81,40 @@ function startDetachedProcess(paths: ReturnType<typeof getRuntimePaths>): void {
   console.log(`person-agent server starting: PID ${child.pid ?? "unknown"}`);
 }
 
-function stopServer(paths: ReturnType<typeof getRuntimePaths>): void {
+async function stopServer(paths: ReturnType<typeof getRuntimePaths>): Promise<void> {
   const state = readRuntimeState(paths);
   if (state === undefined || !isProcessRunning(state.pid)) {
     markServerStopped(paths);
+    releaseServerLock(paths);
     console.log("person-agent server stopped");
     return;
   }
-  process.kill(state.pid, "SIGTERM");
+
+  try {
+    process.kill(state.pid, "SIGTERM");
+  } catch (error) {
+    if (isProcessRunning(state.pid)) throw error;
+  }
   console.log(`person-agent server stopping: PID ${state.pid}`);
+
+  const deadline = Date.now() + 5_000;
+  while (isProcessRunning(state.pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (isProcessRunning(state.pid)) {
+    throw new Error(`Server 停止超时: PID ${state.pid}`);
+  }
+
+  markServerStopped(paths);
+  releaseServerLock(paths);
+  console.log("person-agent server stopped");
 }
 
 function reportStatus(paths: ReturnType<typeof getRuntimePaths>): void {
   const state = readRuntimeState(paths);
   if (state === undefined || !isProcessRunning(state.pid)) {
     markServerStopped(paths);
+    releaseServerLock(paths);
     console.log("person-agent server stopped");
     return;
   }

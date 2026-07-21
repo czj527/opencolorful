@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { spawn, execSync } from "node:child_process";
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,11 +15,11 @@ const env = {
   PERSON_AGENT_HOME: path.join(projectRoot, ".person-agent", "smoke"),
 };
 
-let serverPid;
+let serverProcess;
 
 function cleanup() {
-  if (serverPid) {
-    try { process.kill(serverPid, "SIGTERM"); } catch {}
+  if (serverProcess?.pid) {
+    try { process.kill(serverProcess.pid, "SIGTERM"); } catch {}
   }
 }
 
@@ -36,6 +37,19 @@ async function healthCheck(url, maxRetries = 15, delayMs = 500) {
   throw new Error(`Server 在 ${(maxRetries * delayMs) / 1000}s 内未就绪`);
 }
 
+async function waitForStopped(maxRetries = 20, delayMs = 100) {
+  const statePath = path.join(env.PERSON_AGENT_HOME, "runtime", "server.json");
+  const lockPath = path.join(env.PERSON_AGENT_HOME, "runtime", "server.lock");
+  for (let i = 0; i < maxRetries; i++) {
+    const state = fs.existsSync(statePath)
+      ? JSON.parse(fs.readFileSync(statePath, "utf8"))
+      : undefined;
+    if (state?.status === "stopped" && !fs.existsSync(lockPath)) return;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error("Server 停止后仍残留 online 状态或锁文件");
+}
+
 async function main() {
   console.log("=== person-Agent 基础烟雾测试 ===\n");
 
@@ -45,16 +59,15 @@ async function main() {
   try {
     // 1. 启动 Server（后台）
     console.log("[1/3] 启动 Server...");
-    spawn(process.execPath, [...tsxArgs, "server", "start"], {
+    serverProcess = spawn(process.execPath, [...tsxArgs, "server", "start", "--foreground"], {
       cwd: projectRoot, env, stdio: "ignore",
-      detached: true, windowsHide: true,
-    }).unref();
+      windowsHide: true,
+    });
 
     // 2. 等待健康检查并就绪
     console.log("[2/3] 等待 Server 就绪...");
     const health = await healthCheck("http://127.0.0.1:4310/api/health");
     console.log(`  状态: ${health.status}, 版本: ${health.version}, PID: ${health.pid}`);
-    serverPid = health.pid;
 
     // 3. 停止 Server
     console.log("[3/3] 停止 Server...");
@@ -67,6 +80,7 @@ async function main() {
         else reject(new Error(`stop 退出码: ${code}`));
       });
     });
+    await waitForStopped();
 
     console.log("\n✅ 基础烟雾测试通过");
     process.exit(0);

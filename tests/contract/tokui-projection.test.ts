@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 import { TokuiProjector, TokuiStreamBuilder } from "../../src/ui-projection/tokui/project.js";
-import { TokuiPolicy, TOKUI_MAX_CHUNK_LENGTH } from "../../src/ui-projection/tokui/policy.js";
+import {
+  TokuiPolicy,
+  TOKUI_MAX_BUFFER,
+  TOKUI_MAX_CHUNK_LENGTH,
+} from "../../src/ui-projection/tokui/policy.js";
 
 describe("TokUI projection", () => {
   it("projects tool.started into valid TokUI chunk", () => {
@@ -35,8 +39,26 @@ describe("TokUI projection", () => {
     if (result === null) return;
     expect(result.format).toBe("tokui");
     const chunk2 = (result as { chunk: string }).chunk;
-    expect(chunk2).toContain("v:danger");
+    expect(chunk2).toContain("t:danger");
     expect(chunk2).toContain("测试错误");
+  });
+
+  it("projects plans and escapes tool IDs in every update", () => {
+    const projector = new TokuiProjector();
+    const plan = projector.project({
+      protocolVersion: 1, eventId: "plan", sessionId: "session-tokui",
+      streamId: "stream-1", sequence: 1, timestamp: new Date().toISOString(),
+      type: "plan.updated", payload: { items: ["one", "two"] },
+    } as unknown as PlatformEventEnvelope);
+    const completed = projector.project({
+      protocolVersion: 1, eventId: "tool", sessionId: "session-tokui",
+      streamId: "stream-1", sequence: 2, timestamp: new Date().toISOString(),
+      type: "tool.completed", payload: { toolCallId: 'x"][script]', isError: false },
+    } as unknown as PlatformEventEnvelope);
+
+    expect(plan).not.toBeNull();
+    expect((plan as { chunk: string }).chunk).toContain("[plan tt:");
+    expect((completed as { chunk: string }).chunk).not.toContain('[script]');
   });
 });
 
@@ -76,12 +98,14 @@ describe("TokUI security policy", () => {
   it("rejects unregistered handlers", () => {
     const policy = new TokuiPolicy();
     expect(policy.validateHandler("action:submit")).toBe(true);
-    expect(policy.validateHandler("nav:home")).toBe(true);
+    expect(policy.validateHandler("action:delete-all")).toBe(false);
     expect(policy.validateHandler("eval:malicious")).toBe(false);
+    expect(policy.validateChunk("[btn sub:action:delete-all]").ok).toBe(false);
+    expect(policy.validateChunk('[btn on:"click:action:delete-all"]').ok).toBe(false);
   });
 
-  it("allows registered handler prefixes", () => {
-    const policy = new TokuiPolicy();
+  it("allows explicitly registered handlers", () => {
+    const policy = new TokuiPolicy(["action:save"]);
     const result = policy.validateChunk('[btn clk:action:save tt:"保存"]');
     expect(result.ok).toBe(true);
   });
@@ -106,7 +130,19 @@ describe("TokUI stream builder", () => {
     const flushed = builder.flush();
     expect(flushed.length).toBeGreaterThan(0);
     expect(flushed.join("")).toContain("工具调用");
-    expect(flushed.join("")).toContain("完成");
+    expect(flushed.join("")).toContain("status:done");
     expect(builder.size).toBe(0);
+  });
+
+  it("never buffers more than the configured total limit", () => {
+    const builder = new TokuiStreamBuilder();
+    for (let index = 0; index < 10_000; index += 1) {
+      builder.feed({
+        protocolVersion: 1, eventId: `evt-${index}`, sessionId: "session-tokui",
+        streamId: "stream-1", sequence: index + 1, timestamp: new Date().toISOString(),
+        type: "error", payload: { code: "TEST", message: "x".repeat(200), retryable: false },
+      } as unknown as PlatformEventEnvelope);
+    }
+    expect(builder.size).toBeLessThanOrEqual(TOKUI_MAX_BUFFER);
   });
 });

@@ -84,6 +84,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
           wsRegistry,
           wsPromptService,
           wsReplayStore,
+          options.sessionService,
         );
         wsRegistry.register(clientId, ws);
 

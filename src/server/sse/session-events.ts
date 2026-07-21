@@ -5,14 +5,19 @@ import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PlatformEventEnvelope } from "../../contracts/events.js";
 
-function parseLastSequence(context: Context): number {
+interface ReplayCursor {
+  readonly streamId?: string;
+  readonly sequence: number;
+}
+
+function parseReplayCursor(context: Context): ReplayCursor {
   const lastEventId = context.req.header("Last-Event-ID");
   if (lastEventId !== undefined && lastEventId.trim() !== "") {
-    // 格式: "stream-xxx:seq" 或纯数字 "seq"
-    const parts = lastEventId.split(":");
-    const seq = Number(parts.length === 2 ? parts[1] : parts[0]);
-    if (Number.isInteger(seq) && seq >= 0) {
-      return seq;
+    const separator = lastEventId.lastIndexOf(":");
+    const sequence = Number(separator === -1 ? lastEventId : lastEventId.slice(separator + 1));
+    if (Number.isInteger(sequence) && sequence >= 0) {
+      const streamId = separator > 0 ? lastEventId.slice(0, separator) : undefined;
+      return streamId === undefined ? { sequence } : { streamId, sequence };
     }
   }
 
@@ -20,11 +25,11 @@ function parseLastSequence(context: Context): number {
   if (sinceSeq !== undefined) {
     const seq = Number(sinceSeq);
     if (Number.isInteger(seq) && seq >= 0) {
-      return seq;
+      return { sequence: seq };
     }
   }
 
-  return 0;
+  return { sequence: 0 };
 }
 
 async function writeEvent(
@@ -47,11 +52,31 @@ export async function createSessionEventStream(
   // Runtime 可能尚未创建（将在首次 Prompt 时自动创建），不 404
   // SSE 连接保持打开，等待后续实时事件
 
-  const sinceSeq = parseLastSequence(context);
+  const cursor = parseReplayCursor(context);
 
   return streamSSE(context, async (stream) => {
     const abortSignal = context.req.raw.signal;
     let aborted = false;
+    let replaying = true;
+    const pendingLive: PlatformEventEnvelope[] = [];
+    const deliveredEventIds = new Set<string>();
+    let writeQueue = Promise.resolve();
+
+    const enqueue = (event: PlatformEventEnvelope): void => {
+      if (
+        aborted ||
+        event.sessionId !== sessionId ||
+        deliveredEventIds.has(event.eventId)
+      ) {
+        return;
+      }
+      deliveredEventIds.add(event.eventId);
+      writeQueue = writeQueue
+        .then(() => writeEvent(stream, event))
+        .catch(() => {
+          aborted = true;
+        });
+    };
 
     abortSignal.addEventListener(
       "abort",
@@ -61,55 +86,59 @@ export async function createSessionEventStream(
       { once: true },
     );
 
-    // 先重放已有事件
-    const sessionStreams = replayStore.listSessionStreams(sessionId);
-
-    for (const streamId of sessionStreams) {
-      if (aborted) break;
-      const result = replayStore.getSince(streamId, sinceSeq);
-
-      if (result.reset && sinceSeq > 0) {
-        await stream.writeSSE({
-          event: "reset",
-          data: JSON.stringify({
-            streamId,
-            reason: "缓存已截断，请重新开始",
-          }),
-        });
-      }
-
-      for (const event of result.events) {
-        if (aborted) break;
-        if (event.sessionId === sessionId) {
-          await writeEvent(stream, event);
-        }
-      }
-    }
-
-    if (aborted) return;
-
-    // 建立订阅以获取实时事件
+    // 先订阅再读取快照，避免 replay 与实时广播之间出现丢事件窗口。
     const unsubscribe = replayStore.subscribe((event) => {
-      if (event.sessionId === sessionId && !aborted) {
-        void writeEvent(stream, event).catch(() => {
-          // 写入失败（客户端已断开），静默忽略
-        });
-      }
-    });
-
-    // 等待客户端断开
-    await new Promise<void>((resolve) => {
-      const onAbort = (): void => {
-        abortSignal.removeEventListener("abort", onAbort);
-        resolve();
-      };
-      if (aborted) {
-        onAbort();
+      if (event.sessionId !== sessionId || aborted) return;
+      if (replaying) {
+        pendingLive.push(event);
       } else {
-        abortSignal.addEventListener("abort", onAbort, { once: true });
+        enqueue(event);
       }
     });
 
-    unsubscribe();
+    const sessionStreams = cursor.streamId === undefined
+      ? replayStore.listSessionStreams(sessionId)
+      : [cursor.streamId];
+    try {
+      for (const streamId of sessionStreams) {
+        if (aborted) break;
+        const result = replayStore.getSince(streamId, cursor.sequence);
+
+        if (result.reset && cursor.sequence > 0) {
+          await stream.writeSSE({
+            event: "reset",
+            data: JSON.stringify({
+              streamId,
+              reason: "缓存已截断，请重新开始",
+            }),
+          });
+        }
+
+        for (const event of result.events) enqueue(event);
+      }
+
+      await writeQueue;
+      replaying = false;
+      for (const event of pendingLive) enqueue(event);
+      pendingLive.length = 0;
+      await writeQueue;
+      if (aborted) return;
+
+      await new Promise<void>((resolve) => {
+        const onAbort = (): void => {
+          abortSignal.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        if (aborted) {
+          onAbort();
+        } else {
+          abortSignal.addEventListener("abort", onAbort, { once: true });
+        }
+      });
+      await writeQueue;
+    } finally {
+      replaying = false;
+      unsubscribe();
+    }
   });
 }

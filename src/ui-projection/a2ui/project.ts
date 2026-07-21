@@ -70,6 +70,7 @@ export class A2uiProjector {
               type: "Card",
               properties: {
                 status: "completed",
+                content: (payload.content ?? "").slice(0, 2_000),
               },
             },
           ],
@@ -134,6 +135,44 @@ export class A2uiProjector {
               },
             },
           ],
+        };
+      }
+
+      case "plan.updated": {
+        const payload = event.payload as { items?: unknown };
+        const items = Array.isArray(payload.items)
+          ? payload.items.filter((item): item is string => typeof item === "string").slice(0, 50)
+          : [];
+        return {
+          version: "v0.9.1",
+          surfaceId,
+          catalogId: this.catalog.getCatalogId(),
+          updateComponents: [{
+            id: `plan-${event.sequence}`,
+            type: "Plan",
+            properties: { items },
+          }],
+        };
+      }
+
+      case "attachment.available": {
+        const payload = event.payload as {
+          attachmentId?: string;
+          name?: string;
+          mimeType?: string;
+        };
+        return {
+          version: "v0.9.1",
+          surfaceId,
+          catalogId: this.catalog.getCatalogId(),
+          updateComponents: [{
+            id: payload.attachmentId ?? `attachment-${event.sequence}`,
+            type: "Attachment",
+            properties: {
+              name: payload.name ?? "attachment",
+              ...(payload.mimeType === undefined ? {} : { mimeType: payload.mimeType }),
+            },
+          }],
         };
       }
 
