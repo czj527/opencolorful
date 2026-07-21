@@ -35,8 +35,9 @@ export class EventReplayStore {
       buffer.truncated = true;
     }
 
+    // 异步通知订阅者，慢客户端不阻塞事件发布
     for (const subscriber of this.subscribers) {
-      subscriber(event);
+      setImmediate(() => subscriber(event));
     }
   }
 

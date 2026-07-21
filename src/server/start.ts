@@ -15,6 +15,7 @@ import {
   releaseServerLock,
   writeRuntimeState,
 } from "./runtime-state.js";
+import { ClientRegistry } from "./ws/client-registry.js";
 
 export interface StartServerOptions {
   readonly host: string;
@@ -63,6 +64,7 @@ export async function startForegroundServer(options: StartServerOptions): Promis
       version: options.version,
       pid: process.pid,
       startedAt,
+      paths: options.paths,
       ...appOptions,
     });
     const { server, port } = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
@@ -131,12 +133,16 @@ async function buildProductionAppOptions(
   const sessionService = new SessionService(paths, sessionIndex);
   const promptService = new PromptService();
   const replayStore = new EventReplayStore();
+  const wsRegistry = new ClientRegistry();
 
   return {
     modelService,
     sessionService,
     promptService,
     replayStore,
+    wsRegistry,
+    wsPromptService: promptService,
+    wsReplayStore: replayStore,
     database,
   };
 }

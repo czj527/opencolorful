@@ -208,6 +208,7 @@ describe("SSE event replay", () => {
       payload: { role: "assistant", delta: "hello" },
     } as PlatformEventEnvelope);
 
+    await new Promise((r) => setImmediate(r));
     expect(received.length).toBe(1);
 
     unsubscribe();
@@ -223,6 +224,7 @@ describe("SSE event replay", () => {
       payload: { role: "assistant", delta: "world" },
     } as PlatformEventEnvelope);
 
+    await new Promise((r) => setImmediate(r));
     // unsubscribe 后不再收到事件
     expect(received.length).toBe(1);
   });

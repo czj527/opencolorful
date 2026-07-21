@@ -17,6 +17,12 @@ export const ClientCommandSchema = Type.Union([
   Type.Object({
     protocolVersion: Type.Literal(1),
     requestId: Type.String({ minLength: 1 }),
+    type: Type.Literal("session.unsubscribe"),
+    sessionId: Type.String({ minLength: 1 }),
+  }),
+  Type.Object({
+    protocolVersion: Type.Literal(1),
+    requestId: Type.String({ minLength: 1 }),
     type: Type.Literal("session.subscribe"),
     sessionId: Type.String({ minLength: 1 }),
   }),

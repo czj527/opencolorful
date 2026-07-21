@@ -52,6 +52,18 @@ export class SessionHandler {
       return;
     }
 
+    if (command.type === "session.unsubscribe") {
+      this.registry.unsubscribe(this.clientId, command.sessionId);
+      this.ws.send(
+        serializeMessage({
+          type: "ack",
+          requestId: command.requestId,
+          status: "accepted",
+        }),
+      );
+      return;
+    }
+
     if (command.type === "session.abort") {
       try {
         const result = this.promptService.abortBySession(command.sessionId);

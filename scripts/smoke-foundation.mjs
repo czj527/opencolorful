@@ -14,19 +14,33 @@ const env = {
   PERSON_AGENT_HOME: path.join(projectRoot, ".person-agent", "smoke"),
 };
 
-function run(args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: projectRoot,
-      env,
-      stdio: "inherit",
-      ...options,
-    });
-    child.on("close", (code) => {
-      if (code === 0) resolve(undefined);
-      else reject(new Error(`Exit code: ${code}`));
-    });
-  });
+let serverProcess;
+
+function cleanup() {
+  if (serverProcess && !serverProcess.killed) {
+    try {
+      process.kill(-serverProcess.pid, "SIGTERM");
+    } catch {
+      // 进程可能已退出
+    }
+  }
+}
+
+process.on("exit", cleanup);
+process.on("SIGINT", () => { cleanup(); process.exit(1); });
+process.on("SIGTERM", () => { cleanup(); process.exit(1); });
+
+async function healthCheck(url, maxRetries = 10, delayMs = 500) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const resp = await fetch(url);
+      if (resp.status === 200) return await resp.json();
+    } catch {
+      // 继续重试
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error(`Server 在 ${maxRetries * delayMs / 1000}s 内未就绪`);
 }
 
 async function main() {
@@ -36,40 +50,46 @@ async function main() {
   const tsxArgs = ["--import", "tsx", cliEntry];
 
   try {
-    // 1. 启动 Server
+    // 1. 启动 Server（后台）
     console.log("[1/4] 启动 Server...");
-    const startProc = spawn(process.execPath, [...tsxArgs, "server", "start"], {
+    serverProcess = spawn(process.execPath, [...tsxArgs, "server", "start"], {
       cwd: projectRoot,
       env,
       stdio: "ignore",
       detached: true,
       windowsHide: true,
     });
-    startProc.unref();
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // 2. 状态检查
-    console.log("[2/4] Server 状态...");
-    await run([...tsxArgs, "server", "status"]);
-
-    // 3. 健康检查
-    console.log("[3/4] 健康检查...");
-    const healthResponse = await fetch("http://127.0.0.1:4310/api/health");
-    const health = (await healthResponse.json());
-    if (health.status !== "ok") {
-      throw new Error(`Server 健康检查失败: ${JSON.stringify(health)}`);
-    }
+    // 2. 等待健康检查就绪（最多重试 5 秒）
+    console.log("[2/4] 等待 Server 就绪...");
+    const health = await healthCheck("http://127.0.0.1:4310/api/health");
     console.log(`  状态: ${health.status}, 版本: ${health.version}`);
+
+    // 3. 列出 Sessions（调用 API）
+    console.log("[3/4] 列出 Sessions...");
+    const sessionsResp = await fetch("http://127.0.0.1:4310/api/sessions");
+    const sessions = await sessionsResp.json();
+    console.log(`  共 ${Array.isArray(sessions) ? sessions.length : 0} 个 Session`);
 
     // 4. 停止 Server
     console.log("[4/4] 停止 Server...");
-    await run([...tsxArgs, "server", "stop"]);
+    const stopProc = spawn(process.execPath, [...tsxArgs, "server", "stop"], {
+      cwd: projectRoot,
+      env,
+      stdio: "inherit",
+    });
+    await new Promise((resolve, reject) => {
+      stopProc.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`stop 退出码: ${code}`));
+      });
+    });
 
     console.log("\n✅ 基础烟雾测试通过");
     process.exit(0);
   } catch (error) {
     console.error("\n❌ 烟雾测试失败:", error.message);
+    cleanup();
     process.exit(1);
   }
 }

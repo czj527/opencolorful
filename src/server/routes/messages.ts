@@ -1,20 +1,59 @@
 import type { Hono } from "hono";
 
+import type { RuntimePaths } from "../../config/paths.js";
 import { createApiError } from "../../contracts/api-error.js";
+import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
+import type { SessionService } from "../../runtime/session-service.js";
+import { SessionRuntime } from "../../runtime/session-runtime.js";
 
-export function registerMessageRoutes(app: Hono, promptService: PromptService): void {
+export interface MessageRoutesOptions {
+  readonly promptService: PromptService;
+  readonly sessionService?: SessionService;
+  readonly replayStore?: EventReplayStore;
+  readonly paths?: RuntimePaths;
+}
+
+export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions): void {
+  const { promptService, sessionService, replayStore, paths } = options;
+
   app.post("/api/sessions/:id/messages", async (context) => {
+    const sessionId = context.req.param("id");
     try {
       const body = (await context.req.json()) as { content?: unknown };
       if (typeof body.content !== "string" || !body.content.trim()) {
         return context.json(createApiError("INVALID_INPUT", "Prompt 不能为空"), 400);
       }
-      const run = promptService.prompt(context.req.param("id"), body.content);
+
+      // 如果 Runtime 不存在，自动创建 faux Runtime
+      if (!promptService.hasRuntime(sessionId)) {
+        if (!sessionService || !paths) {
+          return context.json(createApiError("CONFLICT", "Session Runtime 未就绪"), 409);
+        }
+        try {
+          const session = sessionService.open(sessionId);
+          const runtime = await SessionRuntime.create({
+            sessionId,
+            cwd: process.cwd(),
+            sessionDir: paths.sessions,
+            authPath: paths.authFile,
+            providerId: "faux",
+            modelId: "faux-1",
+            faux: { response: "已收到您的消息", tokensPerSecond: 20 },
+            publish: () => {},
+            ...(replayStore ? { replayStore } : {}),
+          });
+          promptService.register(runtime);
+        } catch {
+          return context.json(createApiError("SESSION_ERROR", "无法创建 Session Runtime"), 500);
+        }
+      }
+
+      const run = promptService.prompt(sessionId, body.content);
       return context.json(
         {
           status: "accepted",
-          sessionId: context.req.param("id"),
+          sessionId,
           streamId: run.streamId,
         },
         202,

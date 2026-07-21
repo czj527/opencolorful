@@ -2,6 +2,16 @@ import type { PlatformEventEnvelope } from "../../contracts/events.js";
 import type { UiMessagePayload } from "../../contracts/ui-message.js";
 import { TokuiPolicy, TOKUI_MAX_CHUNK_LENGTH } from "./policy.js";
 
+/** 转义 DSL 中的特殊字符，防止动态值注入 TokUI 语法 */
+function escapeDsValue(value: string): string {
+  return value
+    .replace(/"/g, "&quot;")
+    .replace(/\[/g, "&#91;")
+    .replace(/\]/g, "&#93;")
+    .replace(/\n/g, " ")
+    .replace(/\r/g, "");
+}
+
 export class TokuiProjector {
   private readonly policy: TokuiPolicy;
 
@@ -27,8 +37,8 @@ export class TokuiProjector {
           toolName?: string;
           toolCallId?: string;
         };
-        return `[card tt:"工具调用" id:"${payload.toolCallId ?? "tool"}"]` +
-          `[desc]${payload.toolName ?? "未知工具"}[/desc]` +
+        return `[card tt:"工具调用" id:"${escapeDsValue(payload.toolCallId ?? "tool")}"]` +
+          `[desc]${escapeDsValue(payload.toolName ?? "未知工具")}[/desc]` +
           `[badge v:info]运行中...[/badge]`;
       }
 
@@ -37,7 +47,7 @@ export class TokuiProjector {
           delta?: string;
           toolCallId?: string;
         };
-        const safeDelta = (payload.delta ?? "").slice(0, 200);
+        const safeDelta = escapeDsValue((payload.delta ?? "").slice(0, 200));
         return `[upd id:"${payload.toolCallId ?? "tool"}"][p]${safeDelta}[/p][/upd]`;
       }
 
@@ -57,7 +67,7 @@ export class TokuiProjector {
         const payload = event.payload as { message?: string };
         return `[card tt:"错误"]` +
           `[badge v:danger]错误[/badge]` +
-          `[p]${(payload.message ?? "未知错误").slice(0, 200)}[/p]` +
+          `[p]${escapeDsValue((payload.message ?? "未知错误").slice(0, 200))}[/p]` +
           `[/card]`;
       }
 

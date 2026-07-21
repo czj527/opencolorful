@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { createNodeWebSocket } from "@hono/node-ws";
 
 import { PLATFORM_VERSION } from "../index.js";
+import type { RuntimePaths } from "../config/paths.js";
 import type { EventReplayStore } from "../runtime/event-replay-store.js";
 import type { ModelService } from "../runtime/model-service.js";
 import type { SessionService } from "../runtime/session-service.js";
@@ -18,6 +19,7 @@ export interface ServerAppOptions {
   readonly version?: string;
   readonly pid?: number;
   readonly startedAt?: number;
+  readonly paths?: RuntimePaths;
   readonly modelService?: ModelService;
   readonly sessionService?: SessionService;
   readonly promptService?: PromptService;
@@ -57,7 +59,12 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     registerSessionRoutes(app, options.sessionService);
   }
   if (options.promptService !== undefined) {
-    registerMessageRoutes(app, options.promptService);
+    registerMessageRoutes(app, {
+      promptService: options.promptService,
+      ...(options.sessionService !== undefined ? { sessionService: options.sessionService } : {}),
+      ...(options.replayStore !== undefined ? { replayStore: options.replayStore } : {}),
+      ...(options.paths !== undefined ? { paths: options.paths } : {}),
+    });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {
     registerEventRoutes(app, options.replayStore, options.promptService);
@@ -80,7 +87,6 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
         );
         wsRegistry.register(clientId, ws);
 
-        // 订阅 Replay Store 以接收实时事件
         const unsubscribe = wsReplayStore.subscribe((event) => {
           if (event.sessionId === null) return;
           if (wsRegistry.isSubscribed(clientId, event.sessionId)) {

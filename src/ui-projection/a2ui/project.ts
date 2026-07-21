@@ -44,7 +44,7 @@ export class A2uiProjector {
           toolName?: string;
         };
         return {
-          version: "v0.9",
+          version: "v0.9.1",
           surfaceId,
           updateComponents: [
             {
@@ -65,7 +65,7 @@ export class A2uiProjector {
           isError?: boolean;
         };
         return {
-          version: "v0.9",
+          version: "v0.9.1",
           surfaceId,
           updateComponents: [
             {
@@ -82,7 +82,7 @@ export class A2uiProjector {
       case "turn.completed": {
         const payload = event.payload as { turnId?: string };
         return {
-          version: "v0.9",
+          version: "v0.9.1",
           surfaceId,
           updateComponents: [
             {
@@ -99,7 +99,7 @@ export class A2uiProjector {
       case "error": {
         const payload = event.payload as { message?: string };
         return {
-          version: "v0.9",
+          version: "v0.9.1",
           surfaceId,
           updateComponents: [
             {

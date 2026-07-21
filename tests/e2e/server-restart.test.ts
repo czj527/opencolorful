@@ -19,111 +19,91 @@ const temporaryDirectories: string[] = [];
 
 afterAll(() => {
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    try { fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 忽略 */ }
   }
 });
 
-async function makeAppOptions(paths: ReturnType<typeof getRuntimePaths>) {
-  const database = openMetadataDatabase(paths.database);
-  const sessionIndex = new SessionIndex(database);
-  const providerStore = new ProviderStore(paths.providerSettings);
-  const sessionService = new SessionService(paths, sessionIndex);
-  const promptService = new PromptService();
-  const replayStore = new EventReplayStore();
-  return { database, sessionIndex, sessionService, promptService, replayStore };
-}
-
 describe("server restart recovery", () => {
-  it("survives server restart and continues the same session", async () => {
+  it("rebuilds services from disk and continues a persisted session", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-e2e-"));
     temporaryDirectories.push(directory);
     const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
 
-    // 使用同一套服务
-    const opts = await makeAppOptions(paths);
+    // ─── 第一次启动 ───
+    const db1 = openMetadataDatabase(paths.database);
+    const index1 = new SessionIndex(db1);
+    const store1 = new ProviderStore(paths.providerSettings);
+    const sessionService1 = new SessionService(paths, index1);
+    const promptService1 = new PromptService();
+    const replayStore1 = new EventReplayStore();
 
-    // 第一次启动
     const server1 = await startForegroundServer({
-      host: "127.0.0.1",
-      port: 0,
-      paths,
-      version: PLATFORM_VERSION,
-      appOptions: {
-        promptService: opts.promptService,
-        replayStore: opts.replayStore,
-        sessionService: opts.sessionService,
-      },
+      host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION,
+      appOptions: { promptService: promptService1, replayStore: replayStore1, sessionService: sessionService1 },
     });
+    const base1 = `http://127.0.0.1:${server1.port}`;
 
-    const baseUrl = `http://127.0.0.1:${server1.port}`;
-
-    // 创建 Session
-    const resp1 = await fetch(`${baseUrl}/api/sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+    // 创建 Session（通过 HTTP）
+    const r1 = await fetch(`${base1}/api/sessions`, {
+      method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "重启测试", cwd: process.cwd() }),
     });
-    expect(resp1.status).toBe(201);
-    const session = (await resp1.json()) as { id: string; title: string };
+    expect(r1.status).toBe(201);
+    const session = (await r1.json()) as { id: string; title: string };
     const sessionId = session.id;
 
-    // 创建 Runtime 并发送消息
+    // 创建 Runtime 并发送第一条消息
     const runtime = await SessionRuntime.create({
-      sessionId,
-      cwd: process.cwd(),
-      sessionDir: paths.sessions,
-      authPath: paths.authFile,
-      providerId: "faux",
-      modelId: "faux-1",
-      faux: { response: "e2e reply" },
-      publish: () => {},
-      replayStore: opts.replayStore,
+      sessionId, cwd: process.cwd(), sessionDir: paths.sessions,
+      authPath: paths.authFile, providerId: "faux", modelId: "faux-1",
+      faux: { response: "第一条回复" },
+      publish: () => {}, replayStore: replayStore1,
     });
-    opts.promptService.register(runtime);
-
-    // 通过 HTTP 发送 Prompt
-    const promptResp = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "e2e test" }),
+    promptService1.register(runtime);
+    const runResp = await fetch(`${base1}/api/sessions/${sessionId}/messages`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "你好" }),
     });
-    expect(promptResp.status).toBe(202);
+    expect(runResp.status).toBe(202);
 
-    // 停止 Server
+    // 停止
     await server1.stop();
+    runtime.dispose();
+    sessionService1.closeAll();
+    db1.close();
 
-    // 使用相同服务重启
+    // ─── 第二次启动（全新服务实例）───
+    const db2 = openMetadataDatabase(paths.database);
+    const index2 = new SessionIndex(db2);
+    const sessionService2 = new SessionService(paths, index2);
     const promptService2 = new PromptService();
     const replayStore2 = new EventReplayStore();
 
     const server2 = await startForegroundServer({
-      host: "127.0.0.1",
-      port: 0,
-      paths,
-      version: PLATFORM_VERSION,
-      appOptions: {
-        promptService: promptService2,
-        replayStore: replayStore2,
-        sessionService: opts.sessionService, // 重用同一个 sessionService
-      },
+      host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION,
+      appOptions: { promptService: promptService2, replayStore: replayStore2, sessionService: sessionService2 },
     });
 
     try {
-      const baseUrl2 = `http://127.0.0.1:${server2.port}`;
+      const base2 = `http://127.0.0.1:${server2.port}`;
 
-      // 获取原 Session
-      const getResp = await fetch(`${baseUrl2}/api/sessions/${sessionId}`);
+      // Session 重启后可读
+      const getResp = await fetch(`${base2}/api/sessions/${sessionId}`);
       expect(getResp.status).toBe(200);
-      const reopened = (await getResp.json()) as { id: string; title: string };
+      const reopened = (await getResp.json()) as { id: string };
       expect(reopened.id).toBe(sessionId);
 
-      // 健康检查
-      const healthResp = await fetch(`${baseUrl2}/api/health`);
-      expect(healthResp.status).toBe(200);
+      // 继续发送 Prompt
+      const msgResp = await fetch(`${base2}/api/sessions/${sessionId}/messages`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "继续" }),
+      });
+      expect(msgResp.status).toBe(202);
+
+      sessionService2.closeAll();
     } finally {
       await server2.stop();
-      opts.sessionService.closeAll();
-      opts.database.close();
+      db2.close();
     }
-  }, 15_000);
+  }, 20_000);
 });

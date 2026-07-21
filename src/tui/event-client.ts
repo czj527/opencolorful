@@ -82,9 +82,15 @@ export class TuiEventClient {
                 if (currentData !== "") {
                   try {
                     const parsed = JSON.parse(currentData);
+                    // SSE data 中包含的是完整的 PlatformEventEnvelope
+                    // 提取 type 和内部 payload 给渲染器
+                    const envType = typeof parsed.type === "string" ? parsed.type : "unknown";
+                    const envPayload = typeof parsed.payload === "object" && parsed.payload !== null
+                      ? parsed.payload
+                      : {};
                     onEvent({
-                      type: currentEvent || parsed.type || "unknown",
-                      payload: parsed,
+                      type: envType,
+                      payload: envPayload,
                     });
                   } catch {
                     // 非 JSON 数据，跳过
