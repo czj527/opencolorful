@@ -2,8 +2,33 @@
 
 基于 PI SDK 构建的本地优先 Agent 平台。
 
-项目当前处于基础设施阶段，先完成模型接入、Session 持久化、流式事件、Server
-生命周期和 TUI 客户端，再进入私人助理、Coding Agent、Web UI 和多 Agent 功能。
+Phase 0 基础骨架已经完成：项目可以构建、测试和启动本地 Server，并具备平台事件、
+SQLite Session 元数据索引和 PI SDK Adapter。下一步进入 Phase 1，完成 Provider 设置、
+PI JSONL Session、流式事件和首个 TUI 客户端。
+
+## 开始开发
+
+```powershell
+npm install
+npm run check
+
+# 可选：把开发数据隔离在项目内（该目录已被 Git 忽略）
+$env:PERSON_AGENT_HOME = "$PWD\.person-agent"
+
+npm run cli -- server start
+npm run cli -- server status
+npm run cli -- server logs
+npm run cli -- server stop
+```
+
+前台调试使用：
+
+```powershell
+npm run cli -- server start --foreground
+```
+
+默认监听 `127.0.0.1:4310`，健康检查地址是
+`http://127.0.0.1:4310/api/health`。
 
 ## 文档
 
@@ -27,3 +52,9 @@
 - 关键边界必须测试，低风险胶水代码不强制完整 TDD。
 - 每个 Phase 都要有明确的范围、验收条件和独立提交。
 
+## 当前限制
+
+- 尚未接入真实 Provider 和持久化凭据；
+- 尚未创建真实 PI Agent Session；
+- SSE、WebSocket、TUI、A2UI/TokUI 和 Web UI 从 Phase 1 开始实现；
+- 当前 Server 仅面向本机 loopback，不提供远程认证。

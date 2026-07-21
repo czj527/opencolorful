@@ -12,8 +12,13 @@ coverage/
 .env.*
 !.env.example
 *.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 runtime/
 data/
+sessions/
+.person-agent/
 .local/
 .tmp/
 

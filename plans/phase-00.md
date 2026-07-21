@@ -1,5 +1,21 @@
 # Phase 0：项目骨架和协议契约
 
+## 实施状态
+
+**已完成（2026-07-21）**
+
+| 任务 | 提交 | 结果 |
+|---|---|---|
+| P0-01 | `8052486` | TypeScript ESM、Vitest、固定依赖和构建脚本 |
+| P0-02 | `0b29329` | 运行目录、环境 fallback 和 API Error |
+| P0-03 | `9d72174` | 平台事件、命令、Schema 和序号守卫 |
+| P0-04 | `1b38e24` | SQLite WAL、迁移和 Session 元数据索引 |
+| P0-05 | `68c6861` | PI SDK Adapter、版本探针和 import 边界 |
+| P0-06 | `ae709d2` | Hono 健康检查和本地 Server 生命周期 |
+
+最终验证：`npm run check` 通过，共 6 个测试文件、29 个测试用例；Windows 后台
+start/status/health/stop/logs 手动链路通过。
+
 ## 目标
 
 建立可构建、可测试、可启动的基础项目，并锁定 PI SDK Adapter、平台事件、配置
@@ -225,4 +241,11 @@ git ls-files | Select-String -Pattern '\.env|\.sqlite|sessions|\.log'
 
 - 如果 PI npm 发布版与本地参考源码存在差异，先在 Adapter 测试中明确，不复制 SDK。
 - better-sqlite3 安装失败时先解决 Node ABI，不替换成临时 JSON 双写方案。
-- Phase 0 不加入后台 daemon、真实模型请求、TUI 或 Web UI。
+- Phase 0 不注册系统服务，不加入真实模型请求、TUI 或 Web UI。
+
+## 已知限制
+
+- 本阶段的 faux provider 和内存凭据仅用于无网络兼容验证；
+- Provider 设置、持久化凭据和真实 PI JSONL Session 属于 Phase 1；
+- Server 当前只有健康检查，尚无 SSE、WebSocket 和认证；
+- 日志暂不轮转，远程访问暂不开放。

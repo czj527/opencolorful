@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-本文描述基础设施阶段的稳定模块边界。详细决策依据见
+本文描述基础设施阶段的稳定模块边界。Phase 0 已于 2026-07-21 完成。详细决策依据见
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈
@@ -41,7 +41,9 @@ person-Agent/
 ├── tests/
 │   ├── contract/
 │   ├── integration/
+│   ├── smoke/
 │   └── unit/
+├── scripts/             架构边界和质量检查脚本
 ├── docs/
 └── plans/
 ```
@@ -73,6 +75,9 @@ person-Agent/
 开发环境可以通过 `PERSON_AGENT_HOME` 指向隔离目录。生产配置不得依赖该变量
 才能正常使用。
 
+Phase 0 已实现 `server.json` 的原子更新和 `server.lock` 单实例保护。后台进程在
+Windows 上使用隐藏窗口启动，标准输出和错误输出进入 `logs/server.log`。
+
 ## 模块边界
 
 ### contracts
@@ -90,6 +95,10 @@ person-Agent/
 
 唯一直接依赖 PI SDK 的模块。对外暴露平台稳定接口，不暴露 SDK 私有类型。负责
 版本验证、Session 创建、模型注册、工具适配和事件归一化。
+
+`scripts/verify-pi-sdk-imports.mjs` 会扫描 `src/`；适配层以外出现
+`@earendil-works/pi-*` import 时，质量检查直接失败。Phase 0 的兼容探针覆盖
+PI 0.80.10 内存 Session、内存凭据、faux provider 和工具工厂。
 
 ### runtime
 
@@ -154,6 +163,9 @@ interface PlatformEventEnvelope<T = unknown> {
 | POST | `/api/sessions/:id/abort` | 中断当前运行 |
 | GET | `/api/sessions/:id/events` | SSE 订阅和补发 |
 | GET | `/ws` | WS Session 订阅与控制 |
+
+Phase 0 只开放 `/api/health`。表中其余路由是后续基础设施阶段的目标契约，不能据此
+假定已经实现。
 
 错误统一使用：
 
