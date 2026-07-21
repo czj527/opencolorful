@@ -13,15 +13,22 @@ import type {
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
+  PiModelRuntimeHandle,
+  PiModelSummary,
+  PiProviderDefinition,
   PiSessionHandle,
   WorkspaceToolMode,
 } from "./types.js";
 
 export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./version.js";
+export { createPiModelRuntime } from "./model-runtime.js";
 export type {
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
+  PiModelRuntimeHandle,
+  PiModelSummary,
+  PiProviderDefinition,
   PiSessionHandle,
   WorkspaceToolMode,
 } from "./types.js";

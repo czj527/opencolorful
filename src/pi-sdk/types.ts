@@ -24,3 +24,40 @@ export interface OfflineCompletionResult {
 }
 
 export type WorkspaceToolMode = "read-only" | "all";
+
+export interface PiModelCapabilities {
+  readonly reasoning: boolean;
+  readonly input: readonly ("text" | "image")[];
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+}
+
+export interface PiProviderDefinition {
+  readonly providerId: string;
+  readonly name: string;
+  readonly protocol: string;
+  readonly baseUrl: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly models: readonly {
+    readonly modelId: string;
+    readonly name: string;
+    readonly capabilities: PiModelCapabilities;
+  }[];
+}
+
+export interface PiModelSummary {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly name: string;
+  readonly protocol: string;
+  readonly baseUrl: string;
+  readonly capabilities: PiModelCapabilities;
+  readonly credentialConfigured: boolean;
+}
+
+export interface PiModelRuntimeHandle {
+  setApiKey(providerId: string, apiKey: string): Promise<void>;
+  credentialConfigured(providerId: string): boolean;
+  listConfiguredModels(): PiModelSummary[];
+  listEnvironmentModels(): PiModelSummary[];
+}
