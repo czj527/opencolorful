@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "description": "基于 PI SDK 的本地优先 Agent 平台",
+  "bin": {
+    "agent": "dist/cli/main.js"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check:pi-imports": "node scripts/verify-pi-sdk-imports.mjs",
+    "cli": "tsx src/cli/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "check": "npm run check:pi-imports && npm run typecheck && npm run test && npm run build"
