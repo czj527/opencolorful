@@ -1,11 +1,17 @@
+import { runChatCommand } from "./chat-command.js";
 import { runServerCommand } from "./server-command.js";
 
 async function main(): Promise<void> {
   const [scope, ...args] = process.argv.slice(2);
-  if (scope !== "server") {
-    throw new Error("用法: agent server <start|stop|status|logs> [--foreground]");
+  if (scope === "server") {
+    await runServerCommand(args);
+    return;
   }
-  await runServerCommand(args);
+  if (scope === "chat") {
+    await runChatCommand(args);
+    return;
+  }
+  throw new Error("用法: agent <server|chat> [...args]");
 }
 
 main().catch((error: unknown) => {
