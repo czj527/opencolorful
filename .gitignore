@@ -15,9 +15,9 @@ coverage/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-runtime/
-data/
-sessions/
+/runtime/
+/data/
+/sessions/
 .person-agent/
 .local/
 .tmp/
