@@ -4,6 +4,7 @@ import {
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
 } from "../pi-sdk/index.js";
+import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
 import { type AbortResult, ExecutionRegistry } from "./execution-registry.js";
 
@@ -14,6 +15,7 @@ export interface SessionRuntimeOptions
     readonly tokensPerSecond?: number;
   };
   readonly publish: (event: PlatformEventEnvelope) => void;
+  readonly replayStore?: EventReplayStore;
 }
 
 export interface PromptRun {
@@ -30,10 +32,11 @@ export class SessionRuntime {
     readonly sessionId: string,
     private readonly agent: PiAgentSessionHandle,
     private readonly publish: (event: PlatformEventEnvelope) => void,
+    private readonly replayStore: EventReplayStore | undefined,
   ) {
     this.unsubscribe = agent.subscribe((event) => {
       if (!this.mapper) return;
-      for (const mapped of this.mapper.map(event)) this.publish(mapped);
+      for (const mapped of this.mapper.map(event)) this.emit(mapped);
     });
   }
 
@@ -50,7 +53,7 @@ export class SessionRuntime {
         ? { tokensPerSecond: options.faux.tokensPerSecond }
         : {}),
     });
-    return new SessionRuntime(options.sessionId, agent, options.publish);
+    return new SessionRuntime(options.sessionId, agent, options.publish, options.replayStore);
   }
 
   prompt(text: string): PromptRun {
@@ -61,7 +64,7 @@ export class SessionRuntime {
 
     const mapper = new PlatformEventMapper(this.sessionId, started.streamId);
     this.mapper = mapper;
-    this.publish(mapper.sessionStatus("running"));
+    this.emit(mapper.sessionStatus("running"));
     controller.signal.addEventListener(
       "abort",
       () => {
@@ -89,6 +92,13 @@ export class SessionRuntime {
     this.agent.dispose();
   }
 
+  private emit(event: PlatformEventEnvelope): void {
+    if (this.replayStore) {
+      this.replayStore.publish(event);
+    }
+    this.publish(event);
+  }
+
   private async runPrompt(
     text: string,
     streamId: string,
@@ -97,9 +107,9 @@ export class SessionRuntime {
     try {
       await this.agent.prompt(text);
     } catch (error) {
-      this.publish(mapper.error(error instanceof Error ? error.message : "Prompt 执行失败"));
+      this.emit(mapper.error(error instanceof Error ? error.message : "Prompt 执行失败"));
     } finally {
-      this.publish(mapper.sessionStatus("idle"));
+      this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);
       if (this.mapper === mapper) this.mapper = undefined;
     }

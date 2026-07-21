@@ -20,6 +20,10 @@ export class PromptService {
     await this.require(sessionId).compact();
   }
 
+  hasRuntime(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
   dispose(): void {
     for (const runtime of this.sessions.values()) runtime.dispose();
     this.sessions.clear();
