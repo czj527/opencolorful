@@ -231,16 +231,19 @@ PI Runtime Event
 
 ```json
 {
+  "protocolVersion": 1,
   "eventId": "evt-123",
   "sessionId": "session-123",
   "streamId": "stream-1",
   "sequence": 42,
   "timestamp": "2026-07-21T12:00:00.000Z",
   "type": "ui.message",
-  "format": "a2ui",
   "payload": {
-    "version": "v0.9",
-    "updateComponents": {}
+    "format": "a2ui",
+    "message": {
+      "version": "v0.9",
+      "updateComponents": {}
+    }
   }
 }
 ```
@@ -290,13 +293,14 @@ TokUI 只作为 Web Projection。TokUI 的 DSL 可以通过 Server 根据结构�
 
 ```json
 {
+  "protocolVersion": 1,
   "eventId": "evt-124",
   "sessionId": "session-123",
   "streamId": "stream-1",
   "sequence": 43,
   "type": "ui.message",
-  "format": "tokui",
   "payload": {
+    "format": "tokui",
     "chunk": "[tool-call name:web_search status:running]"
   }
 }
