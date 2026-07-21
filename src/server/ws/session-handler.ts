@@ -99,6 +99,10 @@ export class SessionHandler {
     }
 
     if (command.type === "stream.resume") {
+      if (!this.registry.isSubscribed(this.clientId, command.sessionId)) {
+        this.sendError("请先订阅 Session 再请求 stream resume", command.requestId);
+        return;
+      }
       const result = this.replayStore.getSince(
         command.streamId,
         command.lastSequence,

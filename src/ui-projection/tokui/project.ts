@@ -1,6 +1,6 @@
 import type { PlatformEventEnvelope } from "../../contracts/events.js";
 import type { UiMessagePayload } from "../../contracts/ui-message.js";
-import { TokuiPolicy, TOKUI_MAX_CHUNK_LENGTH } from "./policy.js";
+import { TokuiPolicy, TOKUI_MAX_BUFFER, TOKUI_MAX_CHUNK_LENGTH } from "./policy.js";
 
 /** 转义 DSL 中的特殊字符，防止动态值注入 TokUI 语法 */
 function escapeDsValue(value: string): string {
@@ -89,6 +89,10 @@ export class TokuiStreamBuilder {
   feed(event: PlatformEventEnvelope): void {
     const payload = this.projector.project(event);
     if (payload !== null && payload.format === "tokui") {
+      // MAX_BUFFER 限制
+      if (this.bufferSize + payload.chunk.length > TOKUI_MAX_BUFFER) {
+        return;
+      }
       this.chunks.push(payload.chunk);
       this.bufferSize += payload.chunk.length;
     }

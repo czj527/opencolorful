@@ -39,6 +39,43 @@ export class A2uiProjector {
     const surfaceId = event.sessionId ?? "default";
 
     switch (event.type) {
+      case "message.delta": {
+        const payload = event.payload as { delta?: string; role?: string };
+        return {
+          version: "v0.9.1",
+          surfaceId,
+          catalogId: this.catalog.getCatalogId(),
+          updateComponents: [
+            {
+              id: `msg-${event.sequence}`,
+              type: "Text",
+              properties: {
+                text: (payload.delta ?? "").slice(0, 500),
+                role: payload.role ?? "assistant",
+              },
+            },
+          ],
+        };
+      }
+
+      case "message.completed": {
+        const payload = event.payload as { content?: string };
+        return {
+          version: "v0.9.1",
+          surfaceId,
+          catalogId: this.catalog.getCatalogId(),
+          updateComponents: [
+            {
+              id: `msg-done-${event.sequence}`,
+              type: "Card",
+              properties: {
+                status: "completed",
+              },
+            },
+          ],
+        };
+      }
+
       case "tool.started": {
         const payload = event.payload as {
           toolCallId?: string;

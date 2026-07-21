@@ -8,7 +8,9 @@ import type { PlatformEventEnvelope } from "../../contracts/events.js";
 function parseLastSequence(context: Context): number {
   const lastEventId = context.req.header("Last-Event-ID");
   if (lastEventId !== undefined && lastEventId.trim() !== "") {
-    const seq = Number(lastEventId);
+    // 格式: "stream-xxx:seq" 或纯数字 "seq"
+    const parts = lastEventId.split(":");
+    const seq = Number(parts.length === 2 ? parts[1] : parts[0]);
     if (Number.isInteger(seq) && seq >= 0) {
       return seq;
     }
@@ -30,7 +32,7 @@ async function writeEvent(
   event: PlatformEventEnvelope,
 ): Promise<void> {
   await stream.writeSSE({
-    id: String(event.sequence),
+    id: `${event.streamId ?? "?"}:${event.sequence}`,
     event: event.type,
     data: JSON.stringify(event),
   });

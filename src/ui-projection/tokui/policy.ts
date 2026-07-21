@@ -64,16 +64,22 @@ export class TokuiPolicy {
       }
     }
 
-    // 检查深度（粗略计算嵌套标签数）
+    // 检查组件嵌套深度
     let depth = 0;
     let maxDepth = 0;
-    for (const char of chunk) {
-      if (char === "[") depth += 1;
-      if (char === "]") depth -= 1;
-      maxDepth = Math.max(maxDepth, depth);
+    const tagPattern = /\[(\/)?([a-z][a-z0-9_-]*)/gi;
+    let tagMatch = tagPattern.exec(chunk);
+    while (tagMatch !== null) {
+      if (tagMatch[1] === "/") {
+        depth -= 1;
+      } else {
+        depth += 1;
+        maxDepth = Math.max(maxDepth, depth);
+      }
+      tagMatch = tagPattern.exec(chunk);
     }
     if (maxDepth > TOKUI_MAX_DEPTH) {
-      issues.push(`嵌套深度 ${maxDepth} 超过限制 ${TOKUI_MAX_DEPTH}`);
+      issues.push(`组件嵌套深度 ${maxDepth} 超过限制 ${TOKUI_MAX_DEPTH}`);
     }
 
     // 检查组件白名单

@@ -49,7 +49,7 @@ describe("A2UI projection", () => {
     expect(catalog.getCatalogId()).toBe("person-agent/v1");
   });
 
-  it("does not project message.delta events", () => {
+  it("projects message.delta into A2UI Text component", () => {
     const projector = new A2uiProjector();
     const result = projector.project({
       protocolVersion: 1, eventId: "evt-3", sessionId: "session-a2ui",
@@ -57,7 +57,9 @@ describe("A2UI projection", () => {
       type: "message.delta",
       payload: { role: "assistant", delta: "hello" },
     } as never);
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    if (result === null) return;
+    expect(result.format).toBe("a2ui");
   });
 });
 

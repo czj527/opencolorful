@@ -115,7 +115,8 @@ export class TuiEventClient {
               },
             });
             setTimeout(() => {
-              this.doConnect(sessionId, onEvent, sinceSeq);
+              const resumeSeq = lastEventId ? Number(lastEventId) : sinceSeq;
+              this.doConnect(sessionId, onEvent, resumeSeq);
             }, delay);
           }
         } finally {

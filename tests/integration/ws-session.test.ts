@@ -241,6 +241,15 @@ describe("WebSocket session control", () => {
     try {
       const { ws, received, close } = await connectWs(server.port);
 
+      // 必须先订阅才能 resume
+      ws.send(JSON.stringify({
+        protocolVersion: 1,
+        requestId: "r0",
+        type: "session.subscribe",
+        sessionId: "session-ws",
+      }));
+      await new Promise((r) => setTimeout(r, 30));
+
       // 请求 resume
       ws.send(JSON.stringify({
         protocolVersion: 1,
