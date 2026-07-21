@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>person-Agent TokUI Spike</title>
+<script src="https://cdn.jsdelivr.net/npm/tokui@0.1.8/dist/tokui.min.js"></script>
+</head>
+<body>
+<h1>person-Agent TokUI 投影验证</h1>
+<p>此页面使用静态事件夹具演示 TokUI 渲染，不连接真实 Server。</p>
+<div id="output"></div>
+<script>
+// 模拟从 person-Agent Server 接收的平台事件
+const testEvents = [
+  { type: "tool.started", payload: { toolCallId: "t1", toolName: "search_files" } },
+  { type: "tool.delta", payload: { toolCallId: "t1", delta: "正在搜索..." } },
+  { type: "tool.completed", payload: { toolCallId: "t1", isError: false } },
+  { type: "turn.completed", payload: { turnId: "turn-1" } },
+  { type: "error", payload: { message: "演示错误消息" } },
+];
+
+// 对应上述事件的 TokUI DSL chunks
+const testChunks = [
+  '[card tt:"工具调用" id:"t1"][desc]search_files[/desc][badge v:info]运行中...[/badge]',
+  '[upd id:"t1"][p]正在搜索...[/p][/upd]',
+  '[upd id:"t1"][badge v:success]完成[/badge][/upd]',
+  '[desc]Turn 完成[/desc]',
+  '[card tt:"错误"][badge v:danger]错误[/badge][p]演示错误消息[/p][/card]',
+];
+
+const container = document.getElementById("output");
+const tokui = new TokUI();
+
+tokui.startStream();
+container.innerHTML = "";
+
+for (const [i, chunk] of testChunks.entries()) {
+  setTimeout(() => {
+    tokui.feed(chunk);
+    container.innerHTML = tokui.getHTML();
+  }, i * 800);
+}
+
+setTimeout(() => {
+  tokui.endStream();
+  container.innerHTML = tokui.getHTML();
+}, testChunks.length * 800 + 100);
+</script>
+</body>
+</html>
