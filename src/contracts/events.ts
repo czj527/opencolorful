@@ -6,6 +6,7 @@ export const EVENT_TYPES = [
   "message.started",
   "message.delta",
   "message.completed",
+  "thinking.delta",
   "tool.started",
   "tool.delta",
   "tool.completed",
@@ -18,6 +19,8 @@ export type PlatformEventType = (typeof EVENT_TYPES)[number];
 
 const EventPayloadSchema = Type.Union([
   Type.Object({ status: Type.String() }),
+  Type.Object({ role: Type.String() }),
+  Type.Object({ delta: Type.String() }),
   Type.Object({ role: Type.String(), delta: Type.String() }),
   Type.Object({ role: Type.String(), content: Type.String() }),
   Type.Object({ toolCallId: Type.String(), toolName: Type.String() }),

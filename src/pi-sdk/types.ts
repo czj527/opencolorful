@@ -68,3 +68,45 @@ export interface PiModelRuntimeHandle {
   listConfiguredModels(): PiModelSummary[];
   listEnvironmentModels(): PiModelSummary[];
 }
+
+export type PiAgentEvent =
+  | { readonly type: "agent_start" | "agent_end" | "turn_start" | "turn_end" }
+  | { readonly type: "message_start"; readonly role: string }
+  | { readonly type: "message_end"; readonly role: string; readonly content: string }
+  | { readonly type: "text_delta" | "thinking_delta"; readonly delta: string }
+  | {
+      readonly type: "tool_start";
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: "tool_delta";
+      readonly toolCallId: string;
+      readonly delta: string;
+    }
+  | {
+      readonly type: "tool_end";
+      readonly toolCallId: string;
+      readonly result: unknown;
+      readonly isError: boolean;
+    };
+
+export interface PiAgentSessionHandle {
+  readonly sessionId: string;
+  subscribe(listener: (event: PiAgentEvent) => void): () => void;
+  prompt(text: string): Promise<void>;
+  abort(): Promise<void>;
+  compact(): Promise<void>;
+  dispose(): void;
+}
+
+export interface PiFauxAgentOptions {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly sessionDir: string;
+  readonly authPath: string;
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly response: string;
+  readonly tokensPerSecond?: number;
+}

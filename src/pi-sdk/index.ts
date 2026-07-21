@@ -23,10 +23,14 @@ import type {
 
 export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./version.js";
 export { createPiModelRuntime } from "./model-runtime.js";
+export { createPiFauxAgentSession } from "./agent-session.js";
 export type {
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
+  PiAgentEvent,
+  PiAgentSessionHandle,
+  PiFauxAgentOptions,
   PiModelRuntimeHandle,
   PiModelSummary,
   PiProviderDefinition,
