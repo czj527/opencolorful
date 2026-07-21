@@ -41,6 +41,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
             modelId: "faux-1",
             faux: { response: "已收到您的消息", tokensPerSecond: 20 },
             publish: () => {},
+            sessionHandle: session,
             ...(replayStore ? { replayStore } : {}),
           });
           promptService.register(runtime);

@@ -67,7 +67,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {
-    registerEventRoutes(app, options.replayStore, options.promptService);
+    registerEventRoutes(app, options.replayStore, options.promptService, options.sessionService);
   }
 
   // WebSocket 路由

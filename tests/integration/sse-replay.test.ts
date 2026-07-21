@@ -8,6 +8,8 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 
@@ -229,15 +231,21 @@ describe("SSE event replay", () => {
     expect(received.length).toBe(1);
   });
 
-  it("returns 404 for SSE on non-existent session", async () => {
+  it("returns 404 for SSE on non-existent session when sessionService is provided", async () => {
     const replayStore = new EventReplayStore();
     const promptService = new PromptService();
-    const { app } = createServerApp({ promptService, replayStore });
+    const paths = getRuntimePaths({ PERSON_AGENT_HOME: os.tmpdir() });
+    const db = openMetadataDatabase(paths.database);
+    const idx = new SessionIndex(db);
+    const { SessionService: Svc } = await import("../../src/runtime/session-service.js");
+    const sessionService = new Svc(paths, idx);
+    const { app } = createServerApp({ promptService, replayStore, sessionService });
 
     const response = await app.request(
       "http://local/api/sessions/missing-session/events",
       { headers: { "accept": "text/event-stream" } },
     );
     expect(response.status).toBe(404);
+    db.close();
   });
 });

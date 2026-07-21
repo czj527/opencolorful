@@ -109,4 +109,5 @@ export interface PiFauxAgentOptions {
   readonly modelId: string;
   readonly response: string;
   readonly tokensPerSecond?: number;
+  readonly sessionPath?: string;
 }

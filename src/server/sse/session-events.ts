@@ -42,12 +42,8 @@ export async function createSessionEventStream(
   replayStore: EventReplayStore,
   promptService: PromptService,
 ): Promise<Response> {
-  if (!promptService.hasRuntime(sessionId)) {
-    return context.json(
-      { code: "NOT_FOUND", message: "Session 不存在" },
-      404,
-    );
-  }
+  // Runtime 可能尚未创建（将在首次 Prompt 时自动创建），不 404
+  // SSE 连接保持打开，等待后续实时事件
 
   const sinceSeq = parseLastSequence(context);
 

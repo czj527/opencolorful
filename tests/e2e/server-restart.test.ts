@@ -52,12 +52,14 @@ describe("server restart recovery", () => {
     const session = (await r1.json()) as { id: string; title: string };
     const sessionId = session.id;
 
-    // 创建 Runtime 并发送第一条消息
+    // 创建 Runtime（使用 SessionService 打开的句柄，确保 JSONL 路径一致）
+    const sessionHandle = sessionService1.open(sessionId);
     const runtime = await SessionRuntime.create({
       sessionId, cwd: process.cwd(), sessionDir: paths.sessions,
       authPath: paths.authFile, providerId: "faux", modelId: "faux-1",
       faux: { response: "第一条回复" },
       publish: () => {}, replayStore: replayStore1,
+      sessionHandle,
     });
     promptService1.register(runtime);
     const runResp = await fetch(`${base1}/api/sessions/${sessionId}/messages`, {

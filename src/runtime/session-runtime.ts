@@ -3,6 +3,7 @@ import {
   createPiFauxAgentSession,
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
+  type PiSessionHandle,
 } from "../pi-sdk/index.js";
 import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
@@ -16,6 +17,7 @@ export interface SessionRuntimeOptions
   };
   readonly publish: (event: PlatformEventEnvelope) => void;
   readonly replayStore?: EventReplayStore;
+  readonly sessionHandle?: PiSessionHandle;
 }
 
 export interface PromptRun {
@@ -49,6 +51,7 @@ export class SessionRuntime {
       providerId: options.providerId,
       modelId: options.modelId,
       response: options.faux.response,
+      ...(options.sessionHandle ? { sessionPath: options.sessionHandle.path } : {}),
       ...(options.faux.tokensPerSecond
         ? { tokensPerSecond: options.faux.tokensPerSecond }
         : {}),

@@ -150,9 +150,11 @@ export async function createPiFauxAgentSession(
     compaction: { enabled: false },
     retry: { enabled: false },
   });
-  const sessionManager = SessionManager.create(options.cwd, options.sessionDir, {
-    id: options.sessionId,
-  });
+  const sessionManager = options.sessionPath
+    ? SessionManager.open(options.sessionPath, options.sessionDir)
+    : SessionManager.create(options.cwd, options.sessionDir, {
+        id: options.sessionId,
+      });
   const { session } = await createAgentSession({
     cwd: options.cwd,
     agentDir: path.dirname(options.authPath),
