@@ -2,14 +2,17 @@ import { Hono } from "hono";
 
 import { PLATFORM_VERSION } from "../index.js";
 import type { ModelService } from "../runtime/model-service.js";
+import type { SessionService } from "../runtime/session-service.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
+import { registerSessionRoutes } from "./routes/sessions.js";
 
 export interface ServerAppOptions {
   readonly version?: string;
   readonly pid?: number;
   readonly startedAt?: number;
   readonly modelService?: ModelService;
+  readonly sessionService?: SessionService;
 }
 
 export function createServerApp(options: ServerAppOptions = {}): Hono {
@@ -30,6 +33,9 @@ export function createServerApp(options: ServerAppOptions = {}): Hono {
   if (options.modelService !== undefined) {
     registerProviderRoutes(app, options.modelService);
     registerModelRoutes(app, options.modelService);
+  }
+  if (options.sessionService !== undefined) {
+    registerSessionRoutes(app, options.sessionService);
   }
 
   app.notFound((context) => context.json({ code: "NOT_FOUND", message: "资源不存在" }, 404));

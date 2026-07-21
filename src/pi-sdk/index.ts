@@ -8,6 +8,7 @@ import {
   createCodingTools,
   createReadOnlyTools,
 } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import type {
   OfflineCompletionResult,
@@ -35,9 +36,59 @@ export type {
 
 export function createInMemorySession(cwd: string): PiSessionHandle {
   const manager = SessionManager.inMemory(cwd);
+  return wrapSessionManager(manager);
+}
+
+export function createPersistentSession(
+  cwd: string,
+  sessionDir: string,
+  id: string,
+): PiSessionHandle {
+  return wrapSessionManager(SessionManager.create(cwd, sessionDir, { id }));
+}
+
+export function openPersistentSession(
+  sessionPath: string,
+  sessionDir: string,
+  cwd?: string,
+): PiSessionHandle {
+  return wrapSessionManager(SessionManager.open(sessionPath, sessionDir, cwd));
+}
+
+function wrapSessionManager(manager: SessionManager): PiSessionHandle {
+  const getMessages = (): string[] =>
+    manager
+      .getBranch()
+      .filter((entry) => entry.type === "message")
+      .flatMap((entry) => {
+        const message = entry.message;
+        if (message.role !== "user" && message.role !== "assistant") return [];
+        if (typeof message.content === "string") return [message.content];
+        return [
+          ...message.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text),
+        ];
+      });
+  const getModel = (): { providerId: string; modelId: string } | null => {
+    const modelEntry = [...manager.getBranch()].reverse().find((entry) => {
+      return entry.type === "model_change" || (entry.type === "message" && entry.message.role === "assistant");
+    });
+    if (!modelEntry) return null;
+    if (modelEntry.type === "model_change") {
+      return { providerId: modelEntry.provider, modelId: modelEntry.modelId };
+    }
+    if (modelEntry.type === "message" && modelEntry.message.role === "assistant") {
+      return { providerId: modelEntry.message.provider, modelId: modelEntry.message.model };
+    }
+    return null;
+  };
   return {
     get id() {
       return manager.getSessionId();
+    },
+    get path() {
+      return manager.getSessionFile() ?? "";
     },
     get persisted() {
       return manager.isPersisted();
@@ -45,8 +96,43 @@ export function createInMemorySession(cwd: string): PiSessionHandle {
     get entryCount() {
       return manager.getEntries().length;
     },
+    get messages() {
+      return getMessages();
+    },
+    get model() {
+      return getModel();
+    },
     appendUserMessage(content: string) {
       manager.appendMessage({ role: "user", content, timestamp: Date.now() });
+    },
+    appendAssistantMessage(content: string) {
+      const message: AssistantMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: content }],
+        api: "faux",
+        provider: "faux",
+        model: "faux-1",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: Date.now(),
+      };
+      manager.appendMessage(message);
+    },
+    selectModel(providerId: string, modelId: string) {
+      manager.appendModelChange(providerId, modelId);
+    },
+    setTitle(title: string) {
+      manager.appendSessionInfo(title);
+    },
+    dispose() {
+      manager.getEntries();
     },
   };
 }
