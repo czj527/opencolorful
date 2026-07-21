@@ -40,7 +40,7 @@ describe("TUI event rendering", () => {
   });
 
   it("shows A2UI summary without full rendering", () => {
-    const result = renderEvent(makeEvent("ui.message", { format: "a2ui", message: { components: [] } }));
+    const result = renderEvent(makeEvent("ui.message", { format: "a2ui", messages: [] }));
     expect(result).toContain("a2ui");
   });
 

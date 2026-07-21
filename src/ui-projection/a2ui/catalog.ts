@@ -5,6 +5,7 @@ const BASE_COMPONENTS = [
   "Button",
   "Input",
   "Form",
+  "Column",
 ] as const;
 
 const PLATFORM_EXTENSIONS = [

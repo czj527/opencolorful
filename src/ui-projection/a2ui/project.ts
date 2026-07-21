@@ -1,157 +1,135 @@
 import type { PlatformEventEnvelope } from "../../contracts/events.js";
-import type { UiMessagePayload } from "../../contracts/ui-message.js";
+import type {
+  A2uiComponent,
+  A2uiServerMessage,
+  UiMessagePayload,
+} from "../../contracts/ui-message.js";
 import { A2uiCatalog } from "./catalog.js";
 
-export interface A2uiMessage {
-  readonly version: string;
-  readonly surfaceId: string;
-  readonly catalogId?: string;
-  readonly updateComponents?: Record<string, unknown>[];
+interface ComponentProjection {
+  readonly components: A2uiComponent[];
+  readonly rootChildId: string;
+  readonly replacedRootChildId?: string;
 }
 
 export class A2uiProjector {
   private readonly catalog: A2uiCatalog;
+  private readonly createdSurfaces = new Set<string>();
+  private readonly surfaceChildren = new Map<string, Set<string>>();
+  private readonly streamText = new Map<string, string>();
 
   constructor(catalog?: A2uiCatalog) {
     this.catalog = catalog ?? new A2uiCatalog();
   }
 
   project(event: PlatformEventEnvelope): UiMessagePayload | null {
-    const a2uiMessage = this.buildMessage(event);
-    if (a2uiMessage === null) return null;
-
-    // 校验所有组件都在 Catalog 白名单内
-    const components = a2uiMessage.updateComponents ?? [];
-    for (const comp of components) {
-      const compType = (comp as Record<string, unknown>).type as string | undefined;
-      if (compType !== undefined && !this.catalog.isAllowed(compType)) {
-        return null; // 禁止生成未知组件
-      }
+    const surfaceId = event.sessionId ?? "default";
+    const projection = this.buildComponents(event);
+    if (projection === null) return null;
+    if (projection.components.some((component) => !this.catalog.isAllowed(component.component))) {
+      return null;
     }
 
-    return {
-      format: "a2ui",
-      message: a2uiMessage as unknown as Record<string, unknown>,
-    };
-  }
+    let children = this.surfaceChildren.get(surfaceId);
+    if (children === undefined) {
+      children = new Set<string>();
+      this.surfaceChildren.set(surfaceId, children);
+    }
+    if (projection.replacedRootChildId !== undefined) {
+      children.delete(projection.replacedRootChildId);
+    }
+    children.add(projection.rootChildId);
 
-  private buildMessage(event: PlatformEventEnvelope): A2uiMessage | null {
-    const surfaceId = event.sessionId ?? "default";
-
-    switch (event.type) {
-      case "message.delta": {
-        const payload = event.payload as { delta?: string; role?: string };
-        return {
-          version: "v0.9.1",
+    const messages: A2uiServerMessage[] = [];
+    if (!this.createdSurfaces.has(surfaceId)) {
+      this.createdSurfaces.add(surfaceId);
+      messages.push({
+        version: "v0.9.1",
+        createSurface: {
           surfaceId,
           catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: `msg-${event.sequence}`,
-              type: "Text",
-              properties: {
-                text: (payload.delta ?? "").slice(0, 500),
-                role: payload.role ?? "assistant",
-              },
-            },
-          ],
+        },
+      });
+    }
+    messages.push({
+      version: "v0.9.1",
+      updateComponents: {
+        surfaceId,
+        components: [
+          { id: "root", component: "Column", children: [...children] },
+          ...projection.components,
+        ],
+      },
+    });
+    return { format: "a2ui", messages };
+  }
+
+  private buildComponents(event: PlatformEventEnvelope): ComponentProjection | null {
+    const streamKey = event.streamId ?? event.eventId;
+    switch (event.type) {
+      case "message.delta": {
+        const payload = event.payload as { delta?: string };
+        const id = `message-${streamKey}`;
+        const text = `${this.streamText.get(streamKey) ?? ""}${payload.delta ?? ""}`.slice(0, 8_000);
+        this.streamText.set(streamKey, text);
+        return {
+          rootChildId: id,
+          components: [{ id, component: "Text", text, variant: "body" }],
         };
       }
 
       case "message.completed": {
         const payload = event.payload as { content?: string };
+        const textId = `message-${streamKey}`;
+        const cardId = `card-${streamKey}`;
+        const text = (payload.content ?? this.streamText.get(streamKey) ?? "").slice(0, 8_000);
+        this.streamText.set(streamKey, text);
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: `msg-done-${event.sequence}`,
-              type: "Card",
-              properties: {
-                status: "completed",
-                content: (payload.content ?? "").slice(0, 2_000),
-              },
-            },
+          rootChildId: cardId,
+          replacedRootChildId: textId,
+          components: [
+            { id: textId, component: "Text", text, variant: "body" },
+            { id: cardId, component: "Card", child: textId },
           ],
         };
       }
 
       case "tool.started": {
-        const payload = event.payload as {
-          toolCallId?: string;
-          toolName?: string;
-        };
+        const payload = event.payload as { toolCallId?: string; toolName?: string };
+        const id = payload.toolCallId ?? `tool-${event.sequence}`;
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: payload.toolCallId ?? `tool-${event.sequence}`,
-              type: "ToolCall",
-              properties: {
-                name: payload.toolName ?? "unknown",
-                status: "running",
-              },
-            },
-          ],
+          rootChildId: id,
+          components: [{
+            id,
+            component: "ToolCall",
+            name: payload.toolName ?? "unknown",
+            status: "running",
+          }],
         };
       }
 
       case "tool.completed": {
-        const payload = event.payload as {
-          toolCallId?: string;
-          isError?: boolean;
-        };
+        const payload = event.payload as { toolCallId?: string; isError?: boolean };
+        const id = payload.toolCallId ?? `tool-${event.sequence}`;
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: payload.toolCallId ?? `tool-${event.sequence}`,
-              type: "ToolCall",
-              properties: {
-                status: payload.isError ? "error" : "completed",
-              },
-            },
-          ],
-        };
-      }
-
-      case "turn.completed": {
-        const payload = event.payload as { turnId?: string };
-        return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: `turn-${payload.turnId ?? event.sequence}`,
-              type: "Status",
-              properties: {
-                status: "completed",
-              },
-            },
-          ],
+          rootChildId: id,
+          components: [{
+            id,
+            component: "ToolCall",
+            status: payload.isError ? "error" : "completed",
+          }],
         };
       }
 
       case "plan.updated": {
         const payload = event.payload as { items?: unknown };
+        const id = `plan-${streamKey}`;
         const items = Array.isArray(payload.items)
           ? payload.items.filter((item): item is string => typeof item === "string").slice(0, 50)
           : [];
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [{
-            id: `plan-${event.sequence}`,
-            type: "Plan",
-            properties: { items },
-          }],
+          rootChildId: id,
+          components: [{ id, component: "Plan", items }],
         };
       }
 
@@ -161,37 +139,38 @@ export class A2uiProjector {
           name?: string;
           mimeType?: string;
         };
+        const id = payload.attachmentId ?? `attachment-${event.sequence}`;
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [{
-            id: payload.attachmentId ?? `attachment-${event.sequence}`,
-            type: "Attachment",
-            properties: {
-              name: payload.name ?? "attachment",
-              ...(payload.mimeType === undefined ? {} : { mimeType: payload.mimeType }),
-            },
+          rootChildId: id,
+          components: [{
+            id,
+            component: "Attachment",
+            name: payload.name ?? "attachment",
+            ...(payload.mimeType === undefined ? {} : { mimeType: payload.mimeType }),
           }],
+        };
+      }
+
+      case "turn.completed": {
+        const payload = event.payload as { turnId?: string };
+        const id = `turn-${payload.turnId ?? event.sequence}`;
+        return {
+          rootChildId: id,
+          components: [{ id, component: "Status", status: "completed" }],
         };
       }
 
       case "error": {
         const payload = event.payload as { message?: string };
+        const id = `error-${event.sequence}`;
         return {
-          version: "v0.9.1",
-          surfaceId,
-          catalogId: this.catalog.getCatalogId(),
-          updateComponents: [
-            {
-              id: `error-${event.sequence}`,
-              type: "Status",
-              properties: {
-                status: "error",
-                message: payload.message ?? "未知错误",
-              },
-            },
-          ],
+          rootChildId: id,
+          components: [{
+            id,
+            component: "Status",
+            status: "error",
+            message: payload.message ?? "未知错误",
+          }],
         };
       }
 

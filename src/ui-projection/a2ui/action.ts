@@ -33,21 +33,22 @@ export class A2uiActionValidator {
     this.catalog = catalog ?? new A2uiCatalog();
   }
 
-  validate(value: unknown, context: A2uiActionValidationContext): ValidationResult {
+  validate(value: unknown, validationContext: A2uiActionValidationContext): ValidationResult {
     if (!Value.Check(A2uiActionSchema, value)) {
       return { ok: false, issues: ["Action 结构无效"] };
     }
-    const action = value as A2uiAction;
+    const envelope = value as A2uiAction;
+    const action = envelope.action;
     const issues: string[] = [];
 
-    if (action.sessionId !== context.sessionId) {
-      issues.push("Session ID 不匹配");
+    if (validationContext.sessionId.trim() === "") {
+      issues.push("Session 上下文无效");
     }
-    if (action.surfaceId !== context.surfaceId) {
+    if (action.surfaceId !== validationContext.surfaceId) {
       issues.push("Surface ID 不匹配当前会话");
     }
 
-    const componentType = context.components[action.sourceComponentId];
+    const componentType = validationContext.components[action.sourceComponentId];
     if (componentType === undefined) {
       issues.push("组件不存在");
     } else if (!this.catalog.isAllowed(componentType)) {
@@ -57,19 +58,19 @@ export class A2uiActionValidator {
     if (Number.isNaN(Date.parse(action.timestamp))) {
       issues.push("timestamp 格式无效");
     }
-    if (!ALLOWED_ACTIONS.has(action.actionName)) {
-      issues.push(`未知 Action: ${action.actionName}`);
+    if (!ALLOWED_ACTIONS.has(action.name)) {
+      issues.push(`未知 Action: ${action.name}`);
     }
 
-    const parameter = action.context?.value;
+    const parameter = action.context.value;
     if (
-      action.actionName === "select" &&
+      action.name === "select" &&
       typeof parameter !== "string" &&
       typeof parameter !== "number"
     ) {
       issues.push("select Action 需要字符串或数字 value");
     }
-    if (action.actionName === "toggle" && typeof parameter !== "boolean") {
+    if (action.name === "toggle" && typeof parameter !== "boolean") {
       issues.push("toggle Action 需要布尔 value");
     }
 
