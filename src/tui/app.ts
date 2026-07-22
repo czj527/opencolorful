@@ -121,6 +121,9 @@ export class TuiApp {
       case "tools":
         await this.setToolMode(rest);
         break;
+      case "model":
+        await this.setModel(rest);
+        break;
       case "health":
         await this.showHealth();
         break;
@@ -150,6 +153,7 @@ export class TuiApp {
     this.write("  /models                列出可用模型\n");
     this.write("  /provider              列出已配置 Provider\n");
     this.write("  /tools <off|read-only|all>  设置工具模式\n");
+    this.write("  /model <providerId> <modelId>  选择模型\n");
     this.write("  /health                Server 状态\n");
     this.write("  /abort                 中断当前流\n");
     this.write("  /quit                  退出\n");
@@ -243,6 +247,24 @@ export class TuiApp {
       }
     } catch (error) {
       this.write(`获取 Provider 列表失败: ${String(error)}\n`);
+    }
+  }
+
+  private async setModel(args: string): Promise<void> {
+    const [providerId, modelId] = args.split(/\s+/);
+    if (!providerId || !modelId) {
+      this.write("用法: /model <providerId> <modelId>\n");
+      return;
+    }
+    if (this.state.name !== "chat") {
+      this.write("请先进入聊天模式: /chat <sessionId>\n");
+      return;
+    }
+    try {
+      await this.api.setSessionModel(this.state.sessionId, providerId!, modelId!);
+      this.write(`模型已设为: ${providerId}/${modelId}\n`);
+    } catch (error) {
+      this.write(`设置失败: ${String(error)}\n`);
     }
   }
 

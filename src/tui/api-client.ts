@@ -127,4 +127,15 @@ export class TuiApiClient {
       body: JSON.stringify(settings),
     });
   }
+
+  async setSessionModel(
+    sessionId: string,
+    providerId: string,
+    modelId: string,
+  ): Promise<SessionView> {
+    return this.request<SessionView>(`/api/sessions/${sessionId}/model`, {
+      method: "PUT",
+      body: JSON.stringify({ providerId, modelId }),
+    });
+  }
 }

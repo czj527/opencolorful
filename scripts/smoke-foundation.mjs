@@ -66,7 +66,8 @@ async function main() {
 
     // 2. 等待健康检查并就绪
     console.log("[2/3] 等待 Server 就绪...");
-    const health = await healthCheck("http://127.0.0.1:4310/api/health");
+    const port = process.env.PERSON_AGENT_PORT || "4310";
+    const health = await healthCheck(`http://127.0.0.1:${port}/api/health`);
     console.log(`  状态: ${health.status}, 版本: ${health.version}, PID: ${health.pid}`);
 
     // 3. 停止 Server

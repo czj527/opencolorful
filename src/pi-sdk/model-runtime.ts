@@ -85,6 +85,7 @@ export async function createPiModelRuntime(options: {
         providerId: model.provider,
         modelId: model.id,
         model,
+        runtime,
         credentialConfigured: true,
       };
     },

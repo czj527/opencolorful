@@ -16,12 +16,8 @@ export class PlatformEventMapper {
     return this.envelope("session.status", { status });
   }
 
-  error(message: string): PlatformEventEnvelope {
-    return this.envelope("error", {
-      code: "SESSION_ERROR",
-      message,
-      retryable: false,
-    });
+  error(message: string, code = "SESSION_ERROR", retryable = false): PlatformEventEnvelope {
+    return this.envelope("error", { code, message, retryable });
   }
 
   map(event: PiAgentEvent): PlatformEventEnvelope[] {

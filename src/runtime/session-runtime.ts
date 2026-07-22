@@ -158,7 +158,7 @@ export class SessionRuntime {
       await this.agent.prompt(text);
     } catch (error) {
       const apiError = mapProviderError(error);
-      this.emit(mapper.error(apiError.message));
+      this.emit(mapper.error(apiError.message, apiError.code, apiError.retryable));
     } finally {
       this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);

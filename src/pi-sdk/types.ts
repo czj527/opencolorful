@@ -117,6 +117,7 @@ export interface PiResolvedModel {
   readonly providerId: string;
   readonly modelId: string;
   readonly model: unknown;
+  readonly runtime: unknown;
   readonly credentialConfigured: boolean;
 }
 

@@ -44,13 +44,14 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
             view.workspaceConfirmed,
           );
           const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
+          const runtimeCwd = (toolMode === "all" && view.workspaceCwd) ? view.workspaceCwd : process.cwd();
 
           // 如果 session 选择了模型且有 modelService，使用真实模型
           const selectedModel = session.model;
           if (selectedModel && modelService && selectedModel.providerId !== "faux") {
             const runtime = await SessionRuntime.create({
               sessionId,
-              cwd: process.cwd(),
+              cwd: runtimeCwd,
               authPath: paths.authFile,
               publish: () => {},
               sessionHandle: session,

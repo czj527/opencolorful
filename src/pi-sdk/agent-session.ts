@@ -194,9 +194,10 @@ export async function createPiFauxAgentSession(
 export async function createPiAgentSession(
   options: PiAgentSessionOptions,
 ): Promise<PiAgentSessionHandle> {
-  const modelRuntime = options.modelRuntime as unknown as ModelRuntime;
-  const model = modelRuntime.getModel(options.providerId, options.modelId);
-  if (!model) throw new Error(`Model "${options.providerId}/${options.modelId}" not found in runtime`);
+  const resolved = options.modelRuntime.resolveModel(options.providerId, options.modelId);
+  const modelRuntime = resolved.runtime as ModelRuntime;
+  const model = resolved.model as ReturnType<ModelRuntime["getModel"]>;
+  if (!model) throw new Error(`Model "${options.providerId}/${options.modelId}" not found`);
 
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false },

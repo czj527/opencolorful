@@ -24,12 +24,17 @@ export function registerSessionRoutes(app: Hono, sessionService: SessionService)
     const session = sessionService.create({ title: body.title, cwd: body.cwd });
 
     // 可选：创建时设置工具模式
-    if (body.toolMode !== undefined || body.workspaceCwd !== undefined) {
+    if (typeof body.toolMode === "string" || typeof body.workspaceCwd === "string") {
       try {
-        parseSessionSettings({
-          toolMode: body.toolMode,
-          cwd: body.workspaceCwd,
-          workspaceConfirmed: body.workspaceConfirmed,
+        const settings = parseSessionSettings({
+          ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),
+          ...(typeof body.workspaceCwd === "string" ? { cwd: body.workspaceCwd } : {}),
+          ...(typeof body.workspaceConfirmed === "boolean" ? { workspaceConfirmed: body.workspaceConfirmed } : {}),
+        });
+        sessionService.updateSettings(session.id, {
+          ...(settings.toolMode ? { toolMode: settings.toolMode } : {}),
+          ...(settings.cwd ? { workspaceCwd: settings.cwd } : {}),
+          ...(settings.workspaceConfirmed !== undefined ? { workspaceConfirmed: settings.workspaceConfirmed } : {}),
         });
       } catch (error) {
         return context.json(
