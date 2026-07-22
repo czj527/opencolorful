@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { ApiClient } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
 import type { PlatformEventEnvelope } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
-import { chatReducer, initialChatState } from "../features/chat/chat-state.js";
+import { chatReducer, initialChatState, getStreamCursor } from "../features/chat/chat-state.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
@@ -16,12 +16,23 @@ import "./layout.css";
 // 同源部署：Supervisor 托管 Web 并代理 Agent API
 const API_BASE = "";
 
+const NARROW_LEFT_QUERY = "(max-width: 768px)";
+const NARROW_RIGHT_QUERY = "(max-width: 1024px)";
+
 export function App() {
-  const [state, dispatch] = useReducer(appReducer, initialAppState);
+  const [state, dispatch] = useReducer(appReducer, undefined, () => ({
+    ...initialAppState,
+    // 窄屏默认收起侧栏，避免首屏抽屉互相覆盖
+    leftSidebar: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches ? "collapsed" as const : "expanded" as const,
+    rightSidebar: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches ? "collapsed" as const : "expanded" as const,
+  }));
   const [chat, dispatchChat] = useReducer(chatReducer, initialChatState);
+  const [sseConnected, setSseConnected] = useState(false);
   const apiRef = useRef(new ApiClient(API_BASE));
   const sseRef = useRef<SseClient | null>(null);
   const wsRef = useRef<WsClient | null>(null);
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
   const api = apiRef.current;
 
   // --- 数据加载 ---
@@ -85,16 +96,20 @@ export function App() {
 
   useEffect(() => {
     if (state.activeSessionId && state.connectionStatus === "online") {
+      const sessionId = state.activeSessionId;
+
       sseRef.current?.dispose();
       const sse = new SseClient({
         baseUrl: API_BASE || window.location.origin,
-        sessionId: state.activeSessionId,
+        sessionId,
         onEvent: handlePlatformEvent,
         onReset: () => {
           // 缓存截断：重置聊天状态，从历史重新加载
           dispatchChat({ type: "RESET" });
           void refreshSessions();
         },
+        onOpen: () => setSseConnected(true),
+        onError: () => setSseConnected(false),
       });
       sse.connect();
       sseRef.current = sse;
@@ -103,11 +118,21 @@ export function App() {
       const ws = new WsClient({
         baseUrl: API_BASE || window.location.origin,
         onEvent: handlePlatformEvent,
+        onOpen: () => {
+          // WS（重）连后：订阅会话并按 stream 游标 Resume 补发缺失事件
+          ws.subscribe(sessionId);
+          const { currentStreamId } = chatRef.current;
+          if (currentStreamId !== null) {
+            const cursor = getStreamCursor(chatRef.current, currentStreamId);
+            ws.resume(sessionId, currentStreamId, cursor);
+          }
+        },
       });
       ws.connect();
       wsRef.current = ws;
 
       return () => {
+        setSseConnected(false);
         sse.dispose();
         ws.dispose();
       };
@@ -255,7 +280,23 @@ export function App() {
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
   const leftCollapsed = state.leftSidebar === "collapsed";
   const rightCollapsed = state.rightSidebar === "collapsed";
-  const sseConnected = sseRef.current !== null && state.connectionStatus === "online";
+
+  // 窄屏一次只打开一个抽屉：打开一侧时收起另一侧
+  const handleToggleLeft = useCallback(() => {
+    const opening = state.leftSidebar === "collapsed";
+    dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+    if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.rightSidebar === "expanded") {
+      dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+    }
+  }, [state.leftSidebar, state.rightSidebar]);
+
+  const handleToggleRight = useCallback(() => {
+    const opening = state.rightSidebar === "collapsed";
+    dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+    if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.leftSidebar === "expanded") {
+      dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+    }
+  }, [state.leftSidebar, state.rightSidebar]);
 
   return (
     <div className="app-layout">
@@ -265,8 +306,8 @@ export function App() {
         onStart={handleStart}
         onStop={handleStop}
         onRestart={handleRestart}
-        onToggleLeft={() => dispatch({ type: "TOGGLE_LEFT_SIDEBAR" })}
-        onToggleRight={() => dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" })}
+        onToggleLeft={handleToggleLeft}
+        onToggleRight={handleToggleRight}
         leftCollapsed={leftCollapsed}
         rightCollapsed={rightCollapsed}
       />
@@ -278,7 +319,7 @@ export function App() {
           onSelect={(id) => void handleSelectSession(id)}
           onCreate={(title, cwd) => void handleCreateSession(title, cwd)}
           onArchive={(id) => void handleArchiveSession(id)}
-          onToggle={() => dispatch({ type: "TOGGLE_LEFT_SIDEBAR" })}
+          onToggle={handleToggleLeft}
         />
         <ChatPane
           session={activeSession}
@@ -289,14 +330,14 @@ export function App() {
           onCompact={() => void handleCompact()}
           onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
-          sseConnected={sseConnected}
+          sseConnected={sseConnected && state.connectionStatus === "online"}
         />
         <InspectorSidebar
           session={activeSession}
           providers={state.providers}
           collapsed={rightCollapsed}
           saving={state.loading}
-          onToggle={() => dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" })}
+          onToggle={handleToggleRight}
           onSaveProvider={handleSaveProvider}
           onSaveSessionSettings={handleSaveSessionSettings}
           onShowLogs={() => void handleShowLogs()}

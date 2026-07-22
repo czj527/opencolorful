@@ -35,7 +35,8 @@ export interface ChatState {
   readonly planItems: PlanItem[];
   readonly attachments: Attachment[];
   readonly currentStreamId: string | null;
-  readonly lastSequence: number;
+  /** 每个 stream 的独立 sequence 游标（同一 Session 的每个 stream 从 1 开始） */
+  readonly cursors: ReadonlyMap<string, number>;
   readonly thinking: string;
   readonly thinkingCollapsed: boolean;
   readonly status: "idle" | "running" | "error";
@@ -48,12 +49,17 @@ export const initialChatState: ChatState = {
   planItems: [],
   attachments: [],
   currentStreamId: null,
-  lastSequence: 0,
+  cursors: new Map(),
   thinking: "",
   thinkingCollapsed: true,
   status: "idle",
   error: null,
 };
+
+/** 读取指定 stream 的游标（WS stream.resume 使用） */
+export function getStreamCursor(state: ChatState, streamId: string): number {
+  return state.cursors.get(streamId) ?? 0;
+}
 
 // --- Actions ---
 
@@ -69,11 +75,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "RESET":
       return { ...initialChatState };
 
-    case "PROMPT_SENT":
+    case "PROMPT_SENT": {
+      const cursors = new Map(state.cursors);
+      cursors.set(action.streamId, 0);
       return {
         ...state,
         currentStreamId: action.streamId,
-        lastSequence: 0,
+        cursors,
         status: "running",
         error: null,
         thinking: "",
@@ -81,14 +89,24 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         planItems: [],
         attachments: [],
       };
+    }
 
     case "EVENT": {
       const event = action.event;
 
-      // Skip duplicate or out-of-order events
-      if (event.sequence <= state.lastSequence) return state;
+      // 只处理当前 stream 的事件：旧 stream 的重放事件不污染当前视图
+      if (event.streamId !== null && state.currentStreamId !== null && event.streamId !== state.currentStreamId) {
+        return state;
+      }
 
-      const base = { ...state, lastSequence: event.sequence };
+      // 按 stream 游标去重/乱序丢弃
+      const streamKey = event.streamId ?? "";
+      const cursor = state.cursors.get(streamKey) ?? 0;
+      if (event.sequence <= cursor) return state;
+
+      const cursors = new Map(state.cursors);
+      cursors.set(streamKey, event.sequence);
+      const base = { ...state, cursors };
 
       switch (event.type) {
         case "session.status": {

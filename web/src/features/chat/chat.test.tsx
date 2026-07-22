@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { chatReducer, initialChatState, sanitizeMarkdown, isSafeUrl, type ChatAction } from "./chat-state.js";
+import { chatReducer, initialChatState, getStreamCursor, sanitizeMarkdown, isSafeUrl, type ChatAction } from "./chat-state.js";
 import type { PlatformEventEnvelope } from "../../lib/types.js";
 
-function makeEvent(type: string, payload: unknown, sequence = 1): PlatformEventEnvelope {
+function makeEvent(type: string, payload: unknown, sequence = 1, streamId = "st1"): PlatformEventEnvelope {
   return {
     protocolVersion: 1,
-    eventId: `evt-${sequence}`,
+    eventId: `evt-${streamId}-${sequence}`,
     sessionId: "s1",
-    streamId: "st1",
+    streamId,
     sequence,
     timestamp: new Date().toISOString(),
     type,
@@ -23,11 +23,11 @@ describe("chatReducer", () => {
     expect(initialChatState.currentStreamId).toBeNull();
   });
 
-  it("PROMPT_SENT sets running state", () => {
+  it("PROMPT_SENT sets running state and resets that stream's cursor", () => {
     const state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1" });
     expect(state.status).toBe("running");
     expect(state.currentStreamId).toBe("st1");
-    expect(state.lastSequence).toBe(0);
+    expect(getStreamCursor(state, "st1")).toBe(0);
   });
 
   it("handles message.started", () => {
@@ -45,7 +45,7 @@ describe("chatReducer", () => {
     expect(state.messages[0]!.content).toBe("Hello World");
   });
 
-  it("skips duplicate or out-of-order sequences", () => {
+  it("skips duplicate or out-of-order sequences within the same stream", () => {
     let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1" });
     state = chatReducer(state, { type: "EVENT", event: makeEvent("message.started", { role: "assistant" }, 1) });
     state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "Hello" }, 5) });
@@ -56,6 +56,29 @@ describe("chatReducer", () => {
     // Out-of-order sequence 3 should be skipped
     state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "Old" }, 3) });
     expect(state.messages[0]!.content).toBe("Hello");
+  });
+
+  it("a new stream restarts from sequence 1 even after a larger old stream", () => {
+    // 旧 stream 推进到 sequence 50
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "old-stream" });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.started", { role: "assistant" }, 1, "old-stream") });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "old " }, 50, "old-stream") });
+    expect(getStreamCursor(state, "old-stream")).toBe(50);
+
+    // 新 stream 从 sequence 1 开始，不得被旧游标误判为乱序
+    state = chatReducer(state, { type: "PROMPT_SENT", streamId: "new-stream" });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.started", { role: "assistant" }, 1, "new-stream") });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "new content" }, 2, "new-stream") });
+    expect(state.messages[state.messages.length - 1]!.content).toBe("new content");
+    expect(getStreamCursor(state, "new-stream")).toBe(2);
+  });
+
+  it("ignores events from non-current streams", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "current" });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.started", { role: "assistant" }, 1, "current") });
+    // 旧 stream 的迟到事件不应污染当前视图
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "STALE" }, 99, "old-stream") });
+    expect(state.messages[state.messages.length - 1]!.content).toBe("");
   });
 
   it("handles thinking deltas", () => {
