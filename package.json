@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "web"
+  ],
   "description": "基于 PI SDK 的本地优先 Agent 平台",
   "bin": {
     "agent": "dist/cli/main.js"
@@ -16,7 +19,10 @@
     "cli": "tsx src/cli/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "npm run check:pi-imports && npm run typecheck && npm run test && npm run build"
+    "check": "npm run check:pi-imports && npm run typecheck && npm run test && npm run build",
+    "web:dev": "npm run dev --workspace=web",
+    "web:build": "npm run build --workspace=web",
+    "web:test": "npm run test --workspace=web"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.10",

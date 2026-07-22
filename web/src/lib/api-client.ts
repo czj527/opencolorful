@@ -1,0 +1,131 @@
+import type {
+  AbortResponse,
+  ApiError,
+  HealthResponse,
+  ModelSummary,
+  PromptResponse,
+  ProviderView,
+  SessionSettings,
+  SessionView,
+  SupervisorStatusResponse,
+} from "./types.js";
+
+export class ApiClientError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly retryable: boolean,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+  }
+}
+
+export class ApiClient {
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const options: RequestInit = {
+      method,
+      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    };
+    if (body !== undefined) {
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      let error: ApiError;
+      try {
+        error = (await response.json()) as ApiError;
+      } catch {
+        error = { code: "UNKNOWN", message: response.statusText, retryable: false };
+      }
+      throw new ApiClientError(error.code, error.message, error.retryable, response.status);
+    }
+    return (await response.json()) as T;
+  }
+
+  // Health
+  async getHealth(): Promise<HealthResponse> {
+    return this.request("GET", "/api/health");
+  }
+
+  // Supervisor
+  async getSupervisorStatus(): Promise<SupervisorStatusResponse> {
+    return this.request("GET", "/api/supervisor/status");
+  }
+
+  async startAgentServer(): Promise<{ status: string; pid: number; port: number }> {
+    return this.request("POST", "/api/supervisor/start");
+  }
+
+  async stopAgentServer(): Promise<{ status: string }> {
+    return this.request("POST", "/api/supervisor/stop");
+  }
+
+  async restartAgentServer(): Promise<{ status: string; pid: number; port: number }> {
+    return this.request("POST", "/api/supervisor/restart");
+  }
+
+  async getSupervisorLogs(): Promise<{ logs: string; truncated: boolean }> {
+    return this.request("GET", "/api/supervisor/logs");
+  }
+
+  // Providers
+  async listProviders(): Promise<ProviderView[]> {
+    return this.request("GET", "/api/settings/providers");
+  }
+
+  async updateProvider(provider: Record<string, unknown>, apiKey?: string): Promise<ProviderView> {
+    return this.request("PUT", "/api/settings/providers", { provider, ...(apiKey !== undefined ? { apiKey } : {}) });
+  }
+
+  // Models
+  async listModels(): Promise<ModelSummary[]> {
+    return this.request("GET", "/api/models");
+  }
+
+  // Sessions
+  async listSessions(): Promise<SessionView[]> {
+    return this.request("GET", "/api/sessions");
+  }
+
+  async createSession(title: string, cwd: string, settings?: SessionSettings): Promise<SessionView> {
+    return this.request("POST", "/api/sessions", { title, cwd, ...settings });
+  }
+
+  async getSession(id: string): Promise<SessionView> {
+    return this.request("GET", `/api/sessions/${id}`);
+  }
+
+  async updateSessionSettings(id: string, settings: SessionSettings): Promise<SessionView> {
+    return this.request("PUT", `/api/sessions/${id}/settings`, settings);
+  }
+
+  async setSessionModel(id: string, providerId: string, modelId: string): Promise<SessionView> {
+    return this.request("PUT", `/api/sessions/${id}/model`, { providerId, modelId });
+  }
+
+  async deleteSession(id: string): Promise<SessionView> {
+    return this.request("DELETE", `/api/sessions/${id}`);
+  }
+
+  // Messages
+  async sendPrompt(sessionId: string, content: string): Promise<PromptResponse> {
+    return this.request("POST", `/api/sessions/${sessionId}/messages`, { content });
+  }
+
+  async abort(sessionId: string, streamId: string): Promise<AbortResponse> {
+    return this.request("POST", `/api/sessions/${sessionId}/abort`, { streamId });
+  }
+
+  async compact(sessionId: string): Promise<{ status: string }> {
+    return this.request("POST", `/api/sessions/${sessionId}/compact`);
+  }
+}
