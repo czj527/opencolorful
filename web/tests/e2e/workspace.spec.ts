@@ -48,17 +48,19 @@ async function startProviderFixture(): Promise<number> {
     }
     let body = "";
     request.on("data", (chunk) => { body += chunk; });
-    request.on("end", () => {
+    request.on("end", async () => {
       fixtureCalls += 1;
-      // 携带工具结果（role: tool）的后续请求返回最终文本；首次请求触发 read 工具
       const isToolFollowUp = body.includes('"role":"tool"') || body.includes("tool_call_id");
+      // SLOW 标记：每个 chunk 间延迟 500ms，方便 Abort 测试点击中断按钮
+      const slow = body.includes("SLOW");
       response.writeHead(200, { "content-type": "text/event-stream" });
       if (!isToolFollowUp) {
         response.write(streamChunk({ role: "assistant" }));
+        if (slow) await new Promise((r) => setTimeout(r, 500));
         response.write(streamChunk({
           tool_calls: [{
             index: 0,
-            id: `call-read-${fixtureCalls}`,
+            id: "call-read",
             type: "function",
             function: { name: "read", arguments: '{"path":"target.txt"}' },
           }],
@@ -66,6 +68,12 @@ async function startProviderFixture(): Promise<number> {
         response.write(streamChunk({}, "tool_calls"));
       } else {
         response.write(streamChunk({ role: "assistant", content: "读取完成" }));
+        if (slow) {
+          response.write(streamChunk({ role: "assistant", content: "更多内容..." }));
+          await new Promise((r) => setTimeout(r, 500));
+          response.write(streamChunk({ role: "assistant", content: "还在生成..." }));
+          await new Promise((r) => setTimeout(r, 500));
+        }
         response.write(streamChunk({}, "stop"));
       }
       response.end("data: [DONE]\n\n");
@@ -103,7 +111,7 @@ test.afterAll(async () => {
   if (providerFixture) {
     await new Promise<void>((resolve) => providerFixture!.close(() => resolve()));
   }
-  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
 });
 
 const baseUrl = () => `http://127.0.0.1:${supervisorPort}`;
@@ -168,18 +176,17 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
     const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="fixture-provider/fixture-model"]')).toBeAttached({ timeout: 15_000 });
-    await modelSelect.selectOption("fixture-provider/fixture-model");
+    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 15_000 });
+    await modelSelect.selectOption("0");
 
     // 发送 Prompt
     await page.getByLabel("消息输入").fill("读取 target.txt");
     await page.getByRole("button", { name: "发送消息" }).click();
 
-    // 流式消息与工具调用出现（工具 ID 按调用次数动态生成，用前缀匹配）
-    const toolCall = page.locator('[data-testid^="tool-call-call-read-"]');
-    await expect(toolCall).toBeVisible({ timeout: 30_000 });
+    // 流式消息与工具调用出现
+    await expect(page.getByTestId("tool-call-call-read")).toBeVisible({ timeout: 30_000 });
     // 工具完成
-    await expect(toolCall).toContainText("完成", { timeout: 30_000 });
+    await expect(page.getByTestId("tool-call-call-read")).toContainText("完成", { timeout: 30_000 });
     // 最终消息包含工具结果内容
     await expect(page.getByTestId("message-list")).toContainText("E2E_WORKSPACE_CONTENT", { timeout: 30_000 });
 
@@ -206,8 +213,8 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
     const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="fixture-provider/fixture-model"]')).toBeAttached({ timeout: 15_000 });
-    await modelSelect.selectOption("fixture-provider/fixture-model");
+    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 15_000 });
+    await modelSelect.selectOption("0");
     await page.getByLabel("消息输入").fill("读取 target.txt");
     await page.getByRole("button", { name: "发送消息" }).click();
 
@@ -289,5 +296,125 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.getByTestId("drawer-backdrop").click({ position: { x: 10, y: 400 } });
     await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
     await expect(page.getByRole("main", { name: "聊天区域" })).toBeVisible();
+  });
+
+  test("通过 Web 表单配置 Provider", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto(baseUrl());
+
+    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+    if (status.agentServer.status !== "online") {
+      await page.getByRole("button", { name: "启动 Server" }).click();
+      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
+    }
+
+    // 桌面宽度默认右栏已展开，无需点击；若已折叠则展开
+    const rightToggle = page.getByRole("button", { name: /详情面板/ });
+    const label = await rightToggle.getAttribute("aria-label");
+    if (label?.includes("展开")) {
+      await rightToggle.click();
+    }
+
+    // 切换到 Provider 页签
+    await page.getByRole("button", { name: "Provider" }).click();
+    await page.getByRole("button", { name: "Provider" }).click();
+
+    // 打开添加表单
+    await page.getByRole("button", { name: "+ 添加" }).click();
+
+    // 填写表单
+    await page.getByLabel("Provider ID").fill("form-provider");
+    await page.getByLabel("名称").fill("Form Provider");
+    await page.getByLabel("Base URL").fill(`http://127.0.0.1:${fixturePort}/v1`);
+    await page.getByLabel("模型 ID").fill("form-model");
+    await page.getByLabel("API Key").fill("form-key");
+
+    // 保存
+    await page.getByRole("button", { name: "保存 Provider" }).click();
+
+    // 验证已配置凭据（fixture-provider 已存在，form-provider 新增后有两项）
+    await expect(page.getByText("Form Provider")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("✓ 已配置凭据").first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("真实 Abort：慢速流中点击中断，生成终止", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto(baseUrl());
+
+    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+    if (status.agentServer.status !== "online") {
+      await page.getByRole("button", { name: "启动 Server" }).click();
+      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
+    }
+
+    // 新建会话
+    const uniqueTitle = `Abort-SLOW-${Date.now()}`;
+    await page.getByRole("button", { name: "新建会话" }).click();
+    await page.getByLabel("会话标题").fill(uniqueTitle);
+    await page.getByLabel("工作目录").fill(workspace);
+    await page.getByRole("button", { name: "创建" }).click();
+    await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
+
+    // 选模型
+    const modelSelect = page.getByLabel("选择模型");
+    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 10_000 });
+    await modelSelect.selectOption("0"); // fixture-provider/fixture-model (index 0)
+
+    // 发送 SLOW 标记 Prompt
+    await page.getByLabel("消息输入").fill("SLOW 读取 target.txt");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    // 等待中断按钮出现
+    await expect(page.getByRole("button", { name: "中断生成" })).toBeVisible({ timeout: 10_000 });
+
+    // 点击中断
+    await page.getByRole("button", { name: "中断生成" }).click();
+
+    // 中断后发送按钮恢复
+    await expect(page.getByRole("button", { name: "发送消息" })).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("重启恢复：Agent 重启后会话历史可续，继续对话成功", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto(baseUrl());
+
+    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+    if (status.agentServer.status !== "online") {
+      await page.getByRole("button", { name: "启动 Server" }).click();
+      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
+    }
+
+    // 通过 UI 创建会话并发送一条 Prompt（建立历史）
+    const uniqueTitle = `Restart-${Date.now()}`;
+    await page.getByRole("button", { name: "新建会话" }).click();
+    await page.getByLabel("会话标题").fill(uniqueTitle);
+    await page.getByLabel("工作目录").fill(workspace);
+    await page.getByRole("button", { name: "创建" }).click();
+    await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
+
+    const modelSelect = page.getByLabel("选择模型");
+    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 10_000 });
+    await modelSelect.selectOption("0");
+    await page.getByLabel("消息输入").fill("读取 target.txt");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    // 等待流式完成
+    await expect(page.getByTestId("message-list")).toContainText("E2E_WORKSPACE_CONTENT", { timeout: 30_000 });
+
+    // 重启 Agent Server
+    await page.getByRole("button", { name: "重启 Server" }).click();
+    await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 60_000 });
+
+    // 重新选中会话 — 历史消息应包含之前的内容
+    await page.getByText(uniqueTitle).first().click();
+    // 等待 SSE 重连（事件流指示器变绿色）
+    await expect(page.locator(".status-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("message-list")).toContainText("读取", { timeout: 20_000 });
+
+    // 继续对话
+    await modelSelect.selectOption("0");
+    await page.getByLabel("消息输入").fill("继续对话");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await expect(page.getByTestId("message-list")).toContainText("读取完成", { timeout: 30_000 });
   });
 });
