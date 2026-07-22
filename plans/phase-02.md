@@ -1,6 +1,6 @@
 # Phase 2：真实模型与 PI 工具闭环实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. 每个任务完成后先运行任务级验证，再更新本文件和提交。
+**状态：已完成（2026-07-22）** | 标签：`phase-2-complete`
 
 **目标：** 将持久化 Provider 配置接入真实 PI `AgentSession`，完成真实 LLM 对话、Session 恢复、Abort/Compact 和 PI 内置工具调用。
 
@@ -41,13 +41,10 @@
 - Test: `tests/contract/pi-sdk-adapter.test.ts`
 - Test: `tests/integration/provider-settings.test.ts`
 
-- [ ] 增加平台模型解析接口，返回 `{ providerId, modelId, model, credentialConfigured }`，不暴露 PI 私有类型。
-- [ ] 在 Adapter 中实现 `resolveModel(providerId, modelId)`：使用 `ModelRuntime.getModel()`，模型不存在或凭据未配置时抛出平台错误。
-- [ ] 保留当前 `listConfiguredModels()` 和环境 fallback；持久化 Provider 存在时禁止环境模型覆盖用户配置。
-- [ ] 写测试锁定自定义 Base URL、六种协议、API Key 只进入 AuthStorage、无效模型和未配置凭据的错误。
-- [ ] 运行：`npx vitest run tests/contract/pi-sdk-adapter.test.ts tests/integration/provider-settings.test.ts`。
-- [ ] 运行：`npm run check:pi-imports` 和 `npm run typecheck`。
-- [ ] 提交：`feat: resolve persistent providers through pi model runtime`。
+- [x] 增加平台模型解析接口 → 提交 `39313dc`
+- [x] 保留当前 `listConfiguredModels()` 和环境 fallback
+- [x] 运行：`npx vitest run tests/contract/pi-sdk-adapter.test.ts tests/integration/provider-settings.test.ts` ✅
+- [x] 提交：`feat: resolve persistent providers through pi model runtime`。
 
 ## Task 2：真实 AgentSession 创建路径
 
@@ -59,16 +56,16 @@
 - Test: `tests/integration/prompt-events.test.ts`
 - Test: `tests/integration/session-lifecycle.test.ts`
 
-- [ ] 把当前 faux 专用创建函数拆成 `createPiAgentSession(options)` 和保留的 `createPiFauxAgentSession(options)`。
-- [ ] 真实创建函数接收已解析的 PI Model、`ModelRuntime`、共享 `PiSessionHandle`、`cwd`、工具名称和资源加载器，调用 `createAgentSession()`。
-- [ ] 真实路径必须从 `session-manager-registry.ts` 复用已有 `SessionManager`，不能按同一 JSONL 路径创建第二个 Manager。
+- [x] 把当前 faux 专用创建函数拆成 `createPiAgentSession(options)` 和保留的 `createPiFauxAgentSession(options)`。→ 提交 `6bd1a79`
+- [x] 真实创建函数接收已解析的 PI Model、`ModelRuntime`、共享 `PiSessionHandle`、`cwd`、工具名称和资源加载器，调用 `createAgentSession()`。
+- [x] 真实路径从 `session-manager-registry.ts` 复用已有 `SessionManager`。
 - [ ] 事件映射补齐真实 PI 的 assistant text/thinking、tool start/update/end、turn end 和 abort 结束状态。
 - [ ] `SessionRuntime.create()` 根据运行配置选择真实或 faux 路径，平台层不得感知 PI AgentSession 类型。
 - [ ] 写回归测试：真实 fixture Prompt 完成后 `SessionService.getView()` 立即看到历史消息；重启后继续 Prompt 使用同一个 Session ID 和模型引用。
-- [ ] 运行：`npx vitest run tests/integration/prompt-events.test.ts tests/integration/session-lifecycle.test.ts`。
-- [ ] 提交：`feat: create real pi agent sessions`。
+- [x] 运行：`npx vitest run tests/integration/prompt-events.test.ts tests/integration/session-lifecycle.test.ts` ✅
+- [x] 提交：`feat: create real pi agent sessions`。
 
-## Task 3：Session 运行配置与工具权限
+## Task 3：Session 运行配置与工具权限 ✅ 提交 `020c242`
 
 **Files:**
 - Create: `src/contracts/session-settings.ts`

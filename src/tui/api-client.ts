@@ -13,6 +13,9 @@ export interface SessionView {
   readonly updatedAt: string;
   readonly archived: boolean;
   readonly messages: readonly string[];
+  readonly toolMode?: string;
+  readonly workspaceCwd?: string | null;
+  readonly workspaceConfirmed?: boolean;
 }
 
 export interface ModelSummary {

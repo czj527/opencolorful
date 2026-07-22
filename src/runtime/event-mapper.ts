@@ -63,10 +63,13 @@ export class PlatformEventMapper {
       ];
     }
     if (event.type === "tool_delta") {
+      const safeDelta = typeof event.delta === "string"
+        ? event.delta.slice(0, 200)
+        : event.delta;
       return [
         this.envelope("tool.delta", {
           toolCallId: event.toolCallId,
-          delta: event.delta,
+          delta: safeDelta,
         }),
       ];
     }
