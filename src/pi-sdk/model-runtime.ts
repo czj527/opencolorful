@@ -1,5 +1,6 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
+import { createApiError } from "../contracts/api-error.js";
 import type {
   PiModelRuntimeHandle,
   PiModelSummary,
@@ -71,6 +72,21 @@ export async function createPiModelRuntime(options: {
     },
     listEnvironmentModels(): PiModelSummary[] {
       return runtime.getAvailableSnapshot().map(summarize);
+    },
+    resolveModel(providerId, modelId) {
+      if (!runtime.getProviderAuthStatus(providerId).configured) {
+        throw createApiError("UNAUTHORIZED", `Provider "${providerId}" 未配置凭据`, false);
+      }
+      const model = runtime.getModel(providerId, modelId);
+      if (!model) {
+        throw createApiError("NOT_FOUND", `模型 "${providerId}/${modelId}" 不存在`, false);
+      }
+      return {
+        providerId: model.provider,
+        modelId: model.id,
+        model,
+        credentialConfigured: true,
+      };
     },
   };
 }

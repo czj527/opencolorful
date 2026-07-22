@@ -31,10 +31,12 @@ export type {
   PiCredentialStore,
   PiAgentEvent,
   PiAgentSessionHandle,
+  PiAgentSessionOptions,
   PiFauxAgentOptions,
   PiModelRuntimeHandle,
   PiModelSummary,
   PiProviderDefinition,
+  PiResolvedModel,
   PiSessionHandle,
   WorkspaceToolMode,
 } from "./types.js";

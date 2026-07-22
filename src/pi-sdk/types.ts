@@ -67,6 +67,7 @@ export interface PiModelRuntimeHandle {
   credentialConfigured(providerId: string): boolean;
   listConfiguredModels(): PiModelSummary[];
   listEnvironmentModels(): PiModelSummary[];
+  resolveModel(providerId: string, modelId: string): PiResolvedModel;
 }
 
 export type PiAgentEvent =
@@ -110,4 +111,23 @@ export interface PiFauxAgentOptions {
   readonly response: string;
   readonly tokensPerSecond?: number;
   readonly sessionHandle?: PiSessionHandle;
+}
+
+export interface PiResolvedModel {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly model: unknown;
+  readonly credentialConfigured: boolean;
+}
+
+export interface PiAgentSessionOptions {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly authPath: string;
+  readonly modelRuntime: PiModelRuntimeHandle;
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly sessionHandle: PiSessionHandle;
+  readonly tools?: readonly string[];
+  readonly noTools?: "all";
 }

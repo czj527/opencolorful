@@ -5,6 +5,7 @@ import {
   createPiModelRuntime,
   type PiModelRuntimeHandle,
   type PiModelSummary,
+  type PiResolvedModel,
 } from "../pi-sdk/index.js";
 
 export interface ProviderView extends ProviderSetting {
@@ -34,6 +35,14 @@ export class ModelService {
     return this.store.list().length > 0
       ? this.runtime.listConfiguredModels()
       : this.runtime.listEnvironmentModels();
+  }
+
+  resolveModel(providerId: string, modelId: string): PiResolvedModel {
+    return this.runtime.resolveModel(providerId, modelId);
+  }
+
+  getRuntime(): PiModelRuntimeHandle {
+    return this.runtime;
   }
 
   async upsert(provider: ProviderInput, apiKey?: string): Promise<ProviderView> {
