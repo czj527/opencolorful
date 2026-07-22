@@ -6,7 +6,7 @@
 1. `README.md`；
 2. `docs/product.md`；
 3. `docs/architecture.md`；
-4. 当前阶段计划，例如 `plans/phase-01.md`；
+4. 当前阶段计划，例如 `plans/phase-02.md`；
 5. `git status --short` 和最近提交。
 
 三个参考仓库 `<local-workspace>\pi`、`<local-workspace>\oh-my-pi`、
@@ -15,10 +15,14 @@ Git 历史。
 
 ## 当前开发状态
 
-- `main` 已完成 Phase 0，标签为 `phase-0-complete`；
-- Phase 1 已完成，标签为 `phase-1-complete`；
-- 当前分支：`phase-1-core-infrastructure`；
-- P1-01 Provider 和凭据设置已完成：`1f78ad2`；
+- Phase 0 已完成（`phase-0-complete`）；
+- Phase 1 已完成（`phase-1-complete`）；
+- Phase 2 已完成（`phase-2-complete`），当前在 `main` 分支；
+- 生产 Server 自动装配全部 Service（数据库、Provider、Session、Prompt、Replay、WS）；
+- `SessionRuntime.create()` 支持 faux（测试）和真实模型（生产）两条路径；
+- 工具权限三级：`off` / `read-only` / `all`（需 cwd 确认）；
+- Provider 错误自动映射为稳定 `ApiError`，自动脱敏 URL 和凭据；
+- Phase 3（Web UI + Supervisor）待开始。
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；
