@@ -57,8 +57,7 @@ npm run cli -- server start --foreground
 
 ## 当前限制
 
-- Provider 设置和凭据已可持久化，但真实 Provider Prompt 的生产组合尚未接入；
-- 当前 AgentSession Prompt 闭环使用 faux provider；
-- Server 重启恢复已验证通过（E2E 测试）；
-- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 不在 Phase 1
-  范围内。
+- `SessionRuntime.create()` 支持 faux（测试）和真实模型（生产）两条路径；
+- 真实模型路径已在生产 Server 自动装配——选择了模型的 Session 首次 Prompt 时自动使用；
+- 工具模式 off/read-only/all 已在 Session 创建时持久化并在 Prompt 时生效；
+- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 不在 Phase 2 范围内。

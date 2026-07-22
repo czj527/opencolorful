@@ -2,11 +2,13 @@ import type { Hono } from "hono";
 
 import type { RuntimePaths } from "../../config/paths.js";
 import { createApiError } from "../../contracts/api-error.js";
+import type { ToolMode } from "../../contracts/session-settings.js";
 import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { SessionService } from "../../runtime/session-service.js";
 import { SessionRuntime } from "../../runtime/session-runtime.js";
+import { ToolPolicy } from "../../runtime/tool-policy.js";
 
 export interface MessageRoutesOptions {
   readonly promptService: PromptService;
@@ -33,6 +35,15 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
         try {
           const session = sessionService.open(sessionId);
+          const view = sessionService.getView(sessionId);
+          const toolMode = (view.toolMode ?? "off") as ToolMode;
+          const toolPolicy = new ToolPolicy();
+          const tools = toolPolicy.resolveTools(
+            toolMode,
+            view.workspaceCwd ?? undefined,
+            view.workspaceConfirmed,
+          );
+          const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
 
           // 如果 session 选择了模型且有 modelService，使用真实模型
           const selectedModel = session.model;
@@ -46,11 +57,12 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               modelService,
               resolveProviderId: selectedModel.providerId,
               resolveModelId: selectedModel.modelId,
+              ...(noTools ? { noTools } : {}),
+              ...(tools.length > 0 && !noTools ? { tools } : {}),
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
           } else {
-            // fallback: faux
             const runtime = await SessionRuntime.create({
               sessionId,
               cwd: process.cwd(),
@@ -61,6 +73,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               faux: { response: "已收到您的消息", tokensPerSecond: 20 },
               publish: () => {},
               sessionHandle: session,
+              ...(noTools ? { noTools } : {}),
+              ...(tools.length > 0 && !noTools ? { tools } : {}),
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
