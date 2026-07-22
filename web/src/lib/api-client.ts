@@ -1,5 +1,6 @@
 import type {
   AbortResponse,
+  AgentServerDiscovery,
   ApiError,
   HealthResponse,
   ModelSummary,
@@ -75,6 +76,10 @@ export class ApiClient {
 
   async getSupervisorLogs(): Promise<{ logs: string; truncated: boolean }> {
     return this.request("GET", "/api/supervisor/logs");
+  }
+
+  async discoverAgentServer(): Promise<AgentServerDiscovery> {
+    return this.request("GET", "/api/supervisor/agent-server");
   }
 
   // Providers

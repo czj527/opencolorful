@@ -1,4 +1,18 @@
-import type { PlatformEventEnvelope, WsClientCommand, WsServerMessage } from "./types.js";
+import type { PlatformEventEnvelope } from "./types.js";
+
+// 与服务端 src/contracts/commands.ts ClientCommandSchema 对齐
+export type WsClientCommand =
+  | { readonly protocolVersion: 1; readonly requestId: string; readonly type: "session.subscribe"; readonly sessionId: string }
+  | { readonly protocolVersion: 1; readonly requestId: string; readonly type: "session.unsubscribe"; readonly sessionId: string }
+  | { readonly protocolVersion: 1; readonly requestId: string; readonly type: "session.abort"; readonly sessionId: string }
+  | { readonly protocolVersion: 1; readonly requestId: string; readonly type: "session.compact"; readonly sessionId: string }
+  | { readonly protocolVersion: 1; readonly requestId: string; readonly type: "stream.resume"; readonly sessionId: string; readonly streamId: string; readonly lastSequence: number };
+
+// 与服务端 src/server/ws/protocol.ts WsServerMessageSchema 对齐
+export type WsServerMessage =
+  | { readonly type: "event"; readonly payload: PlatformEventEnvelope }
+  | { readonly type: "ack"; readonly requestId: string; readonly status: "accepted" | "already-stopped" | "rejected" }
+  | { readonly type: "error"; readonly requestId?: string; readonly code: string; readonly message: string };
 
 export interface WsClientOptions {
   readonly baseUrl: string;
@@ -12,6 +26,7 @@ export interface WsClientOptions {
 export class WsClient {
   private ws: WebSocket | null = null;
   private readonly subscriptions = new Set<string>();
+  private requestCounter = 0;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
@@ -42,9 +57,9 @@ export class WsClient {
 
     ws.onopen = () => {
       this.reconnectAttempts = 0;
-      // Re-subscribe to all sessions after reconnect
+      // 重连后恢复全部订阅
       for (const sessionId of this.subscriptions) {
-        this.send({ type: "subscribe", sessionId });
+        this.sendCommand({ protocolVersion: 1, requestId: this.nextRequestId(), type: "session.subscribe", sessionId });
       }
       this.onOpen?.();
     };
@@ -60,7 +75,7 @@ export class WsClient {
         }
         this.onMessage?.(data);
       } catch {
-        // Ignore malformed messages
+        // 忽略无法解析的消息
       }
     };
 
@@ -94,26 +109,36 @@ export class WsClient {
     this.onClose?.();
   }
 
-  subscribe(sessionId: string): void {
+  subscribe(sessionId: string): string {
     this.subscriptions.add(sessionId);
-    this.send({ type: "subscribe", sessionId });
+    const requestId = this.nextRequestId();
+    this.sendCommand({ protocolVersion: 1, requestId, type: "session.subscribe", sessionId });
+    return requestId;
   }
 
-  unsubscribe(sessionId: string): void {
+  unsubscribe(sessionId: string): string {
     this.subscriptions.delete(sessionId);
-    this.send({ type: "unsubscribe", sessionId });
+    const requestId = this.nextRequestId();
+    this.sendCommand({ protocolVersion: 1, requestId, type: "session.unsubscribe", sessionId });
+    return requestId;
   }
 
-  abort(sessionId: string, streamId: string): void {
-    this.send({ type: "abort", sessionId, streamId });
+  abort(sessionId: string): string {
+    const requestId = this.nextRequestId();
+    this.sendCommand({ protocolVersion: 1, requestId, type: "session.abort", sessionId });
+    return requestId;
   }
 
-  compact(sessionId: string): void {
-    this.send({ type: "compact", sessionId });
+  compact(sessionId: string): string {
+    const requestId = this.nextRequestId();
+    this.sendCommand({ protocolVersion: 1, requestId, type: "session.compact", sessionId });
+    return requestId;
   }
 
-  resume(sessionId: string, streamId: string, lastSequence: number): void {
-    this.send({ type: "resume", sessionId, streamId, lastSequence });
+  resume(sessionId: string, streamId: string, lastSequence: number): string {
+    const requestId = this.nextRequestId();
+    this.sendCommand({ protocolVersion: 1, requestId, type: "stream.resume", sessionId, streamId, lastSequence });
+    return requestId;
   }
 
   isSubscribed(sessionId: string): boolean {
@@ -124,7 +149,12 @@ export class WsClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
-  private send(command: WsClientCommand): void {
+  private nextRequestId(): string {
+    this.requestCounter += 1;
+    return `req-${Date.now()}-${this.requestCounter}`;
+  }
+
+  private sendCommand(command: WsClientCommand): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(command));
     }

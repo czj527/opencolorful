@@ -38,13 +38,13 @@ describe("ApiClient", () => {
       createdAt: "2026-01-01",
       updatedAt: "2026-01-01",
       archived: false,
-      provider: null,
       model: null,
       toolMode: "read-only",
       workspaceCwd: "/tmp",
       workspaceConfirmed: false,
       thinkingLevel: "medium",
       messages: [],
+      messageEntries: [],
     };
     mockFetch.mockResolvedValueOnce(jsonResponse(session, 201));
 

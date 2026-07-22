@@ -1,6 +1,6 @@
-// Web client types mirroring server contracts
+// Web 客户端类型，与服务端契约对齐
 
-// --- Platform Event Envelope ---
+// --- Platform Event Envelope（src/contracts/events.ts）---
 export interface PlatformEventEnvelope {
   readonly protocolVersion: 1;
   readonly eventId: string;
@@ -12,7 +12,7 @@ export interface PlatformEventEnvelope {
   readonly payload: unknown;
 }
 
-// --- API Error ---
+// --- API Error（src/contracts/api-error.ts）---
 export interface ApiError {
   readonly code: string;
   readonly message: string;
@@ -54,7 +54,17 @@ export interface ModelSummary {
   readonly credentialConfigured: boolean;
 }
 
-// --- Session ---
+// --- Session（与服务端 src/runtime/session-service.ts SessionView 对齐）---
+export interface MessageEntry {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+export interface SessionModelRef {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
 export interface SessionView {
   readonly id: string;
   readonly title: string;
@@ -62,13 +72,13 @@ export interface SessionView {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly archived: boolean;
-  readonly provider: string | null;
-  readonly model: string | null;
   readonly toolMode: string;
   readonly workspaceCwd: string | null;
   readonly workspaceConfirmed: boolean;
   readonly thinkingLevel: string;
   readonly messages: readonly string[];
+  readonly messageEntries: readonly MessageEntry[];
+  readonly model: SessionModelRef | null;
 }
 
 export interface SessionSettings {
@@ -95,6 +105,12 @@ export interface SupervisorStatusResponse {
   };
 }
 
+export interface AgentServerDiscovery {
+  readonly url: string;
+  readonly port: number;
+  readonly wsUrl: string;
+}
+
 // --- Prompt ---
 export interface PromptResponse {
   readonly status: string;
@@ -113,19 +129,3 @@ export interface HealthResponse {
   readonly pid: number;
   readonly uptimeSeconds: number;
 }
-
-// --- WS Protocol ---
-export type WsClientCommand =
-  | { readonly type: "subscribe"; readonly sessionId: string }
-  | { readonly type: "unsubscribe"; readonly sessionId: string }
-  | { readonly type: "abort"; readonly sessionId: string; readonly streamId: string }
-  | { readonly type: "compact"; readonly sessionId: string }
-  | { readonly type: "resume"; readonly sessionId: string; readonly streamId: string; readonly lastSequence: number };
-
-export type WsServerMessage =
-  | { readonly type: "event"; readonly payload: PlatformEventEnvelope }
-  | { readonly type: "subscribed"; readonly sessionId: string }
-  | { readonly type: "unsubscribed"; readonly sessionId: string }
-  | { readonly type: "abort_result"; readonly sessionId: string; readonly status: string }
-  | { readonly type: "compact_result"; readonly sessionId: string; readonly status: string }
-  | { readonly type: "resume_result"; readonly sessionId: string; readonly events: PlatformEventEnvelope[] };
