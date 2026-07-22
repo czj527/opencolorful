@@ -17,6 +17,9 @@ export interface ProviderFormData {
   modelId: string;
   modelName: string;
   apiKey: string;
+  reasoning: boolean;
+  contextWindow: number;
+  maxTokens: number;
 }
 
 export interface ProviderFormErrors {
@@ -25,6 +28,7 @@ export interface ProviderFormErrors {
   baseUrl?: string;
   modelId?: string;
   apiKey?: string;
+  capabilities?: string;
 }
 
 export function validateProviderForm(data: ProviderFormData): ProviderFormErrors {
@@ -55,6 +59,14 @@ export function validateProviderForm(data: ProviderFormData): ProviderFormErrors
 
   if (!data.modelId.trim()) {
     errors.modelId = "模型 ID 不能为空";
+  }
+
+  if (!Number.isInteger(data.contextWindow) || data.contextWindow < 1) {
+    errors.capabilities = "上下文窗口必须是正整数";
+  } else if (!Number.isInteger(data.maxTokens) || data.maxTokens < 1) {
+    errors.capabilities = "最大输出必须是正整数";
+  } else if (data.maxTokens > data.contextWindow) {
+    errors.capabilities = "最大输出不能大于上下文窗口";
   }
 
   return errors;

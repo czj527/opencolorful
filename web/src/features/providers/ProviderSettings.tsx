@@ -10,7 +10,7 @@ interface ProviderSettingsProps {
 }
 
 export function ProviderSettings({ providers, onSave, saving }: ProviderSettingsProps) {
-  const [form, setForm] = useState<ProviderFormData>({
+  const emptyForm: ProviderFormData = {
     providerId: "",
     name: "",
     protocol: "openai-completions",
@@ -18,7 +18,11 @@ export function ProviderSettings({ providers, onSave, saving }: ProviderSettings
     modelId: "",
     modelName: "",
     apiKey: "",
-  });
+    reasoning: false,
+    contextWindow: 32768,
+    maxTokens: 4096,
+  };
+  const [form, setForm] = useState<ProviderFormData>(emptyForm);
   const [errors, setErrors] = useState<ProviderFormErrors>({});
   const [showForm, setShowForm] = useState(false);
 
@@ -28,11 +32,11 @@ export function ProviderSettings({ providers, onSave, saving }: ProviderSettings
     if (hasProviderFormErrors(validationErrors)) return;
 
     await onSave(form);
-    setForm({ providerId: "", name: "", protocol: "openai-completions", baseUrl: "", modelId: "", modelName: "", apiKey: "" });
+    setForm(emptyForm);
     setShowForm(false);
   };
 
-  const update = (field: keyof ProviderFormData, value: string) => {
+  const update = (field: keyof ProviderFormData, value: string | number | boolean) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field as keyof ProviderFormErrors]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -134,6 +138,41 @@ export function ProviderSettings({ providers, onSave, saving }: ProviderSettings
               />
               {errors.modelId && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 2 }}>{errors.modelId}</div>}
             </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label htmlFor="provider-context-window" style={{ fontSize: 12, color: "var(--text-secondary)" }}>上下文窗口</label>
+                <input
+                  id="provider-context-window"
+                  type="number"
+                  min={1}
+                  value={form.contextWindow}
+                  onChange={(e) => update("contextWindow", Number(e.target.value))}
+                  style={{ width: "100%", padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label htmlFor="provider-max-tokens" style={{ fontSize: 12, color: "var(--text-secondary)" }}>最大输出</label>
+                <input
+                  id="provider-max-tokens"
+                  type="number"
+                  min={1}
+                  value={form.maxTokens}
+                  onChange={(e) => update("maxTokens", Number(e.target.value))}
+                  style={{ width: "100%", padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
+                />
+              </div>
+            </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={form.reasoning}
+                onChange={(e) => update("reasoning", e.target.checked)}
+              />
+              支持推理（reasoning）
+            </label>
+            {errors.capabilities && <div style={{ color: "var(--danger)", fontSize: 12 }} role="alert">{errors.capabilities}</div>}
 
             <div>
               <label htmlFor="provider-apikey" style={{ fontSize: 12, color: "var(--text-secondary)" }}>API Key</label>

@@ -55,16 +55,17 @@ export function ChatPane({
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
           <select
             aria-label="选择模型"
-            value={session.model ? `${session.model.providerId}/${session.model.modelId}` : ""}
+            value={session.model ? models.findIndex((m) => m.providerId === session.model!.providerId && m.modelId === session.model!.modelId) : -1}
             onChange={(e) => {
-              const [providerId, modelId] = e.target.value.split("/");
-              if (providerId && modelId) onSelectModel(providerId, modelId);
+              const index = Number(e.target.value);
+              const model = models[index];
+              if (model) onSelectModel(model.providerId, model.modelId);
             }}
             style={{ padding: "4px 6px", background: "var(--bg-tertiary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 12, maxWidth: 200 }}
           >
-            <option value="">未选择模型</option>
-            {models.map((m) => (
-              <option key={`${m.providerId}/${m.modelId}`} value={`${m.providerId}/${m.modelId}`}>
+            <option value={-1}>未选择模型</option>
+            {models.map((m, index) => (
+              <option key={`${m.providerId}/${m.modelId}`} value={index}>
                 {m.providerId}/{m.modelId}
               </option>
             ))}

@@ -77,6 +77,12 @@ export class SessionService {
     return { ...archived, messages: current.messages, messageEntries: current.messageEntries, model: current.model };
   }
 
+  unarchive(id: string): SessionView {
+    const current = this.getView(id);
+    const restored = this.index.unarchive(id);
+    return { ...restored, messages: current.messages, messageEntries: current.messageEntries, model: current.model };
+  }
+
   updateSettings(
     id: string,
     settings: {

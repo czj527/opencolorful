@@ -48,7 +48,7 @@ export function App() {
 
   const refreshSessions = useCallback(async () => {
     try {
-      const sessions = await api.listSessions();
+      const sessions = await api.listSessions({ includeArchived: true });
       dispatch({ type: "SET_SESSIONS", payload: sessions });
     } catch {
       // Server 可能未运行
@@ -177,6 +177,13 @@ export function App() {
     } catch { /* 忽略 */ }
   }, [api, state.activeSessionId, refreshSessions]);
 
+  const handleUnarchiveSession = useCallback(async (id: string) => {
+    try {
+      await api.unarchiveSession(id);
+      await refreshSessions();
+    } catch { /* 忽略 */ }
+  }, [api, refreshSessions]);
+
   // --- Prompt 生命周期 ---
 
   const handleSend = useCallback(async (content: string) => {
@@ -238,7 +245,12 @@ export function App() {
         models: [{
           modelId: data.modelId,
           name: data.modelName || data.modelId,
-          capabilities: { reasoning: false, input: ["text"], contextWindow: 32768, maxTokens: 4096 },
+          capabilities: {
+            reasoning: data.reasoning,
+            input: ["text"],
+            contextWindow: data.contextWindow,
+            maxTokens: data.maxTokens,
+          },
         }],
       },
       data.apiKey || undefined,
@@ -334,6 +346,7 @@ export function App() {
           onSelect={(id) => void handleSelectSession(id)}
           onCreate={(title, cwd) => void handleCreateSession(title, cwd)}
           onArchive={(id) => void handleArchiveSession(id)}
+          onUnarchive={(id) => void handleUnarchiveSession(id)}
           onToggle={handleToggleLeft}
         />
         <ChatPane

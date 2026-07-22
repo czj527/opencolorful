@@ -18,11 +18,24 @@ describe("provider form validation", () => {
     modelId: "gpt-4",
     modelName: "GPT-4",
     apiKey: "sk-test-key",
+    reasoning: false,
+    contextWindow: 32768,
+    maxTokens: 4096,
   };
 
   it("accepts a valid form", () => {
     const errors = validateProviderForm(validForm);
     expect(hasProviderFormErrors(errors)).toBe(false);
+  });
+
+  it("rejects maxTokens greater than contextWindow", () => {
+    const errors = validateProviderForm({ ...validForm, contextWindow: 100, maxTokens: 200 });
+    expect(errors.capabilities).toBeDefined();
+  });
+
+  it("rejects non-positive contextWindow", () => {
+    const errors = validateProviderForm({ ...validForm, contextWindow: 0 });
+    expect(errors.capabilities).toBeDefined();
   });
 
   it("rejects empty providerId", () => {

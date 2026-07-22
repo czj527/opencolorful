@@ -155,4 +155,14 @@ export class SessionIndex {
     }
     return this.get(id) as SessionMetadata;
   }
+
+  unarchive(id: string, updatedAt = new Date().toISOString()): SessionMetadata {
+    const result = this.database
+      .prepare("UPDATE sessions SET archived = 0, updated_at = ? WHERE id = ?")
+      .run(updatedAt, id);
+    if (result.changes !== 1) {
+      throw new Error(`Session 不存在: ${id}`);
+    }
+    return this.get(id) as SessionMetadata;
+  }
 }

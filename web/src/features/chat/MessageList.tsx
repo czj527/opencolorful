@@ -3,6 +3,7 @@ import type { ChatMessage, ToolCall, PlanItem as PlanItemData, Attachment } from
 import { ToolCallItem } from "./ToolCallItem.jsx";
 import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
+import { renderSafeMarkdown } from "./safe-markdown.jsx";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -46,14 +47,15 @@ export function MessageList({
             borderRadius: 6,
             maxWidth: "85%",
             alignSelf: entry.role === "user" ? "flex-end" : "flex-start",
-            whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}
         >
           <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>
             {entry.role === "user" ? "你" : "助手"}
           </div>
-          {entry.content}
+          {entry.role === "assistant"
+            ? renderSafeMarkdown(entry.content)
+            : <span style={{ whiteSpace: "pre-wrap" }}>{entry.content}</span>}
         </div>
       ))}
 
@@ -98,13 +100,12 @@ export function MessageList({
             padding: "8px 12px",
             maxWidth: "85%",
             alignSelf: "flex-start",
-            whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}
           data-testid="streaming-message"
         >
           <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>助手</div>
-          {streamingMessage.content}
+          {renderSafeMarkdown(streamingMessage.content)}
           <span className="streaming-cursor" aria-hidden="true">▍</span>
         </div>
       )}

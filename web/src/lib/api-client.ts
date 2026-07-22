@@ -97,8 +97,9 @@ export class ApiClient {
   }
 
   // Sessions
-  async listSessions(): Promise<SessionView[]> {
-    return this.request("GET", "/api/sessions");
+  async listSessions(options?: { includeArchived?: boolean }): Promise<SessionView[]> {
+    const query = options?.includeArchived ? "?includeArchived=true" : "";
+    return this.request("GET", `/api/sessions${query}`);
   }
 
   async createSession(title: string, cwd: string, settings?: SessionSettings): Promise<SessionView> {
@@ -119,6 +120,10 @@ export class ApiClient {
 
   async deleteSession(id: string): Promise<SessionView> {
     return this.request("DELETE", `/api/sessions/${id}`);
+  }
+
+  async unarchiveSession(id: string): Promise<SessionView> {
+    return this.request("POST", `/api/sessions/${id}/unarchive`);
   }
 
   // Messages

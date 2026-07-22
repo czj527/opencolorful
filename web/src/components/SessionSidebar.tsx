@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SessionView } from "../lib/types.js";
-import { Plus, Archive, Search, FolderOpen } from "lucide-react";
+import { Plus, Archive, ArchiveRestore, Search, FolderOpen } from "lucide-react";
 
 interface SessionSidebarProps {
   readonly sessions: SessionView[];
@@ -9,6 +9,7 @@ interface SessionSidebarProps {
   readonly onSelect: (id: string) => void;
   readonly onCreate: (title: string, cwd: string) => void;
   readonly onArchive: (id: string) => void;
+  readonly onUnarchive: (id: string) => void;
   readonly onToggle: () => void;
 }
 
@@ -19,20 +20,25 @@ export function SessionSidebar({
   onSelect,
   onCreate,
   onArchive,
+  onUnarchive,
   onToggle,
 }: SessionSidebarProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCwd, setNewCwd] = useState("");
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
 
   if (collapsed) {
     return null;
   }
 
-  const filtered = search.trim()
-    ? sessions.filter((s) => s.title.toLowerCase().includes(search.trim().toLowerCase()))
-    : sessions;
+  const active = sessions.filter((s) => !s.archived);
+  const archived = sessions.filter((s) => s.archived);
+  const filtered = (list: SessionView[]) =>
+    search.trim()
+      ? list.filter((s) => s.title.toLowerCase().includes(search.trim().toLowerCase()))
+      : list;
 
   const handleCreate = () => {
     const title = newTitle.trim();
@@ -101,14 +107,14 @@ export function SessionSidebar({
       )}
 
       <div className="sidebar-content">
-        {filtered.length === 0 ? (
+        {filtered(active).length === 0 ? (
           <div className="empty-state">
             <FolderOpen size={24} strokeWidth={1.5} aria-hidden="true" style={{ opacity: 0.4 }} />
             <div>{search ? "无匹配会话" : "暂无会话"}</div>
             {!search && <div style={{ fontSize: "12px" }}>点击 + 创建新会话</div>}
           </div>
         ) : (
-          filtered.map((session) => (
+          filtered(active).map((session) => (
             <div
               key={session.id}
               className={`sidebar-item${session.id === activeSessionId ? " active" : ""}`}
@@ -135,6 +141,47 @@ export function SessionSidebar({
               </div>
             </div>
           ))
+        )}
+
+        {archived.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => setShowArchived(!showArchived)}
+              aria-expanded={showArchived}
+              style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: "4px 12px", width: "100%", textAlign: "left" }}
+            >
+              {showArchived ? "▾" : "▸"} 已归档（{archived.length}）
+            </button>
+            {showArchived && filtered(archived).map((session) => (
+              <div
+                key={session.id}
+                className="sidebar-item"
+                style={{ opacity: 0.7 }}
+                role="button"
+                tabIndex={0}
+                onClick={() => onSelect(session.id)}
+                onKeyDown={(e) => { if (e.key === "Enter") onSelect(session.id); }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                  <div className="sidebar-item-title" style={{ flex: 1, minWidth: 0 }}>{session.title}</div>
+                  <button
+                    className="icon-button"
+                    style={{ padding: 2, border: "none", flexShrink: 0 }}
+                    onClick={(e) => { e.stopPropagation(); onUnarchive(session.id); }}
+                    type="button"
+                    aria-label={`重开会话 ${session.title}`}
+                    title="重开会话"
+                  >
+                    <ArchiveRestore size={12} aria-hidden="true" />
+                  </button>
+                </div>
+                <div className="sidebar-item-meta">
+                  {session.messages.length} 条消息 · 已归档
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </aside>
