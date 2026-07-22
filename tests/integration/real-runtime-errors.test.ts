@@ -59,6 +59,11 @@ describe("provider error mapping", () => {
     expect(error.message).not.toContain("sk-abc123");
   });
 
+  it("does not leak a non-sk Bearer token", () => {
+    const error = mapProviderError(new Error("Authorization: Bearer plain-secret-token"));
+    expect(error.message).not.toContain("plain-secret-token");
+  });
+
   it("handles non-Error objects", () => {
     const error = mapProviderError("plain string error");
     expect(error.code).toBe("PROVIDER_ERROR");

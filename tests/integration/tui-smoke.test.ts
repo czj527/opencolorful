@@ -84,6 +84,13 @@ describe("TUI smoke test", () => {
       const run = runtime.prompt("smoke test");
       await run.completed;
 
+      const compactResponse = await fetch(
+        `http://127.0.0.1:${server.port}/api/sessions/${session.id}/compact`,
+        { method: "POST" },
+      );
+      expect(compactResponse.status).toBe(409);
+      expect(await compactResponse.json()).toMatchObject({ code: "CONFLICT" });
+
       // 归档 Session
       await api.deleteSession(session.id);
 

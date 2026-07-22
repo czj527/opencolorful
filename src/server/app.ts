@@ -56,7 +56,12 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     registerModelRoutes(app, options.modelService);
   }
   if (options.sessionService !== undefined) {
-    registerSessionRoutes(app, options.sessionService);
+    registerSessionRoutes(
+      app,
+      options.sessionService,
+      options.modelService,
+      options.promptService,
+    );
   }
   if (options.promptService !== undefined) {
     registerMessageRoutes(app, {

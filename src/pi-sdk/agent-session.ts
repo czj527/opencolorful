@@ -166,6 +166,7 @@ export async function createPiFauxAgentSession(
     sessionManager,
     resourceLoader: minimalResourceLoader(),
     noTools: "all",
+    ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
 
   return {
@@ -214,6 +215,7 @@ export async function createPiAgentSession(
     settingsManager,
     sessionManager,
     resourceLoader: minimalResourceLoader(),
+    ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };
 
   if (options.noTools === "all") {

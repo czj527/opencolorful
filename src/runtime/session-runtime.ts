@@ -34,6 +34,7 @@ export interface SessionRuntimeOptions {
   readonly sessionHandle?: PiSessionHandle;
   readonly tools?: readonly string[];
   readonly noTools?: "all";
+  readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface PromptRun {
@@ -77,6 +78,7 @@ export class SessionRuntime {
         ...(options.faux.tokensPerSecond
           ? { tokensPerSecond: options.faux.tokensPerSecond }
           : {}),
+        ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -94,6 +96,7 @@ export class SessionRuntime {
         sessionHandle: options.sessionHandle,
         ...(options.tools ? { tools: options.tools } : {}),
         ...(options.noTools ? { noTools: options.noTools } : {}),
+        ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");

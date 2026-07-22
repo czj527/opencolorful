@@ -31,6 +31,7 @@ export interface OfflineCompletionResult {
 }
 
 export type WorkspaceToolMode = "read-only" | "all";
+export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface PiModelCapabilities {
   readonly reasoning: boolean;
@@ -111,6 +112,7 @@ export interface PiFauxAgentOptions {
   readonly response: string;
   readonly tokensPerSecond?: number;
   readonly sessionHandle?: PiSessionHandle;
+  readonly thinkingLevel?: PiThinkingLevel;
 }
 
 export interface PiResolvedModel {
@@ -131,4 +133,5 @@ export interface PiAgentSessionOptions {
   readonly sessionHandle: PiSessionHandle;
   readonly tools?: readonly string[];
   readonly noTools?: "all";
+  readonly thinkingLevel?: PiThinkingLevel;
 }

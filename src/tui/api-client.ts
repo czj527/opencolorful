@@ -16,6 +16,8 @@ export interface SessionView {
   readonly toolMode?: string;
   readonly workspaceCwd?: string | null;
   readonly workspaceConfirmed?: boolean;
+  readonly thinkingLevel?: string;
+  readonly model?: { readonly providerId: string; readonly modelId: string } | null;
 }
 
 export interface ModelSummary {
@@ -106,6 +108,13 @@ export class TuiApiClient {
         method: "POST",
         body: JSON.stringify({ streamId }),
       },
+    );
+  }
+
+  async compact(sessionId: string): Promise<{ readonly status: string }> {
+    return this.request<{ readonly status: string }>(
+      `/api/sessions/${sessionId}/compact`,
+      { method: "POST" },
     );
   }
 

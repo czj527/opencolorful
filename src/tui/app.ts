@@ -124,6 +124,9 @@ export class TuiApp {
       case "model":
         await this.setModel(rest);
         break;
+      case "thinking":
+        await this.setThinkingLevel(rest);
+        break;
       case "config":
         await this.configureProvider(rest);
         break;
@@ -136,6 +139,9 @@ export class TuiApp {
         } else {
           this.write("当前没有活跃的流可以中断\n");
         }
+        break;
+      case "compact":
+        await this.compactSession();
         break;
       case "quit":
       case "exit":
@@ -156,10 +162,13 @@ export class TuiApp {
     this.write("  /models                列出可用模型\n");
     this.write("  /provider              列出已配置 Provider\n");
     this.write("  /config <id> <协议> <url> <model> [key]  配置 Provider\n");
-    this.write("  /tools <off|read-only|all>  设置工具模式\n");
+    this.write("  /tools <off|read-only> [工作目录]  设置非写入工具模式\n");
+    this.write("  /tools all <工作目录>  确认并启用完整工具\n");
     this.write("  /model <providerId> <modelId>  选择模型\n");
+    this.write("  /thinking <off|minimal|low|medium|high|xhigh|max>  设置思考级别\n");
     this.write("  /health                Server 状态\n");
     this.write("  /abort                 中断当前流\n");
+    this.write("  /compact               压缩当前会话上下文\n");
     this.write("  /quit                  退出\n");
     this.write("\n聊天模式下直接输入文本即可发送 Prompt\n");
     this.write("Ctrl+C 可中断当前流\n");
@@ -294,9 +303,37 @@ export class TuiApp {
     }
   }
 
-  private async setToolMode(mode: string): Promise<void> {
+  private async setToolMode(args: string): Promise<void> {
+    const [mode, ...workspaceParts] = args.split(/\s+/).filter(Boolean);
     if (!mode || !["off", "read-only", "all"].includes(mode)) {
-      this.write("用法: /tools <off|read-only|all>\n");
+      this.write("用法: /tools <off|read-only> [工作目录] 或 /tools all <工作目录>\n");
+      return;
+    }
+    if (this.state.name !== "chat") {
+      this.write("请先进入聊天模式: /chat <sessionId>\n");
+      return;
+    }
+    const workspaceCwd = workspaceParts.join(" ");
+    if (mode === "all" && !workspaceCwd) {
+      this.write("all 模式必须提供并确认工作目录\n");
+      return;
+    }
+    try {
+      await this.api.updateSessionSettings(this.state.sessionId, {
+        toolMode: mode,
+        ...(workspaceCwd ? { workspaceCwd } : {}),
+        ...(mode === "all" ? { workspaceConfirmed: true } : {}),
+      });
+      this.write(`工具模式已设为: ${mode}\n`);
+    } catch (error) {
+      this.write(`设置失败: ${String(error)}\n`);
+    }
+  }
+
+  private async setThinkingLevel(level: string): Promise<void> {
+    const levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+    if (!levels.includes(level)) {
+      this.write("用法: /thinking <off|minimal|low|medium|high|xhigh|max>\n");
       return;
     }
     if (this.state.name !== "chat") {
@@ -304,10 +341,8 @@ export class TuiApp {
       return;
     }
     try {
-      await this.api.updateSessionSettings(this.state.sessionId, {
-        toolMode: mode,
-      });
-      this.write(`工具模式已设为: ${mode}\n`);
+      await this.api.updateSessionSettings(this.state.sessionId, { thinkingLevel: level });
+      this.write(`思考级别已设为: ${level}\n`);
     } catch (error) {
       this.write(`设置失败: ${String(error)}\n`);
     }
@@ -347,6 +382,19 @@ export class TuiApp {
       }
     } catch (error) {
       this.write(`中断失败: ${String(error)}\n`);
+    }
+  }
+
+  private async compactSession(): Promise<void> {
+    if (this.state.name !== "chat") {
+      this.write("请先进入聊天模式: /chat <sessionId>\n");
+      return;
+    }
+    try {
+      await this.api.compact(this.state.sessionId);
+      this.write("会话上下文已压缩\n");
+    } catch (error) {
+      this.write(`压缩失败: ${String(error)}\n`);
     }
   }
 

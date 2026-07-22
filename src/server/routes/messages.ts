@@ -28,6 +28,12 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       if (typeof body.content !== "string" || !body.content.trim()) {
         return context.json(createApiError("INVALID_INPUT", "Prompt 不能为空"), 400);
       }
+      if (sessionService !== undefined) {
+        const view = sessionService.getView(sessionId);
+        if (view.archived) {
+          return context.json(createApiError("CONFLICT", "已归档 Session 不能执行 Prompt"), 409);
+        }
+      }
 
       if (!promptService.hasRuntime(sessionId)) {
         if (!sessionService || !paths) {
@@ -60,6 +66,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               resolveModelId: selectedModel.modelId,
               ...(noTools ? { noTools } : {}),
               ...(tools.length > 0 && !noTools ? { tools } : {}),
+              thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
@@ -76,6 +83,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               sessionHandle: session,
               ...(noTools ? { noTools } : {}),
               ...(tools.length > 0 && !noTools ? { tools } : {}),
+              thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
@@ -108,6 +116,19 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       return context.json(promptService.abort(context.req.param("id"), body.streamId));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Session Runtime 不存在"), 404);
+    }
+  });
+
+  app.post("/api/sessions/:id/compact", async (context) => {
+    const sessionId = context.req.param("id");
+    if (!promptService.hasRuntime(sessionId)) {
+      return context.json(createApiError("NOT_FOUND", "Session Runtime 不存在"), 404);
+    }
+    try {
+      await promptService.compact(sessionId);
+      return context.json({ status: "completed" });
+    } catch {
+      return context.json(createApiError("CONFLICT", "当前会话无需压缩"), 409);
     }
   });
 }

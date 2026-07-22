@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模型运行时、Session 工具权限（off/read-only/all）、Provider 错误映射和 API Key 脱敏。
+Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模型运行时、Session 工具权限（off/read-only/all）、思考级别、Provider/工具结果脱敏和真实 Provider/工具重启 E2E。
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈
@@ -162,11 +162,12 @@ interface PlatformEventEnvelope<T = unknown> {
 | GET/DELETE | `/api/sessions/:id` | 读取、归档或删除 |
 | POST | `/api/sessions/:id/messages` | 发送 Prompt |
 | POST | `/api/sessions/:id/abort` | 中断当前运行 |
+| POST | `/api/sessions/:id/compact` | 压缩当前会话上下文 |
 | GET | `/api/sessions/:id/events` | SSE 订阅和补发 |
 | GET | `/ws` | WS Session 订阅与控制 |
 
-Phase 0 只开放 `/api/health`。表中其余路由是后续基础设施阶段的目标契约，不能据此
-假定已经实现。
+Phase 2 已实现表中除 `/api/server/status` 外的路由；Server 生命周期状态当前仍通过
+CLI 和运行状态文件管理，Phase 3 再由 Supervisor 提供 Web 控制 API。
 
 错误统一使用：
 
@@ -202,6 +203,8 @@ A2UI Catalog 在本地随应用发布并固定版本。Agent 不允许指定任�
 
 - API Key 只进入 AuthStorage，不写普通配置和 Session；
 - 日志统一脱敏；
+- Provider 错误、工具增量和工具最终结果统一脱敏并限制长度；
+- 完整工具权限的确认绑定到具体工作目录，目录变化必须重新确认；
 - 所有 API 输入按 Schema 校验；
 - A2UI Action 必须由 Server 重新校验；
 - TokUI 仅开放白名单组件和命名 Handler；

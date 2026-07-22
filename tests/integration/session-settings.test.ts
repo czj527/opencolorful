@@ -8,6 +8,8 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
+import { PromptService } from "../../src/runtime/prompt-service.js";
+import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { createServerApp } from "../../src/server/app.js";
 import { parseSessionSettings } from "../../src/contracts/session-settings.js";
 
@@ -30,12 +32,14 @@ afterEach(() => {
 });
 
 describe("session settings", () => {
-  it("creates session with default toolMode off", () => {
+  it("creates session with a read-only default bound to the session cwd", () => {
     const ctx = createContext();
     const session = ctx.service.create({ title: "默认设置", cwd: process.cwd() });
     const view = ctx.service.getView(session.id);
-    expect(view.toolMode).toBe("off");
+    expect(view.toolMode).toBe("read-only");
+    expect(view.workspaceCwd).toBe(process.cwd());
     expect(view.workspaceConfirmed).toBe(false);
+    expect(view.thinkingLevel).toBe("medium");
     ctx.service.closeAll();
     ctx.database.close();
   });
@@ -128,6 +132,65 @@ describe("session settings", () => {
     ctx.database.close();
   });
 
+  it("requires reconfirmation when an all-mode workspace changes", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ sessionService: ctx.service });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "工作区变更",
+        cwd: process.cwd(),
+        toolMode: "all",
+        workspaceCwd: process.cwd(),
+        workspaceConfirmed: true,
+      }),
+    });
+    const session = (await createResp.json()) as { id: string };
+
+    const response = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceCwd: os.tmpdir() }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("allows a read-only workspace change without write confirmation", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ sessionService: ctx.service });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "只读工作区", cwd: process.cwd() }),
+    });
+    const session = (await createResp.json()) as { id: string };
+
+    const response = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolMode: "read-only", workspaceCwd: os.tmpdir() }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      toolMode: "read-only",
+      workspaceCwd: os.tmpdir(),
+      workspaceConfirmed: false,
+    });
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
   it("rejects path traversal in cwd", () => {
     expect(() => parseSessionSettings({
       toolMode: "all",
@@ -140,9 +203,82 @@ describe("session settings", () => {
     expect(() => parseSessionSettings({ toolMode: "unsafe" })).toThrow();
   });
 
-  it("archived session settings are preserved but session is not listed", async () => {
+  it("persists a valid thinking level and rejects an unknown level", async () => {
     const ctx = createContext();
     const { app } = createServerApp({ sessionService: ctx.service });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "思考级别", cwd: process.cwd() }),
+    });
+    const session = (await createResp.json()) as { id: string };
+
+    const updateResp = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thinkingLevel: "high" }),
+      },
+    );
+    expect(updateResp.status).toBe(200);
+    expect(await updateResp.json()).toMatchObject({ thinkingLevel: "high" });
+
+    const invalidResp = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thinkingLevel: "extreme" }),
+      },
+    );
+    expect(invalidResp.status).toBe(400);
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("disposes an idle runtime when settings change", async () => {
+    const ctx = createContext();
+    const promptService = new PromptService();
+    const session = ctx.service.create({ title: "运行时重建", cwd: process.cwd() });
+    const runtime = await SessionRuntime.create({
+      sessionId: session.id,
+      cwd: process.cwd(),
+      sessionDir: ctx.paths.sessions,
+      authPath: ctx.paths.authFile,
+      providerId: "faux",
+      modelId: "faux-1",
+      faux: { response: "ok" },
+      publish: () => {},
+      sessionHandle: session,
+    });
+    promptService.register(runtime);
+    const { app } = createServerApp({ sessionService: ctx.service, promptService });
+
+    const response = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolMode: "read-only" }),
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(promptService.hasRuntime(session.id)).toBe(false);
+    promptService.dispose();
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("archived session settings are preserved but session is not listed", async () => {
+    const ctx = createContext();
+    const promptService = new PromptService();
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      promptService,
+      paths: ctx.paths,
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -169,6 +305,17 @@ describe("session settings", () => {
     const list = (await (await app.request("http://local/api/sessions")).json()) as unknown[];
     expect(list.length).toBe(0);
 
+    const promptResponse = await app.request(
+      `http://local/api/sessions/${session.id}/messages`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "不应执行" }),
+      },
+    );
+    expect(promptResponse.status).toBe(409);
+
+    promptService.dispose();
     ctx.service.closeAll();
     ctx.database.close();
   });

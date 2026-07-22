@@ -1,14 +1,11 @@
 import type { ApiErrorCode } from "../contracts/api-error.js";
 import { createApiError } from "../contracts/api-error.js";
+import { sanitizeSensitiveText } from "./sanitize.js";
 
 export function mapProviderError(error: unknown): ReturnType<typeof createApiError> {
   const message = error instanceof Error ? error.message : "未知 Provider 错误";
 
-  // 移除可能包含凭据的 URL 和 header
-  const sanitized = message
-    .replace(/https?:\/\/[^\s]+/g, "[URL]")
-    .replace(/(?:Authorization|api[_-]?key)[:\s]+[^\s]+(\s+[^\s]+)?/gi, "[AUTH_HEADER]")
-    .replace(/\bsk-[a-zA-Z0-9_-]{5,}\b/g, "[API_KEY]");
+  const sanitized = sanitizeSensitiveText(message);
 
   // HTTP 401/403 → 认证失败
   if (

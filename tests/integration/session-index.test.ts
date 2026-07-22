@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openMetadataDatabase } from "../../src/storage/database.js";
+import { CURRENT_SCHEMA_VERSION } from "../../src/storage/migrations.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 
 const temporaryDirectories: string[] = [];
@@ -27,11 +28,11 @@ describe("session metadata index", () => {
     const first = openMetadataDatabase(databasePath);
 
     expect(first.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(first.prepare("SELECT version FROM schema_version").pluck().get()).toBe(2);
+    expect(first.prepare("SELECT version FROM schema_version").pluck().get()).toBe(CURRENT_SCHEMA_VERSION);
     first.close();
 
     const reopened = openMetadataDatabase(databasePath);
-    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(2);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(CURRENT_SCHEMA_VERSION);
     reopened.close();
   });
 

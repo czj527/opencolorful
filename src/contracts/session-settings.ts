@@ -3,6 +3,8 @@ import { Value } from "typebox/value";
 
 export const TOOL_MODES = ["off", "read-only", "all"] as const;
 export type ToolMode = (typeof TOOL_MODES)[number];
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export const SessionSettingsSchema = Type.Object({
   toolMode: Type.Optional(
@@ -10,6 +12,9 @@ export const SessionSettingsSchema = Type.Object({
   ),
   cwd: Type.Optional(Type.String({ minLength: 1 })),
   workspaceConfirmed: Type.Optional(Type.Boolean()),
+  thinkingLevel: Type.Optional(
+    Type.Union(THINKING_LEVELS.map((level) => Type.Literal(level))),
+  ),
 });
 
 export type SessionSettings = Static<typeof SessionSettingsSchema>;

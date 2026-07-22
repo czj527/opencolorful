@@ -10,6 +10,7 @@ export interface CreateSessionInput {
   readonly toolMode?: string;
   readonly workspaceCwd?: string;
   readonly workspaceConfirmed?: boolean;
+  readonly thinkingLevel?: string;
 }
 
 export interface SessionMetadata {
@@ -24,6 +25,7 @@ export interface SessionMetadata {
   readonly toolMode: string;
   readonly workspaceCwd: string | null;
   readonly workspaceConfirmed: boolean;
+  readonly thinkingLevel: string;
 }
 
 interface SessionRow {
@@ -38,6 +40,7 @@ interface SessionRow {
   tool_mode: string;
   workspace_cwd: string | null;
   workspace_confirmed: number;
+  thinking_level: string;
 }
 
 function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
@@ -56,6 +59,7 @@ function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
     toolMode: row.tool_mode ?? "off",
     workspaceCwd: row.workspace_cwd,
     workspaceConfirmed: row.workspace_confirmed === 1,
+    thinkingLevel: row.thinking_level ?? "medium",
   };
 }
 
@@ -67,8 +71,8 @@ export class SessionIndex {
     this.database
       .prepare(
         `INSERT INTO sessions
-          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed)
-         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed)`,
+          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed, thinking_level)
+         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed, @thinkingLevel)`,
       )
       .run({
         id: input.id,
@@ -81,13 +85,14 @@ export class SessionIndex {
         toolMode: input.toolMode ?? "off",
         workspaceCwd: input.workspaceCwd ?? null,
         workspaceConfirmed: input.workspaceConfirmed ? 1 : 0,
+        thinkingLevel: input.thinkingLevel ?? "medium",
       });
     return this.get(input.id) as SessionMetadata;
   }
 
   updateSettings(
     id: string,
-    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean },
+    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean; thinkingLevel?: string },
     updatedAt = new Date().toISOString(),
   ): SessionMetadata {
     const sets: string[] = ["updated_at = ?"];
@@ -103,6 +108,10 @@ export class SessionIndex {
     if (settings.workspaceConfirmed !== undefined) {
       sets.push("workspace_confirmed = ?");
       params.push(settings.workspaceConfirmed ? 1 : 0);
+    }
+    if (settings.thinkingLevel !== undefined) {
+      sets.push("thinking_level = ?");
+      params.push(settings.thinkingLevel);
     }
     params.push(id);
     this.database

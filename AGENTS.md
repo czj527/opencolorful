@@ -22,7 +22,9 @@ Git 历史。
 - `SessionRuntime.create()` 支持 faux（测试）和真实模型（生产）两条路径；
 - 工具权限三级：`off` / `read-only` / `all`（需 cwd 确认）；
 - Provider 错误自动映射为稳定 `ApiError`，自动脱敏 URL 和凭据；
-- Phase 3（Web UI + Supervisor）待开始。
+- 真实 Provider + PI read 工具 + Server 重启 E2E 已完成；
+- Session 设置包含工具模式、工作目录、确认状态和思考级别；
+- Phase 3（Web UI + Supervisor）待开始；
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；
@@ -33,9 +35,9 @@ Git 历史。
 - P1-09 重启恢复 E2E 和文档已完成：`9f6e5fc`；
 - Phase 1 验收缺口修复已完成：`2a71636`；
 - A2UI v0.9.1 官方 Envelope 对齐已完成：`5562743`；
-- 下一项任务是 Phase 2（尚未定义）。
+- 下一项任务是按 `plans/phase-03.md` 实施 Supervisor 和 Web UI。
 
-截至 `5562743`，最近一次完整验证为 18 个测试文件、94 个测试用例通过。该数字只是
+截至 Phase 2 最终验收，最近一次完整验证为 24 个测试文件、130 个测试用例通过。该数字只是
 交接快照；接手后必须重新运行验证，不得直接复述为当前结果。
 
 ## 当前实现边界
@@ -67,13 +69,12 @@ Git 历史。
 
 尚未具备：
 
-- 真实 Provider Prompt 的生产组合（当前为 faux provider 闭环）；
-- `SessionRuntime.create()` 当前是 faux 专用创建路径，尚未从持久化 Provider 设置构造
-  生产模型运行时；
-- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 不在 Phase 1
-  范围内。
+- OAuth、沙盒和逐次工具审批；
+- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI；
+- Supervisor、Electron、LAN/远程访问和云端同步。
 
-不要把 faux 测试运行时当作真实 Provider 已完成端到端接入。
+faux runtime 只用于确定性测试；生产组合根根据 Session 模型引用创建真实 PI
+`ModelRuntime` 和 `AgentSession`。
 
 ## 架构硬约束
 
@@ -123,18 +124,18 @@ Git 历史。
 
 本项目刻意采用轻量流程，避免复杂 Skill 仪式和不可控 Token 消耗。
 
-1. 确认当前分支和工作区。继续 Phase 1 时使用现有
-   `phase-1-core-infrastructure`，不要重复建分支或嵌套 worktree。
+1. 确认当前分支和工作区；当前 Phase 2 已在 `main` 完成，开始 Phase 3 时按计划创建
+   独立功能分支，不要嵌套 worktree。
 2. 阅读当前任务的范围、完成定义和验证命令，先指出会阻塞实现的计划错误。
 3. 关键边界先写最小失败测试并确认 RED：Provider/Auth、Session 恢复、事件序号、
    Replay、Abort 竞态、WS 权限、A2UI/TokUI 安全。
 4. 普通路由胶水、CLI 文案和简单映射不强制完整 TDD，但必须有相关验证并通过
    TypeScript 严格检查。
-5. 每次只实现当前 P1 任务，不提前加入后续 Profile、记忆、多 Agent 或 Web 应用。
+5. 每次只实现当前 Phase 任务，不提前加入 Profile、记忆或多 Agent。
 6. 先跑任务指定测试，再单独运行 `npm run check`。
-7. 每个 P1 任务独立提交，提交信息使用计划中给出的标题。
-8. 更新 `plans/phase-01.md` 的状态、真实提交和已知偏差。
-9. Phase 全部完成后才更新主文档、创建 `phase-1-complete` 标签并请求合并到 `main`。
+7. 每个任务独立提交，提交信息使用计划中给出的标题。
+8. 更新当前 `plans/phase-xx.md` 的状态、真实提交和已知偏差。
+9. Phase 全部完成后才更新主文档、创建完成标签并请求合并到 `main`。
 
 除非用户明确要求，不启动并行子 Agent。不要为普通任务引入额外 worktree、复杂流程
 文档或重复计划。

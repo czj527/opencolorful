@@ -36,6 +36,8 @@ export class SessionService {
       title: request.title.trim() || "未命名会话",
       sessionPath: session.path,
       createdAt: new Date().toISOString(),
+      toolMode: "read-only",
+      workspaceCwd: request.cwd,
     });
     this.active.set(id, session);
     return session;
@@ -75,7 +77,12 @@ export class SessionService {
 
   updateSettings(
     id: string,
-    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean },
+    settings: {
+      toolMode?: string;
+      workspaceCwd?: string;
+      workspaceConfirmed?: boolean;
+      thinkingLevel?: string;
+    },
   ): SessionView {
     this.index.updateSettings(id, settings);
     return this.getView(id);

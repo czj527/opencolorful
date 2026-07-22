@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export function applyMigrations(database: Database.Database): void {
   database.exec(`
@@ -44,6 +44,11 @@ export function applyMigrations(database: Database.Database): void {
       ALTER TABLE sessions ADD COLUMN workspace_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (workspace_confirmed IN (0, 1));
     `);
     database.prepare("UPDATE schema_version SET version = 2").run();
+  }
+
+  if (current < 3) {
+    database.exec("ALTER TABLE sessions ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'medium'");
+    database.prepare("UPDATE schema_version SET version = 3").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

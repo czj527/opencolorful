@@ -24,6 +24,15 @@ export class PromptService {
     return this.sessions.has(sessionId);
   }
 
+  invalidate(sessionId: string): "missing" | "removed" | "busy" {
+    const runtime = this.sessions.get(sessionId);
+    if (runtime === undefined) return "missing";
+    if (runtime.activeStream() !== undefined) return "busy";
+    runtime.dispose();
+    this.sessions.delete(sessionId);
+    return "removed";
+  }
+
   abortBySession(sessionId: string): AbortResult {
     const runtime = this.require(sessionId);
     const active = runtime.activeStream();

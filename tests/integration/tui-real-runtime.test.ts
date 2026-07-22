@@ -76,6 +76,11 @@ describe("TUI real runtime", () => {
 
       // 更新 session 设置
       const session = await api.createSession("TUI 设置测试", process.cwd());
+      await expect(
+        api.setSessionModel(session.id, "tui-test", "missing-model"),
+      ).rejects.toThrow("模型");
+      const selected = await api.setSessionModel(session.id, "tui-test", "test-model");
+      expect(selected.model).toEqual({ providerId: "tui-test", modelId: "test-model" });
       const updated = await api.updateSessionSettings(session.id, { toolMode: "read-only" });
       expect(updated.toolMode).toBe("read-only");
 
