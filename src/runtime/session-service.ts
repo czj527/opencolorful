@@ -5,6 +5,7 @@ import type { RuntimePaths } from "../config/paths.js";
 import {
   createPersistentSession,
   openPersistentSession,
+  type PiMessageEntry,
   type PiSessionHandle,
 } from "../pi-sdk/index.js";
 import type { SessionIndex, SessionMetadata } from "../storage/session-index.js";
@@ -16,6 +17,7 @@ export interface CreateSessionRequest {
 
 export interface SessionView extends Omit<SessionMetadata, "model" | "provider"> {
   readonly messages: readonly string[];
+  readonly messageEntries: readonly PiMessageEntry[];
   readonly model: { readonly providerId: string; readonly modelId: string } | null;
 }
 
@@ -72,7 +74,7 @@ export class SessionService {
   archive(id: string): SessionView {
     const current = this.getView(id);
     const archived = this.index.archive(id);
-    return { ...archived, messages: current.messages, model: current.model };
+    return { ...archived, messages: current.messages, messageEntries: current.messageEntries, model: current.model };
   }
 
   updateSettings(
@@ -95,7 +97,7 @@ export class SessionService {
 
   private toView(metadata: SessionMetadata): SessionView {
     const session = this.open(metadata.id);
-    return { ...metadata, messages: session.messages, model: session.model };
+    return { ...metadata, messages: session.messages, messageEntries: session.messageEntries, model: session.model };
   }
 
   private assertSessionPath(sessionPath: string): void {

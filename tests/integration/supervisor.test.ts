@@ -20,7 +20,13 @@ afterEach(async () => {
     supervisorInstance = null;
   }
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true });
+    // Windows 上子进程文件句柄（SQLite WAL、日志、Defender 扫描）释放有延迟，
+    // 使用较长重试窗口清理；失败只告警不阻塞其他目录
+    try {
+      fs.rmSync(directory, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    } catch {
+      console.warn(`清理临时目录失败（可手动删除）: ${directory}`);
+    }
   }
 });
 
@@ -59,7 +65,7 @@ describe("supervisor", () => {
       supervisorPort: 0,
       entryScript: CLI_ENTRY,
     });
-    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
+    const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
 
     const response = await app.request("http://127.0.0.1/api/supervisor/status");
     expect(response.status).toBe(200);
@@ -158,7 +164,7 @@ describe("supervisor", () => {
       supervisorPort: 0,
       entryScript: CLI_ENTRY,
     });
-    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
+    const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
 
     // No log file yet
     const empty = await app.request("http://127.0.0.1/api/supervisor/logs");
@@ -250,17 +256,22 @@ describe("supervisor", () => {
     expect(response.status).toBe(200);
   }, 60_000);
 
-  it("returns 404 for unknown routes", async () => {
+  it("returns 404 for unknown non-API routes", async () => {
     const { paths } = makeTempHome();
     const controller = new ProcessController({
       paths,
       agentServerPort: 0,
       supervisorPort: 0,
     });
-    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
+    const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
 
-    const response = await app.request("http://127.0.0.1/api/unknown");
+    // 非 API 路径且未托管 Web → 404
+    const response = await app.request("http://127.0.0.1/nonexistent-page");
     expect(response.status).toBe(404);
+
+    // Agent 未启动时未知 API 路径被代理并返回 502
+    const apiResponse = await app.request("http://127.0.0.1/api/unknown");
+    expect(apiResponse.status).toBe(502);
   });
 
   it("writes supervisor state file with both process PIDs", async () => {
@@ -285,4 +296,83 @@ describe("supervisor", () => {
 
     await controller.stopAgentServer();
   }, 30_000);
+
+  it("serves web static assets when webDistDir is provided", async () => {
+    const { paths } = makeTempHome();
+    const webDist = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-webdist-"));
+    temporaryDirectories.push(webDist);
+    fs.writeFileSync(path.join(webDist, "index.html"), "<html><body>person-agent web</body></html>", "utf8");
+    fs.mkdirSync(path.join(webDist, "assets"), { recursive: true });
+    fs.writeFileSync(path.join(webDist, "assets", "app.js"), "console.log('app')", "utf8");
+
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({ paths, agentServerPort: agentPort, supervisorPort: 0 });
+    const { app } = createSupervisorApp({
+      controller,
+      supervisorPort: 0,
+      agentServerPort: agentPort,
+      webDistDir: webDist,
+    });
+
+    const indexResponse = await app.request("http://127.0.0.1/");
+    expect(indexResponse.status).toBe(200);
+    const html = await indexResponse.text();
+    expect(html).toContain("person-agent web");
+
+    // SPA fallback：非 API 路径也返回 index.html
+    const spaResponse = await app.request("http://127.0.0.1/sessions/abc");
+    expect(spaResponse.status).toBe(200);
+    expect(await spaResponse.text()).toContain("person-agent web");
+  });
+
+  it("proxies agent API requests through supervisor and returns 502 when agent is down", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+    const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
+
+    // Agent 未启动时代理返回 502
+    const downResponse = await app.request("http://127.0.0.1/api/health");
+    expect(downResponse.status).toBe(502);
+    const downBody = (await downResponse.json()) as { code: string };
+    expect(downBody.code).toBe("AGENT_UNREACHABLE");
+
+    // 启动 Agent 后代理转发成功
+    await controller.startAgentServer();
+    const upResponse = await app.request("http://127.0.0.1/api/health");
+    expect(upResponse.status).toBe(200);
+    const upBody = (await upResponse.json()) as { status: string };
+    expect(upBody.status).toBe("ok");
+
+    // Session API 也通过代理
+    const sessionsResponse = await app.request("http://127.0.0.1/api/sessions");
+    expect(sessionsResponse.status).toBe(200);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+
+  it("sanitizes API keys in supervisor logs endpoint", async () => {
+    const { paths } = makeTempHome();
+    fs.mkdirSync(path.dirname(paths.serverLog), { recursive: true });
+    fs.writeFileSync(
+      paths.serverLog,
+      "provider configured with key sk-abc123def456ghi789 and Authorization: Bearer sk-secret-token-12345\n",
+      "utf8",
+    );
+
+    const controller = new ProcessController({ paths, agentServerPort: 0, supervisorPort: 0 });
+    const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
+
+    const response = await app.request("http://127.0.0.1/api/supervisor/logs");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { logs: string };
+    expect(body.logs).not.toContain("sk-abc123def456ghi789");
+    expect(body.logs).not.toContain("sk-secret-token-12345");
+    expect(body.logs).toContain("sk-***");
+  });
 });

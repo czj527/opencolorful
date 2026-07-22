@@ -1,9 +1,8 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimePaths } from "../config/paths.js";
-import { PLATFORM_VERSION } from "../index.js";
 import { readRuntimeState, isProcessRunning } from "../server/runtime-state.js";
 import type { AgentServerStatus, SupervisorState } from "./types.js";
 
@@ -12,6 +11,33 @@ export interface ProcessControllerOptions {
   readonly agentServerPort: number;
   readonly supervisorPort: number;
   readonly entryScript?: string;
+}
+
+const HEALTH_TIMEOUT_MS = 15_000;
+
+function killProcessTree(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (process.platform === "win32") {
+      // taskkill /T 终止进程树，/F 强制
+      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], () => resolve());
+    } else {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+      }
+      resolve();
+    }
+  });
+}
+
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isProcessRunning(pid);
 }
 
 export class ProcessController {
@@ -52,8 +78,6 @@ export class ProcessController {
       }
     }
 
-    this.cleanupOrphanedState();
-
     fs.mkdirSync(path.dirname(this.paths.serverLog), { recursive: true });
     const logHandle = fs.openSync(this.paths.serverLog, "a");
 
@@ -68,6 +92,7 @@ export class ProcessController {
       stdio: ["ignore", logHandle, logHandle],
       env: {
         ...process.env,
+        PERSON_AGENT_HOME: this.paths.home,
         PERSON_AGENT_PORT: String(this.agentServerPort),
         PERSON_AGENT_DAEMON: "1",
       },
@@ -78,10 +103,26 @@ export class ProcessController {
     this.child = child;
     const pid = child.pid;
     if (pid === undefined) {
+      this.child = null;
       throw new Error("无法启动 Agent Server 子进程");
     }
 
-    await this.waitForHealth(this.agentServerPort, 15_000);
+    // 子进程提前退出时立即失败
+    let exitedEarly = false;
+    child.once("exit", () => {
+      exitedEarly = true;
+    });
+
+    try {
+      await this.waitForHealth(this.agentServerPort, HEALTH_TIMEOUT_MS, () => exitedEarly);
+    } catch (error) {
+      // 启动失败：清理子进程树、状态和引用
+      await killProcessTree(pid);
+      await waitForExit(pid, 3_000);
+      this.child = null;
+      this.updateAgentServerStatus("error");
+      throw error;
+    }
 
     this.writeSupervisorState({
       supervisorPid: process.pid,
@@ -111,16 +152,10 @@ export class ProcessController {
       if (isProcessRunning(pid)) throw error;
     }
 
-    const deadline = Date.now() + 10_000;
-    while (isProcessRunning(pid) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    if (isProcessRunning(pid)) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch { /* already dead */ }
-      await new Promise((resolve) => setTimeout(resolve, 200));
+    const exited = await waitForExit(pid, 10_000);
+    if (!exited) {
+      await killProcessTree(pid);
+      await waitForExit(pid, 3_000);
     }
 
     this.child = null;
@@ -163,9 +198,16 @@ export class ProcessController {
     return { logs: `[...已截断，仅显示最后 ${Math.floor(maxBytes / 1024)}KB...]\n${buffer.toString("utf8")}`, truncated: true };
   }
 
-  private async waitForHealth(port: number, timeoutMs: number): Promise<void> {
+  private async waitForHealth(
+    port: number,
+    timeoutMs: number,
+    isExited: () => boolean,
+  ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (isExited()) {
+        throw new Error("Agent Server 子进程启动后立即退出");
+      }
       try {
         const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
           signal: AbortSignal.timeout(2_000),
@@ -175,13 +217,6 @@ export class ProcessController {
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
     throw new Error(`Agent Server 启动超时：${timeoutMs}ms 内未响应 /api/health`);
-  }
-
-  private cleanupOrphanedState(): void {
-    const state = readRuntimeState(this.paths);
-    if (state !== undefined && state.pid !== process.pid && !isProcessRunning(state.pid)) {
-      // Server state is stale (orphaned PID)
-    }
   }
 
   private readSupervisorState(): SupervisorState | undefined {
@@ -204,7 +239,10 @@ export class ProcessController {
 
   private updateAgentServerStatus(status: AgentServerStatus): void {
     const current = this.readSupervisorState();
-    if (current === undefined) return;
+    if (current === undefined) {
+      if (status === "stopped" || status === "error") return;
+      return;
+    }
     this.writeSupervisorState({
       ...current,
       agentServerStatus: status,

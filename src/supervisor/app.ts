@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { createNodeWebSocket } from "@hono/node-ws";
+import { WebSocket as UpstreamWebSocket } from "ws";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -14,10 +16,25 @@ export interface SupervisorAppOptions {
   readonly webDistDir?: string;
 }
 
-export function createSupervisorApp(options: SupervisorAppOptions): Hono {
+export interface SupervisorAppResult {
+  readonly app: Hono;
+  readonly nodeWebSocket: ReturnType<typeof createNodeWebSocket>;
+}
+
+function sanitizeLogContent(content: string): string {
+  return content
+    .replace(/(sk-[A-Za-z0-9_-]{8,})/g, "sk-***")
+    .replace(/(Authorization|authorization)[:=]\s*\S+/g, "$1: ***")
+    .replace(/(api[-_]?key)[:=]\s*\S+/gi, "$1=***");
+}
+
+export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAppResult {
   const app = new Hono();
+  const nodeWebSocket = createNodeWebSocket({ app });
   const { controller, supervisorPort, agentServerPort } = options;
   const startedAt = Date.now();
+
+  // --- Supervisor API ---
 
   app.get("/api/supervisor/status", async (context) => {
     const agentStatus = await controller.getAgentServerStatus();
@@ -45,9 +62,6 @@ export function createSupervisorApp(options: SupervisorAppOptions): Hono {
       return context.json({ status: "started", pid: result.pid, port: result.port }, 201);
     } catch (error) {
       const message = error instanceof Error ? error.message : "启动失败";
-      if (message.includes("已在运行") || message.includes("already")) {
-        return context.json({ status: "already_running" }, 200);
-      }
       return context.json({ status: "error", message }, 500);
     }
   });
@@ -78,22 +92,100 @@ export function createSupervisorApp(options: SupervisorAppOptions): Hono {
 
   app.get("/api/supervisor/logs", (context) => {
     const { logs, truncated } = controller.readLogTail();
-    return context.json({ logs, truncated });
+    return context.json({ logs: sanitizeLogContent(logs), truncated });
   });
 
-  // Agent Server address discovery for Web
+  // Agent Server 地址发现（WS 与直连场景）
   app.get("/api/supervisor/agent-server", (context) => {
     return context.json({
       url: `http://127.0.0.1:${agentServerPort}`,
       port: agentServerPort,
+      wsUrl: `ws://127.0.0.1:${agentServerPort}/ws`,
     });
   });
 
-  // Serve static web assets in production
+  // --- WS 代理到 Agent Server ---
+  app.get("/ws", nodeWebSocket.upgradeWebSocket(() => ({
+    onOpen(_evt, clientWs) {
+      const upstream = new UpstreamWebSocket(`ws://127.0.0.1:${agentServerPort}/ws`);
+      const pending: string[] = [];
+      let upstreamOpen = false;
+
+      upstream.on("open", () => {
+        upstreamOpen = true;
+        for (const message of pending.splice(0)) upstream.send(message);
+      });
+      upstream.on("message", (data) => {
+        try {
+          clientWs.send(typeof data === "string" ? data : data.toString());
+        } catch { /* client gone */ }
+      });
+      upstream.on("close", () => {
+        try { clientWs.close(); } catch { /* already closed */ }
+      });
+      upstream.on("error", () => {
+        try { clientWs.close(); } catch { /* already closed */ }
+      });
+
+      clientWs.raw?.addEventListener("message", (evt) => {
+        const raw = typeof evt.data === "string" ? evt.data : new TextDecoder().decode(evt.data as ArrayBuffer);
+        if (upstreamOpen) {
+          upstream.send(raw);
+        } else {
+          pending.push(raw);
+        }
+      });
+      clientWs.raw?.addEventListener("close", () => {
+        upstream.close();
+      });
+    },
+  })));
+
+  // --- HTTP/SSE 代理：非 Supervisor 的 /api 请求转发到 Agent Server ---
+  app.all("/api/*", async (context) => {
+    const requestUrl = new URL(context.req.url);
+    const target = `http://127.0.0.1:${agentServerPort}${requestUrl.pathname}${requestUrl.search}`;
+
+    const headers = new Headers();
+    for (const [name, value] of context.req.raw.headers.entries()) {
+      if (["host", "connection", "content-length"].includes(name.toLowerCase())) continue;
+      headers.set(name, value);
+    }
+
+    const method = context.req.method;
+    const hasBody = !["GET", "HEAD"].includes(method);
+
+    let response: Response;
+    try {
+      response = await fetch(target, {
+        method,
+        headers,
+        ...(hasBody ? { body: await context.req.raw.clone().text() } : {}),
+        redirect: "manual",
+      });
+    } catch {
+      return context.json(
+        { code: "AGENT_UNREACHABLE", message: "Agent Server 未运行或不可达", retryable: true },
+        502,
+      );
+    }
+
+    const responseHeaders = new Headers();
+    for (const [name, value] of response.headers.entries()) {
+      if (["connection", "transfer-encoding", "content-length", "content-encoding"].includes(name.toLowerCase())) continue;
+      responseHeaders.set(name, value);
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      headers: responseHeaders,
+    });
+  });
+
+  // --- 生产模式托管 Web 静态资源 ---
   const webDistDir = options.webDistDir;
   if (webDistDir && fs.existsSync(webDistDir)) {
-    app.use("/*", serveStatic({ root: webDistDir }));
-    // SPA fallback: serve index.html for non-API routes
+    app.use("/assets/*", serveStatic({ root: webDistDir }));
     app.get("*", (context) => {
       const indexPath = path.join(webDistDir, "index.html");
       if (fs.existsSync(indexPath)) {
@@ -107,5 +199,5 @@ export function createSupervisorApp(options: SupervisorAppOptions): Hono {
     context.json({ code: "NOT_FOUND", message: "资源不存在" }, 404),
   );
 
-  return app;
+  return { app, nodeWebSocket };
 }

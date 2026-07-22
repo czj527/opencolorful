@@ -1,9 +1,15 @@
+export interface PiMessageEntry {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
 export interface PiSessionHandle {
   readonly id: string;
   readonly path: string;
   readonly persisted: boolean;
   readonly entryCount: number;
   readonly messages: readonly string[];
+  readonly messageEntries: readonly PiMessageEntry[];
   readonly model: { readonly providerId: string; readonly modelId: string } | null;
   appendUserMessage(content: string): void;
   appendAssistantMessage(content: string): void;
