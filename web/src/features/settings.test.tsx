@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { validateProviderForm, hasProviderFormErrors } from "../features/providers/provider-form.js";
-import { validateSessionSettings, hasSessionSettingsErrors } from "../features/sessions/session-settings.js";
+import {
+  validateSessionSettings,
+  hasSessionSettingsErrors,
+  settingsFormFromSession,
+  applySessionSettingsChange,
+  type SessionSettingsFormData,
+} from "../features/sessions/session-settings.js";
 
 describe("provider form validation", () => {
   const validForm = {
@@ -126,5 +132,105 @@ describe("session settings validation", () => {
       });
       expect(hasSessionSettingsErrors(errors)).toBe(false);
     }
+  });
+});
+
+describe("settingsFormFromSession", () => {
+  it("builds form state from a session view", () => {
+    const form = settingsFormFromSession({
+      toolMode: "all",
+      workspaceCwd: "/work/a",
+      workspaceConfirmed: true,
+      thinkingLevel: "high",
+    });
+    expect(form).toEqual({
+      toolMode: "all",
+      workspaceCwd: "/work/a",
+      workspaceConfirmed: true,
+      thinkingLevel: "high",
+    });
+  });
+
+  it("falls back to safe defaults for unknown persisted values", () => {
+    const form = settingsFormFromSession({
+      toolMode: "bogus",
+      workspaceCwd: null,
+      workspaceConfirmed: false,
+      thinkingLevel: "bogus",
+    });
+    expect(form.toolMode).toBe("read-only");
+    expect(form.workspaceCwd).toBe("");
+    expect(form.thinkingLevel).toBe("medium");
+  });
+
+  it("produces independent state per session (no cross-session leakage)", () => {
+    const sessionA = settingsFormFromSession({ toolMode: "all", workspaceCwd: "/a", workspaceConfirmed: true, thinkingLevel: "max" });
+    const sessionB = settingsFormFromSession({ toolMode: "read-only", workspaceCwd: "/b", workspaceConfirmed: false, thinkingLevel: "low" });
+    expect(sessionA.workspaceConfirmed).toBe(true);
+    expect(sessionB.workspaceConfirmed).toBe(false);
+    expect(sessionA.thinkingLevel).toBe("max");
+    expect(sessionB.thinkingLevel).toBe("low");
+  });
+});
+
+describe("applySessionSettingsChange", () => {
+  const base: SessionSettingsFormData = {
+    toolMode: "read-only",
+    workspaceCwd: "/work/original",
+    workspaceConfirmed: false,
+    thinkingLevel: "medium",
+  };
+
+  it("forces reconfirmation when switching from non-all to all", () => {
+    const next = applySessionSettingsChange(
+      { ...base, workspaceConfirmed: true },
+      { toolMode: "all" },
+      "/work/original",
+    );
+    expect(next.workspaceConfirmed).toBe(false);
+  });
+
+  it("clears confirmation when workspace cwd deviates from the persisted value", () => {
+    const confirmedAll: SessionSettingsFormData = {
+      ...base,
+      toolMode: "all",
+      workspaceConfirmed: true,
+    };
+    const next = applySessionSettingsChange(confirmedAll, { workspaceCwd: "/work/changed" }, "/work/original");
+    expect(next.workspaceConfirmed).toBe(false);
+  });
+
+  it("keeps confirmation when cwd stays at the persisted value", () => {
+    const confirmedAll: SessionSettingsFormData = {
+      ...base,
+      toolMode: "all",
+      workspaceConfirmed: true,
+    };
+    const next = applySessionSettingsChange(confirmedAll, { thinkingLevel: "high" }, "/work/original");
+    expect(next.workspaceConfirmed).toBe(true);
+  });
+
+  it("re-confirming after a cwd change is possible (user checks the box again)", () => {
+    const confirmedAll: SessionSettingsFormData = {
+      ...base,
+      toolMode: "all",
+      workspaceConfirmed: true,
+    };
+    let next = applySessionSettingsChange(confirmedAll, { workspaceCwd: "/work/changed" }, "/work/original");
+    expect(next.workspaceConfirmed).toBe(false);
+    next = applySessionSettingsChange(next, { workspaceConfirmed: true }, "/work/original");
+    expect(next.workspaceConfirmed).toBe(true);
+  });
+
+  it("switching from all to read-only and back requires fresh confirmation", () => {
+    const confirmedAll: SessionSettingsFormData = {
+      ...base,
+      toolMode: "all",
+      workspaceConfirmed: true,
+    };
+    const toReadOnly = applySessionSettingsChange(confirmedAll, { toolMode: "read-only" }, "/work/original");
+    // 切走时保留确认值以便回显，但回到 all 必须重新确认
+    const backToAll = applySessionSettingsChange(toReadOnly, { toolMode: "all" }, "/work/original");
+    expect(backToAll.workspaceConfirmed).toBe(false);
   });
 });

@@ -1,7 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { SessionView } from "../../lib/types.js";
-import { TOOL_MODES, THINKING_LEVELS, validateSessionSettings, hasSessionSettingsErrors, type SessionSettingsFormData, type SessionSettingsFormErrors } from "./session-settings.js";
+import {
+  TOOL_MODES,
+  THINKING_LEVELS,
+  validateSessionSettings,
+  hasSessionSettingsErrors,
+  settingsFormFromSession,
+  applySessionSettingsChange,
+  type SessionSettingsFormData,
+  type SessionSettingsFormErrors,
+} from "./session-settings.js";
 
 interface SessionSettingsPanelProps {
   readonly session: SessionView;
@@ -10,14 +19,21 @@ interface SessionSettingsPanelProps {
 }
 
 export function SessionSettingsPanel({ session, onSave, saving }: SessionSettingsPanelProps) {
-  const [form, setForm] = useState<SessionSettingsFormData>({
-    toolMode: (session.toolMode as SessionSettingsFormData["toolMode"]) ?? "read-only",
-    workspaceCwd: session.workspaceCwd ?? "",
-    workspaceConfirmed: session.workspaceConfirmed,
-    thinkingLevel: (session.thinkingLevel as SessionSettingsFormData["thinkingLevel"]) ?? "medium",
-  });
+  const [form, setForm] = useState<SessionSettingsFormData>(() => settingsFormFromSession(session));
   const [errors, setErrors] = useState<SessionSettingsFormErrors>({});
   const [saved, setSaved] = useState(false);
+
+  // Session 切换或外部更新时同步表单（配合父级 key={session.id} 双保险）
+  useEffect(() => {
+    setForm(settingsFormFromSession(session));
+    setErrors({});
+    setSaved(false);
+  }, [session.id, session.toolMode, session.workspaceCwd, session.workspaceConfirmed, session.thinkingLevel]);
+
+  const applyChange = (change: Partial<SessionSettingsFormData>) => {
+    setForm((prev) => applySessionSettingsChange(prev, change, session.workspaceCwd));
+    setSaved(false);
+  };
 
   const handleSave = async () => {
     const validationErrors = validateSessionSettings(form);
@@ -35,7 +51,7 @@ export function SessionSettingsPanel({ session, onSave, saving }: SessionSetting
   };
 
   return (
-    <div style={{ padding: 12 }}>
+    <div style={{ padding: 12 }} data-testid="session-settings-panel">
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>会话设置</div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -44,14 +60,14 @@ export function SessionSettingsPanel({ session, onSave, saving }: SessionSetting
           <select
             id="tool-mode"
             value={form.toolMode}
-            onChange={(e) => setForm((prev) => ({ ...prev, toolMode: e.target.value as SessionSettingsFormData["toolMode"] }))}
+            onChange={(e) => applyChange({ toolMode: e.target.value as SessionSettingsFormData["toolMode"] })}
             style={{ width: "100%", padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
           >
             {TOOL_MODES.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
-          {errors.toolMode && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 2 }}>{errors.toolMode}</div>}
+          {errors.toolMode && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 2 }} role="alert">{errors.toolMode}</div>}
         </div>
 
         {form.toolMode !== "off" && (
@@ -61,11 +77,11 @@ export function SessionSettingsPanel({ session, onSave, saving }: SessionSetting
               id="workspace-cwd"
               type="text"
               value={form.workspaceCwd}
-              onChange={(e) => setForm((prev) => ({ ...prev, workspaceCwd: e.target.value }))}
+              onChange={(e) => applyChange({ workspaceCwd: e.target.value })}
               placeholder="/path/to/workspace"
               style={{ width: "100%", padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
             />
-            {errors.workspaceCwd && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 2 }}>{errors.workspaceCwd}</div>}
+            {errors.workspaceCwd && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 2 }} role="alert">{errors.workspaceCwd}</div>}
           </div>
         )}
 
@@ -75,7 +91,7 @@ export function SessionSettingsPanel({ session, onSave, saving }: SessionSetting
               <input
                 type="checkbox"
                 checked={form.workspaceConfirmed}
-                onChange={(e) => setForm((prev) => ({ ...prev, workspaceConfirmed: e.target.checked }))}
+                onChange={(e) => applyChange({ workspaceConfirmed: e.target.checked })}
               />
               确认授权完整工具权限
             </label>
@@ -87,7 +103,7 @@ export function SessionSettingsPanel({ session, onSave, saving }: SessionSetting
           <select
             id="thinking-level"
             value={form.thinkingLevel}
-            onChange={(e) => setForm((prev) => ({ ...prev, thinkingLevel: e.target.value as SessionSettingsFormData["thinkingLevel"] }))}
+            onChange={(e) => applyChange({ thinkingLevel: e.target.value as SessionSettingsFormData["thinkingLevel"] })}
             style={{ width: "100%", padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
           >
             {THINKING_LEVELS.map((l) => (

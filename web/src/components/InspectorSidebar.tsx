@@ -67,6 +67,7 @@ export function InspectorSidebar({
         {tab === "session" && (
           session ? (
             <SessionSettingsPanel
+              key={session.id}
               session={session}
               onSave={onSaveSessionSettings}
               saving={saving}
