@@ -4,7 +4,8 @@
 
 最终验收补充：真实 OpenAI-compatible 本地 Provider、PI `read` 工具、Server 重启继续
 会话、工作区授权重新确认、思考级别、Runtime 配置失效重建、事件脱敏和 TUI Compact
-均已纳入自动化验证。最终质量门为 24 个测试文件、130 个用例。
+均已纳入自动化验证。验收修复提交为 `333fa0a`；最终质量门为 24 个测试文件、
+130 个用例。
 
 **目标：** 将持久化 Provider 配置接入真实 PI `AgentSession`，完成真实 LLM 对话、Session 恢复、Abort/Compact 和 PI 内置工具调用。
 

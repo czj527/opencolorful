@@ -18,6 +18,7 @@ Git 历史。
 - Phase 0 已完成（`phase-0-complete`）；
 - Phase 1 已完成（`phase-1-complete`）；
 - Phase 2 已完成（`phase-2-complete`），当前在 `main` 分支；
+- Phase 2 最终验收修复提交：`333fa0a`；
 - 生产 Server 自动装配全部 Service（数据库、Provider、Session、Prompt、Replay、WS）；
 - `SessionRuntime.create()` 支持 faux（测试）和真实模型（生产）两条路径；
 - 工具权限三级：`off` / `read-only` / `all`（需 cwd 确认）；
