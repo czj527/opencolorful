@@ -14,6 +14,7 @@ import {
 import type {
   PiAgentEvent,
   PiAgentSessionHandle,
+  PiAgentSessionOptions,
   PiFauxAgentOptions,
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
@@ -166,6 +167,61 @@ export async function createPiFauxAgentSession(
     resourceLoader: minimalResourceLoader(),
     noTools: "all",
   });
+
+  return {
+    sessionId: session.sessionId,
+    subscribe(listener) {
+      return session.subscribe((event) => {
+        const mapped = mapAgentEvent(event);
+        if (mapped) listener(mapped);
+      });
+    },
+    prompt(text) {
+      return session.prompt(text);
+    },
+    abort() {
+      return session.abort();
+    },
+    async compact() {
+      await session.compact();
+    },
+    dispose() {
+      session.dispose();
+    },
+  };
+}
+
+export async function createPiAgentSession(
+  options: PiAgentSessionOptions,
+): Promise<PiAgentSessionHandle> {
+  const modelRuntime = options.modelRuntime as unknown as ModelRuntime;
+  const model = modelRuntime.getModel(options.providerId, options.modelId);
+  if (!model) throw new Error(`Model "${options.providerId}/${options.modelId}" not found in runtime`);
+
+  const settingsManager = SettingsManager.inMemory({
+    compaction: { enabled: false },
+    retry: { enabled: false },
+  });
+
+  const sessionManager = getSessionManager(options.sessionHandle);
+
+  const createOptions: Parameters<typeof createAgentSession>[0] = {
+    cwd: options.cwd,
+    agentDir: path.dirname(options.authPath),
+    modelRuntime,
+    model,
+    settingsManager,
+    sessionManager,
+    resourceLoader: minimalResourceLoader(),
+  };
+
+  if (options.noTools === "all") {
+    createOptions.noTools = "all";
+  } else if (options.tools && options.tools.length > 0) {
+    createOptions.tools = [...options.tools];
+  }
+
+  const { session } = await createAgentSession(createOptions);
 
   return {
     sessionId: session.sessionId,

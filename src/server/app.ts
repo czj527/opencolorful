@@ -64,6 +64,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.sessionService !== undefined ? { sessionService: options.sessionService } : {}),
       ...(options.replayStore !== undefined ? { replayStore: options.replayStore } : {}),
       ...(options.paths !== undefined ? { paths: options.paths } : {}),
+      ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {

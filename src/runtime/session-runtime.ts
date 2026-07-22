@@ -1,23 +1,38 @@
 import type { PlatformEventEnvelope } from "../contracts/events.js";
 import {
+  createPiAgentSession,
   createPiFauxAgentSession,
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
   type PiSessionHandle,
 } from "../pi-sdk/index.js";
+import type { ModelService } from "./model-service.js";
 import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
 import { type AbortResult, ExecutionRegistry } from "./execution-registry.js";
 
-export interface SessionRuntimeOptions
-  extends Omit<PiFauxAgentOptions, "response" | "tokensPerSecond"> {
-  readonly faux: {
+export interface SessionRuntimeOptions {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly sessionDir?: string;
+  readonly authPath: string;
+  readonly providerId?: string;
+  readonly modelId?: string;
+  // faux 模式（测试用）
+  readonly faux?: {
     readonly response: string;
     readonly tokensPerSecond?: number;
   };
+  // 真实模型模式
+  readonly modelService?: ModelService;
+  readonly resolveProviderId?: string;
+  readonly resolveModelId?: string;
+  // 共享
   readonly publish: (event: PlatformEventEnvelope) => void;
   readonly replayStore?: EventReplayStore;
   readonly sessionHandle?: PiSessionHandle;
+  readonly tools?: readonly string[];
+  readonly noTools?: "all";
 }
 
 export interface PromptRun {
@@ -43,19 +58,46 @@ export class SessionRuntime {
   }
 
   static async create(options: SessionRuntimeOptions): Promise<SessionRuntime> {
-    const agent = await createPiFauxAgentSession({
-      sessionId: options.sessionId,
-      cwd: options.cwd,
-      sessionDir: options.sessionDir,
-      authPath: options.authPath,
-      providerId: options.providerId,
-      modelId: options.modelId,
-      response: options.faux.response,
-      ...(options.sessionHandle ? { sessionHandle: options.sessionHandle } : {}),
-      ...(options.faux.tokensPerSecond
-        ? { tokensPerSecond: options.faux.tokensPerSecond }
-        : {}),
-    });
+    let agent: PiAgentSessionHandle;
+
+    if (options.faux !== undefined) {
+      if (!options.sessionDir || !options.providerId || !options.modelId) {
+        throw new Error("Faux 模式需要 sessionDir、providerId 和 modelId");
+      }
+      agent = await createPiFauxAgentSession({
+        sessionId: options.sessionId,
+        cwd: options.cwd,
+        sessionDir: options.sessionDir,
+        authPath: options.authPath,
+        providerId: options.providerId,
+        modelId: options.modelId,
+        response: options.faux.response,
+        ...(options.sessionHandle ? { sessionHandle: options.sessionHandle } : {}),
+        ...(options.faux.tokensPerSecond
+          ? { tokensPerSecond: options.faux.tokensPerSecond }
+          : {}),
+      });
+    } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
+      // 真实模型路径
+      const resolved = options.modelService.resolveModel(
+        options.resolveProviderId,
+        options.resolveModelId,
+      );
+      agent = await createPiAgentSession({
+        sessionId: options.sessionId,
+        cwd: options.cwd,
+        authPath: options.authPath,
+        modelRuntime: options.modelService.getRuntime(),
+        providerId: options.resolveProviderId,
+        modelId: options.resolveModelId,
+        sessionHandle: options.sessionHandle,
+        ...(options.tools ? { tools: options.tools } : {}),
+        ...(options.noTools ? { noTools: options.noTools } : {}),
+      });
+    } else {
+      throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");
+    }
+
     return new SessionRuntime(options.sessionId, agent, options.publish, options.replayStore);
   }
 

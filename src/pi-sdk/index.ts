@@ -24,7 +24,7 @@ import { registerSessionManager } from "./session-manager-registry.js";
 
 export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./version.js";
 export { createPiModelRuntime } from "./model-runtime.js";
-export { createPiFauxAgentSession } from "./agent-session.js";
+export { createPiAgentSession, createPiFauxAgentSession } from "./agent-session.js";
 export type {
   OfflineCompletionResult,
   PiCredentialInfo,
