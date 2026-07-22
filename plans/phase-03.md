@@ -1,10 +1,10 @@
 # Phase 3：Supervisor 与 Web UI 实施计划
 
-**状态：已完成（2026-07-22）** | 标签：`phase-3-complete`
+**状态：整改中（2026-07-22 验收不通过，标签已撤回）**
 
-Supervisor 进程管理（启动/停止/重启/日志/状态）、React Web 工作台（三栏布局、
-Provider/Session 设置、流式聊天状态管理、Provider 和 Session 设置验证、
-Playwright 浏览器 E2E）已全部纳入自动化验证。
+首轮验收发现 6 项阻塞问题：Supervisor 未托管 Web、核心 Web 功能未接入、
+SSE/WS 协议不兼容、浏览器运行时错误、E2E 名不副实、smoke-web 进程清理失败。
+正在逐项修复。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task。Phase 3 只能在 `phase-2-complete` 验收通过后开始。
 
@@ -164,7 +164,33 @@ Playwright 浏览器 E2E）已全部纳入自动化验证。
 
 - [x] 记录 Supervisor 端口、Web 开发/生产命令、三栏交互、工具权限和浏览器验收流程。
 - [x] 更新非目标：OAuth、远程访问、Electron、多 Agent、逐次审批仍未完成。
-- [ ] 运行：`npm run check:pi-imports`、`npm run typecheck`、`npm test`、`npm run build`、`npm run web:test`、`npm run web:build`、`npx playwright test`、`node scripts/smoke-foundation.mjs`、`node scripts/smoke-web.mjs`。
-- [ ] 检查：`git diff --check`、`git status --short`、敏感文件扫描和残留进程/端口。
-- [ ] 创建标签：`phase-3-complete`。
-- [ ] 提交：`docs: complete phase 3 web workspace`。
+- [x] 运行：`npm run check:pi-imports`、`npm run typecheck`、`npm test`、`npm run build`、`npm run web:test`、`npm run web:build`、`npx playwright test`、`node scripts/smoke-foundation.mjs`、`node scripts/smoke-web.mjs`。
+- [x] 检查：`git diff --check`、`git status --short`、敏感文件扫描和残留进程/端口。
+- [ ] 创建标签：`phase-3-complete`（待二次验收通过后恢复）。
+- [x] 提交：`docs: complete phase 3 web workspace`。
+
+## 二次验收整改（2026-07-22）
+
+首轮验收不通过的 6 项阻塞问题及修复：
+
+1. **Supervisor 未托管 Web/未代理 Agent API** → `createSupervisorApp` 现在返回
+   `{ app, nodeWebSocket }`，注册 WS 代理、HTTP/SSE 透明代理（Agent 停止时返回
+   502 `AGENT_UNREACHABLE`）、`web/dist` 静态托管与 SPA fallback；`start.ts` 自动解析
+   `web/dist`；Vite 分别代理 `/api/supervisor`（4311）、`/api`（4310）与 `/ws`。
+2. **核心 Web 功能未接入** → `App.tsx` 完整接线 `chatReducer`/`SseClient`/`WsClient`；
+   Abort 携带真实 `streamId`；`sending` 来自 chat 运行状态；新增 `MessageComposer`、
+   `MessageList`、`ToolCallItem`、`PlanItem`、`UiProjection` 组件；`ProviderSettings`、
+   `SessionSettingsPanel` 挂载到 Inspector；Session 创建显式输入工作目录，支持搜索、
+   归档和模型选择。
+3. **SSE/WS 协议不兼容** → SSE 客户端注册全部命名事件监听器，依赖 EventSource 自动
+   `Last-Event-ID: streamId:sequence` 重连补发，处理 `reset` 事件；WS 客户端按
+   `ClientCommandSchema` 发送 `protocolVersion`/`requestId`/`session.*`/`stream.resume`。
+4. **浏览器运行时错误与类型漂移** → 移除 `process.cwd()`；`SessionView` 与服务端
+   对齐（`model` 为对象、无 `provider` 字段）；服务端新增 `messageEntries`（含角色），
+   TUI 与既有测试保持兼容。
+5. **E2E 名不副实** → 7 个 Playwright 用例全部通过 `page.goto` 驱动真实页面：首屏、
+   页面启动 Server、Provider → Session → 模型 → 真实 Prompt → PI `read` 工具内容、
+   Abort、Agent 停止后页面在线、桌面与窄屏布局折叠。
+6. **smoke-web 进程清理失败** → 等待子进程退出、Windows `taskkill /T /F` 兜底、
+   不再直接 `process.exit(0)`；`process-controller` 健康检查超时/子进程早退时
+   终止进程树并标记 error 状态；日志端点增加 API Key 脱敏测试。

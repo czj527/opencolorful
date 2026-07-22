@@ -5,8 +5,9 @@
 Phase 0 基础骨架已完成。Phase 1 已完成——SSE/WS/TUI/A2UI/TokUI 基础设施。
 Phase 2 已完成——Provider/凭据驱动真实 LLM、PI 内置工具三级权限（off/read-only/all）、
 Provider 错误映射、思考级别和真实 Provider/工具重启 E2E。
-Phase 3 已完成——Supervisor 进程管理 + React Web 工作台（三栏布局、流式聊天、
-Provider/Session 设置、Playwright E2E）。当前标签：`phase-3-complete`。
+Phase 3 整改中——Supervisor 进程管理（Web 静态托管、HTTP/SSE/WS 代理、地址发现）
+与 React Web 工作台（三栏布局、流式聊天、工具事件、Provider/Session 设置、
+真实浏览器 E2E）。标签 `phase-3-complete` 待二次验收通过后恢复。
 
 ## 开始开发
 
@@ -35,6 +36,9 @@ npm run cli -- server start --foreground
 ## Supervisor 和 Web 工作台
 
 ```powershell
+# 先构建 Web（Supervisor 生产模式托管 web/dist）
+npm run web:build
+
 # 启动 Supervisor（默认端口 4311，Agent Server 端口 4310）
 npm run cli -- supervisor start
 
@@ -42,13 +46,15 @@ npm run cli -- supervisor start
 npm run cli -- supervisor start --port 4311 --agent-port 4310
 ```
 
-Supervisor 管理 Agent Server 的生命周期（启动、停止、重启），并提供 Web 静态资源。
-Agent Server 停止时 Supervisor 仍保持在线，可通过 API 重新启动。
+Supervisor 管理 Agent Server 的生命周期（启动、停止、重启），托管 Web 静态资源，
+并将非 Supervisor 的 HTTP/SSE 请求透明代理到 Agent Server；WebSocket 通过
+`/ws` 代理或 `/api/supervisor/agent-server` 地址发现连接。Agent Server 停止时
+Supervisor 与 Web 页面仍保持在线，可随时通过页面重新启动。
 
 Web 工作台使用 React + Vite 构建，位于 `web/` npm workspace：
 
 ```powershell
-# Web 开发模式（Vite 代理到 Agent Server）
+# Web 开发模式（/api/supervisor → 4311，/api 与 /ws → 4310）
 npm run web:dev
 
 # Web 生产构建
@@ -57,7 +63,7 @@ npm run web:build
 # Web 单元测试
 npm run web:test
 
-# Playwright 浏览器 E2E
+# Playwright 真实浏览器验收（需先 npm run web:build）
 cd web && npx playwright test
 ```
 
@@ -91,5 +97,5 @@ cd web && npx playwright test
 - OAuth、沙盒和逐次工具审批仍未完成；
 - 私人助理、Coding Agent Profile、记忆、多 Agent、插件不在当前范围内；
 - Electron、LAN/远程访问和云端同步未实现；
-- Web UI 的 A2UI/TokUI 投影组件尚未连接到实时事件流；
+- Web 端 A2UI/TokUI 投影当前展示附件与安全占位，未渲染完整交互组件；
 - Supervisor 不提供系统服务注册，仅作为本地进程管理器。
