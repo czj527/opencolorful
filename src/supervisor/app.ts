@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { serveStatic } from "@hono/node-server/serve-static";
+import fs from "node:fs";
+import path from "node:path";
 
 import { PLATFORM_VERSION } from "../index.js";
 import type { ProcessController } from "./process-controller.js";
@@ -8,6 +11,7 @@ export interface SupervisorAppOptions {
   readonly controller: ProcessController;
   readonly supervisorPort: number;
   readonly agentServerPort: number;
+  readonly webDistDir?: string;
 }
 
 export function createSupervisorApp(options: SupervisorAppOptions): Hono {
@@ -76,6 +80,28 @@ export function createSupervisorApp(options: SupervisorAppOptions): Hono {
     const { logs, truncated } = controller.readLogTail();
     return context.json({ logs, truncated });
   });
+
+  // Agent Server address discovery for Web
+  app.get("/api/supervisor/agent-server", (context) => {
+    return context.json({
+      url: `http://127.0.0.1:${agentServerPort}`,
+      port: agentServerPort,
+    });
+  });
+
+  // Serve static web assets in production
+  const webDistDir = options.webDistDir;
+  if (webDistDir && fs.existsSync(webDistDir)) {
+    app.use("/*", serveStatic({ root: webDistDir }));
+    // SPA fallback: serve index.html for non-API routes
+    app.get("*", (context) => {
+      const indexPath = path.join(webDistDir, "index.html");
+      if (fs.existsSync(indexPath)) {
+        return context.html(fs.readFileSync(indexPath, "utf8"));
+      }
+      return context.notFound();
+    });
+  }
 
   app.notFound((context) =>
     context.json({ code: "NOT_FOUND", message: "资源不存在" }, 404),
