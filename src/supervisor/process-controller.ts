@@ -42,6 +42,7 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
 
 export class ProcessController {
   private child: ChildProcess | null = null;
+  private startPromise: Promise<{ pid: number; port: number }> | null = null;
   private readonly paths: RuntimePaths;
   private readonly agentServerPort: number;
   private readonly supervisorPort: number;
@@ -66,11 +67,28 @@ export class ProcessController {
   }
 
   get agentServerPid(): number | null {
-    if (this.child?.pid !== undefined) return this.child.pid;
-    return this.readSupervisorState()?.agentServerPid ?? null;
+    if (this.child !== null && this.child.exitCode === null && this.child.pid !== undefined) {
+      return this.child.pid;
+    }
+    const statePid = this.readSupervisorState()?.agentServerPid ?? null;
+    if (statePid !== null && isProcessRunning(statePid)) return statePid;
+    return null;
   }
 
   async startAgentServer(): Promise<{ pid: number; port: number }> {
+    // 串行化并发 start：第二个调用等待第一个完成
+    if (this.startPromise !== null) {
+      return this.startPromise;
+    }
+    this.startPromise = this.doStartAgentServer();
+    try {
+      return await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  private async doStartAgentServer(): Promise<{ pid: number; port: number }> {
     if (this.agentServerRunning) {
       const pid = this.agentServerPid;
       if (pid !== null) {
@@ -107,19 +125,26 @@ export class ProcessController {
       throw new Error("无法启动 Agent Server 子进程");
     }
 
-    // 子进程提前退出时立即失败
+    // 子进程提前退出时立即失败；退出后清理引用与状态
     let exitedEarly = false;
     child.once("exit", () => {
       exitedEarly = true;
+      if (this.child === child) {
+        this.child = null;
+      }
+      this.updateAgentServerStatus("stopped");
     });
 
     try {
-      await this.waitForHealth(this.agentServerPort, HEALTH_TIMEOUT_MS, () => exitedEarly);
+      // 健康检查必须验证响应 PID 属于当前子进程，防止端口被其他服务占用时误判
+      await this.waitForHealth(this.agentServerPort, HEALTH_TIMEOUT_MS, () => exitedEarly, pid);
     } catch (error) {
       // 启动失败：清理子进程树、状态和引用
       await killProcessTree(pid);
       await waitForExit(pid, 3_000);
-      this.child = null;
+      if (this.child === child) {
+        this.child = null;
+      }
       this.updateAgentServerStatus("error");
       throw error;
     }
@@ -202,6 +227,7 @@ export class ProcessController {
     port: number,
     timeoutMs: number,
     isExited: () => boolean,
+    expectedPid: number,
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -212,11 +238,17 @@ export class ProcessController {
         const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
           signal: AbortSignal.timeout(2_000),
         });
-        if (response.ok) return;
+        if (response.ok) {
+          const body = (await response.json()) as { pid?: unknown };
+          // 端口可能被其他服务占用并伪造健康响应，必须验证 PID 属于当前子进程
+          if (body.pid === expectedPid) {
+            return;
+          }
+        }
       } catch { /* not ready yet */ }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    throw new Error(`Agent Server 启动超时：${timeoutMs}ms 内未响应 /api/health`);
+    throw new Error(`Agent Server 启动超时：${timeoutMs}ms 内未响应 /api/health（或端口被占用）`);
   }
 
   private readSupervisorState(): SupervisorState | undefined {

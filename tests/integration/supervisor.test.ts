@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
@@ -12,12 +13,16 @@ import { isProcessRunning } from "../../src/server/runtime-state.js";
 import type { SupervisorStatusResponse } from "../../src/supervisor/types.js";
 
 const temporaryDirectories: string[] = [];
+const fakeServers: http.Server[] = [];
 let supervisorInstance: Awaited<ReturnType<typeof startSupervisor>> | null = null;
 
 afterEach(async () => {
   if (supervisorInstance) {
     await supervisorInstance.stop().catch(() => {});
     supervisorInstance = null;
+  }
+  for (const server of fakeServers.splice(0)) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   for (const directory of temporaryDirectories.splice(0)) {
     // Windows 上子进程文件句柄（SQLite WAL、日志、Defender 扫描）释放有延迟，
@@ -375,4 +380,76 @@ describe("supervisor", () => {
     expect(body.logs).not.toContain("sk-secret-token-12345");
     expect(body.logs).toContain("sk-***");
   });
+
+  it("rejects start when port is occupied by a fake health service", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+
+    // 伪造健康服务：占用 Agent 端口并返回不属于子进程的 PID
+    const fake = http.createServer((req, res) => {
+      if (req.url === "/api/health") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: "ok", version: "0.1.0", pid: 999999, uptimeSeconds: 1 }));
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    fakeServers.push(fake);
+    await new Promise<void>((resolve) => fake.listen(agentPort, "127.0.0.1", () => resolve()));
+
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    // PID 不匹配 → 不得误报成功；子进程最终也会因 EADDRINUSE 退出
+    await expect(controller.startAgentServer()).rejects.toThrow();
+    // 失败后 child 与状态必须清理干净
+    expect(controller.agentServerPid).toBeNull();
+    expect(controller.agentServerRunning).toBe(false);
+  }, 30_000);
+
+  it("serializes concurrent start calls", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const [first, second] = await Promise.all([
+      controller.startAgentServer(),
+      controller.startAgentServer(),
+    ]);
+    expect(second.pid).toBe(first.pid);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+
+  it("clears child reference and state when the agent process exits unexpectedly", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const { pid } = await controller.startAgentServer();
+    expect(controller.agentServerPid).toBe(pid);
+
+    // 模拟异常退出：强杀子进程
+    process.kill(pid, "SIGKILL");
+    const deadline = Date.now() + 5_000;
+    while (controller.agentServerPid !== null && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(controller.agentServerPid).toBeNull();
+    expect(controller.agentServerRunning).toBe(false);
+  }, 30_000);
 });
