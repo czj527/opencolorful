@@ -7,7 +7,7 @@ export function mapProviderError(error: unknown): ReturnType<typeof createApiErr
   // 移除可能包含凭据的 URL 和 header
   const sanitized = message
     .replace(/https?:\/\/[^\s]+/g, "[URL]")
-    .replace(/(?:Authorization|api[_-]?key)[:\s]+[^\s]+/gi, "[AUTH_HEADER]")
+    .replace(/(?:Authorization|api[_-]?key)[:\s]+[^\s]+(\s+[^\s]+)?/gi, "[AUTH_HEADER]")
     .replace(/\bsk-[a-zA-Z0-9_-]{5,}\b/g, "[API_KEY]");
 
   // HTTP 401/403 → 认证失败

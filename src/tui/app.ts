@@ -124,6 +124,9 @@ export class TuiApp {
       case "model":
         await this.setModel(rest);
         break;
+      case "config":
+        await this.configureProvider(rest);
+        break;
       case "health":
         await this.showHealth();
         break;
@@ -152,6 +155,7 @@ export class TuiApp {
     this.write("  /chat <sessionId>      同上\n");
     this.write("  /models                列出可用模型\n");
     this.write("  /provider              列出已配置 Provider\n");
+    this.write("  /config <id> <协议> <url> <model> [key]  配置 Provider\n");
     this.write("  /tools <off|read-only|all>  设置工具模式\n");
     this.write("  /model <providerId> <modelId>  选择模型\n");
     this.write("  /health                Server 状态\n");
@@ -247,6 +251,28 @@ export class TuiApp {
       }
     } catch (error) {
       this.write(`获取 Provider 列表失败: ${String(error)}\n`);
+    }
+  }
+
+  private async configureProvider(args: string): Promise<void> {
+    const parts = args.split(/\s+/);
+    if (parts.length < 4) {
+      this.write("用法: /config <providerId> <protocol> <baseUrl> <modelId> [apiKey]\n");
+      this.write("  协议: openai-completions | anthropic-messages | google-generative-ai | ...\n");
+      return;
+    }
+    try {
+      const [providerId, protocol, baseUrl, modelId, apiKey] = parts;
+      await this.api.configureProvider({
+        providerId: providerId!,
+        name: providerId!,
+        protocol: protocol!,
+        baseUrl: baseUrl!,
+        models: [{ modelId: modelId!, name: modelId!, capabilities: { reasoning: false, input: ["text"], contextWindow: 32768, maxTokens: 4096 } }],
+      }, apiKey);
+      this.write(`Provider ${providerId} 已配置\n`);
+    } catch (error) {
+      this.write(`配置失败: ${String(error)}\n`);
     }
   }
 

@@ -87,6 +87,19 @@ export function registerSessionRoutes(app: Hono, sessionService: SessionService)
           400,
         );
       }
+
+      // 目录变更时，若未显式确认，自动清除旧确认
+      const currentView = sessionService.getView(sessionId);
+      const newCwd = typeof body.workspaceCwd === "string" ? body.workspaceCwd : undefined;
+      const explicitConfirmed = "workspaceConfirmed" in body;
+      const cwdChanged = newCwd !== undefined && newCwd !== currentView.workspaceCwd;
+      if (cwdChanged && !explicitConfirmed && typeof body.toolMode === "string" && body.toolMode === "all") {
+        return context.json(
+          createApiError("INVALID_INPUT", "更改工作目录后必须重新确认 all 模式"),
+          400,
+        );
+      }
+
       const updated = sessionService.updateSettings(sessionId, {
         ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),
         ...(typeof body.workspaceCwd === "string" ? { workspaceCwd: body.workspaceCwd } : {}),

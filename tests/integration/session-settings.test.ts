@@ -172,4 +172,49 @@ describe("session settings", () => {
     ctx.service.closeAll();
     ctx.database.close();
   });
+
+  it("rejects directory switch without re-confirmation in all mode", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ sessionService: ctx.service });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "目录切换", cwd: process.cwd() }),
+    });
+    const session = (await createResp.json()) as { id: string };
+
+    // Step 1: 设为 all + 确认目录 A
+    const r1 = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolMode: "all",
+          workspaceCwd: process.cwd(),
+          workspaceConfirmed: true,
+        }),
+      },
+    );
+    expect(r1.status).toBe(200);
+
+    // Step 2: 切换到目录 B 但不重新确认 → 应拒绝
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "switched-"));
+    temporaryDirectories.push(tmpDir);
+    const r2 = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          toolMode: "all",
+          workspaceCwd: tmpDir,
+        }),
+      },
+    );
+    expect(r2.status).toBe(400);
+
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
 });

@@ -138,4 +138,14 @@ export class TuiApiClient {
       body: JSON.stringify({ providerId, modelId }),
     });
   }
+
+  async configureProvider(
+    provider: Record<string, unknown>,
+    apiKey?: string,
+  ): Promise<Record<string, unknown>> {
+    return this.request("/api/settings/providers", {
+      method: "PUT",
+      body: JSON.stringify({ provider, ...(apiKey ? { apiKey } : {}) }),
+    });
+  }
 }

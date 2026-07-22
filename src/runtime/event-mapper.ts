@@ -3,6 +3,24 @@ import crypto from "node:crypto";
 import type { PlatformEventEnvelope, PlatformEventType } from "../contracts/events.js";
 import type { PiAgentEvent } from "../pi-sdk/index.js";
 
+const MAX_TOOL_RESULT_LENGTH = 2_000;
+
+function sanitizeToolResult(result: unknown, _isError: boolean): unknown {
+  if (result === undefined || result === null) return result;
+  if (typeof result === "string") {
+    return result.slice(0, MAX_TOOL_RESULT_LENGTH);
+  }
+  if (typeof result === "object") {
+    try {
+      const json = JSON.stringify(result);
+      return JSON.parse(json.slice(0, MAX_TOOL_RESULT_LENGTH));
+    } catch {
+      return "[非 JSON 结果]";
+    }
+  }
+  return result;
+}
+
 export class PlatformEventMapper {
   private sequence = 0;
   private turnId = "";
@@ -70,10 +88,11 @@ export class PlatformEventMapper {
       ];
     }
     if (event.type !== "tool_end") return [];
+    const safeResult = sanitizeToolResult(event.result, event.isError);
     return [
       this.envelope("tool.completed", {
         toolCallId: event.toolCallId,
-        result: event.result,
+        result: safeResult,
         isError: event.isError,
       }),
     ];
