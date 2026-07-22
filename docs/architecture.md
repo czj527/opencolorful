@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-本文描述基础设施阶段的稳定模块边界。Phase 0 已于 2026-07-21 完成。详细决策依据见
+Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模型运行时、Session 工具权限（off/read-only/all）、Provider 错误映射和 API Key 脱敏。
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈
@@ -103,7 +103,8 @@ PI 0.80.10 内存 Session、内存凭据、faux provider 和工具工厂。
 ### runtime
 
 以 Session ID 为入口管理 PI Agent Session。运行态与传输层分离，事件只发布到
-内部 Event Bus。
+内部 Event Bus。Phase 2 新增 `ToolPolicy`（工具权限解析）和 `ProviderErrors`
+（Provider 错误映射与脱敏）。
 
 ### storage
 
