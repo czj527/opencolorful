@@ -10,6 +10,7 @@ import type { ModelService } from "./model-service.js";
 import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
 import { type AbortResult, ExecutionRegistry } from "./execution-registry.js";
+import { mapProviderError } from "./provider-errors.js";
 
 export interface SessionRuntimeOptions {
   readonly sessionId: string;
@@ -156,7 +157,8 @@ export class SessionRuntime {
     try {
       await this.agent.prompt(text);
     } catch (error) {
-      this.emit(mapper.error(error instanceof Error ? error.message : "Prompt 执行失败"));
+      const apiError = mapProviderError(error);
+      this.emit(mapper.error(apiError.message));
     } finally {
       this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);
