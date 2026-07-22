@@ -54,11 +54,8 @@ describe("TUI event rendering", () => {
     expect(result).toBeUndefined();
   });
 
-  it("truncates long thinking deltas", () => {
-    const longText = "x".repeat(200);
-    const result = renderEvent(makeEvent("thinking.delta", { delta: longText }));
-    expect(result).toContain("...");
-    // Should truncate at approximately 120 chars
-    expect(result!.length).toBeLessThan(longText.length + 50);
+  it("renders thinking deltas as dim text without truncation", () => {
+    const result = renderEvent(makeEvent("thinking.delta", { delta: "reasoning..." }));
+    expect(result).toContain("reasoning...");
   });
 });

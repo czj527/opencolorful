@@ -30,7 +30,7 @@ export function renderEvent(event: TuiEvent): string | undefined {
 
     case "thinking.delta": {
       const delta = String(event.payload.delta ?? "");
-      return `${DIM}[思考] ${delta.slice(0, 120)}${delta.length > 120 ? "..." : ""}${RESET}`;
+      return `${DIM}${delta}${RESET}`;
     }
 
     case "tool.started": {
