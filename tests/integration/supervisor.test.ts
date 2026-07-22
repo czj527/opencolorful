@@ -1,0 +1,288 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import { getRuntimePaths } from "../../src/config/paths.js";
+import { ProcessController } from "../../src/supervisor/process-controller.js";
+import { createSupervisorApp } from "../../src/supervisor/app.js";
+import { startSupervisor } from "../../src/supervisor/start.js";
+import { isProcessRunning } from "../../src/server/runtime-state.js";
+import type { SupervisorStatusResponse } from "../../src/supervisor/types.js";
+
+const temporaryDirectories: string[] = [];
+let supervisorInstance: Awaited<ReturnType<typeof startSupervisor>> | null = null;
+
+afterEach(async () => {
+  if (supervisorInstance) {
+    await supervisorInstance.stop().catch(() => {});
+    supervisorInstance = null;
+  }
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function makeTempHome(prefix = "person-agent-supervisor-"): { home: string; paths: ReturnType<typeof getRuntimePaths> } {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  temporaryDirectories.push(home);
+  return { home, paths: getRuntimePaths({ PERSON_AGENT_HOME: home }) };
+}
+
+const CLI_ENTRY = path.resolve(import.meta.dirname, "../../src/cli/main.ts");
+
+async function findFreePort(): Promise<number> {
+  const { createServer } = await import("node:net");
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (address && typeof address === "object") {
+        resolve(address.port);
+      } else {
+        reject(new Error("无法获取端口"));
+      }
+      server.close();
+    });
+    server.on("error", reject);
+  });
+}
+
+describe("supervisor", () => {
+  it("returns stopped status when no agent server is running", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
+
+    const response = await app.request("http://127.0.0.1/api/supervisor/status");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as SupervisorStatusResponse;
+    expect(body.agentServer.status).toBe("stopped");
+    expect(body.agentServer.pid).toBeNull();
+    expect(body.supervisor.pid).toBe(process.pid);
+  });
+
+  it("starts agent server and reports online status", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const { pid } = await controller.startAgentServer();
+    expect(pid).toBeGreaterThan(0);
+    expect(isProcessRunning(pid)).toBe(true);
+
+    const status = await controller.getAgentServerStatus();
+    expect(status).toBe("online");
+
+    // Verify health endpoint is reachable
+    const health = await fetch(`http://127.0.0.1:${agentPort}/api/health`);
+    expect(health.status).toBe(200);
+
+    await controller.stopAgentServer();
+    expect(isProcessRunning(pid)).toBe(false);
+  }, 30_000);
+
+  it("duplicate start returns same PID without spawning a second process", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const first = await controller.startAgentServer();
+    const second = await controller.startAgentServer();
+    expect(second.pid).toBe(first.pid);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+
+  it("stops an active agent server", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const { pid } = await controller.startAgentServer();
+    expect(isProcessRunning(pid)).toBe(true);
+
+    await controller.stopAgentServer();
+    expect(isProcessRunning(pid)).toBe(false);
+
+    const status = await controller.getAgentServerStatus();
+    expect(status).toBe("stopped");
+  }, 30_000);
+
+  it("restarts the agent server with a new PID", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    const first = await controller.startAgentServer();
+    const second = await controller.restartAgentServer();
+    expect(second.pid).not.toBe(first.pid);
+    expect(isProcessRunning(second.pid)).toBe(true);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+
+  it("returns logs endpoint with agent server output", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
+
+    // No log file yet
+    const empty = await app.request("http://127.0.0.1/api/supervisor/logs");
+    expect(empty.status).toBe(200);
+    const emptyBody = (await empty.json()) as { logs: string; truncated: boolean };
+    expect(emptyBody.logs).toBe("");
+
+    // Start server to generate logs
+    await controller.startAgentServer();
+    const logsResponse = await app.request("http://127.0.0.1/api/supervisor/logs");
+    expect(logsResponse.status).toBe(200);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+
+  it("supervisor stays up when agent server is stopped", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const supervisorPort = await findFreePort();
+
+    supervisorInstance = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: agentPort,
+      entryScript: CLI_ENTRY,
+    });
+
+    // Status should show stopped
+    let statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    expect(statusResponse.status).toBe(200);
+    let body = (await statusResponse.json()) as SupervisorStatusResponse;
+    expect(body.agentServer.status).toBe("stopped");
+
+    // Start agent server via API
+    const startResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, {
+      method: "POST",
+    });
+    expect(startResponse.status).toBe(201);
+
+    // Check status again
+    statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    body = (await statusResponse.json()) as SupervisorStatusResponse;
+    expect(body.agentServer.status).toBe("online");
+
+    // Stop agent server
+    const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, {
+      method: "POST",
+    });
+    expect(stopResponse.status).toBe(200);
+
+    // Supervisor should still be running
+    statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    body = (await statusResponse.json()) as SupervisorStatusResponse;
+    expect(body.agentServer.status).toBe("stopped");
+  }, 60_000);
+
+  it("stop and restart via API work correctly", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const supervisorPort = await findFreePort();
+
+    supervisorInstance = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: agentPort,
+      entryScript: CLI_ENTRY,
+    });
+
+    // Start
+    let response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(201);
+    const startBody = (await response.json()) as { status: string; pid: number; port: number };
+    const firstPid = startBody.pid;
+
+    // Restart
+    response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/restart`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+    const restartBody = (await response.json()) as { status: string; pid: number; port: number };
+    expect(restartBody.pid).not.toBe(firstPid);
+
+    // Stop
+    response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+  }, 60_000);
+
+  it("returns 404 for unknown routes", async () => {
+    const { paths } = makeTempHome();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: 0,
+      supervisorPort: 0,
+    });
+    const app = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
+
+    const response = await app.request("http://127.0.0.1/api/unknown");
+    expect(response.status).toBe(404);
+  });
+
+  it("writes supervisor state file with both process PIDs", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+      entryScript: CLI_ENTRY,
+    });
+
+    await controller.startAgentServer();
+
+    const statePath = path.join(paths.runtime, "supervisor.json");
+    expect(fs.existsSync(statePath)).toBe(true);
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    expect(state.supervisorPid).toBe(process.pid);
+    expect(state.agentServerPid).toBeGreaterThan(0);
+    expect(state.agentServerStatus).toBe("online");
+    expect(state.agentServerPort).toBe(agentPort);
+
+    await controller.stopAgentServer();
+  }, 30_000);
+});
