@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-Phase 0、1、2 已于 2026-07-22 完成。Phase 3 新增：Supervisor 进程管理（Agent Server 生命周期控制、Web 静态资源托管）、React Web 工作台（三栏布局、Provider/Session 设置、流式聊天状态管理）、Playwright 浏览器 E2E。
+Phase 0、1、2 已于 2026-07-22 完成。Phase 3 已完成：Supervisor 进程管理（Agent Server 生命周期控制、Web 静态资源托管、HTTP/SSE/WS 透明代理、健康检查 PID 验证、串行化 start、进程树清理）、React Web 工作台（三栏布局、per-stream 事件游标、安全 Markdown 渲染、A2UI/TokUI 白名单投影）、真实 Provider 驱动的 10 个 Playwright 浏览器用例（首屏、表单配置、工具调用、Abort、重启恢复、桌面与窄屏布局）。
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈

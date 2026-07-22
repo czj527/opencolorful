@@ -25,7 +25,7 @@ Git 历史。
 - Provider 错误自动映射为稳定 `ApiError`，自动脱敏 URL 和凭据；
 - 真实 Provider + PI read 工具 + Server 重启 E2E 已完成；
 - Session 设置包含工具模式、工作目录、确认状态和思考级别；
-- Phase 3（Web UI + Supervisor）待开始；
+- Phase 3 已完成（`phase-3-complete`），当前在 `phase-3-supervisor-web` 分支；
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；

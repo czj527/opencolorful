@@ -1,10 +1,10 @@
 # Phase 3：Supervisor 与 Web UI 实施计划
 
-**状态：整改中（2026-07-22 验收不通过，标签已撤回）**
+**状态：二次验收完成（2026-07-22）** | 标签：`phase-3-complete`
 
-首轮验收发现 6 项阻塞问题：Supervisor 未托管 Web、核心 Web 功能未接入、
-SSE/WS 协议不兼容、浏览器运行时错误、E2E 名不副实、smoke-web 进程清理失败。
-正在逐项修复。
+首轮验收发现 6 项阻塞问题。二次整改完成：PID 验证、串行化 start、跨会话设置隔离、
+per-stream 游标、WS Resume、窄屏首屏无重叠、Provider 表单 UI E2E、真实 Abort、
+重启恢复、归档重开、模型能力表单、安全 Markdown、A2UI/TokUI 白名单投影。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task。Phase 3 只能在 `phase-2-complete` 验收通过后开始。
 

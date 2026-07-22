@@ -5,9 +5,9 @@
 Phase 0 基础骨架已完成。Phase 1 已完成——SSE/WS/TUI/A2UI/TokUI 基础设施。
 Phase 2 已完成——Provider/凭据驱动真实 LLM、PI 内置工具三级权限（off/read-only/all）、
 Provider 错误映射、思考级别和真实 Provider/工具重启 E2E。
-Phase 3 整改中——Supervisor 进程管理（Web 静态托管、HTTP/SSE/WS 代理、地址发现）
-与 React Web 工作台（三栏布局、流式聊天、工具事件、Provider/Session 设置、
-真实浏览器 E2E）。标签 `phase-3-complete` 待二次验收通过后恢复。
+Phase 3 已完成——Supervisor 进程管理（Web 静态托管、HTTP/SSE/WS 代理、健康检查 PID 验证、
+串行化 start、进程树清理）与 React Web 工作台（三栏布局、per-stream 游标、安全 Markdown、
+Provider 表单配置、归档重开、真实 Abort、重启恢复、10 个 Playwright 浏览器验收测试）。
 
 ## 开始开发
 
