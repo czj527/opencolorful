@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模型运行时、Session 工具权限（off/read-only/all）、思考级别、Provider/工具结果脱敏和真实 Provider/工具重启 E2E。
+Phase 0、1、2 已于 2026-07-22 完成。Phase 3 新增：Supervisor 进程管理（Agent Server 生命周期控制、Web 静态资源托管）、React Web 工作台（三栏布局、Provider/Session 设置、流式聊天状态管理）、Playwright 浏览器 E2E。
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈
@@ -36,8 +36,16 @@ person-Agent/
 │   ├── runtime/           Agent Session 生命周期和事件映射
 │   ├── server/            Hono 路由、SSE、WebSocket
 │   ├── storage/           SQLite 元数据和 PI Session 定位
+│   ├── supervisor/        Agent Server 进程管理和 Web 托管
 │   ├── tui/               Server 协议客户端
 │   └── ui-projection/     A2UI/TokUI 投影
+├── web/                   React Web 工作台（npm workspace）
+│   ├── src/
+│   │   ├── app/           三栏布局、状态管理
+│   │   ├── components/    通用 UI 组件
+│   │   ├── features/      Provider/Session/Chat 功能模块
+│   │   └── lib/           API/SSE/WS 客户端
+│   └── tests/e2e/         Playwright 浏览器测试
 ├── tests/
 │   ├── contract/
 │   ├── integration/
