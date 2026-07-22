@@ -110,4 +110,18 @@ export class TuiApiClient {
     const params = sinceSeq !== undefined ? `?sinceSeq=${sinceSeq}` : "";
     return `${this.baseUrl}/api/sessions/${sessionId}/events${params}`;
   }
+
+  async listProviders(): Promise<Record<string, unknown>[]> {
+    return this.request<Record<string, unknown>[]>("/api/settings/providers");
+  }
+
+  async updateSessionSettings(
+    sessionId: string,
+    settings: Record<string, unknown>,
+  ): Promise<SessionView> {
+    return this.request<SessionView>(`/api/sessions/${sessionId}/settings`, {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    });
+  }
 }

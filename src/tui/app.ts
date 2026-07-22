@@ -115,6 +115,12 @@ export class TuiApp {
       case "models":
         await this.listModels();
         break;
+      case "provider":
+        await this.listProviders();
+        break;
+      case "tools":
+        await this.setToolMode(rest);
+        break;
       case "health":
         await this.showHealth();
         break;
@@ -142,6 +148,8 @@ export class TuiApp {
     this.write("  /open <sessionId>      打开并进入会话\n");
     this.write("  /chat <sessionId>      同上\n");
     this.write("  /models                列出可用模型\n");
+    this.write("  /provider              列出已配置 Provider\n");
+    this.write("  /tools <off|read-only|all>  设置工具模式\n");
     this.write("  /health                Server 状态\n");
     this.write("  /abort                 中断当前流\n");
     this.write("  /quit                  退出\n");
@@ -219,6 +227,41 @@ export class TuiApp {
       }
     } catch (error) {
       this.write(`获取模型列表失败: ${String(error)}\n`);
+    }
+  }
+
+  private async listProviders(): Promise<void> {
+    try {
+      const providers = await this.api.listProviders();
+      if (providers.length === 0) {
+        this.write("暂无已配置的 Provider\n");
+        return;
+      }
+      for (const p of providers) {
+        const cred = p.credentialConfigured ? "✓" : "✗";
+        this.write(`  [${cred}] ${p.providerId}: ${p.name} (${p.protocol})\n`);
+      }
+    } catch (error) {
+      this.write(`获取 Provider 列表失败: ${String(error)}\n`);
+    }
+  }
+
+  private async setToolMode(mode: string): Promise<void> {
+    if (!mode || !["off", "read-only", "all"].includes(mode)) {
+      this.write("用法: /tools <off|read-only|all>\n");
+      return;
+    }
+    if (this.state.name !== "chat") {
+      this.write("请先进入聊天模式: /chat <sessionId>\n");
+      return;
+    }
+    try {
+      await this.api.updateSessionSettings(this.state.sessionId, {
+        toolMode: mode,
+      });
+      this.write(`工具模式已设为: ${mode}\n`);
+    } catch (error) {
+      this.write(`设置失败: ${String(error)}\n`);
     }
   }
 
