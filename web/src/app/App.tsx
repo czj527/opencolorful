@@ -280,6 +280,8 @@ export function App() {
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
   const leftCollapsed = state.leftSidebar === "collapsed";
   const rightCollapsed = state.rightSidebar === "collapsed";
+  const narrowLayout = typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches;
+  const drawerOpen = narrowLayout && (!leftCollapsed || !rightCollapsed);
 
   // 窄屏一次只打开一个抽屉：打开一侧时收起另一侧
   const handleToggleLeft = useCallback(() => {
@@ -298,6 +300,11 @@ export function App() {
     }
   }, [state.leftSidebar, state.rightSidebar]);
 
+  const closeDrawers = useCallback(() => {
+    if (state.leftSidebar === "expanded") dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+    if (state.rightSidebar === "expanded") dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+  }, [state.leftSidebar, state.rightSidebar]);
+
   return (
     <div className="app-layout">
       <ServerStatusBar
@@ -312,6 +319,14 @@ export function App() {
         rightCollapsed={rightCollapsed}
       />
       <div className="app-main">
+        {drawerOpen && (
+          <div
+            className="drawer-backdrop"
+            onClick={closeDrawers}
+            aria-hidden="true"
+            data-testid="drawer-backdrop"
+          />
+        )}
         <SessionSidebar
           sessions={state.sessions}
           activeSessionId={state.activeSessionId}

@@ -263,23 +263,31 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByRole("main", { name: "聊天区域" })).toBeVisible();
   });
 
-  test("窄屏宽度：侧栏抽屉化且不溢出", async ({ page }) => {
+  test("窄屏宽度：首屏无重叠，抽屉互斥且带遮罩", async ({ page }) => {
     await page.setViewportSize({ width: 480, height: 800 });
     await page.goto(baseUrl());
 
     // 状态栏关键控件在窄屏下仍可见
     await expect(page.getByTestId("connection-status")).toBeVisible();
 
-    // 收起两栏，聊天区域全宽
-    const leftToggle = page.getByRole("button", { name: "收起会话面板" });
-    if (await leftToggle.isVisible()) await leftToggle.click();
-    const rightToggle = page.getByRole("button", { name: "收起详情面板" });
-    if (await rightToggle.isVisible()) await rightToggle.click();
-
+    // 首屏：两侧栏默认收起，聊天区域可见，无任何抽屉重叠
     await expect(page.getByRole("main", { name: "聊天区域" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "会话列表" })).not.toBeVisible();
+    await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
 
-    // 展开左栏（抽屉形式覆盖）
+    // 展开左抽屉：出现遮罩，聊天区仍在底层
     await page.getByRole("button", { name: "展开会话面板" }).click();
     await expect(page.getByRole("complementary", { name: "会话列表" })).toBeVisible();
+    await expect(page.getByTestId("drawer-backdrop")).toBeVisible();
+
+    // 打开右抽屉时左抽屉自动关闭（互斥）
+    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await expect(page.getByRole("complementary", { name: "详情面板" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "会话列表" })).not.toBeVisible();
+
+    // 点击遮罩未被抽屉覆盖的区域关闭抽屉（右抽屉占据右侧，点击左边缘）
+    await page.getByTestId("drawer-backdrop").click({ position: { x: 10, y: 400 } });
+    await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
+    await expect(page.getByRole("main", { name: "聊天区域" })).toBeVisible();
   });
 });

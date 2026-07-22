@@ -93,14 +93,14 @@ body {
   overflow: hidden;
 }
 
-/* Responsive: narrow screens */
+/* Responsive: narrow screens — 抽屉 + 遮罩，一次只开一个（由 App 状态保证） */
 @media (max-width: 1024px) {
   .app-inspector {
     position: absolute;
     right: 0;
     top: var(--statusbar-height);
     bottom: 0;
-    z-index: 10;
+    z-index: 20;
     box-shadow: -4px 0 12px rgba(0, 0, 0, 0.3);
   }
 
@@ -115,12 +115,19 @@ body {
     left: 0;
     top: var(--statusbar-height);
     bottom: 0;
-    z-index: 10;
+    z-index: 20;
     box-shadow: 4px 0 12px rgba(0, 0, 0, 0.3);
   }
 
   .app-sidebar-left.collapsed {
     box-shadow: none;
+  }
+
+  .drawer-backdrop {
+    position: absolute;
+    inset: var(--statusbar-height) 0 0 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 15;
   }
 }
 
