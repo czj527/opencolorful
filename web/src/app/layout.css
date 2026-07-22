@@ -328,6 +328,19 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
+.spinner-icon {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.streaming-cursor {
+  animation: blink 1s step-end infinite;
+  color: var(--accent);
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
 }

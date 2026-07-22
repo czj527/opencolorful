@@ -85,13 +85,13 @@ describe("appReducer", () => {
         createdAt: "2026-01-01",
         updatedAt: "2026-01-01",
         archived: false,
-        provider: null,
-        model: null,
         toolMode: "read-only",
         workspaceCwd: "/tmp",
         workspaceConfirmed: false,
         thinkingLevel: "medium",
         messages: [],
+        messageEntries: [],
+        model: null,
       },
     ];
     let state = appReducer(initialAppState, { type: "SET_SESSIONS", payload: sessions });
