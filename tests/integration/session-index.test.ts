@@ -27,11 +27,11 @@ describe("session metadata index", () => {
     const first = openMetadataDatabase(databasePath);
 
     expect(first.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(first.prepare("SELECT version FROM schema_version").pluck().get()).toBe(1);
+    expect(first.prepare("SELECT version FROM schema_version").pluck().get()).toBe(2);
     first.close();
 
     const reopened = openMetadataDatabase(databasePath);
-    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(1);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(2);
     reopened.close();
   });
 
@@ -53,6 +53,7 @@ describe("session metadata index", () => {
       id: "session-1",
       title: "第一段会话",
       archived: false,
+      toolMode: "off",
     });
     reopened.close();
   });

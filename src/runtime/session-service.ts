@@ -14,7 +14,7 @@ export interface CreateSessionRequest {
   readonly cwd: string;
 }
 
-export interface SessionView extends Omit<SessionMetadata, "model"> {
+export interface SessionView extends Omit<SessionMetadata, "model" | "provider"> {
   readonly messages: readonly string[];
   readonly model: { readonly providerId: string; readonly modelId: string } | null;
 }
@@ -71,6 +71,14 @@ export class SessionService {
     const current = this.getView(id);
     const archived = this.index.archive(id);
     return { ...archived, messages: current.messages, model: current.model };
+  }
+
+  updateSettings(
+    id: string,
+    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean },
+  ): SessionView {
+    this.index.updateSettings(id, settings);
+    return this.getView(id);
   }
 
   closeAll(): void {
