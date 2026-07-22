@@ -21,6 +21,7 @@ coverage/
 .person-agent/
 .local/
 .tmp/
+.superpowers/
 
 # Editor and operating-system files.
 .idea/
