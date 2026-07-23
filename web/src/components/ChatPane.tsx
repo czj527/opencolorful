@@ -2,7 +2,7 @@ import type { SessionView, ModelSummary } from "../lib/types.js";
 import type { ChatState } from "../features/chat/chat-state.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Settings } from "lucide-react";
 
 interface ChatPaneProps {
   readonly session: SessionView | null;
@@ -14,6 +14,7 @@ interface ChatPaneProps {
   readonly onToggleThinking: () => void;
   readonly onSelectModel: (providerId: string, modelId: string) => void;
   readonly sseConnected: boolean;
+  readonly onSettingsClick?: () => void;
 }
 
 export function ChatPane({
@@ -26,6 +27,7 @@ export function ChatPane({
   onToggleThinking,
   onSelectModel,
   sseConnected,
+  onSettingsClick,
 }: ChatPaneProps) {
   if (!session) {
     return (
@@ -75,6 +77,17 @@ export function ChatPane({
             title={sseConnected ? "事件流已连接" : "事件流未连接"}
             aria-label={sseConnected ? "事件流已连接" : "事件流未连接"}
           />
+          {onSettingsClick && (
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onSettingsClick}
+              title="设置中心"
+              aria-label="设置中心"
+            >
+              <Settings size={14} />
+            </button>
+          )}
         </div>
       </div>
 

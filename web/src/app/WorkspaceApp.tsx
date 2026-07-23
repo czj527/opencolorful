@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiClient } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
-import type { PlatformEventEnvelope } from "../lib/types.js";
+import type { PlatformEventEnvelope, LayoutPreferences } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor } from "../features/chat/chat-state.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
@@ -11,6 +11,9 @@ import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
 import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
 import type { ProviderFormData } from "../features/providers/provider-form.js";
+import { usePanelResize } from "../features/layout/use-panel-resize.js";
+import { mergeLayoutPreferences, DEFAULT_LAYOUT_ONLY } from "../features/layout/layout-preferences.js";
+import { navigateToSettings } from "./page-router.js";
 import "./layout.css";
 
 // 同源部署：Supervisor 托管 Web 并代理 Agent API
@@ -18,6 +21,15 @@ const API_BASE = "";
 
 const NARROW_LEFT_QUERY = "(max-width: 768px)";
 const NARROW_RIGHT_QUERY = "(max-width: 1024px)";
+
+function applyLayoutVars(layout: LayoutPreferences) {
+  document.documentElement.style.setProperty("--left-sidebar-width", `${layout.leftSidebarWidth}px`);
+  document.documentElement.style.setProperty("--right-sidebar-width", `${layout.rightSidebarWidth}px`);
+  document.documentElement.style.setProperty(
+    "--transition-duration",
+    layout.reducedMotion === "on" ? "0ms" : "0.2s",
+  );
+}
 
 export function WorkspaceApp() {
   const [state, dispatch] = useReducer(appReducer, undefined, () => ({
@@ -28,12 +40,26 @@ export function WorkspaceApp() {
   }));
   const [chat, dispatchChat] = useReducer(chatReducer, initialChatState);
   const [sseConnected, setSseConnected] = useState(false);
+  const [layoutPrefs, setLayoutPrefs] = useState<LayoutPreferences>(DEFAULT_LAYOUT_ONLY);
   const apiRef = useRef(new ApiClient(API_BASE));
   const sseRef = useRef<SseClient | null>(null);
   const wsRef = useRef<WsClient | null>(null);
+  const leftResizeRef = useRef<HTMLDivElement | null>(null);
+  const rightResizeRef = useRef<HTMLDivElement | null>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
   const api = apiRef.current;
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getPreferences().then((prefs) => {
+      if (cancelled) return;
+      const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
+      setLayoutPrefs(layout);
+      applyLayoutVars(layout);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [api]);
 
   // --- 数据加载 ---
 
@@ -294,8 +320,38 @@ export function WorkspaceApp() {
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
   const leftCollapsed = state.leftSidebar === "collapsed";
   const rightCollapsed = state.rightSidebar === "collapsed";
+  const focusMode = leftCollapsed && rightCollapsed;
   const narrowLayout = typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches;
   const drawerOpen = narrowLayout && (!leftCollapsed || !rightCollapsed);
+
+  // 拖拽调整大小（依赖 leftCollapsed/rightCollapsed，放在声明之后）
+  const onResizeLeft = useCallback((w: number) => {
+    setLayoutPrefs((prev) => ({ ...prev, leftSidebarWidth: w }));
+    document.documentElement.style.setProperty("--left-sidebar-width", `${w}px`);
+  }, []);
+  const onResizeLeftEnd = useCallback((w: number) => {
+    api.updatePreferences({ layout: { ...layoutPrefs, leftSidebarWidth: w } }).catch(() => {});
+  }, [api, layoutPrefs]);
+  const leftResize = usePanelResize(leftResizeRef, {
+    side: "left", minWidth: 200, maxWidth: 420,
+    currentWidth: layoutPrefs.leftSidebarWidth,
+    onResize: onResizeLeft, onResizeEnd: onResizeLeftEnd,
+    disabled: leftCollapsed,
+  });
+
+  const onResizeRight = useCallback((w: number) => {
+    setLayoutPrefs((prev) => ({ ...prev, rightSidebarWidth: w }));
+    document.documentElement.style.setProperty("--right-sidebar-width", `${w}px`);
+  }, []);
+  const onResizeRightEnd = useCallback((w: number) => {
+    api.updatePreferences({ layout: { ...layoutPrefs, rightSidebarWidth: w } }).catch(() => {});
+  }, [api, layoutPrefs]);
+  const rightResize = usePanelResize(rightResizeRef, {
+    side: "right", minWidth: 240, maxWidth: 520,
+    currentWidth: layoutPrefs.rightSidebarWidth,
+    onResize: onResizeRight, onResizeEnd: onResizeRightEnd,
+    disabled: rightCollapsed,
+  });
 
   // 窄屏一次只打开一个抽屉：打开一侧时收起另一侧
   const handleToggleLeft = useCallback(() => {
@@ -320,7 +376,7 @@ export function WorkspaceApp() {
   }, [state.leftSidebar, state.rightSidebar]);
 
   return (
-    <div className="app-layout">
+    <div className="app-layout" data-focus-mode={focusMode ? "true" : undefined}>
       <ServerStatusBar
         status={state.supervisorStatus}
         connectionStatus={state.connectionStatus}
@@ -351,6 +407,9 @@ export function WorkspaceApp() {
           onUnarchive={(id) => void handleUnarchiveSession(id)}
           onToggle={handleToggleLeft}
         />
+        {!focusMode && !narrowLayout && (
+          <div ref={leftResizeRef} className="resize-handle" {...leftResize.resizeHandleProps} />
+        )}
         <ChatPane
           session={activeSession}
           chat={chat}
@@ -361,7 +420,11 @@ export function WorkspaceApp() {
           onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
+          onSettingsClick={navigateToSettings}
         />
+        {!focusMode && !narrowLayout && (
+          <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />
+        )}
         <InspectorSidebar
           session={activeSession}
           providers={state.providers}

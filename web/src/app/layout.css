@@ -1,6 +1,8 @@
 :root {
   --sidebar-width: 260px;
   --inspector-width: 300px;
+  --left-sidebar-width: 280px;
+  --right-sidebar-width: 320px;
   --statusbar-height: 40px;
   --border-color: #2d2d2d;
   --bg-primary: #1a1a1a;
@@ -13,6 +15,7 @@
   --danger: #ff4a4a;
   --success: #4aff4a;
   --warning: #ffaa00;
+  --transition-duration: 0.2s;
 }
 
 * {
@@ -353,4 +356,77 @@ body {
 
 @keyframes blink {
   50% { opacity: 0; }
+}
+
+/* Layout 4.0 — CSS 变量驱动的可调宽侧栏 */
+.app-sidebar-left {
+  width: var(--left-sidebar-width);
+}
+
+.app-inspector {
+  width: var(--right-sidebar-width);
+}
+
+/* 拖拽手柄 */
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background var(--transition-duration);
+  user-select: none;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--accent);
+}
+
+/* Focus 模式：两侧完全收起时中央聊天区占满 */
+.app-layout[data-focus-mode="true"] .app-main {
+  position: relative;
+}
+
+.app-layout[data-focus-mode="true"] .app-sidebar-left,
+.app-layout[data-focus-mode="true"] .app-inspector,
+.app-layout[data-focus-mode="true"] .resize-handle {
+  display: none;
+}
+
+.app-layout[data-focus-mode="true"] .app-chat {
+  width: 100%;
+}
+
+/* Focus 模式下的展开按钮保留（由 ServerStatusBar 渲染） */
+.focus-expand-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.focus-expand-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+/* 减少动态 — 跟随用户系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-duration: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+
+  .streaming-cursor {
+    animation: none;
+  }
 }
