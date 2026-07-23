@@ -15,6 +15,7 @@ export interface PiSessionHandle {
   appendAssistantMessage(content: string): void;
   selectModel(providerId: string, modelId: string): void;
   setTitle(title: string): void;
+  persist(): void;
   dispose(): void;
 }
 

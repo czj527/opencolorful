@@ -111,7 +111,17 @@ test.afterAll(async () => {
   if (providerFixture) {
     await new Promise<void>((resolve) => providerFixture!.close(() => resolve()));
   }
-  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+  const cleanupDeadline = Date.now() + 15_000;
+  while (Date.now() < cleanupDeadline) {
+    try {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  // Windows Defender/SQLite 句柄偶尔会在进程退出后短暂滞留，不影响测试结果。
+  console.warn(`临时 E2E 目录仍被系统占用，稍后可清理：${tempHome}`);
 });
 
 const baseUrl = () => `http://127.0.0.1:${supervisorPort}`;
@@ -196,7 +206,18 @@ test.describe("web workspace 真实浏览器验收", () => {
     // 工具完成
     await expect(page.getByTestId("tool-call-call-read")).toContainText("完成", { timeout: 30_000 });
     // 最终消息包含工具结果内容
-    await expect(page.getByTestId("message-list")).toContainText("E2E_WORKSPACE_CONTENT", { timeout: 30_000 });
+    const messageList = page.getByTestId("message-list");
+    await expect(messageList).toContainText("E2E_WORKSPACE_CONTENT", { timeout: 30_000 });
+
+    const timelineOrder = await messageList.locator(":scope > *").evaluateAll((elements) =>
+      elements.map((element) => ({
+        tool: element.getAttribute("data-testid"),
+        text: element.textContent ?? "",
+      })));
+    const toolIndex = timelineOrder.findIndex((item) => item.tool === "tool-call-call-read");
+    const finalAnswerIndex = timelineOrder.findIndex((item) => item.text.includes("读取完成"));
+    expect(toolIndex).toBeGreaterThanOrEqual(0);
+    expect(finalAnswerIndex).toBeGreaterThan(toolIndex);
 
     expect(fixtureCalls).toBeGreaterThanOrEqual(2);
   });
@@ -395,7 +416,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     // 重新选中会话 — 历史消息应包含之前的内容
     await page.getByText(uniqueTitle).first().click();
     // 等待 SSE 重连（事件流指示器变绿色）
-    await expect(page.locator(".status-dot.online")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("事件流已连接")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("message-list")).toContainText("读取", { timeout: 20_000 });
 
     // 继续对话

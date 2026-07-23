@@ -87,6 +87,7 @@ export function ChatPane({
       <MessageList
         messages={chat.messages}
         historyEntries={historyEntries}
+        timeline={chat.timeline}
         toolCalls={chat.toolCalls}
         planItems={chat.planItems}
         attachments={chat.attachments}

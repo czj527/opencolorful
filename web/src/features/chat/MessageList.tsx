@@ -1,5 +1,11 @@
 import { Brain } from "lucide-react";
-import type { ChatMessage, ToolCall, PlanItem as PlanItemData, Attachment } from "./chat-state.js";
+import type {
+  Attachment,
+  ChatMessage,
+  ChatTimelineItem,
+  PlanItem as PlanItemData,
+  ToolCall,
+} from "./chat-state.js";
 import { ToolCallItem } from "./ToolCallItem.jsx";
 import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
@@ -8,6 +14,7 @@ import { renderSafeMarkdown } from "./safe-markdown.jsx";
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
   readonly historyEntries: readonly { role: "user" | "assistant"; content: string }[];
+  readonly timeline: readonly ChatTimelineItem[];
   readonly toolCalls: ReadonlyMap<string, ToolCall>;
   readonly planItems: readonly PlanItemData[];
   readonly attachments: readonly Attachment[];
@@ -17,9 +24,40 @@ interface MessageListProps {
   readonly recovering: boolean;
 }
 
+function sameMessage(
+  left: { readonly role: string; readonly content: string },
+  right: { readonly role: string; readonly content: string },
+): boolean {
+  return left.role === right.role && left.content === right.content;
+}
+
+function MessageBlock({ message }: { readonly message: ChatMessage }) {
+  return (
+    <div
+      style={{
+        padding: "8px 12px",
+        background: message.role === "user" ? "var(--bg-tertiary)" : "transparent",
+        borderRadius: 6,
+        maxWidth: "85%",
+        alignSelf: message.role === "user" ? "flex-end" : "flex-start",
+        wordBreak: "break-word",
+      }}
+    >
+      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>
+        {message.role === "user" ? "你" : "助手"}
+      </div>
+      {message.role === "assistant"
+        ? renderSafeMarkdown(message.content)
+        : <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
+      {message.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   historyEntries,
+  timeline,
   toolCalls,
   planItems,
   attachments,
@@ -28,43 +66,53 @@ export function MessageList({
   onToggleThinking,
   recovering,
 }: MessageListProps) {
-  // 当前会话的实时消息（含用户发送）优先于服务端历史
-  const entries = messages.length > 0
-    ? messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, streaming: m.streaming }))
-    : historyEntries.map((e) => ({ role: e.role, content: e.content, streaming: false }));
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  const timelineMessageIds = new Set(
+    timeline.filter((item) => item.kind === "message").map((item) => item.id),
+  );
 
-  return (
-    <div className="chat-messages" data-testid="message-list">
-      {recovering && (
-        <div style={{ padding: "4px 10px", fontSize: 12, color: "var(--warning)", textAlign: "center" }}>
-          连接中断，正在恢复事件流…
-        </div>
-      )}
+  // Session JSONL 历史与实时状态会短暂重叠。当前 turn 的消息由 timeline 渲染，
+  // 从历史中移除对应的最新条目，既避免重复，也保留工具卡片的事件顺序。
+  const matchedHistoryIndexes = new Set<number>();
+  let historyCursor = historyEntries.length - 1;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = timeline[index]!;
+    if (item.kind !== "message") continue;
+    const message = messagesById.get(item.id);
+    if (!message) continue;
+    for (let historyIndex = historyCursor; historyIndex >= 0; historyIndex -= 1) {
+      if (sameMessage(historyEntries[historyIndex]!, message)) {
+        matchedHistoryIndexes.add(historyIndex);
+        historyCursor = historyIndex - 1;
+        break;
+      }
+    }
+  }
 
-      {entries.map((entry, i) => (
+  const visibleHistory = historyEntries.filter((_, index) => !matchedHistoryIndexes.has(index));
+  const untimedMessages = messages.filter((message) => !timelineMessageIds.has(message.id));
+  const representedUntimed = new Set<number>();
+  const missingUntimedMessages: ChatMessage[] = [];
+  for (const message of untimedMessages) {
+    const index = visibleHistory.findIndex((entry, candidateIndex) =>
+      !representedUntimed.has(candidateIndex) && sameMessage(entry, message));
+    if (index === -1) {
+      missingUntimedMessages.push(message);
+    } else {
+      representedUntimed.add(index);
+    }
+  }
+
+  const renderTimelineItem = (item: ChatTimelineItem) => {
+    if (item.kind === "message") {
+      const message = messagesById.get(item.id);
+      return message ? <MessageBlock key={`message-${item.id}`} message={message} /> : null;
+    }
+    if (item.kind === "thinking") {
+      if (!thinking) return null;
+      return (
         <div
-          key={`entry-${i}`}
-          style={{
-            padding: "8px 12px",
-            background: entry.role === "user" ? "var(--bg-tertiary)" : "transparent",
-            borderRadius: 6,
-            maxWidth: "85%",
-            alignSelf: entry.role === "user" ? "flex-end" : "flex-start",
-            wordBreak: "break-word",
-          }}
-        >
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>
-            {entry.role === "user" ? "你" : "助手"}
-          </div>
-          {entry.role === "assistant"
-            ? renderSafeMarkdown(entry.content)
-            : <span style={{ whiteSpace: "pre-wrap" }}>{entry.content}</span>}
-          {entry.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
-        </div>
-      ))}
-
-      {thinking && (
-        <div
+          key={item.id}
           style={{
             padding: "6px 10px",
             background: "var(--bg-tertiary)",
@@ -86,19 +134,47 @@ export function MessageList({
             <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{thinking}</div>
           )}
         </div>
-      )}
+      );
+    }
+    if (item.kind === "tool") {
+      const toolCall = toolCalls.get(item.id);
+      return toolCall ? <ToolCallItem key={`tool-${item.id}`} toolCall={toolCall} /> : null;
+    }
+    if (item.kind === "plan") {
+      return planItems.length > 0 ? <PlanList key={item.id} items={planItems} /> : null;
+    }
+    const attachment = attachments.find((candidate) => candidate.attachmentId === item.id);
+    return attachment
+      ? <UiProjection key={`attachment-${item.id}`} attachments={[attachment]} />
+      : null;
+  };
 
-      {planItems.length > 0 && <PlanList items={planItems} />}
-
-      {toolCalls.size > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {Array.from(toolCalls.values()).map((toolCall) => (
-            <ToolCallItem key={toolCall.toolCallId} toolCall={toolCall} />
-          ))}
+  return (
+    <div className="chat-messages" data-testid="message-list">
+      {recovering && (
+        <div style={{ padding: "4px 10px", fontSize: 12, color: "var(--warning)", textAlign: "center" }}>
+          连接中断，正在恢复事件流…
         </div>
       )}
 
-      {attachments.length > 0 && <UiProjection attachments={attachments} />}
+      {visibleHistory.map((entry, index) => (
+        <MessageBlock
+          key={`history-${index}`}
+          message={{
+            id: `history-${index}`,
+            role: entry.role,
+            content: entry.content,
+            timestamp: "",
+            streaming: false,
+          }}
+        />
+      ))}
+
+      {missingUntimedMessages.map((message) => (
+        <MessageBlock key={`untimed-${message.id}`} message={message} />
+      ))}
+
+      {timeline.map(renderTimelineItem)}
     </div>
   );
 }

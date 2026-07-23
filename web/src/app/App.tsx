@@ -42,7 +42,8 @@ export function App() {
       const status = await api.getSupervisorStatus();
       dispatch({ type: "SET_SUPERVISOR_STATUS", payload: status });
     } catch {
-      dispatch({ type: "SET_CONNECTION_STATUS", payload: "error" });
+      // Supervisor 的轮询请求短暂失败时仍可恢复，不把网络抖动误报成服务端硬错误。
+      dispatch({ type: "SET_CONNECTION_STATUS", payload: "degraded" });
     }
   }, [api]);
 
@@ -189,6 +190,7 @@ export function App() {
   const handleSend = useCallback(async (content: string) => {
     if (!state.activeSessionId) return;
     const sessionId = state.activeSessionId;
+    dispatchChat({ type: "PROMPT_PENDING", userContent: content });
     try {
       const result = await api.sendPrompt(sessionId, content);
       dispatchChat({ type: "PROMPT_SENT", streamId: result.streamId, userContent: content });

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimePaths } from "../config/paths.js";
@@ -33,6 +34,7 @@ export class SessionService {
     const id = crypto.randomUUID();
     const session = createPersistentSession(request.cwd, this.paths.sessions, id);
     session.setTitle(request.title.trim() || "未命名会话");
+    session.persist();
     this.index.create({
       id,
       title: request.title.trim() || "未命名会话",
@@ -46,7 +48,18 @@ export class SessionService {
   }
 
   list(options: { readonly includeArchived?: boolean } = {}): SessionView[] {
-    return this.index.list(options).map((metadata) => this.toView(metadata));
+    const views: SessionView[] = [];
+    for (const metadata of this.index.list(options)) {
+      try {
+        views.push(this.toView(metadata));
+      } catch {
+        // SQLite 只是索引；一个损坏会话不能让整个列表接口不可用。
+        // 只有 JSONL 已确定不存在时才删除索引，已有但损坏的文件仍保留供恢复。
+        if (!fs.existsSync(metadata.sessionPath)) this.index.remove(metadata.id);
+        this.active.delete(metadata.id);
+      }
+    }
+    return views;
   }
 
   open(id: string): PiSessionHandle {

@@ -29,12 +29,22 @@ export interface Attachment {
   readonly mimeType?: string;
 }
 
+export type ChatTimelineItem =
+  | { readonly kind: "message"; readonly id: string }
+  | { readonly kind: "thinking"; readonly id: string }
+  | { readonly kind: "tool"; readonly id: string }
+  | { readonly kind: "plan"; readonly id: string }
+  | { readonly kind: "attachment"; readonly id: string };
+
 export interface ChatState {
   readonly messages: ChatMessage[];
+  readonly timeline: ChatTimelineItem[];
   readonly toolCalls: Map<string, ToolCall>;
   readonly planItems: PlanItem[];
   readonly attachments: Attachment[];
   readonly currentStreamId: string | null;
+  readonly pendingPrompt: boolean;
+  readonly pendingStreamId: string | null;
   /** 每个 stream 的独立 sequence 游标（同一 Session 的每个 stream 从 1 开始） */
   readonly cursors: ReadonlyMap<string, number>;
   readonly thinking: string;
@@ -45,10 +55,13 @@ export interface ChatState {
 
 export const initialChatState: ChatState = {
   messages: [],
+  timeline: [],
   toolCalls: new Map(),
   planItems: [],
   attachments: [],
   currentStreamId: null,
+  pendingPrompt: false,
+  pendingStreamId: null,
   cursors: new Map(),
   thinking: "",
   thinkingCollapsed: true,
@@ -61,10 +74,20 @@ export function getStreamCursor(state: ChatState, streamId: string): number {
   return state.cursors.get(streamId) ?? 0;
 }
 
+function appendTimelineItem(
+  timeline: readonly ChatTimelineItem[],
+  item: ChatTimelineItem,
+): ChatTimelineItem[] {
+  return timeline.some((existing) => existing.kind === item.kind && existing.id === item.id)
+    ? [...timeline]
+    : [...timeline, item];
+}
+
 // --- Actions ---
 
 export type ChatAction =
   | { type: "RESET" }
+  | { type: "PROMPT_PENDING"; userContent: string }
   | { type: "PROMPT_SENT"; streamId: string; userContent: string }
   | { type: "EVENT"; event: PlatformEventEnvelope }
   | { type: "TOGGLE_THINKING" }
@@ -75,29 +98,71 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "RESET":
       return { ...initialChatState };
 
-    case "PROMPT_SENT": {
-      const cursors = new Map(state.cursors);
-      cursors.set(action.streamId, 0);
+    case "PROMPT_PENDING": {
+      const pendingMessage: ChatMessage = {
+        id: "user-pending",
+        role: "user",
+        content: action.userContent,
+        timestamp: new Date().toISOString(),
+        streaming: false,
+      };
       return {
         ...state,
-        currentStreamId: action.streamId,
-        cursors,
         messages: [
-          ...state.messages,
-          {
-            id: `user-${action.streamId}`,
-            role: "user" as const,
-            content: action.userContent,
-            timestamp: new Date().toISOString(),
-            streaming: false,
-          },
+          ...state.messages.filter((message) => message.id !== pendingMessage.id),
+          pendingMessage,
         ],
+        timeline: [{ kind: "message", id: pendingMessage.id }],
+        currentStreamId: null,
+        pendingPrompt: true,
+        pendingStreamId: null,
         status: "running",
         error: null,
         thinking: "",
         toolCalls: new Map(),
         planItems: [],
         attachments: [],
+      };
+    }
+
+    case "PROMPT_SENT": {
+      const cursors = new Map(state.cursors);
+      const earlyEventsReceived = state.pendingStreamId === action.streamId || cursors.has(action.streamId);
+      if (!earlyEventsReceived) cursors.set(action.streamId, 0);
+      const userMessage: ChatMessage = {
+        id: `user-${action.streamId}`,
+        role: "user",
+        content: action.userContent,
+        timestamp: new Date().toISOString(),
+        streaming: false,
+      };
+      const pendingIndex = state.messages.findIndex((message) => message.id === "user-pending");
+      const messages = pendingIndex !== -1
+        ? state.messages.map((message, index) => index === pendingIndex ? userMessage : message)
+        : state.messages.some((message) => message.id === userMessage.id)
+          ? state.messages
+          : earlyEventsReceived
+            ? [userMessage, ...state.messages]
+            : [...state.messages, userMessage];
+      const userTimelineItem: ChatTimelineItem = { kind: "message", id: userMessage.id };
+      const earlyTimeline = state.timeline.filter((item) =>
+        !(item.kind === "message" && (item.id === "user-pending" || item.id === userMessage.id)));
+      return {
+        ...state,
+        currentStreamId: action.streamId,
+        pendingPrompt: false,
+        pendingStreamId: null,
+        cursors,
+        messages,
+        timeline: earlyEventsReceived
+          ? [userTimelineItem, ...earlyTimeline]
+          : [userTimelineItem],
+        status: "running",
+        error: null,
+        thinking: earlyEventsReceived ? state.thinking : "",
+        toolCalls: earlyEventsReceived ? state.toolCalls : new Map(),
+        planItems: earlyEventsReceived ? state.planItems : [],
+        attachments: earlyEventsReceived ? state.attachments : [],
       };
     }
 
@@ -108,6 +173,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       if (event.streamId !== null && state.currentStreamId !== null && event.streamId !== state.currentStreamId) {
         return state;
       }
+      if (event.streamId !== null && state.pendingPrompt && state.currentStreamId === null) {
+        if (state.pendingStreamId !== null && event.streamId !== state.pendingStreamId) return state;
+        // pending 期间忽略已经见过的旧 stream；第一个新 stream 成为本次 Prompt 的候选流。
+        if (state.pendingStreamId === null && state.cursors.has(event.streamId)) return state;
+      }
 
       // 按 stream 游标去重/乱序丢弃
       const streamKey = event.streamId ?? "";
@@ -116,7 +186,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
       const cursors = new Map(state.cursors);
       cursors.set(streamKey, event.sequence);
-      const base = { ...state, cursors };
+      const base = {
+        ...state,
+        cursors,
+        pendingStreamId: state.pendingPrompt && state.pendingStreamId === null && event.streamId !== null
+          ? event.streamId
+          : state.pendingStreamId,
+      };
 
       switch (event.type) {
         case "session.status": {
@@ -143,6 +219,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 streaming: true,
               },
             ],
+            timeline: appendTimelineItem(base.timeline, { kind: "message", id: event.eventId }),
           };
 
         case "message.delta": {
@@ -152,12 +229,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           // message.started 可能未抵达或延迟（取决于 PI SDK/模型），
           // 此时自动创建一个 streaming message，防止全部 delta 被丢弃
           if (!lastMessage || !lastMessage.streaming) {
+            const message: ChatMessage = {
+              id: event.eventId,
+              role: "assistant",
+              content: payload.delta,
+              timestamp: event.timestamp,
+              streaming: true,
+            };
             return {
               ...base,
-              messages: [
-                ...base.messages,
-                { id: event.eventId, role: "assistant" as const, content: payload.delta, timestamp: event.timestamp, streaming: true },
-              ],
+              messages: [...base.messages, message],
+              timeline: appendTimelineItem(base.timeline, { kind: "message", id: message.id }),
             };
           }
           return {
@@ -171,7 +253,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
         case "thinking.delta": {
           const payload = event.payload as { delta: string };
-          return { ...base, thinking: base.thinking + payload.delta };
+          return {
+            ...base,
+            thinking: base.thinking + payload.delta,
+            timeline: appendTimelineItem(base.timeline, { kind: "thinking", id: `thinking-${streamKey}` }),
+          };
         }
 
         case "message.completed": {
@@ -198,6 +284,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 streaming: false,
               },
             ],
+            timeline: appendTimelineItem(base.timeline, { kind: "message", id: event.eventId }),
           };
         }
 
@@ -209,7 +296,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             toolName: payload.toolName,
             status: "running",
           });
-          return { ...base, toolCalls: newToolCalls };
+          return {
+            ...base,
+            toolCalls: newToolCalls,
+            timeline: appendTimelineItem(base.timeline, { kind: "tool", id: payload.toolCallId }),
+          };
         }
 
         case "tool.delta": {
@@ -239,6 +330,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return {
             ...base,
             planItems: payload.items.map((text, i) => ({ id: `plan-${i}`, text })),
+            timeline: appendTimelineItem(base.timeline, { kind: "plan", id: `plan-${streamKey}` }),
           };
         }
 
@@ -254,6 +346,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 ...(payload.mimeType !== undefined ? { mimeType: payload.mimeType } : {}),
               },
             ],
+            timeline: appendTimelineItem(base.timeline, { kind: "attachment", id: payload.attachmentId }),
           };
         }
 
@@ -274,7 +367,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, thinkingCollapsed: !state.thinkingCollapsed };
 
     case "SET_ERROR":
-      return { ...state, status: "error", error: action.error };
+      return {
+        ...state,
+        currentStreamId: null,
+        pendingPrompt: false,
+        pendingStreamId: null,
+        status: "error",
+        error: action.error,
+      };
   }
 }
 

@@ -127,6 +127,10 @@ export class SessionIndex {
     return mapRow(row);
   }
 
+  remove(id: string): void {
+    this.database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  }
+
   list(options: { readonly includeArchived?: boolean } = {}): SessionMetadata[] {
     const rows = options.includeArchived
       ? this.database.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all()

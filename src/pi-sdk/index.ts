@@ -8,6 +8,8 @@ import {
   createCodingTools,
   createReadOnlyTools,
 } from "@earendil-works/pi-coding-agent";
+import fs from "node:fs";
+import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import type {
@@ -145,6 +147,18 @@ function wrapSessionManager(manager: SessionManager): PiSessionHandle {
     },
     setTitle(title: string) {
       manager.appendSessionInfo(title);
+    },
+    persist() {
+      const sessionFile = manager.getSessionFile();
+      if (!sessionFile || !manager.isPersisted()) return;
+      fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+      const header = manager.getHeader();
+      const entries = header === null ? manager.getEntries() : [header, ...manager.getEntries()];
+      fs.writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+      // PI SDK defers creating a file until an assistant message. We have now
+      // deliberately flushed the same entries, so subsequent appends may use
+      // the normal append path instead of attempting to create the file again.
+      (manager as unknown as { flushed: boolean }).flushed = true;
     },
     dispose() {
       manager.getEntries();

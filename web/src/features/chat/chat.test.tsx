@@ -113,6 +113,7 @@ describe("chatReducer", () => {
 
     state = chatReducer(state, { type: "EVENT", event: makeEvent("tool.completed", { toolCallId: "t1", result: "done", isError: false }, 3) });
     expect(state.toolCalls.get("t1")!.status).toBe("completed");
+    expect(state.timeline.map((item) => item.kind)).toEqual(["message", "tool"]);
   });
 
   it("handles tool error", () => {
@@ -220,5 +221,31 @@ describe("message resilience", () => {
     expect(state.messages).toHaveLength(2);
     expect(state.messages[1]!.content).toBe("Full response");
     expect(state.messages[1]!.streaming).toBe(false);
+  });
+
+  it("keeps events that arrive before the prompt HTTP response", () => {
+    let state = chatReducer(initialChatState, { type: "EVENT", event: makeEvent("message.started", { role: "assistant" }, 1, "early") });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "真实输出" }, 2, "early") });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("tool.started", { toolCallId: "tool-early", toolName: "read" }, 3, "early") });
+    state = chatReducer(state, { type: "PROMPT_SENT", streamId: "early", userContent: "用户输入" });
+
+    expect(state.currentStreamId).toBe("early");
+    expect(getStreamCursor(state, "early")).toBe(3);
+    expect(state.messages.map((message) => message.content)).toEqual(["用户输入", "真实输出"]);
+    expect(state.toolCalls.get("tool-early")?.toolName).toBe("read");
+  });
+
+  it("accepts early events for a second prompt after clearing the previous stream", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "old", userContent: "第一轮" });
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.completed", { role: "assistant", content: "旧回复" }, 1, "old") });
+    state = chatReducer(state, { type: "PROMPT_PENDING", userContent: "第二轮" });
+
+    expect(state.currentStreamId).toBeNull();
+    state = chatReducer(state, { type: "EVENT", event: makeEvent("message.delta", { role: "assistant", delta: "新回复" }, 1, "new") });
+    state = chatReducer(state, { type: "PROMPT_SENT", streamId: "new", userContent: "第二轮" });
+
+    expect(state.currentStreamId).toBe("new");
+    expect(state.messages.map((message) => message.content)).toEqual(["第一轮", "旧回复", "第二轮", "新回复"]);
+    expect(getStreamCursor(state, "new")).toBe(1);
   });
 });

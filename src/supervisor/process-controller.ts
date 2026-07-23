@@ -220,7 +220,9 @@ export class ProcessController {
       const body = (await response.json()) as { pid?: unknown };
       return body.pid === pid ? "online" : "error";
     } catch {
-      return "error";
+      // 子进程仍在运行但健康端点短暂不可达时可恢复，不能把瞬时网络/启动抖动
+      // 误报成不可恢复的错误；PID 不匹配仍在上方明确返回 error。
+      return "degraded";
     }
   }
 

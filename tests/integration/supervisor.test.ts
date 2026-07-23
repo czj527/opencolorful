@@ -488,4 +488,32 @@ describe("supervisor", () => {
 
     await expect(controller.getAgentServerStatus()).resolves.toBe("error");
   });
+
+  it("reports degraded when a live agent temporarily cannot answer health checks", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    fs.mkdirSync(paths.runtime, { recursive: true });
+    fs.writeFileSync(
+      path.join(paths.runtime, "supervisor.json"),
+      JSON.stringify({
+        supervisorPid: process.pid,
+        supervisorPort: 0,
+        supervisorStartedAt: new Date().toISOString(),
+        agentServerPid: process.pid,
+        agentServerPort: agentPort,
+        agentServerStatus: "online",
+        agentServerStartedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: agentPort,
+      supervisorPort: 0,
+    });
+
+    await expect(controller.getAgentServerStatus()).resolves.toBe("degraded");
+  });
 });
