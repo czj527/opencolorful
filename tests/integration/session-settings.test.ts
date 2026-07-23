@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
+import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
@@ -360,6 +361,76 @@ describe("session settings", () => {
       },
     );
     expect(r2.status).toBe(400);
+
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("applies global defaults only when creating a new session", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    // 修改全局默认：thinkingLevel=high, toolMode=off
+    preferencesStore.update({
+      defaults: { thinkingLevel: "high", toolMode: "off", model: null } as never,
+    });
+
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      preferencesStore,
+    });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "应用默认", cwd: process.cwd() }),
+    });
+    expect(createResp.status).toBe(201);
+    const view = (await createResp.json()) as {
+      thinkingLevel: string;
+      toolMode: string;
+    };
+    // 全局默认应被应用到新会话
+    expect(view.thinkingLevel).toBe("high");
+    expect(view.toolMode).toBe("off");
+
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("keeps an existing session override after global defaults change", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      preferencesStore,
+    });
+
+    // 创建一个 session 并显式设置 thinkingLevel=low
+    const created = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "显式覆盖",
+        cwd: process.cwd(),
+        thinkingLevel: "low",
+      }),
+    });
+    const session = (await created.json()) as { id: string };
+
+    // 先确认创建时已写入显式 thinkingLevel=low
+    const initialResp = await app.request(`http://local/api/sessions/${session.id}`);
+    const initialView = (await initialResp.json()) as { thinkingLevel: string };
+    expect(initialView.thinkingLevel).toBe("low");
+
+    // 修改全局默认 thinkingLevel=max
+    preferencesStore.update({
+      defaults: { thinkingLevel: "max", toolMode: "read-only", model: null } as never,
+    });
+
+    // 重新读取现有 session：显式值 low 应保留
+    const getResp = await app.request(`http://local/api/sessions/${session.id}`);
+    const view = (await getResp.json()) as { thinkingLevel: string };
+    expect(view.thinkingLevel).toBe("low");
 
     ctx.service.closeAll();
     ctx.database.close();

@@ -9,12 +9,14 @@ import {
 import type { SessionService } from "../../runtime/session-service.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
+import type { PreferencesStore } from "../../config/preferences-store.js";
 
 export function registerSessionRoutes(
   app: Hono,
   sessionService: SessionService,
   modelService?: ModelService,
   promptService?: PromptService,
+  preferencesStore?: PreferencesStore,
 ): void {
   app.get("/api/sessions", (context) => {
     const includeArchived = context.req.query("includeArchived") === "true";
@@ -58,13 +60,47 @@ export function registerSessionRoutes(
     }
 
     const session = sessionService.create({ title: body.title, cwd: body.cwd });
-    if (settings !== undefined) {
-      sessionService.updateSettings(session.id, {
-        ...(settings.toolMode ? { toolMode: settings.toolMode } : {}),
-        ...(settings.cwd ? { workspaceCwd: settings.cwd } : {}),
-        ...(settings.workspaceConfirmed !== undefined ? { workspaceConfirmed: settings.workspaceConfirmed } : {}),
-        ...(settings.thinkingLevel !== undefined ? { thinkingLevel: settings.thinkingLevel } : {}),
-      });
+
+    // 合并设置：请求显式字段优先，缺失字段回退到全局偏好默认值。
+    const preferences = preferencesStore?.get();
+    const wantsThinkingLevel = settings?.thinkingLevel !== undefined
+      ? settings.thinkingLevel
+      : preferences?.defaults.thinkingLevel;
+    // toolMode=all 必须由用户在请求中显式确认工作区；全局默认如果是 all 也无法
+    // 自动满足确认条件，因此当回退来源是全局默认且为 all 时退化为 read-only。
+    const effectiveToolMode =
+      settings?.toolMode !== undefined
+        ? settings.toolMode
+        : preferences?.defaults.toolMode === "all"
+          ? "read-only"
+          : preferences?.defaults.toolMode;
+
+    const updates: {
+      toolMode?: string;
+      workspaceCwd?: string;
+      workspaceConfirmed?: boolean;
+      thinkingLevel?: string;
+    } = {};
+    if (effectiveToolMode !== undefined) updates.toolMode = effectiveToolMode;
+    if (settings?.cwd) updates.workspaceCwd = settings.cwd;
+    if (settings?.workspaceConfirmed !== undefined) updates.workspaceConfirmed = settings.workspaceConfirmed;
+    if (wantsThinkingLevel !== undefined) updates.thinkingLevel = wantsThinkingLevel;
+
+    if (Object.keys(updates).length > 0) {
+      sessionService.updateSettings(session.id, updates);
+    }
+
+    // 应用全局默认模型：仅当请求未指定模型、全局默认可用且可 resolve 时。
+    const view = sessionService.getView(session.id);
+    if (preferences?.defaults.model && modelService !== undefined && view.model === null) {
+      const defaultModel = preferences.defaults.model;
+      try {
+        modelService.resolveModel(defaultModel.providerId, defaultModel.modelId);
+        const opened = sessionService.open(session.id);
+        opened.selectModel(defaultModel.providerId, defaultModel.modelId);
+      } catch {
+        // 默认模型不可用时不阻塞创建，留给后续显式选择。
+      }
     }
 
     return context.json(sessionService.getView(session.id), 201);

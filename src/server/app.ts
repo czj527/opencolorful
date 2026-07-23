@@ -7,11 +7,13 @@ import type { EventReplayStore } from "../runtime/event-replay-store.js";
 import type { ModelService } from "../runtime/model-service.js";
 import type { SessionService } from "../runtime/session-service.js";
 import type { PromptService } from "../runtime/prompt-service.js";
+import type { PreferencesStore } from "../config/preferences-store.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerSettingsRoutes } from "./routes/settings.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -24,6 +26,7 @@ export interface ServerAppOptions {
   readonly sessionService?: SessionService;
   readonly promptService?: PromptService;
   readonly replayStore?: EventReplayStore;
+  readonly preferencesStore?: PreferencesStore;
   readonly wsRegistry?: ClientRegistry;
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;
@@ -55,12 +58,16 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     registerProviderRoutes(app, options.modelService);
     registerModelRoutes(app, options.modelService);
   }
+  if (options.preferencesStore !== undefined) {
+    registerSettingsRoutes(app, options.preferencesStore, options.modelService);
+  }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(
       app,
       options.sessionService,
       options.modelService,
       options.promptService,
+      options.preferencesStore,
     );
   }
   if (options.promptService !== undefined) {
