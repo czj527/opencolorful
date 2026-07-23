@@ -1,7 +1,7 @@
 # Phase 4 交互体验与基础设施优化设计
 
-**状态：设计草案，待用户审阅**  
-**基线：Phase 3 已合并到 `main`**  
+**状态：设计草案，待用户审阅**
+**基线：Phase 3 已合并到 `main`**
 **参考：`<local-workspace>\openhanako` 的 Web 设置、侧栏 resize 和流式 buffer 实现**
 
 ## 1. 目标与边界
