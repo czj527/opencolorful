@@ -1,0 +1,177 @@
+import { Type } from "typebox";
+
+import { THINKING_LEVELS, TOOL_MODES, type ThinkingLevel, type ToolMode } from "./session-settings.js";
+
+/**
+ * 全局偏好文档。Phase 4 起作为新建 Session 的默认值来源和 Web 布局持久化载体。
+ *
+ * 设计约束：
+ * - 文件缺失/损坏时回退默认值，不阻塞 Supervisor 启动；
+ * - 读取时忽略未知字段，写回时只保留合法字段；
+ * - 任何 API 响应都不包含凭据。
+ */
+export const PreferencesDocumentSchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    defaults: Type.Object({
+      model: Type.Union([
+        Type.Object({ providerId: Type.String(), modelId: Type.String() }),
+        Type.Null(),
+      ]),
+      thinkingLevel: Type.Union(THINKING_LEVELS.map((level) => Type.Literal(level))),
+      toolMode: Type.Union(TOOL_MODES.map((mode) => Type.Literal(mode))),
+    }),
+    layout: Type.Object({
+      leftSidebarWidth: Type.Number({ minimum: 200, maximum: 420 }),
+      rightSidebarWidth: Type.Number({ minimum: 240, maximum: 520 }),
+      leftCollapsed: Type.Boolean(),
+      rightCollapsed: Type.Boolean(),
+      focusMode: Type.Boolean(),
+      reducedMotion: Type.Union([
+        Type.Literal("system"),
+        Type.Literal("on"),
+        Type.Literal("off"),
+      ]),
+    }),
+  },
+  { additionalProperties: false },
+);
+
+export interface ModelReference {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
+export interface DefaultsPreferences {
+  readonly model: ModelReference | null;
+  readonly thinkingLevel: ThinkingLevel;
+  readonly toolMode: ToolMode;
+}
+
+export interface LayoutPreferences {
+  readonly leftSidebarWidth: number;
+  readonly rightSidebarWidth: number;
+  readonly leftCollapsed: boolean;
+  readonly rightCollapsed: boolean;
+  readonly focusMode: boolean;
+  readonly reducedMotion: "system" | "on" | "off";
+}
+
+export interface PreferencesDocument {
+  readonly version: 1;
+  readonly defaults: DefaultsPreferences;
+  readonly layout: LayoutPreferences;
+}
+
+const LEFT_MIN = 200;
+const LEFT_MAX = 420;
+const RIGHT_MIN = 240;
+const RIGHT_MAX = 520;
+
+const REDUCED_MOTION_VALUES = ["system", "on", "off"] as const;
+
+export function defaultPreferences(): PreferencesDocument {
+  return {
+    version: 1,
+    defaults: {
+      model: null,
+      thinkingLevel: "medium",
+      toolMode: "read-only",
+    },
+    layout: {
+      // 左侧 Session 列表默认较窄；右侧 Inspector 含设置，默认更宽。
+      leftSidebarWidth: 280,
+      rightSidebarWidth: 320,
+      leftCollapsed: false,
+      rightCollapsed: false,
+      focusMode: false,
+      reducedMotion: "system",
+    },
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function clampBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function pickThinkingLevel(value: unknown, fallback: ThinkingLevel): ThinkingLevel {
+  return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value)
+    ? (value as ThinkingLevel)
+    : fallback;
+}
+
+function pickToolMode(value: unknown, fallback: ToolMode): ToolMode {
+  return typeof value === "string" && (TOOL_MODES as readonly string[]).includes(value)
+    ? (value as ToolMode)
+    : fallback;
+}
+
+function pickReducedMotion(
+  value: unknown,
+  fallback: LayoutPreferences["reducedMotion"],
+): LayoutPreferences["reducedMotion"] {
+  return typeof value === "string" && (REDUCED_MOTION_VALUES as readonly string[]).includes(value)
+    ? (value as LayoutPreferences["reducedMotion"])
+    : fallback;
+}
+
+function normalizeModel(value: unknown): DefaultsPreferences["model"] {
+  if (value === null) return null;
+  if (isObject(value)) {
+    const { providerId, modelId } = value;
+    if (
+      typeof providerId === "string" &&
+      providerId.length > 0 &&
+      typeof modelId === "string" &&
+      modelId.length > 0
+    ) {
+      return { providerId, modelId };
+    }
+  }
+  return null;
+}
+
+function normalizeDefaults(value: unknown, fallback: DefaultsPreferences): DefaultsPreferences {
+  if (!isObject(value)) return { ...fallback };
+  return {
+    model: normalizeModel(value.model),
+    thinkingLevel: pickThinkingLevel(value.thinkingLevel, fallback.thinkingLevel),
+    toolMode: pickToolMode(value.toolMode, fallback.toolMode),
+  };
+}
+
+function normalizeLayout(value: unknown, fallback: LayoutPreferences): LayoutPreferences {
+  if (!isObject(value)) return { ...fallback };
+  return {
+    leftSidebarWidth: clampNumber(value.leftSidebarWidth, LEFT_MIN, LEFT_MAX, fallback.leftSidebarWidth),
+    rightSidebarWidth: clampNumber(value.rightSidebarWidth, RIGHT_MIN, RIGHT_MAX, fallback.rightSidebarWidth),
+    leftCollapsed: clampBoolean(value.leftCollapsed, fallback.leftCollapsed),
+    rightCollapsed: clampBoolean(value.rightCollapsed, fallback.rightCollapsed),
+    focusMode: clampBoolean(value.focusMode, fallback.focusMode),
+    reducedMotion: pickReducedMotion(value.reducedMotion, fallback.reducedMotion),
+  };
+}
+
+/**
+ * 把任意（可能来自外部或损坏文件的）输入归一化为合法的偏好文档。
+ * 忽略未知字段，对越界值做 clamp 或回退，保证返回值始终满足 schema。
+ */
+export function normalizePreferences(value: unknown): PreferencesDocument {
+  const fallback = defaultPreferences();
+  if (!isObject(value)) return { ...fallback };
+
+  return {
+    version: 1,
+    defaults: normalizeDefaults(value.defaults, fallback.defaults),
+    layout: normalizeLayout(value.layout, fallback.layout),
+  };
+}
