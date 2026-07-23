@@ -116,6 +116,41 @@ test.afterAll(async () => {
 
 const baseUrl = () => `http://127.0.0.1:${supervisorPort}`;
 
+async function ensureFixtureProvider(page: Page): Promise<void> {
+  const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+  if (status.agentServer.status !== "online") {
+    await page.getByRole("button", { name: "启动 Server" }).click();
+    await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
+  }
+
+  const providerResponse = await page.request.put(`${baseUrl()}/api/settings/providers`, {
+    data: {
+      provider: {
+        providerId: "fixture-provider",
+        name: "Fixture Provider",
+        protocol: "openai-completions",
+        baseUrl: `http://127.0.0.1:${fixturePort}/v1`,
+        models: [{
+          modelId: "fixture-model",
+          name: "Fixture Model",
+          capabilities: { reasoning: false, input: ["text"], contextWindow: 4096, maxTokens: 512 },
+        }],
+      },
+      apiKey: "fixture-key",
+    },
+  });
+  expect(providerResponse.ok()).toBe(true);
+}
+
+async function selectFixtureModel(page: Page): Promise<void> {
+  const select = page.getByLabel("选择模型");
+  const option = select.locator("option").filter({ hasText: "fixture-provider/fixture-model" });
+  await expect(option).toBeAttached({ timeout: 15_000 });
+  const value = await option.getAttribute("value");
+  expect(value).not.toBeNull();
+  await select.selectOption(value!);
+}
+
 test.describe("web workspace 真实浏览器验收", () => {
   test("首屏加载工作台，显示 Supervisor 状态", async ({ page }) => {
     await page.goto(baseUrl());
@@ -138,32 +173,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     test.setTimeout(90_000);
     await page.goto(baseUrl());
 
-    // 确保 Agent 在线
-    const status = await page.request.get(`${baseUrl()}/api/supervisor/status`);
-    const body = await status.json();
-    if (body.agentServer.status !== "online") {
-      await page.getByRole("button", { name: "启动 Server" }).click();
-      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
-    }
-
-    // 配置 Provider（通过 API 提交，表单已单独做单元测试）
-    const providerResponse = await page.request.put(`${baseUrl()}/api/settings/providers`, {
-      data: {
-        provider: {
-          providerId: "fixture-provider",
-          name: "Fixture Provider",
-          protocol: "openai-completions",
-          baseUrl: `http://127.0.0.1:${fixturePort}/v1`,
-          models: [{
-            modelId: "fixture-model",
-            name: "Fixture Model",
-            capabilities: { reasoning: false, input: ["text"], contextWindow: 4096, maxTokens: 512 },
-          }],
-        },
-        apiKey: "fixture-key",
-      },
-    });
-    expect(providerResponse.ok()).toBe(true);
+    await ensureFixtureProvider(page);
 
     // 通过页面创建 Session
     await page.getByRole("button", { name: "新建会话" }).click();
@@ -175,9 +185,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByText("E2E 验收会话").first()).toBeVisible({ timeout: 10_000 });
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
-    const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 15_000 });
-    await modelSelect.selectOption("0");
+    await selectFixtureModel(page);
 
     // 发送 Prompt
     await page.getByLabel("消息输入").fill("读取 target.txt");
@@ -193,15 +201,10 @@ test.describe("web workspace 真实浏览器验收", () => {
     expect(fixtureCalls).toBeGreaterThanOrEqual(2);
   });
 
-  test("中断按钮在生成中可用", async ({ page }) => {
+  test("普通 Prompt 完成后发送按钮恢复", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(baseUrl());
-
-    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
-    if (status.agentServer.status !== "online") {
-      await page.getByRole("button", { name: "启动 Server" }).click();
-      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
-    }
+    await ensureFixtureProvider(page);
 
     // 创建新会话
     const uniqueTitle = `Abort 测试 ${Date.now()}`;
@@ -212,16 +215,14 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
-    const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 15_000 });
-    await modelSelect.selectOption("0");
+    await selectFixtureModel(page);
     await page.getByLabel("消息输入").fill("读取 target.txt");
     await page.getByRole("button", { name: "发送消息" }).click();
 
-    // 生成中出现中断按钮
-    const abortButton = page.getByRole("button", { name: "中断生成" });
-    // 快速流程下中断按钮可能转瞬即逝——只要能发送就算流程通了
+    // 普通 Prompt 必须能完整执行工具并恢复发送状态
+    await expect(page.getByTestId("tool-call-call-read")).toContainText("完成", { timeout: 30_000 });
     await expect(page.getByTestId("message-list")).toContainText("E2E_WORKSPACE_CONTENT", { timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "发送消息" })).toBeVisible({ timeout: 15_000 });
   });
 
   test("Agent 停止后页面仍可访问并显示已停止", async ({ page }) => {
@@ -340,12 +341,7 @@ test.describe("web workspace 真实浏览器验收", () => {
   test("真实 Abort：慢速流中点击中断，生成终止", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto(baseUrl());
-
-    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
-    if (status.agentServer.status !== "online") {
-      await page.getByRole("button", { name: "启动 Server" }).click();
-      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
-    }
+    await ensureFixtureProvider(page);
 
     // 新建会话
     const uniqueTitle = `Abort-SLOW-${Date.now()}`;
@@ -356,9 +352,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
     // 选模型
-    const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 10_000 });
-    await modelSelect.selectOption("0"); // fixture-provider/fixture-model (index 0)
+    await selectFixtureModel(page);
 
     // 发送 SLOW 标记 Prompt
     await page.getByLabel("消息输入").fill("SLOW 读取 target.txt");
@@ -377,12 +371,7 @@ test.describe("web workspace 真实浏览器验收", () => {
   test("重启恢复：Agent 重启后会话历史可续，继续对话成功", async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto(baseUrl());
-
-    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
-    if (status.agentServer.status !== "online") {
-      await page.getByRole("button", { name: "启动 Server" }).click();
-      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
-    }
+    await ensureFixtureProvider(page);
 
     // 通过 UI 创建会话并发送一条 Prompt（建立历史）
     const uniqueTitle = `Restart-${Date.now()}`;
@@ -392,9 +381,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.getByRole("button", { name: "创建" }).click();
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
-    const modelSelect = page.getByLabel("选择模型");
-    await expect(modelSelect.locator('option[value="0"]')).toBeAttached({ timeout: 10_000 });
-    await modelSelect.selectOption("0");
+    await selectFixtureModel(page);
     await page.getByLabel("消息输入").fill("读取 target.txt");
     await page.getByRole("button", { name: "发送消息" }).click();
 
@@ -412,7 +399,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByTestId("message-list")).toContainText("读取", { timeout: 20_000 });
 
     // 继续对话
-    await modelSelect.selectOption("0");
+    await selectFixtureModel(page);
     await page.getByLabel("消息输入").fill("继续对话");
     await page.getByRole("button", { name: "发送消息" }).click();
     await expect(page.getByTestId("message-list")).toContainText("读取完成", { timeout: 30_000 });

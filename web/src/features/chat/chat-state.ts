@@ -65,7 +65,7 @@ export function getStreamCursor(state: ChatState, streamId: string): number {
 
 export type ChatAction =
   | { type: "RESET" }
-  | { type: "PROMPT_SENT"; streamId: string }
+  | { type: "PROMPT_SENT"; streamId: string; userContent: string }
   | { type: "EVENT"; event: PlatformEventEnvelope }
   | { type: "TOGGLE_THINKING" }
   | { type: "SET_ERROR"; error: string };
@@ -82,6 +82,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         currentStreamId: action.streamId,
         cursors,
+        messages: [
+          ...state.messages,
+          {
+            id: `user-${action.streamId}`,
+            role: "user" as const,
+            content: action.userContent,
+            timestamp: new Date().toISOString(),
+            streaming: false,
+          },
+        ],
         status: "running",
         error: null,
         thinking: "",
@@ -137,9 +147,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
         case "message.delta": {
           const payload = event.payload as { role: string; delta: string };
-          if (payload.role !== "assistant") return base;
+          // 不因 role 过滤：服务端可能以非 assistant 角色发送文本增量
           const lastMessage = base.messages[base.messages.length - 1];
-          if (!lastMessage || !lastMessage.streaming) return base;
+          // message.started 可能未抵达或延迟（取决于 PI SDK/模型），
+          // 此时自动创建一个 streaming message，防止全部 delta 被丢弃
+          if (!lastMessage || !lastMessage.streaming) {
+            return {
+              ...base,
+              messages: [
+                ...base.messages,
+                { id: event.eventId, role: "assistant" as const, content: payload.delta, timestamp: event.timestamp, streaming: true },
+              ],
+            };
+          }
           return {
             ...base,
             messages: [

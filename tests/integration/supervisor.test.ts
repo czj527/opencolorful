@@ -452,4 +452,40 @@ describe("supervisor", () => {
     expect(controller.agentServerPid).toBeNull();
     expect(controller.agentServerRunning).toBe(false);
   }, 30_000);
+
+  it("does not report online when a reused PID serves a foreign health response", async () => {
+    const { paths } = makeTempHome();
+    const fakeServer = http.createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "ok", pid: process.pid + 1 }));
+    });
+    fakeServers.push(fakeServer);
+    await new Promise<void>((resolve) => fakeServer.listen(0, "127.0.0.1", () => resolve()));
+    const address = fakeServer.address();
+    if (address === null || typeof address === "string") throw new Error("无法获取伪造服务端口");
+
+    fs.mkdirSync(paths.runtime, { recursive: true });
+    fs.writeFileSync(
+      path.join(paths.runtime, "supervisor.json"),
+      JSON.stringify({
+        supervisorPid: process.pid,
+        supervisorPort: 0,
+        supervisorStartedAt: new Date().toISOString(),
+        agentServerPid: process.pid,
+        agentServerPort: address.port,
+        agentServerStatus: "online",
+        agentServerStartedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    const controller = new ProcessController({
+      paths,
+      agentServerPort: address.port,
+      supervisorPort: 0,
+    });
+
+    await expect(controller.getAgentServerStatus()).resolves.toBe("error");
+  });
 });

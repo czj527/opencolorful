@@ -36,7 +36,7 @@ Git 历史。
 - P1-09 重启恢复 E2E 和文档已完成：`9f6e5fc`；
 - Phase 1 验收缺口修复已完成：`2a71636`；
 - A2UI v0.9.1 官方 Envelope 对齐已完成：`5562743`；
-- 下一项任务是按 `plans/phase-03.md` 实施 Supervisor 和 Web UI。
+- Phase 3 Supervisor 与 Web UI 已完成；后续 Phase 尚未排期。
 
 截至 Phase 2 最终验收，最近一次完整验证为 24 个测试文件、130 个测试用例通过。该数字只是
 交接快照；接手后必须重新运行验证，不得直接复述为当前结果。
@@ -71,8 +71,8 @@ Git 历史。
 尚未具备：
 
 - OAuth、沙盒和逐次工具审批；
-- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI；
-- Supervisor、Electron、LAN/远程访问和云端同步。
+- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 交互扩展；
+- Electron、LAN/远程访问和云端同步。
 
 faux runtime 只用于确定性测试；生产组合根根据 Session 模型引用创建真实 PI
 `ModelRuntime` 和 `AgentSession`。

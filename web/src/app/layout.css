@@ -141,9 +141,12 @@ body {
 }
 
 .status-dot.online { background: var(--success); }
-.status-dot.stopped { background: var(--text-secondary); }
-.status-dot.error { background: var(--danger); }
+.status-dot.starting,
+.status-dot.stopping,
 .status-dot.connecting { background: var(--warning); }
+.status-dot.stopped { background: var(--text-secondary); }
+.status-dot.degraded { background: var(--warning); }
+.status-dot.error { background: var(--danger); }
 
 /* Buttons */
 .icon-button {

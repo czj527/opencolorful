@@ -3,7 +3,7 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, S
 
 interface ServerStatusBarProps {
   readonly status: SupervisorStatusResponse | null;
-  readonly connectionStatus: "connecting" | "online" | "stopped" | "error";
+  readonly connectionStatus: "connecting" | "starting" | "online" | "stopping" | "stopped" | "degraded" | "error";
   readonly onStart: () => void;
   readonly onStop: () => void;
   readonly onRestart: () => void;
@@ -43,7 +43,10 @@ export function ServerStatusBar({
       <span className={`status-dot ${connectionStatus}`} aria-hidden="true" />
       <span data-testid="connection-status">
         {connectionStatus === "online" && "已连接"}
+        {connectionStatus === "starting" && "启动中"}
+        {connectionStatus === "stopping" && "停止中"}
         {connectionStatus === "stopped" && "已停止"}
+        {connectionStatus === "degraded" && "降级"}
         {connectionStatus === "error" && "错误"}
         {connectionStatus === "connecting" && "连接中…"}
       </span>
@@ -55,7 +58,7 @@ export function ServerStatusBar({
 
       <div style={{ flex: 1 }} />
 
-      {agentStatus === "stopped" && (
+      {(agentStatus === "stopped" || agentStatus === "error") && (
         <button
           className="icon-button primary"
           onClick={onStart}
@@ -90,7 +93,7 @@ export function ServerStatusBar({
           </button>
         </>
       )}
-      {(agentStatus === "starting" || agentStatus === "degraded") && (
+      {(agentStatus === "starting" || agentStatus === "stopping" || agentStatus === "degraded") && (
         <Loader2 size={14} className="spinner-icon" aria-label="处理中" />
       )}
 

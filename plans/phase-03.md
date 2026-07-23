@@ -166,7 +166,7 @@ per-stream 游标、WS Resume、窄屏首屏无重叠、Provider 表单 UI E2E�
 - [x] 更新非目标：OAuth、远程访问、Electron、多 Agent、逐次审批仍未完成。
 - [x] 运行：`npm run check:pi-imports`、`npm run typecheck`、`npm test`、`npm run build`、`npm run web:test`、`npm run web:build`、`npx playwright test`、`node scripts/smoke-foundation.mjs`、`node scripts/smoke-web.mjs`。
 - [x] 检查：`git diff --check`、`git status --short`、敏感文件扫描和残留进程/端口。
-- [ ] 创建标签：`phase-3-complete`（待二次验收通过后恢复）。
+- [x] 创建标签：`phase-3-complete`（二次验收通过后恢复）。
 - [x] 提交：`docs: complete phase 3 web workspace`。
 
 ## 二次验收整改（2026-07-22）

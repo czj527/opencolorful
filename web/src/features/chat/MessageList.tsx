@@ -28,7 +28,10 @@ export function MessageList({
   onToggleThinking,
   recovering,
 }: MessageListProps) {
-  const streamingMessage = messages.find((m) => m.streaming);
+  // 当前会话的实时消息（含用户发送）优先于服务端历史
+  const entries = messages.length > 0
+    ? messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, streaming: m.streaming }))
+    : historyEntries.map((e) => ({ role: e.role, content: e.content, streaming: false }));
 
   return (
     <div className="chat-messages" data-testid="message-list">
@@ -38,9 +41,9 @@ export function MessageList({
         </div>
       )}
 
-      {historyEntries.map((entry, i) => (
+      {entries.map((entry, i) => (
         <div
-          key={`history-${i}`}
+          key={`entry-${i}`}
           style={{
             padding: "8px 12px",
             background: entry.role === "user" ? "var(--bg-tertiary)" : "transparent",
@@ -56,6 +59,7 @@ export function MessageList({
           {entry.role === "assistant"
             ? renderSafeMarkdown(entry.content)
             : <span style={{ whiteSpace: "pre-wrap" }}>{entry.content}</span>}
+          {entry.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
         </div>
       ))}
 
@@ -91,22 +95,6 @@ export function MessageList({
           {Array.from(toolCalls.values()).map((toolCall) => (
             <ToolCallItem key={toolCall.toolCallId} toolCall={toolCall} />
           ))}
-        </div>
-      )}
-
-      {streamingMessage && (
-        <div
-          style={{
-            padding: "8px 12px",
-            maxWidth: "85%",
-            alignSelf: "flex-start",
-            wordBreak: "break-word",
-          }}
-          data-testid="streaming-message"
-        >
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>助手</div>
-          {renderSafeMarkdown(streamingMessage.content)}
-          <span className="streaming-cursor" aria-hidden="true">▍</span>
         </div>
       )}
 

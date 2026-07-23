@@ -2,7 +2,7 @@ import type { ModelSummary, ProviderView, SessionView, SupervisorStatusResponse 
 
 export type SidebarState = "expanded" | "collapsed";
 
-export type ConnectionStatus = "connecting" | "online" | "stopped" | "error";
+export type ConnectionStatus = "connecting" | "starting" | "online" | "stopping" | "stopped" | "degraded" | "error";
 
 export interface AppState {
   readonly supervisorStatus: SupervisorStatusResponse | null;
@@ -49,7 +49,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         supervisorStatus: action.payload,
-        connectionStatus: action.payload.agentServer.status === "online" ? "online" : action.payload.agentServer.status === "stopped" ? "stopped" : "error",
+        connectionStatus: action.payload.agentServer.status === "online"
+          ? "online"
+          : action.payload.agentServer.status === "stopped"
+            ? "stopped"
+            : action.payload.agentServer.status === "starting"
+              ? "starting"
+              : action.payload.agentServer.status === "stopping"
+                ? "stopping"
+                : action.payload.agentServer.status === "degraded"
+                  ? "degraded"
+                  : "error",
       };
     case "SET_CONNECTION_STATUS":
       return { ...state, connectionStatus: action.payload };

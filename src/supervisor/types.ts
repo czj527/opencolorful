@@ -11,6 +11,7 @@ export type AgentServerStatus =
   | "starting"
   | "online"
   | "degraded"
+  | "stopping"
   | "error";
 
 export interface SupervisorState {

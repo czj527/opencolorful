@@ -43,6 +43,7 @@ async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
 export class ProcessController {
   private child: ChildProcess | null = null;
   private startPromise: Promise<{ pid: number; port: number }> | null = null;
+  private lifecycleStatus: AgentServerStatus = "stopped";
   private readonly paths: RuntimePaths;
   private readonly agentServerPort: number;
   private readonly supervisorPort: number;
@@ -90,11 +91,14 @@ export class ProcessController {
 
   private async doStartAgentServer(): Promise<{ pid: number; port: number }> {
     if (this.agentServerRunning) {
+      this.lifecycleStatus = "online";
       const pid = this.agentServerPid;
       if (pid !== null) {
         return { pid, port: this.agentServerPort };
       }
     }
+
+    this.lifecycleStatus = "starting";
 
     fs.mkdirSync(path.dirname(this.paths.serverLog), { recursive: true });
     const logHandle = fs.openSync(this.paths.serverLog, "a");
@@ -132,7 +136,8 @@ export class ProcessController {
       if (this.child === child) {
         this.child = null;
       }
-      this.updateAgentServerStatus("stopped");
+      this.lifecycleStatus = this.lifecycleStatus === "stopping" ? "stopped" : "error";
+      this.updateAgentServerStatus(this.lifecycleStatus);
     });
 
     try {
@@ -145,6 +150,7 @@ export class ProcessController {
       if (this.child === child) {
         this.child = null;
       }
+      this.lifecycleStatus = "error";
       this.updateAgentServerStatus("error");
       throw error;
     }
@@ -159,6 +165,7 @@ export class ProcessController {
       agentServerStartedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    this.lifecycleStatus = "online";
 
     return { pid, port: this.agentServerPort };
   }
@@ -167,9 +174,12 @@ export class ProcessController {
     const pid = this.agentServerPid;
     if (pid === null || !isProcessRunning(pid)) {
       this.child = null;
+      this.lifecycleStatus = "stopped";
       this.updateAgentServerStatus("stopped");
       return;
     }
+
+    this.lifecycleStatus = "stopping";
 
     try {
       process.kill(pid, "SIGTERM");
@@ -184,6 +194,7 @@ export class ProcessController {
     }
 
     this.child = null;
+    this.lifecycleStatus = "stopped";
     this.updateAgentServerStatus("stopped");
   }
 
@@ -193,16 +204,21 @@ export class ProcessController {
   }
 
   async getAgentServerStatus(): Promise<AgentServerStatus> {
+    if (this.lifecycleStatus === "starting" || this.lifecycleStatus === "stopping") {
+      return this.lifecycleStatus;
+    }
     const pid = this.agentServerPid;
     if (pid === null || !isProcessRunning(pid)) {
-      return "stopped";
+      return this.lifecycleStatus === "error" ? "error" : "stopped";
     }
     try {
       const response = await fetch(
         `http://127.0.0.1:${this.agentServerPort}/api/health`,
         { signal: AbortSignal.timeout(3_000) },
       );
-      return response.ok ? "online" : "degraded";
+      if (!response.ok) return "degraded";
+      const body = (await response.json()) as { pid?: unknown };
+      return body.pid === pid ? "online" : "error";
     } catch {
       return "error";
     }

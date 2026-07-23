@@ -191,7 +191,7 @@ export function App() {
     const sessionId = state.activeSessionId;
     try {
       const result = await api.sendPrompt(sessionId, content);
-      dispatchChat({ type: "PROMPT_SENT", streamId: result.streamId });
+      dispatchChat({ type: "PROMPT_SENT", streamId: result.streamId, userContent: content });
       // WS 订阅（幂等）确保收到控制事件
       if (wsRef.current && !wsRef.current.isSubscribed(sessionId)) {
         wsRef.current.subscribe(sessionId);

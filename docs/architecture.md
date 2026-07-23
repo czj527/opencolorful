@@ -20,7 +20,7 @@ Phase 0、1、2 已于 2026-07-22 完成。Phase 3 已完成：Supervisor 进程
 | Session 正文 | PI SessionManager JSONL |
 | 测试 | Vitest |
 | TUI | `@earendil-works/pi-tui` 0.80.10，通过 Server API |
-| Web UI | 后续 React；A2UI + TokUI 渲染适配 |
+| Web UI | React + Vite；A2UI + TokUI 白名单渲染适配 |
 
 依赖版本必须固定，PI SDK 升级先通过 Adapter 兼容测试，再修改业务代码。
 
@@ -56,8 +56,7 @@ person-Agent/
 └── plans/
 ```
 
-初期保持单个 npm package。Web UI 真正开始开发时再引入 workspace，避免过早增加
-构建和发布复杂度。
+Web UI 已作为 `web/` npm workspace 管理，Server 与 Web 分别构建、测试和由 Supervisor 托管。
 
 ## 运行时数据目录
 
@@ -174,8 +173,8 @@ interface PlatformEventEnvelope<T = unknown> {
 | GET | `/api/sessions/:id/events` | SSE 订阅和补发 |
 | GET | `/ws` | WS Session 订阅与控制 |
 
-Phase 2 已实现表中除 `/api/server/status` 外的路由；Server 生命周期状态当前仍通过
-CLI 和运行状态文件管理，Phase 3 再由 Supervisor 提供 Web 控制 API。
+Phase 2 已实现表中除 `/api/server/status` 外的路由；Phase 3 由 Supervisor 提供 Web
+控制 API、静态托管和 Agent API/WS 代理。
 
 错误统一使用：
 

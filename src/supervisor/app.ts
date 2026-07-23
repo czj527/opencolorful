@@ -28,6 +28,33 @@ function sanitizeLogContent(content: string): string {
     .replace(/(api[-_]?key)[:=]\s*\S+/gi, "$1=***");
 }
 
+function createSafeProxyBody(body: ReadableStream<Uint8Array> | null): ReadableStream<Uint8Array> | null {
+  if (body === null) return null;
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const result = await reader.read();
+        if (result.done) {
+          controller.close();
+        } else {
+          controller.enqueue(result.value);
+        }
+      } catch {
+        // 客户端主动关闭 SSE/HTTP 流时，吞掉上游 ECONNRESET 并结束代理流。
+        controller.close();
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } catch {
+        // 上游已经断开。
+      }
+    },
+  });
+}
+
 export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAppResult {
   const app = new Hono();
   const nodeWebSocket = createNodeWebSocket({ app });
@@ -39,7 +66,17 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
   app.get("/api/supervisor/status", async (context) => {
     const agentStatus = await controller.getAgentServerStatus();
     const response: SupervisorStatusResponse = {
-      status: agentStatus === "online" ? "online" : agentStatus === "stopped" ? "stopped" : "degraded",
+      status: agentStatus === "online"
+        ? "online"
+        : agentStatus === "stopped"
+          ? "stopped"
+          : agentStatus === "starting"
+            ? "starting"
+            : agentStatus === "stopping"
+              ? "stopping"
+              : agentStatus === "error"
+                ? "error"
+                : "degraded",
       supervisor: {
         pid: process.pid,
         port: supervisorPort,
@@ -176,7 +213,7 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
       responseHeaders.set(name, value);
     }
 
-    return new Response(response.body, {
+    return new Response(createSafeProxyBody(response.body), {
       status: response.status,
       headers: responseHeaders,
     });
