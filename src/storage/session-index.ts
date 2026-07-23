@@ -127,6 +127,10 @@ export class SessionIndex {
     return mapRow(row);
   }
 
+  remove(id: string): void {
+    this.database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  }
+
   list(options: { readonly includeArchived?: boolean } = {}): SessionMetadata[] {
     const rows = options.includeArchived
       ? this.database.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all()
@@ -149,6 +153,16 @@ export class SessionIndex {
   archive(id: string, updatedAt = new Date().toISOString()): SessionMetadata {
     const result = this.database
       .prepare("UPDATE sessions SET archived = 1, updated_at = ? WHERE id = ?")
+      .run(updatedAt, id);
+    if (result.changes !== 1) {
+      throw new Error(`Session 不存在: ${id}`);
+    }
+    return this.get(id) as SessionMetadata;
+  }
+
+  unarchive(id: string, updatedAt = new Date().toISOString()): SessionMetadata {
+    const result = this.database
+      .prepare("UPDATE sessions SET archived = 0, updated_at = ? WHERE id = ?")
       .run(updatedAt, id);
     if (result.changes !== 1) {
       throw new Error(`Session 不存在: ${id}`);

@@ -2,7 +2,7 @@
 
 ## 架构状态
 
-Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模型运行时、Session 工具权限（off/read-only/all）、思考级别、Provider/工具结果脱敏和真实 Provider/工具重启 E2E。
+Phase 0、1、2 已于 2026-07-22 完成。Phase 3 已完成：Supervisor 进程管理（Agent Server 生命周期控制、Web 静态资源托管、HTTP/SSE/WS 透明代理、健康检查 PID 验证、串行化 start、进程树清理）、React Web 工作台（三栏布局、per-stream 事件游标、安全 Markdown 渲染、A2UI/TokUI 白名单投影）、真实 Provider 驱动的 10 个 Playwright 浏览器用例（首屏、表单配置、工具调用、Abort、重启恢复、桌面与窄屏布局）。
 [基础设施设计](superpowers/specs/2026-07-21-agent-platform-foundation-design.md)。
 
 ## 技术栈
@@ -20,7 +20,7 @@ Phase 0、1、2 已于 2026-07-22 完成。Phase 2 新增：真实 Provider 模�
 | Session 正文 | PI SessionManager JSONL |
 | 测试 | Vitest |
 | TUI | `@earendil-works/pi-tui` 0.80.10，通过 Server API |
-| Web UI | 后续 React；A2UI + TokUI 渲染适配 |
+| Web UI | React + Vite；A2UI + TokUI 白名单渲染适配 |
 
 依赖版本必须固定，PI SDK 升级先通过 Adapter 兼容测试，再修改业务代码。
 
@@ -36,8 +36,16 @@ person-Agent/
 │   ├── runtime/           Agent Session 生命周期和事件映射
 │   ├── server/            Hono 路由、SSE、WebSocket
 │   ├── storage/           SQLite 元数据和 PI Session 定位
+│   ├── supervisor/        Agent Server 进程管理和 Web 托管
 │   ├── tui/               Server 协议客户端
 │   └── ui-projection/     A2UI/TokUI 投影
+├── web/                   React Web 工作台（npm workspace）
+│   ├── src/
+│   │   ├── app/           三栏布局、状态管理
+│   │   ├── components/    通用 UI 组件
+│   │   ├── features/      Provider/Session/Chat 功能模块
+│   │   └── lib/           API/SSE/WS 客户端
+│   └── tests/e2e/         Playwright 浏览器测试
 ├── tests/
 │   ├── contract/
 │   ├── integration/
@@ -48,8 +56,7 @@ person-Agent/
 └── plans/
 ```
 
-初期保持单个 npm package。Web UI 真正开始开发时再引入 workspace，避免过早增加
-构建和发布复杂度。
+Web UI 已作为 `web/` npm workspace 管理，Server 与 Web 分别构建、测试和由 Supervisor 托管。
 
 ## 运行时数据目录
 
@@ -166,8 +173,8 @@ interface PlatformEventEnvelope<T = unknown> {
 | GET | `/api/sessions/:id/events` | SSE 订阅和补发 |
 | GET | `/ws` | WS Session 订阅与控制 |
 
-Phase 2 已实现表中除 `/api/server/status` 外的路由；Server 生命周期状态当前仍通过
-CLI 和运行状态文件管理，Phase 3 再由 Supervisor 提供 Web 控制 API。
+Phase 2 已实现表中除 `/api/server/status` 外的路由；Phase 3 由 Supervisor 提供 Web
+控制 API、静态托管和 Agent API/WS 代理。
 
 错误统一使用：
 

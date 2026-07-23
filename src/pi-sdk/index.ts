@@ -8,12 +8,15 @@ import {
   createCodingTools,
   createReadOnlyTools,
 } from "@earendil-works/pi-coding-agent";
+import fs from "node:fs";
+import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import type {
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
+  PiMessageEntry,
   PiModelRuntimeHandle,
   PiModelSummary,
   PiProviderDefinition,
@@ -33,6 +36,7 @@ export type {
   PiAgentSessionHandle,
   PiAgentSessionOptions,
   PiFauxAgentOptions,
+  PiMessageEntry,
   PiModelRuntimeHandle,
   PiModelSummary,
   PiProviderDefinition,
@@ -63,20 +67,23 @@ export function openPersistentSession(
 }
 
 function wrapSessionManager(manager: SessionManager): PiSessionHandle {
-  const getMessages = (): string[] =>
+  const getEntries = (): PiMessageEntry[] =>
     manager
       .getBranch()
       .filter((entry) => entry.type === "message")
       .flatMap((entry) => {
         const message = entry.message;
         if (message.role !== "user" && message.role !== "assistant") return [];
-        if (typeof message.content === "string") return [message.content];
-        return [
-          ...message.content
-            .filter((block) => block.type === "text")
-            .map((block) => block.text),
-        ];
+        const content =
+          typeof message.content === "string"
+            ? message.content
+            : message.content
+                .filter((block) => block.type === "text")
+                .map((block) => block.text)
+                .join("");
+        return [{ role: message.role, content }];
       });
+  const getMessages = (): string[] => getEntries().map((entry) => entry.content);
   const getModel = (): { providerId: string; modelId: string } | null => {
     const modelEntry = [...manager.getBranch()].reverse().find((entry) => {
       return entry.type === "model_change" || (entry.type === "message" && entry.message.role === "assistant");
@@ -105,6 +112,9 @@ function wrapSessionManager(manager: SessionManager): PiSessionHandle {
     },
     get messages() {
       return getMessages();
+    },
+    get messageEntries() {
+      return getEntries();
     },
     get model() {
       return getModel();
@@ -137,6 +147,18 @@ function wrapSessionManager(manager: SessionManager): PiSessionHandle {
     },
     setTitle(title: string) {
       manager.appendSessionInfo(title);
+    },
+    persist() {
+      const sessionFile = manager.getSessionFile();
+      if (!sessionFile || !manager.isPersisted()) return;
+      fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+      const header = manager.getHeader();
+      const entries = header === null ? manager.getEntries() : [header, ...manager.getEntries()];
+      fs.writeFileSync(sessionFile, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+      // PI SDK defers creating a file until an assistant message. We have now
+      // deliberately flushed the same entries, so subsequent appends may use
+      // the normal append path instead of attempting to create the file again.
+      (manager as unknown as { flushed: boolean }).flushed = true;
     },
     dispose() {
       manager.getEntries();

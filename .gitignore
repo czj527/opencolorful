@@ -6,6 +6,8 @@ dist-*/
 .cache/
 coverage/
 *.tsbuildinfo
+web/test-results/
+web/playwright-report/
 
 # Local runtime state, logs, and credentials.
 .env

@@ -1,0 +1,131 @@
+// Web 客户端类型，与服务端契约对齐
+
+// --- Platform Event Envelope（src/contracts/events.ts）---
+export interface PlatformEventEnvelope {
+  readonly protocolVersion: 1;
+  readonly eventId: string;
+  readonly sessionId: string | null;
+  readonly streamId: string | null;
+  readonly sequence: number;
+  readonly timestamp: string;
+  readonly type: string;
+  readonly payload: unknown;
+}
+
+// --- API Error（src/contracts/api-error.ts）---
+export interface ApiError {
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
+}
+
+// --- Provider ---
+export interface ProviderModelCapabilities {
+  readonly reasoning: boolean;
+  readonly input: ("text" | "image")[];
+  readonly contextWindow: number;
+  readonly maxTokens: number;
+}
+
+export interface ProviderModelSetting {
+  readonly modelId: string;
+  readonly name: string;
+  readonly capabilities: ProviderModelCapabilities;
+}
+
+export interface ProviderView {
+  readonly providerId: string;
+  readonly name: string;
+  readonly protocol: string;
+  readonly baseUrl: string;
+  readonly headers?: Record<string, string>;
+  readonly models: ProviderModelSetting[];
+  readonly credentialConfigured: boolean;
+}
+
+export interface ModelSummary {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly name: string;
+  readonly protocol: string;
+  readonly baseUrl: string;
+  readonly capabilities: ProviderModelCapabilities;
+  readonly credentialConfigured: boolean;
+}
+
+// --- Session（与服务端 src/runtime/session-service.ts SessionView 对齐）---
+export interface MessageEntry {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+export interface SessionModelRef {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
+export interface SessionView {
+  readonly id: string;
+  readonly title: string;
+  readonly sessionPath: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly archived: boolean;
+  readonly toolMode: string;
+  readonly workspaceCwd: string | null;
+  readonly workspaceConfirmed: boolean;
+  readonly thinkingLevel: string;
+  readonly messages: readonly string[];
+  readonly messageEntries: readonly MessageEntry[];
+  readonly model: SessionModelRef | null;
+}
+
+export interface SessionSettings {
+  readonly toolMode?: "off" | "read-only" | "all";
+  readonly workspaceCwd?: string;
+  readonly workspaceConfirmed?: boolean;
+  readonly thinkingLevel?: string;
+}
+
+// --- Supervisor ---
+export interface SupervisorStatusResponse {
+  readonly status: string;
+  readonly supervisor: {
+    readonly pid: number;
+    readonly port: number;
+    readonly version: string;
+    readonly uptimeSeconds: number;
+  };
+  readonly agentServer: {
+    readonly status: string;
+    readonly pid: number | null;
+    readonly port: number | null;
+    readonly version: string | null;
+  };
+}
+
+export interface AgentServerDiscovery {
+  readonly url: string;
+  readonly port: number;
+  readonly wsUrl: string;
+}
+
+// --- Prompt ---
+export interface PromptResponse {
+  readonly status: string;
+  readonly sessionId: string;
+  readonly streamId: string;
+}
+
+export interface AbortResponse {
+  readonly status: string;
+}
+
+// --- Health ---
+export interface HealthResponse {
+  readonly status: string;
+  readonly version: string;
+  readonly pid: number;
+  readonly uptimeSeconds: number;
+}

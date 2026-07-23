@@ -61,6 +61,20 @@ describe("session lifecycle", () => {
     second.database.close();
   });
 
+  it("persists a newly created empty session across a restart", () => {
+    const first = createContext();
+    const created = first.service.create({ title: "尚未开始", cwd: process.cwd() });
+    expect(fs.existsSync(created.path)).toBe(true);
+    first.service.closeAll();
+    first.database.close();
+
+    const second = createContext(first.paths);
+    expect(second.service.list()).toHaveLength(1);
+    expect(second.service.getView(created.id).messageEntries).toEqual([]);
+    second.service.closeAll();
+    second.database.close();
+  });
+
   it("keeps one authoritative runtime and archives through the HTTP route", async () => {
     const context = createContext();
     const created = context.service.create({ title: "唯一运行态", cwd: process.cwd() });
@@ -75,6 +89,21 @@ describe("session lifecycle", () => {
     expect(archiveResponse.status).toBe(200);
     expect((await app.request(`http://local/api/sessions/${created.id}`)).status).toBe(200);
     expect(await (await app.request("http://local/api/sessions")).json()).toEqual([]);
+
+    // includeArchived 可见已归档会话
+    const withArchived = await (await app.request("http://local/api/sessions?includeArchived=true")).json() as { archived: boolean }[];
+    expect(withArchived).toHaveLength(1);
+    expect(withArchived[0]!.archived).toBe(true);
+
+    // unarchive 恢复会话
+    const unarchiveResponse = await app.request(`http://local/api/sessions/${created.id}/unarchive`, {
+      method: "POST",
+    });
+    expect(unarchiveResponse.status).toBe(200);
+    const restored = await unarchiveResponse.json() as { archived: boolean };
+    expect(restored.archived).toBe(false);
+    expect((await (await app.request("http://local/api/sessions")).json() as unknown[]).length).toBe(1);
+
     context.service.closeAll();
     context.database.close();
   });
@@ -114,6 +143,25 @@ describe("session lifecycle", () => {
     const context = createContext();
     expect(() => context.service.open("../outside")).toThrow();
     expect(() => context.service.open("missing-session")).toThrow();
+    context.database.close();
+  });
+
+  it("skips and removes orphaned index rows instead of failing the whole session list", () => {
+    const context = createContext();
+    const valid = context.service.create({ title: "有效会话", cwd: process.cwd() });
+    const orphanId = "00000000-0000-4000-8000-000000000001";
+    context.index.create({
+      id: orphanId,
+      title: "孤儿会话",
+      sessionPath: path.join(context.paths.sessions, "missing-session.jsonl"),
+      workspaceCwd: process.cwd(),
+    });
+
+    const listed = context.service.list({ includeArchived: true });
+    expect(listed.map((session) => session.id)).toEqual([valid.id]);
+    expect(context.index.get(orphanId)).toBeUndefined();
+
+    context.service.closeAll();
     context.database.close();
   });
 });

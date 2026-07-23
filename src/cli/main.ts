@@ -1,5 +1,6 @@
 import { runChatCommand } from "./chat-command.js";
 import { runServerCommand } from "./server-command.js";
+import { runSupervisorCommand } from "./supervisor-command.js";
 
 async function main(): Promise<void> {
   const [scope, ...args] = process.argv.slice(2);
@@ -7,11 +8,15 @@ async function main(): Promise<void> {
     await runServerCommand(args);
     return;
   }
+  if (scope === "supervisor") {
+    await runSupervisorCommand(args);
+    return;
+  }
   if (scope === "chat") {
     await runChatCommand(args);
     return;
   }
-  throw new Error("用法: agent <server|chat> [...args]");
+  throw new Error("用法: agent <server|supervisor|chat> [...args]");
 }
 
 main().catch((error: unknown) => {

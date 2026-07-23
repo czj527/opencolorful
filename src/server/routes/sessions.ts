@@ -16,7 +16,10 @@ export function registerSessionRoutes(
   modelService?: ModelService,
   promptService?: PromptService,
 ): void {
-  app.get("/api/sessions", (context) => context.json(sessionService.list()));
+  app.get("/api/sessions", (context) => {
+    const includeArchived = context.req.query("includeArchived") === "true";
+    return context.json(sessionService.list({ includeArchived }));
+  });
 
   app.post("/api/sessions", async (context) => {
     const body = (await context.req.json()) as {
@@ -166,6 +169,14 @@ export function registerSessionRoutes(
         return context.json(createApiError("CONFLICT", "Session 正在运行，暂时不能归档"), 409);
       }
       return context.json(sessionService.archive(sessionId));
+    } catch {
+      return context.json(createApiError("NOT_FOUND", "Session 不存在"), 404);
+    }
+  });
+
+  app.post("/api/sessions/:id/unarchive", (context) => {
+    try {
+      return context.json(sessionService.unarchive(context.req.param("id")));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Session 不存在"), 404);
     }
