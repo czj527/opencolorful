@@ -129,3 +129,48 @@ export interface HealthResponse {
   readonly pid: number;
   readonly uptimeSeconds: number;
 }
+
+// --- Preferences（src/contracts/preferences.ts）---
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ToolMode = "off" | "read-only" | "all";
+export type ReducedMotion = "system" | "on" | "off";
+
+export interface ModelReference {
+  readonly providerId: string;
+  readonly modelId: string;
+}
+
+export interface DefaultsPreferences {
+  readonly model: ModelReference | null;
+  readonly thinkingLevel: ThinkingLevel;
+  readonly toolMode: ToolMode;
+}
+
+export interface LayoutPreferences {
+  readonly leftSidebarWidth: number;
+  readonly rightSidebarWidth: number;
+  readonly leftCollapsed: boolean;
+  readonly rightCollapsed: boolean;
+  readonly focusMode: boolean;
+  readonly reducedMotion: ReducedMotion;
+}
+
+export interface PreferencesDocument {
+  readonly version: 1;
+  readonly defaults: DefaultsPreferences;
+  readonly layout: LayoutPreferences;
+}
+
+// --- Supervisor logs 查询---
+export interface LogQuery {
+  readonly limit?: number;
+  readonly since?: string | null;
+  readonly level?: "all" | "info" | "warn" | "error";
+  readonly query?: string;
+}
+
+export interface LogTail {
+  readonly logs: string;
+  readonly truncated: boolean;
+  readonly nextCursor: string | null;
+}

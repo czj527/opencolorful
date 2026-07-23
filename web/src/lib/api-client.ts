@@ -3,7 +3,10 @@ import type {
   AgentServerDiscovery,
   ApiError,
   HealthResponse,
+  LogQuery,
+  LogTail,
   ModelSummary,
+  PreferencesDocument,
   PromptResponse,
   ProviderView,
   SessionSettings,
@@ -74,8 +77,29 @@ export class ApiClient {
     return this.request("POST", "/api/supervisor/restart");
   }
 
-  async getSupervisorLogs(): Promise<{ logs: string; truncated: boolean }> {
-    return this.request("GET", "/api/supervisor/logs");
+  async getSupervisorLogs(query?: LogQuery): Promise<LogTail> {
+    if (query === undefined) {
+      return this.request("GET", "/api/supervisor/logs");
+    }
+    const params = new URLSearchParams();
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    if (query.since !== undefined && query.since !== null) params.set("since", query.since);
+    if (query.level !== undefined) params.set("level", query.level);
+    if (query.query !== undefined) params.set("query", query.query);
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    return this.request("GET", `/api/supervisor/logs${qs}`);
+  }
+
+  // Preferences
+  async getPreferences(): Promise<PreferencesDocument> {
+    return this.request("GET", "/api/settings/preferences");
+  }
+
+  async updatePreferences(patch: {
+    defaults?: PreferencesDocument["defaults"];
+    layout?: PreferencesDocument["layout"];
+  }): Promise<PreferencesDocument> {
+    return this.request("PUT", "/api/settings/preferences", patch);
   }
 
   async discoverAgentServer(): Promise<AgentServerDiscovery> {
