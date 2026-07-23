@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { RuntimePaths } from "../config/paths.js";
 import { readRuntimeState, isProcessRunning } from "../server/runtime-state.js";
+import { filterLogLines, type LogQuery, type LogTail } from "./log-filter.js";
 import type { AgentServerStatus, SupervisorState } from "./types.js";
 
 export interface ProcessControllerOptions {
@@ -226,19 +227,57 @@ export class ProcessController {
     }
   }
 
-  readLogTail(maxBytes = 64 * 1024): { logs: string; truncated: boolean } {
+  /**
+   * 读取日志尾部并应用可选过滤查询。
+   *
+   * - 旧签名 `readLogTail(maxBytes?)` 保留兼容；传数字时返回原始尾部文本，
+   *   不做 level/cursor 过滤（与 Supervisor 路由的脱敏配合使用）。
+   * - 新签名 `readLogTail(query?)` 用 `LogQuery` 做 limit/since/level/query 过滤，
+   *   并在 `LogTail.nextCursor` 中返回稳定的字节偏移 cursor 供增量读取。
+   */
+  readLogTail(queryOrMaxBytes?: number | LogQuery): LogTail | { logs: string; truncated: boolean } {
+    if (typeof queryOrMaxBytes === "number") {
+      const maxBytes = queryOrMaxBytes;
+      if (!fs.existsSync(this.paths.serverLog)) {
+        return { logs: "", truncated: false };
+      }
+      const stat = fs.statSync(this.paths.serverLog);
+      if (stat.size <= maxBytes) {
+        return { logs: fs.readFileSync(this.paths.serverLog, "utf8"), truncated: false };
+      }
+      const buffer = Buffer.alloc(maxBytes);
+      const fd = fs.openSync(this.paths.serverLog, "r");
+      fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
+      fs.closeSync(fd);
+      return {
+        logs: `[...已截断，仅显示最后 ${Math.floor(maxBytes / 1024)}KB...]\n${buffer.toString("utf8")}`,
+        truncated: true,
+      };
+    }
+
+    // query 路径：最多读取 256KB，先按字节尾部读取，再交给纯过滤模块。
+    const MAX_BYTES = 256 * 1024;
     if (!fs.existsSync(this.paths.serverLog)) {
-      return { logs: "", truncated: false };
+      return { logs: "", truncated: false, nextCursor: null };
     }
     const stat = fs.statSync(this.paths.serverLog);
-    if (stat.size <= maxBytes) {
-      return { logs: fs.readFileSync(this.paths.serverLog, "utf8"), truncated: false };
+    let raw: string;
+    if (stat.size <= MAX_BYTES) {
+      raw = fs.readFileSync(this.paths.serverLog, "utf8");
+    } else {
+      const buffer = Buffer.alloc(MAX_BYTES);
+      const fd = fs.openSync(this.paths.serverLog, "r");
+      fs.readSync(fd, buffer, 0, MAX_BYTES, stat.size - MAX_BYTES);
+      fs.closeSync(fd);
+      raw = buffer.toString("utf8");
+      // 丢弃可能不完整的首行。
+      const firstNewline = raw.indexOf("\n");
+      raw = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
     }
-    const buffer = Buffer.alloc(maxBytes);
-    const fd = fs.openSync(this.paths.serverLog, "r");
-    fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
-    fs.closeSync(fd);
-    return { logs: `[...已截断，仅显示最后 ${Math.floor(maxBytes / 1024)}KB...]\n${buffer.toString("utf8")}`, truncated: true };
+
+    const query = queryOrMaxBytes ?? {};
+    const since = query.since ?? null;
+    return filterLogLines(raw, query, since);
   }
 
   private async waitForHealth(

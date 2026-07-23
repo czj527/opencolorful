@@ -44,6 +44,7 @@ export interface SupervisorStatusResponse {
 export interface SupervisorLogResponse {
   readonly logs: string;
   readonly truncated: boolean;
+  readonly nextCursor: string | null;
 }
 
 export const SUPERVISOR_DEFAULT_PORT = 4311;

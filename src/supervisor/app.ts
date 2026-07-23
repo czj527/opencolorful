@@ -128,8 +128,29 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
   });
 
   app.get("/api/supervisor/logs", (context) => {
-    const { logs, truncated } = controller.readLogTail();
-    return context.json({ logs: sanitizeLogContent(logs), truncated });
+    const limitParam = context.req.query("limit");
+    const limit = limitParam === undefined ? undefined : Math.max(1, Math.min(2000, Number.parseInt(limitParam, 10)));
+    const since = context.req.query("since") ?? null;
+    const levelParam = context.req.query("level") ?? "all";
+    const level: "all" | "info" | "warn" | "error" =
+      levelParam === "info" || levelParam === "warn" || levelParam === "error" ? levelParam : "all";
+    const query = context.req.query("query") ?? undefined;
+
+    const result = controller.readLogTail({
+      ...(limit !== undefined ? { limit } : {}),
+      since,
+      level,
+      ...(query !== undefined ? { query } : {}),
+    });
+    const logs = "logs" in result ? result.logs : "";
+    const truncated = result.truncated;
+    const nextCursor = "nextCursor" in result ? result.nextCursor : null;
+
+    return context.json({
+      logs: sanitizeLogContent(logs),
+      truncated,
+      nextCursor,
+    });
   });
 
   // Agent Server 地址发现（WS 与直连场景）
