@@ -14,6 +14,7 @@ import type { SessionIndex, SessionMetadata } from "../storage/session-index.js"
 export interface CreateSessionRequest {
   readonly title: string;
   readonly cwd: string;
+  readonly agentId?: string;
 }
 
 export interface SessionView extends Omit<SessionMetadata, "model" | "provider"> {
@@ -30,9 +31,13 @@ export class SessionService {
     private readonly index: SessionIndex,
   ) {}
 
-  create(request: CreateSessionRequest): PiSessionHandle {
+create(request: CreateSessionRequest): PiSessionHandle {
     const id = crypto.randomUUID();
-    const session = createPersistentSession(request.cwd, this.paths.sessions, id);
+    // 有 Agent：Session 存入 agents/<id>/sessions/。无 Agent：原有全局 sessions/
+    const sessionDir = request.agentId !== undefined
+      ? path.join(this.paths.agents, request.agentId, "sessions")
+      : this.paths.sessions;
+    const session = createPersistentSession(request.cwd, sessionDir, id);
     session.setTitle(request.title.trim() || "未命名会话");
     session.persist();
     this.index.create({
@@ -42,23 +47,29 @@ export class SessionService {
       createdAt: new Date().toISOString(),
       toolMode: "read-only",
       workspaceCwd: request.cwd,
+      agentId: request.agentId ?? null,
     });
     this.active.set(id, session);
     return session;
   }
 
-  list(options: { readonly includeArchived?: boolean } = {}): SessionView[] {
+  list(options: { readonly includeArchived?: boolean; readonly agentId?: string } = {}): SessionView[] {
     const views: SessionView[] = [];
     for (const metadata of this.index.list(options)) {
       try {
+        if (options.agentId !== undefined && metadata.agentId !== options.agentId) continue;
         views.push(this.toView(metadata));
       } catch {
-        // SQLite 只是索引；一个损坏会话不能让整个列表接口不可用。
-        // 只有 JSONL 已确定不存在时才删除索引，已有但损坏的文件仍保留供恢复。
         if (!fs.existsSync(metadata.sessionPath)) this.index.remove(metadata.id);
         this.active.delete(metadata.id);
       }
     }
+    return views;
+  }
+
+  listByAgent(agentId: string): SessionView[] {
+    return this.list({ agentId });
+  }
     return views;
   }
 

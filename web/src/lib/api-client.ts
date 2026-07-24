@@ -1,6 +1,9 @@
 import type {
   AbortResponse,
+  AgentIdentity,
+  AgentProfile,
   AgentServerDiscovery,
+  AgentView,
   ApiError,
   HealthResponse,
   LogQuery,
@@ -98,6 +101,7 @@ export class ApiClient {
   async updatePreferences(patch: {
     defaults?: Partial<PreferencesDocument["defaults"]>;
     layout?: Partial<PreferencesDocument["layout"]>;
+    appearance?: Partial<PreferencesDocument["appearance"]>;
   }): Promise<PreferencesDocument> {
     return this.request("PUT", "/api/settings/preferences", patch);
   }
@@ -161,5 +165,34 @@ export class ApiClient {
 
   async compact(sessionId: string): Promise<{ status: string }> {
     return this.request("POST", `/api/sessions/${sessionId}/compact`);
+  }
+
+  // Agents
+  async listAgents(): Promise<AgentView[]> {
+    return this.request("GET", "/api/agents");
+  }
+
+  async createAgent(type: string, name: string): Promise<AgentView> {
+    return this.request("POST", "/api/agents", { type, name });
+  }
+
+  async getAgent(id: string): Promise<AgentView> {
+    return this.request("GET", `/api/agents/${id}`);
+  }
+
+  async updateAgent(id: string, identity: Partial<AgentIdentity>): Promise<AgentView> {
+    return this.request("PUT", `/api/agents/${id}`, identity);
+  }
+
+  async updateAgentProfile(id: string, profile: Partial<AgentProfile>): Promise<AgentView> {
+    return this.request("PUT", `/api/agents/${id}/profile`, profile);
+  }
+
+  async archiveAgent(id: string): Promise<void> {
+    await this.request("POST", `/api/agents/${id}/archive`);
+  }
+
+  async getAgentSessions(id: string): Promise<SessionView[]> {
+    return this.request("GET", `/api/agents/${id}/sessions`);
   }
 }

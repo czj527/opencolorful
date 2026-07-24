@@ -33,6 +33,9 @@ export const PreferencesDocumentSchema = Type.Object(
         Type.Literal("off"),
       ]),
     }),
+    appearance: Type.Object({
+      theme: Type.Union([Type.Literal("dark"), Type.Literal("light")]),
+    }),
   },
   { additionalProperties: false },
 );
@@ -57,10 +60,15 @@ export interface LayoutPreferences {
   readonly reducedMotion: "system" | "on" | "off";
 }
 
+export interface AppearancePreferences {
+  readonly theme: "dark" | "light";
+}
+
 export interface PreferencesDocument {
   readonly version: 1;
   readonly defaults: DefaultsPreferences;
   readonly layout: LayoutPreferences;
+  readonly appearance: AppearancePreferences;
 }
 
 const LEFT_MIN = 200;
@@ -86,6 +94,9 @@ export function defaultPreferences(): PreferencesDocument {
       rightCollapsed: false,
       focusMode: false,
       reducedMotion: "system",
+    },
+    appearance: {
+      theme: "dark",
     },
   };
 }
@@ -161,6 +172,18 @@ function normalizeLayout(value: unknown, fallback: LayoutPreferences): LayoutPre
   };
 }
 
+const THEME_VALUES = ["dark", "light"] as const;
+
+function normalizeAppearance(value: unknown, fallback: AppearancePreferences): AppearancePreferences {
+  if (!isObject(value)) return { ...fallback };
+  return {
+    theme:
+      typeof value.theme === "string" && (THEME_VALUES as readonly string[]).includes(value.theme)
+        ? (value.theme as AppearancePreferences["theme"])
+        : fallback.theme,
+  };
+}
+
 /**
  * 把任意（可能来自外部或损坏文件的）输入归一化为合法的偏好文档。
  * 忽略未知字段，对越界值做 clamp 或回退，保证返回值始终满足 schema。
@@ -173,5 +196,6 @@ export function normalizePreferences(value: unknown): PreferencesDocument {
     version: 1,
     defaults: normalizeDefaults(value.defaults, fallback.defaults),
     layout: normalizeLayout(value.layout, fallback.layout),
+    appearance: normalizeAppearance(value.appearance, fallback.appearance),
   };
 }

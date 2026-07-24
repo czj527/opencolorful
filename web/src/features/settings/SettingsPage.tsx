@@ -97,6 +97,21 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   };
 
+  const handleSaveAppearance = async (theme: PreferencesDocument["appearance"]["theme"]) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await props.api.updatePreferences({ appearance: { theme } });
+      setPreferences(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "保存失败";
+      setSaveError(msg);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveProvider = async (data: ProviderFormData) => {
     setSaving(true);
     setSaveError(null);
@@ -153,6 +168,7 @@ export function SettingsPage(props: SettingsPageProps) {
             models,
             onSavePreferences: handleSavePreferences,
             onSaveLayout: handleSaveLayout,
+            onSaveTheme: handleSaveAppearance,
             onSaveProvider: handleSaveProvider,
             onGetSupervisorLogs: getSupervisorLogs,
             saving,
@@ -172,6 +188,7 @@ interface SectionRenderProps {
   readonly models: readonly ModelSummary[];
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
+  readonly onSaveTheme: (theme: PreferencesDocument["appearance"]["theme"]) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
   readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
   readonly saving: boolean;
@@ -218,6 +235,7 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
         <LayoutSection
           preferences={props.preferences}
           onSave={props.onSaveLayout}
+          onSaveTheme={props.onSaveTheme}
           saving={props.saving}
           lastSaveError={props.saveError}
         />

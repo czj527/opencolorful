@@ -4,6 +4,7 @@ import type { PreferencesDocument } from "../../../lib/types.js";
 export interface LayoutSectionProps {
   readonly preferences: PreferencesDocument;
   readonly onSave: (layout: PreferencesDocument["layout"]) => Promise<void>;
+  readonly onSaveTheme: (theme: PreferencesDocument["appearance"]["theme"]) => Promise<void>;
   readonly saving: boolean;
   readonly lastSaveError: string | null;
 }
@@ -12,6 +13,7 @@ export function LayoutSection(props: LayoutSectionProps) {
   const layout = props.preferences.layout;
   const [form, setForm] = useState(layout);
   const [msg, setMsg] = useState("");
+  const [themeMsg, setThemeMsg] = useState("");
 
   const handleSave = async () => {
     setMsg("");
@@ -20,6 +22,16 @@ export function LayoutSection(props: LayoutSectionProps) {
       setMsg("saved");
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "保存失败");
+    }
+  };
+
+  const handleThemeChange = async (theme: PreferencesDocument["appearance"]["theme"]) => {
+    setThemeMsg("");
+    try {
+      await props.onSaveTheme(theme);
+      setThemeMsg("saved");
+    } catch (err) {
+      setThemeMsg(err instanceof Error ? err.message : "主题保存失败");
     }
   };
 
@@ -76,6 +88,20 @@ export function LayoutSection(props: LayoutSectionProps) {
           <option value="off">完整动态</option>
         </select>
       </label>
+
+      <label>
+        主题
+        <select
+          value={props.preferences.appearance.theme}
+          onChange={(e) => void handleThemeChange(e.target.value as PreferencesDocument["appearance"]["theme"])}
+        >
+          <option value="dark">暗色</option>
+          <option value="light">亮色</option>
+        </select>
+      </label>
+
+      {themeMsg === "saved" && <div className="save-ok">主题已保存</div>}
+      {themeMsg && themeMsg !== "saved" && <div className="save-error">{themeMsg}</div>}
 
       {props.lastSaveError && <div className="save-error" role="alert">{props.lastSaveError}</div>}
       {msg === "saved" && <div className="save-ok">已保存</div>}

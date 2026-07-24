@@ -8,12 +8,14 @@ import type { ModelService } from "../runtime/model-service.js";
 import type { SessionService } from "../runtime/session-service.js";
 import type { PromptService } from "../runtime/prompt-service.js";
 import type { PreferencesStore } from "../config/preferences-store.js";
+import type { AgentStore } from "../config/agent-store.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
+import { registerAgentRoutes } from "./routes/agents.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -27,6 +29,7 @@ export interface ServerAppOptions {
   readonly promptService?: PromptService;
   readonly replayStore?: EventReplayStore;
   readonly preferencesStore?: PreferencesStore;
+  readonly agentStore?: AgentStore;
   readonly wsRegistry?: ClientRegistry;
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;

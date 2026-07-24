@@ -32,6 +32,7 @@ const fakePreferences: PreferencesDocument = {
   version: 1,
   defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
   layout: { leftSidebarWidth: 280, rightSidebarWidth: 320, leftCollapsed: false, rightCollapsed: false, focusMode: false, reducedMotion: "system" },
+  appearance: { theme: "dark" },
 };
 
 const fakeSupervisorStatus: SupervisorStatusResponse = {
@@ -106,6 +107,7 @@ describe("LayoutSection", () => {
       <LayoutSection
         preferences={fakePreferences}
         onSave={async () => {}}
+        onSaveTheme={async () => {}}
         saving={false}
         lastSaveError={null}
       />,

@@ -11,6 +11,7 @@ export interface CreateSessionInput {
   readonly workspaceCwd?: string;
   readonly workspaceConfirmed?: boolean;
   readonly thinkingLevel?: string;
+  readonly agentId?: string;
 }
 
 export interface SessionMetadata {
@@ -26,6 +27,7 @@ export interface SessionMetadata {
   readonly workspaceCwd: string | null;
   readonly workspaceConfirmed: boolean;
   readonly thinkingLevel: string;
+  readonly agentId: string | null;
 }
 
 interface SessionRow {
@@ -41,6 +43,7 @@ interface SessionRow {
   workspace_cwd: string | null;
   workspace_confirmed: number;
   thinking_level: string;
+  agent_id: string | null;
 }
 
 function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
@@ -60,6 +63,7 @@ function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
     workspaceCwd: row.workspace_cwd,
     workspaceConfirmed: row.workspace_confirmed === 1,
     thinkingLevel: row.thinking_level ?? "medium",
+    agentId: row.agent_id ?? null,
   };
 }
 
@@ -71,8 +75,8 @@ export class SessionIndex {
     this.database
       .prepare(
         `INSERT INTO sessions
-          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed, thinking_level)
-         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed, @thinkingLevel)`,
+          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed, thinking_level, agent_id)
+         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed, @thinkingLevel, @agentId)`,
       )
       .run({
         id: input.id,
@@ -86,6 +90,7 @@ export class SessionIndex {
         workspaceCwd: input.workspaceCwd ?? null,
         workspaceConfirmed: input.workspaceConfirmed ? 1 : 0,
         thinkingLevel: input.thinkingLevel ?? "medium",
+        agentId: input.agentId ?? null,
       });
     return this.get(input.id) as SessionMetadata;
   }

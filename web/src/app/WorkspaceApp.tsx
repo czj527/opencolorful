@@ -29,6 +29,10 @@ const API_BASE = "";
 const NARROW_LEFT_QUERY = "(max-width: 768px)";
 const NARROW_RIGHT_QUERY = "(max-width: 1024px)";
 
+function applyTheme(theme: "dark" | "light") {
+  document.documentElement.dataset.theme = theme;
+}
+
 function applyLayoutVars(layout: LayoutPreferences, reducedMotion: boolean) {
   document.documentElement.style.setProperty("--left-sidebar-width", `${layout.leftSidebarWidth}px`);
   document.documentElement.style.setProperty("--right-sidebar-width", `${layout.rightSidebarWidth}px`);
@@ -80,6 +84,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       if (cancelled) return;
       const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
       setLayoutPrefs(layout);
+      applyTheme(prefs.appearance.theme);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [active, api]);

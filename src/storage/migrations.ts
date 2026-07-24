@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export function applyMigrations(database: Database.Database): void {
   database.exec(`
@@ -49,6 +49,11 @@ export function applyMigrations(database: Database.Database): void {
   if (current < 3) {
     database.exec("ALTER TABLE sessions ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'medium'");
     database.prepare("UPDATE schema_version SET version = 3").run();
+  }
+
+  if (current < 4) {
+    database.exec("ALTER TABLE sessions ADD COLUMN agent_id TEXT");
+    database.prepare("UPDATE schema_version SET version = 4").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

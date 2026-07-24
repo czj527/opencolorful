@@ -6,6 +6,7 @@ export interface RuntimePaths {
   readonly config: string;
   readonly auth: string;
   readonly sessions: string;
+  readonly agents: string;
   readonly logs: string;
   readonly runtime: string;
   readonly cache: string;
@@ -31,6 +32,7 @@ export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): R
     config,
     auth,
     sessions: path.join(home, "sessions"),
+    agents: path.join(home, "agents"),
     logs,
     runtime,
     cache: path.join(home, "cache"),

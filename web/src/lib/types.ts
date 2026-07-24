@@ -155,10 +155,15 @@ export interface LayoutPreferences {
   readonly reducedMotion: ReducedMotion;
 }
 
+export interface AppearancePreferences {
+  readonly theme: "dark" | "light";
+}
+
 export interface PreferencesDocument {
   readonly version: 1;
   readonly defaults: DefaultsPreferences;
   readonly layout: LayoutPreferences;
+  readonly appearance: AppearancePreferences;
 }
 
 // --- Supervisor logs 查询---
@@ -174,4 +179,25 @@ export interface LogTail {
   readonly truncated: boolean;
   readonly nextCursor: string | null;
   readonly status?: string;
+}
+
+// --- Agent ---
+export interface AgentIdentity {
+  readonly id: string;
+  readonly type: "work" | "coding" | "assistant";
+  readonly name: string;
+  readonly createdAt: string;
+}
+
+export interface AgentProfile {
+  readonly persona: string;
+  readonly personality: readonly string[];
+  readonly replyStyle: string;
+  readonly updatedAt: string;
+}
+
+export interface AgentView {
+  readonly identity: AgentIdentity;
+  readonly profile: AgentProfile | null;
+  readonly sessionCount: number;
 }
