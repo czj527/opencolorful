@@ -8,7 +8,7 @@ import {
 } from "../contracts/preferences.js";
 
 export type PreferencesPatch = Partial<
-  Pick<PreferencesDocument, "defaults"> & Pick<PreferencesDocument, "layout">
+  Pick<PreferencesDocument, "defaults"> & Pick<PreferencesDocument, "layout"> & Pick<PreferencesDocument, "appearance">
 >;
 
 /**
@@ -56,6 +56,7 @@ export class PreferencesStore {
       version: 1,
       defaults: patch.defaults ?? current.defaults,
       layout: patch.layout ?? current.layout,
+      appearance: patch.appearance ?? current.appearance,
     };
     const normalized = normalizePreferences(next);
     this.write(normalized);

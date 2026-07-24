@@ -31,8 +31,10 @@ export function registerSettingsRoutes(
 
     const hasDefaults = body.defaults !== undefined;
     const hasLayout = body.layout !== undefined;
+    const hasAppearance = body.appearance !== undefined;
     const rawDefaults = hasDefaults ? (body.defaults as Record<string, unknown>) : undefined;
     const rawLayout = hasLayout ? (body.layout as Record<string, unknown>) : undefined;
+    const rawAppearance = hasAppearance ? (body.appearance as Record<string, unknown>) : undefined;
 
     const previous = preferencesStore.get();
     // 深合并 patch 与已有值：请求只提交变化的字段，缺失字段保留上一次值。
@@ -42,10 +44,14 @@ export function registerSettingsRoutes(
     const mergedLayout = rawLayout !== undefined
       ? { ...previous.layout, ...rawLayout }
       : previous.layout;
+    const mergedAppearance = rawAppearance !== undefined
+      ? { ...previous.appearance, ...rawAppearance }
+      : previous.appearance;
     const candidate = normalizePreferences({
       version: 1,
       defaults: mergedDefaults,
       layout: mergedLayout,
+      appearance: mergedAppearance,
     });
 
     // 显式校验原始请求字段：非法枚举返回 400 而不是静默回退。
@@ -76,6 +82,15 @@ export function registerSettingsRoutes(
           typeof (rawDefaults.model as { modelId?: unknown }).modelId !== "string")
       ) {
         return context.json(createApiError("INVALID_INPUT", "model 引用无效"), 400);
+      }
+    }
+
+    if (rawAppearance !== undefined) {
+      if (Object.prototype.hasOwnProperty.call(rawAppearance, "theme")) {
+        const theme = rawAppearance.theme;
+        if (theme !== "dark" && theme !== "light") {
+          return context.json(createApiError("INVALID_INPUT", "theme 必须是 dark 或 light"), 400);
+        }
       }
     }
 

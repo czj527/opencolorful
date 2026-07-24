@@ -428,3 +428,91 @@ body {
 .app-layout[data-reduced-motion="true"] .streaming-cursor {
   animation: none;
 }
+
+/* ===== 聊天控制栏（输入框下方） ===== */
+.chat-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-right {
+  margin-left: auto;
+}
+
+.control-select {
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.control-select:focus {
+  border-color: var(--accent);
+}
+
+.control-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-select {
+  flex: 1;
+  max-width: 240px;
+}
+
+.control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.control-btn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.control-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.control-btn.primary:hover {
+  background: var(--accent-hover);
+}
+
+.control-btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.control-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
