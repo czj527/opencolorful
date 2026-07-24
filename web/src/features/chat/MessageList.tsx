@@ -1,4 +1,5 @@
-import { Brain } from "lucide-react";
+import { useEffect } from "react";
+import { Brain, ArrowDown } from "lucide-react";
 import type {
   Attachment,
   ChatMessage,
@@ -10,6 +11,7 @@ import { ToolCallItem } from "./ToolCallItem.jsx";
 import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
 import { renderSafeMarkdown } from "./safe-markdown.jsx";
+import { useChatScroll } from "./use-chat-scroll.js";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -66,7 +68,13 @@ export function MessageList({
   onToggleThinking,
   recovering,
 }: MessageListProps) {
+  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(false);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
+
+  // 每次 messages/timeline 变化后执行自动滚动
+  useEffect(() => {
+    autoScrollIfAtBottom();
+  }, [messages, timeline, autoScrollIfAtBottom]);
   const timelineMessageIds = new Set(
     timeline.filter((item) => item.kind === "message").map((item) => item.id),
   );
@@ -150,7 +158,7 @@ export function MessageList({
   };
 
   return (
-    <div className="chat-messages" data-testid="message-list">
+    <div className="chat-messages" data-testid="message-list" ref={containerRef}>
       {recovering && (
         <div style={{ padding: "4px 10px", fontSize: 12, color: "var(--warning)", textAlign: "center" }}>
           连接中断，正在恢复事件流…
@@ -175,6 +183,24 @@ export function MessageList({
       ))}
 
       {timeline.map(renderTimelineItem)}
+
+      {hasUnread && (
+        <button
+          type="button"
+          className="icon-button scroll-to-latest"
+          onClick={scrollToLatest}
+          aria-label="跳到最新消息"
+          data-testid="scroll-to-latest"
+          style={{
+            position: "sticky",
+            bottom: 8,
+            alignSelf: "center",
+            zIndex: 5,
+          }}
+        >
+          <ArrowDown size={14} /> 跳到最新
+        </button>
+      )}
     </div>
   );
 }
