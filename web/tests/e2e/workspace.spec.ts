@@ -434,10 +434,11 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 折叠左侧
     await page.getByRole("button", { name: "收起会话面板" }).click();
-    await expect(page.locator(".app-sidebar-left.collapsed")).toBeVisible();
+    // collapsed 类设置 width:0/overflow:hidden，元素不可见但仍在 DOM 中
+    await expect(page.locator(".app-sidebar-left.collapsed")).toBeAttached();
     // 折叠右侧
     await page.getByRole("button", { name: "收起详情面板" }).click();
-    await expect(page.locator(".app-inspector.collapsed")).toBeVisible();
+    await expect(page.locator(".app-inspector.collapsed")).toBeAttached();
     // Focus 模式激活
     await expect(page.locator(".app-layout[data-focus-mode='true']")).toBeVisible();
 
@@ -447,8 +448,9 @@ test.describe("web workspace 真实浏览器验收", () => {
   });
 
   test("窄屏宽度：无横向溢出、抽屉正常打开和关闭", async ({ page }) => {
-    await page.goto(baseUrl());
+    // 先设置 viewport 再 goto，使初始化时的 media query 匹配窄屏断点
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(baseUrl());
 
     // 窄屏首屏确认无横向溢出
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
@@ -463,7 +465,7 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 点击遮罩关闭
     await page.getByTestId("drawer-backdrop").click();
-    await expect(page.locator(".app-sidebar-left.collapsed")).toBeVisible();
+    await expect(page.locator(".app-sidebar-left.collapsed")).toBeAttached();
   });
 
   test("进入 /settings 并导航 section，返回聊天保持会话", async ({ page }) => {

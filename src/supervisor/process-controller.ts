@@ -255,29 +255,36 @@ export class ProcessController {
       };
     }
 
-    // query 路径：最多读取 256KB，先按字节尾部读取，再交给纯过滤模块。
-    const MAX_BYTES = 256 * 1024;
+    // query 路径：读取文件尾部用于过滤，并传递 chunk 在文件中的起始偏移
+    // 使得 filterLogLines 生成的 cursor 为绝对文件偏移，跨 chunk 增量读取不会漏行。
+    const MAX_BYTES = 1 * 1024 * 1024; // 1MB
     if (!fs.existsSync(this.paths.serverLog)) {
       return { logs: "", truncated: false, nextCursor: null };
     }
     const stat = fs.statSync(this.paths.serverLog);
     let raw: string;
+    let chunkStart = 0;
     if (stat.size <= MAX_BYTES) {
       raw = fs.readFileSync(this.paths.serverLog, "utf8");
+      chunkStart = 0;
     } else {
+      chunkStart = stat.size - MAX_BYTES;
       const buffer = Buffer.alloc(MAX_BYTES);
       const fd = fs.openSync(this.paths.serverLog, "r");
-      fs.readSync(fd, buffer, 0, MAX_BYTES, stat.size - MAX_BYTES);
+      fs.readSync(fd, buffer, 0, MAX_BYTES, chunkStart);
       fs.closeSync(fd);
       raw = buffer.toString("utf8");
-      // 丢弃可能不完整的首行。
+      // 丢弃可能不完整的首行，并调整 chunk 起始偏移
       const firstNewline = raw.indexOf("\n");
-      raw = firstNewline >= 0 ? raw.slice(firstNewline + 1) : raw;
+      if (firstNewline >= 0) {
+        raw = raw.slice(firstNewline + 1);
+        chunkStart += firstNewline + 1;
+      }
     }
 
     const query = queryOrMaxBytes ?? {};
     const since = query.since ?? null;
-    return filterLogLines(raw, query, since);
+    return filterLogLines(raw, query, since, chunkStart);
   }
 
   private async waitForHealth(

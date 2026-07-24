@@ -73,7 +73,7 @@ export function decodeCursor(cursor: string): number | null {
  *
  * 当 input 文本末尾不是换行时，仍按已有行处理。
  */
-export function filterLogLines(input: string, query: LogQuery, sinceCursor: string | null): LogTail {
+export function filterLogLines(input: string, query: LogQuery, sinceCursor: string | null, baseOffset = 0): LogTail {
   const sinceOffset = sinceCursor !== null ? (decodeCursor(sinceCursor) ?? -1) : -1;
   const level = query.level ?? "all";
   const needle = query.query !== undefined && query.query.length > 0
@@ -121,7 +121,8 @@ export function filterLogLines(input: string, query: LogQuery, sinceCursor: stri
 
   const lastLine = window.length > 0 ? window[window.length - 1] : null;
   const last = lastLine !== undefined ? lastLine : null;
-  const nextCursor = last !== null ? encodeCursor(last.end - 1) : sinceCursor;
+  // cursor 是文件内的绝对字节偏移：chunk 内偏移 + chunk 在文件中的起始位置
+  const nextCursor = last !== null ? encodeCursor(baseOffset + last.end - 1) : sinceCursor;
 
   return { logs, truncated, nextCursor };
 }

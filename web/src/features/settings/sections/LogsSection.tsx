@@ -34,15 +34,25 @@ export function LogsSection(props: LogsSectionProps) {
     }
   }, [props, level, search, cursor]);
 
-  // level/search 变更时重置 cursor 并按需全量刷新
+  // level/search 变更时重置 cursor 并清空日志重新加载
   const refreshFull = useCallback(() => {
+    setLogs("");
     setCursor(null);
   }, []);
 
   useEffect(() => {
+    setLogs("");
+    setCursor(null);
     void fetchLogs(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level, search]);
+
+  // 刷新按钮：清空旧内容 + 重置 cursor + 立即拉取
+  const handleRefresh = useCallback(() => {
+    setLogs("");
+    setCursor(null);
+    void fetchLogs(true);
+  }, [fetchLogs]);
 
   useEffect(() => {
     if (timerRef.current !== null) clearInterval(timerRef.current);
@@ -70,7 +80,7 @@ export function LogsSection(props: LogsSectionProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button type="button" className="settings-btn" onClick={() => void refreshFull()}>
+        <button type="button" className="settings-btn" onClick={handleRefresh}>
           刷新
         </button>
       </div>

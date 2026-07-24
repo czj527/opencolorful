@@ -58,6 +58,17 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
       const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
       setLayoutPrefs(layout);
       applyLayoutVars(layout);
+      // 同步本地折叠状态到持久化的偏好值
+      if (layout.leftCollapsed && state.leftSidebar === "expanded") {
+        dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+      } else if (!layout.leftCollapsed && state.leftSidebar === "collapsed") {
+        dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+      }
+      if (layout.rightCollapsed && state.rightSidebar === "expanded") {
+        dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+      } else if (!layout.rightCollapsed && state.rightSidebar === "collapsed") {
+        dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+      }
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [api]);
@@ -368,18 +379,20 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   const handleToggleLeft = useCallback(() => {
     const opening = state.leftSidebar === "collapsed";
     dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+    api.updatePreferences({ layout: { ...layoutPrefs, leftCollapsed: !leftCollapsed } }).catch(() => {});
     if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.rightSidebar === "expanded") {
       dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
     }
-  }, [state.leftSidebar, state.rightSidebar]);
+  }, [state.leftSidebar, state.rightSidebar, leftCollapsed, api, layoutPrefs]);
 
   const handleToggleRight = useCallback(() => {
     const opening = state.rightSidebar === "collapsed";
     dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+    api.updatePreferences({ layout: { ...layoutPrefs, rightCollapsed: !rightCollapsed } }).catch(() => {});
     if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.leftSidebar === "expanded") {
       dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
     }
-  }, [state.leftSidebar, state.rightSidebar]);
+  }, [state.leftSidebar, state.rightSidebar, rightCollapsed, api, layoutPrefs]);
 
   const closeDrawers = useCallback(() => {
     if (state.leftSidebar === "expanded") dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
