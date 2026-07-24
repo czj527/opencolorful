@@ -47,7 +47,7 @@ export function SessionSidebar({
   };
 
   return (
-    <aside className="app-sidebar-left" role="complementary" aria-label="会话列表">
+    <aside className={`app-sidebar-left${collapsed ? " collapsed" : ""}`} role="complementary" aria-label="会话列表">
       <div className="sidebar-header">
         <span className="sidebar-title">会话</span>
         <button

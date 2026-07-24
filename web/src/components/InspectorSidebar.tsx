@@ -30,7 +30,7 @@ export function InspectorSidebar({
   const [tab, setTab] = useState<Tab>("session");
 
   return (
-    <aside className="app-inspector" role="complementary" aria-label="详情面板">
+    <aside className={`app-inspector${collapsed ? " collapsed" : ""}`} role="complementary" aria-label="详情面板">
       <div className="sidebar-header">
         <div style={{ display: "flex", gap: 4 }}>
           <button
