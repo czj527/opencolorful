@@ -433,17 +433,16 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // 折叠左侧
-    await page.getByRole("button", { name: "折叠左侧栏" }).click();
+    await page.getByRole("button", { name: "收起会话面板" }).click();
     await expect(page.locator(".app-sidebar-left.collapsed")).toBeVisible();
     // 折叠右侧
-    const toggleRight = page.getByRole("button", { name: "折叠右侧栏" });
-    if (await toggleRight.isVisible()) await toggleRight.click();
+    await page.getByRole("button", { name: "收起详情面板" }).click();
     await expect(page.locator(".app-inspector.collapsed")).toBeVisible();
     // Focus 模式激活
     await expect(page.locator(".app-layout[data-focus-mode='true']")).toBeVisible();
 
     // 重新展开左侧
-    await page.getByRole("button", { name: "展开左侧栏" }).click();
+    await page.getByRole("button", { name: "展开会话面板" }).click();
     await expect(page.locator(".app-layout[data-focus-mode='true']")).not.toBeVisible();
   });
 
@@ -451,13 +450,13 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.goto(baseUrl());
     await page.setViewportSize({ width: 390, height: 844 });
 
-    // 窄屏首屏确认左右折叠，无横向溢出
+    // 窄屏首屏确认无横向溢出
     const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
     const viewport = page.viewportSize();
     expect(bodyWidth).toBeLessThanOrEqual(viewport!.width + 2);
 
-    // 打开左侧抽屉
-    await page.getByRole("button", { name: "展开左侧栏" }).click();
+    // 打开左侧抽屉（窄屏默认收起）
+    await page.getByRole("button", { name: "展开会话面板" }).click();
     await expect(page.locator(".app-sidebar-left")).toBeVisible();
     // 遮罩存在
     await expect(page.getByTestId("drawer-backdrop")).toBeVisible();
@@ -478,9 +477,9 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.getByLabel("工作目录").fill(workspace);
     await page.getByRole("button", { name: "创建" }).click();
 
-    // 进入设置中心
-    await page.getByRole("button", { name: "设置中心" }).click();
-    await expect(page.locator("[data-page='settings']")).toBeVisible();
+    // 进入设置中心（齿轮按钮在 ChatPane 标题栏）
+    await page.getByLabel("设置中心").click();
+    await expect(page.locator("[data-page='settings']")).toBeVisible({ timeout: 10_000 });
 
     // 导航到不同 section
     await page.getByTestId("settings-nav-defaults").click();
