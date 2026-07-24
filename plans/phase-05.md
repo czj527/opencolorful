@@ -8,9 +8,10 @@
 ## 一、目标
 
 1. **Agent 身份证** — 每个 Agent 有永久身份编码，按类型分为 work/coding/assistant 三种，姓名可重复；人设/性格/回复风格是**独立属性**，不属于身份证
-2. **主题系统** — 亮色/暗色两种，CSS 变量 + `data-theme` 切换，持久化
-3. **工具卡片渲染稳定性** — 修复消息时间线重建导致卡片闪失的问题
-4. **聊天交互优化** — 控制栏下移、空状态、Agent 选择器
+2. **会话不强制绑定 Agent** — 会话可以属于某个 Agent，也可以不属于任何 Agent（此时体现模型最原本的性格，类似 openhanako 的 Hanako）。创建会话不需要先创建 Agent
+3. **主题系统** — 亮色/暗色两种，CSS 变量 + `data-theme` 切换，持久化
+4. **工具卡片渲染稳定性** — 修复消息时间线重建导致卡片闪失的问题
+5. **聊天交互优化** — 控制栏下移、空状态、Agent 选择器
 
 ---
 
@@ -79,7 +80,20 @@ interface AgentProfile {
 
 ---
 
-## 四、主题系统
+## 四、Session 与 Agent 的关系
+
+- `sessions.agent_id` 为 **可空（NULL）**。NULL = 无 Agent，使用模型原本性格
+- **创建会话不需要先创建 Agent**——会话随时可建，Agent 是可选增强
+- 目录：无 Agent → `sessions/*.jsonl`；绑定 Agent → `agents/<id>/sessions/*.jsonl`
+- UI：无 Agent 会话显示"默认"，Agent 选择器中有"未绑定"选项
+
+### Migration v4
+
+`sessions` 表新增 `agent_id TEXT`（可空，无默认值）。已有会话全部为 NULL。
+
+---
+
+## 五、主题系统
 
 两套主题，CSS 变量模式：
 
@@ -94,7 +108,7 @@ interface AgentProfile {
 
 ---
 
-## 五、工具卡片渲染稳定性修复
+## 六、工具卡片渲染稳定性修复
 
 ### 5.1 当前问题
 
@@ -131,7 +145,7 @@ openhanako 的 `buildAssistantBlocksFromContent` 一次性构建 blocks，text/t
 
 ---
 
-## 六、交互优化
+## 七、交互优化
 
 ### 6.1 控制栏下移
 
@@ -151,7 +165,7 @@ openhanako 的 `buildAssistantBlocksFromContent` 一次性构建 blocks，text/t
 
 ---
 
-## 七、文件变更清单
+## 八、文件变更清单
 
 | 文件 | 动作 |
 |---|---|
@@ -182,7 +196,7 @@ openhanako 的 `buildAssistantBlocksFromContent` 一次性构建 blocks，text/t
 
 ---
 
-## 八、任务拆分
+## 九、任务拆分
 
 ### Task 1：Agent 契约与 AgentStore
 - `agent-identity.ts` + `agent-store.ts` + 单测
@@ -214,7 +228,7 @@ openhanako 的 `buildAssistantBlocksFromContent` 一次性构建 blocks，text/t
 
 ---
 
-## 九、质量门
+## 十、质量门
 
 ```powershell
 node scripts/verify-pi-sdk-imports.mjs
@@ -226,14 +240,15 @@ npx tsc -p tsconfig.build.json
 npx playwright test
 ```
 
-## 十、验收标准
+## 十一、验收标准
 
 - [ ] Agent 创建/编辑/归档 API 全部可用
-- [ ] Session 创建绑定 agentId，列表按 Agent 过滤
+- [ ] 无 Agent 时可直接创建 Session，`agent_id` 为 NULL
+- [ ] Session 可绑定到 Agent，列表可按 Agent 过滤
 - [ ] 亮/暗主题切换持久化，刷新不变
 - [ ] 工具卡片在流式渲染中不消失/不乱序
 - [ ] 控制栏下移，模型选择/工具/思考在输入框下方一行
-- [ ] 空状态欢迎卡片随 Agent 切换更新
+- [ ] 空状态欢迎卡片随 Agent 切换更新（无 Agent 时显示"默认"）
 - [ ] `npm run check` 全部通过
 - [ ] Playwright 全部通过
 - [ ] 工作区干净（`git status --short` 空）
