@@ -13,7 +13,7 @@ export interface InputControlBarProps {
   readonly onThinkingLevelChange: (level: string) => void;
   readonly onSend: () => void;
   readonly onAbort: () => void;
-  readonly onSettingsClick?: () => void;
+  readonly onSettingsClick?: (() => void) | undefined;
 }
 
 const TOOL_MODES: { value: string; label: string }[] = [
