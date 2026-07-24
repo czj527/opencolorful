@@ -11,7 +11,7 @@ export interface CreateSessionInput {
   readonly workspaceCwd?: string;
   readonly workspaceConfirmed?: boolean;
   readonly thinkingLevel?: string;
-  readonly agentId?: string;
+  readonly agentId?: string | null;
 }
 
 export interface SessionMetadata {

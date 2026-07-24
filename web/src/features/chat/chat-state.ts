@@ -228,7 +228,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 streaming: true,
               },
             ],
-            timeline: appendTimelineItem(base.timeline, { kind: "message", id: event.eventId }),
+            timeline: appendTimelineItem(base.timeline, { kind: "message", id: `msg-${streamKey}` }),
           };
 
         case "message.delta": {
@@ -248,7 +248,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             return {
               ...base,
               messages: [...base.messages, message],
-              timeline: appendTimelineItem(base.timeline, { kind: "message", id: message.id }),
+              timeline: appendTimelineItem(base.timeline, { kind: "message", id: `msg-${streamKey}` }),
             };
           }
           return {
@@ -293,7 +293,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 streaming: false,
               },
             ],
-            timeline: appendTimelineItem(base.timeline, { kind: "message", id: event.eventId }),
+            timeline: appendTimelineItem(base.timeline, { kind: "message", id: `msg-${streamKey}` }),
           };
         }
 

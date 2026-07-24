@@ -70,8 +70,6 @@ create(request: CreateSessionRequest): PiSessionHandle {
   listByAgent(agentId: string): SessionView[] {
     return this.list({ agentId });
   }
-    return views;
-  }
 
   open(id: string): PiSessionHandle {
     const metadata = this.index.get(id);
