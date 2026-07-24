@@ -425,4 +425,75 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.getByRole("button", { name: "发送消息" }).click();
     await expect(page.getByTestId("message-list")).toContainText("读取完成", { timeout: 30_000 });
   });
+
+  // Phase 4 验收
+
+  test("桌面宽度：两侧折叠进入 Focus 模式且可再展开", async ({ page }) => {
+    await page.goto(baseUrl());
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // 折叠左侧
+    await page.getByRole("button", { name: "折叠左侧栏" }).click();
+    await expect(page.locator(".app-sidebar-left.collapsed")).toBeVisible();
+    // 折叠右侧
+    const toggleRight = page.getByRole("button", { name: "折叠右侧栏" });
+    if (await toggleRight.isVisible()) await toggleRight.click();
+    await expect(page.locator(".app-inspector.collapsed")).toBeVisible();
+    // Focus 模式激活
+    await expect(page.locator(".app-layout[data-focus-mode='true']")).toBeVisible();
+
+    // 重新展开左侧
+    await page.getByRole("button", { name: "展开左侧栏" }).click();
+    await expect(page.locator(".app-layout[data-focus-mode='true']")).not.toBeVisible();
+  });
+
+  test("窄屏宽度：无横向溢出、抽屉正常打开和关闭", async ({ page }) => {
+    await page.goto(baseUrl());
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    // 窄屏首屏确认左右折叠，无横向溢出
+    const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
+    const viewport = page.viewportSize();
+    expect(bodyWidth).toBeLessThanOrEqual(viewport!.width + 2);
+
+    // 打开左侧抽屉
+    await page.getByRole("button", { name: "展开左侧栏" }).click();
+    await expect(page.locator(".app-sidebar-left")).toBeVisible();
+    // 遮罩存在
+    await expect(page.getByTestId("drawer-backdrop")).toBeVisible();
+
+    // 点击遮罩关闭
+    await page.getByTestId("drawer-backdrop").click();
+    await expect(page.locator(".app-sidebar-left.collapsed")).toBeVisible();
+  });
+
+  test("进入 /settings 并导航 section，返回聊天保持会话", async ({ page }) => {
+    test.setTimeout(30_000);
+    await page.goto(baseUrl());
+    await ensureFixtureProvider(page);
+
+    // 先创建会话建立状态
+    await page.getByRole("button", { name: "新建会话" }).click();
+    await page.getByLabel("会话标题").fill(`Settings-${Date.now()}`);
+    await page.getByLabel("工作目录").fill(workspace);
+    await page.getByRole("button", { name: "创建" }).click();
+
+    // 进入设置中心
+    await page.getByRole("button", { name: "设置中心" }).click();
+    await expect(page.locator("[data-page='settings']")).toBeVisible();
+
+    // 导航到不同 section
+    await page.getByTestId("settings-nav-defaults").click();
+    await expect(page.getByTestId("settings-content")).toBeVisible();
+
+    await page.getByTestId("settings-nav-layout").click();
+    await expect(page.getByTestId("settings-content")).toBeVisible();
+
+    await page.getByTestId("settings-nav-runtime").click();
+    await expect(page.getByTestId("settings-content")).toBeVisible();
+
+    // 返回聊天 — 会话仍然存在
+    await page.getByTestId("settings-back").click();
+    await expect(page.getByTestId("message-list")).toBeVisible();
+  });
 });

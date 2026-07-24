@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { appReducer, initialAppState, type AppAction } from "./state.js";
+import { routeFromPathname } from "./page-router.js";
+import { SettingsPage } from "../features/settings/SettingsPage.js";
 
 describe("appReducer", () => {
   it("starts with initial state", () => {
@@ -109,5 +112,23 @@ describe("appReducer", () => {
   it("sets loading state", () => {
     const state = appReducer(initialAppState, { type: "SET_LOADING", payload: true });
     expect(state.loading).toBe(true);
+  });
+});
+
+describe("route isolation", () => {
+  it("routes / to workspace", () => {
+    expect(routeFromPathname("/")).toBe("workspace");
+  });
+
+  it("routes /settings to settings (not workspace)", () => {
+    expect(routeFromPathname("/settings")).toBe("settings");
+  });
+
+  it("settings page shell renders without SSE or WebSocket references", () => {
+    // SettingsPage 渲染不应引用 EventSource 或 WebSocket——设置页不与 Agent 建立流连接。
+    const html = renderToStaticMarkup(<SettingsPage api={null as never} />);
+    expect(html).not.toContain("EventSource");
+    expect(html).not.toContain("WebSocket");
+    expect(html).toContain("settings");
   });
 });

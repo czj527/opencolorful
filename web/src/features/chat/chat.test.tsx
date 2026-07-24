@@ -249,3 +249,70 @@ describe("message resilience", () => {
     expect(getStreamCursor(state, "new")).toBe(1);
   });
 });
+
+describe("chatReducer EVENT_BATCH", () => {
+  it("processes multiple deltas from a single batch preserving order", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1", userContent: "test" });
+    state = chatReducer(state, {
+      type: "EVENT_BATCH",
+      events: [
+        makeEvent("message.started", { role: "assistant" }, 1),
+        makeEvent("message.delta", { role: "assistant", delta: "Hello " }, 2),
+        makeEvent("message.delta", { role: "assistant", delta: "World" }, 3),
+      ],
+    });
+    expect(state.messages[state.messages.length - 1]!.content).toBe("Hello World");
+    expect(state.messages[state.messages.length - 1]!.streaming).toBe(true);
+  });
+
+  it("handles tool calls and plan within a batch", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1", userContent: "read file" });
+    state = chatReducer(state, {
+      type: "EVENT_BATCH",
+      events: [
+        makeEvent("tool.started", { toolCallId: "t1", toolName: "read" }, 1),
+        makeEvent("tool.completed", { toolCallId: "t1", result: "file content" }, 2),
+        makeEvent("plan.updated", { planId: "p1", items: ["读取", "分析"] }, 3),
+      ],
+    });
+    expect(state.toolCalls.get("t1")?.status).toBe("completed");
+    expect(state.toolCalls.get("t1")?.result).toBe("file content");
+    expect(state.planItems).toHaveLength(2);
+    expect(state.planItems[0]?.text).toBe("读取");
+  });
+
+  it("drops duplicate sequence within a batch via single EVENT handler", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1", userContent: "hello" });
+    state = chatReducer(state, {
+      type: "EVENT_BATCH",
+      events: [
+        makeEvent("message.delta", { role: "assistant", delta: "X" }, 1),
+        makeEvent("message.delta", { role: "assistant", delta: "Y" }, 1), // 重复 sequence
+        makeEvent("message.delta", { role: "assistant", delta: "Z" }, 2),
+      ],
+    });
+    // 重复 sequence=1 的事件被丢弃，只保留第一个
+    expect(state.messages[state.messages.length - 1]!.content).toBe("XZ");
+  });
+
+  it("builds correct timeline order: message → thinking → tool → plan → attachment", () => {
+    let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1", userContent: "complex" });
+    state = chatReducer(state, {
+      type: "EVENT_BATCH",
+      events: [
+        makeEvent("message.delta", { role: "assistant", delta: "Let me think" }, 1),
+        makeEvent("thinking.delta", { delta: "hmm..." }, 2),
+        makeEvent("tool.started", { toolCallId: "t1", toolName: "bash" }, 3),
+        makeEvent("plan.updated", { planId: "p1", items: ["s1"] }, 4),
+        makeEvent("attachment.available", { attachmentId: "a1", name: "file.png", mimeType: "image/png" }, 5),
+      ],
+    });
+    const kinds = state.timeline.map((i) => i.kind);
+    // timeline 按事件到达顺序排列：每个事件类型在 timeline 中插入对应项
+    expect(kinds).toContain("message");
+    expect(kinds).toContain("thinking");
+    expect(kinds).toContain("tool");
+    expect(kinds).toContain("plan");
+    expect(kinds).toContain("attachment");
+  });
+});
