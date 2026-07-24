@@ -90,6 +90,7 @@ export type ChatAction =
   | { type: "PROMPT_PENDING"; userContent: string }
   | { type: "PROMPT_SENT"; streamId: string; userContent: string }
   | { type: "EVENT"; event: PlatformEventEnvelope }
+  | { type: "EVENT_BATCH"; events: readonly PlatformEventEnvelope[] }
   | { type: "TOGGLE_THINKING" }
   | { type: "SET_ERROR"; error: string };
 
@@ -97,6 +98,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "RESET":
       return { ...initialChatState };
+
+    case "EVENT_BATCH": {
+      let next = state;
+      for (const event of action.events) {
+        next = chatReducer(next, { type: "EVENT", event });
+      }
+      return next;
+    }
 
     case "PROMPT_PENDING": {
       const pendingMessage: ChatMessage = {

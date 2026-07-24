@@ -13,6 +13,7 @@ import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
 import type { ProviderFormData } from "../features/providers/provider-form.js";
 import { usePanelResize } from "../features/layout/use-panel-resize.js";
 import { mergeLayoutPreferences, DEFAULT_LAYOUT_ONLY } from "../features/layout/layout-preferences.js";
+import { StreamBuffer } from "../features/chat/stream-buffer.js";
 import { navigateToSettings } from "./page-router.js";
 import "./layout.css";
 
@@ -46,6 +47,7 @@ export function WorkspaceApp() {
   const wsRef = useRef<WsClient | null>(null);
   const leftResizeRef = useRef<HTMLDivElement | null>(null);
   const rightResizeRef = useRef<HTMLDivElement | null>(null);
+  const bufferRef = useRef<StreamBuffer | null>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
   const api = apiRef.current;
@@ -111,15 +113,25 @@ export function WorkspaceApp() {
     return undefined;
   }, [state.connectionStatus, refreshSessions, refreshProvidersAndModels]);
 
-  // --- 事件流接线：SSE 事件 → chat reducer ---
+  // --- 事件流接线：SSE/WS 事件 → StreamBuffer → chatReducer EVENT_BATCH ---
+
+  useEffect(() => {
+    const buffer = new StreamBuffer((events) => {
+      dispatchChat({ type: "EVENT_BATCH", events });
+      for (const e of events) {
+        if (e.type === "message.completed" || e.type === "session.status") {
+          void refreshSessions();
+          break;
+        }
+      }
+    });
+    bufferRef.current = buffer;
+    return () => buffer.dispose();
+  }, []);
 
   const handlePlatformEvent = useCallback((event: PlatformEventEnvelope) => {
-    dispatchChat({ type: "EVENT", event });
-    // message.completed 后刷新会话历史
-    if (event.type === "message.completed" || event.type === "session.status") {
-      void refreshSessions();
-    }
-  }, [refreshSessions]);
+    bufferRef.current?.push(event);
+  }, []);
 
   useEffect(() => {
     if (state.activeSessionId && state.connectionStatus === "online") {
