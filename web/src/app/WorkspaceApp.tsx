@@ -14,7 +14,6 @@ import type { ProviderFormData } from "../features/providers/provider-form.js";
 import { usePanelResize } from "../features/layout/use-panel-resize.js";
 import { mergeLayoutPreferences, DEFAULT_LAYOUT_ONLY } from "../features/layout/layout-preferences.js";
 import { StreamBuffer } from "../features/chat/stream-buffer.js";
-import { navigateToSettings } from "./page-router.js";
 import "./layout.css";
 
 // 同源部署：Supervisor 托管 Web 并代理 Agent API
@@ -32,7 +31,7 @@ function applyLayoutVars(layout: LayoutPreferences) {
   );
 }
 
-export function WorkspaceApp() {
+export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: () => void }) {
   const [state, dispatch] = useReducer(appReducer, undefined, () => ({
     ...initialAppState,
     // 窄屏默认收起侧栏，避免首屏抽屉互相覆盖
@@ -432,7 +431,8 @@ export function WorkspaceApp() {
           onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
-          onSettingsClick={navigateToSettings}
+          onSettingsClick={onSettingsClick}
+          reducedMotion={layoutPrefs.reducedMotion === "on"}
         />
         {!focusMode && !narrowLayout && (
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />

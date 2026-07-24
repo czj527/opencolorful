@@ -35,10 +35,17 @@ export function registerSettingsRoutes(
     const rawLayout = hasLayout ? (body.layout as Record<string, unknown>) : undefined;
 
     const previous = preferencesStore.get();
+    // 深合并 patch 与已有值：请求只提交变化的字段，缺失字段保留上一次值。
+    const mergedDefaults = rawDefaults !== undefined
+      ? { ...previous.defaults, ...rawDefaults }
+      : previous.defaults;
+    const mergedLayout = rawLayout !== undefined
+      ? { ...previous.layout, ...rawLayout }
+      : previous.layout;
     const candidate = normalizePreferences({
       version: 1,
-      defaults: rawDefaults ?? previous.defaults,
-      layout: rawLayout ?? previous.layout,
+      defaults: mergedDefaults,
+      layout: mergedLayout,
     });
 
     // 显式校验原始请求字段：非法枚举返回 400 而不是静默回退。

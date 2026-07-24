@@ -29,10 +29,6 @@ export function InspectorSidebar({
 }: InspectorSidebarProps) {
   const [tab, setTab] = useState<Tab>("session");
 
-  if (collapsed) {
-    return null;
-  }
-
   return (
     <aside className="app-inspector" role="complementary" aria-label="详情面板">
       <div className="sidebar-header">

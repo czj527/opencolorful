@@ -29,11 +29,13 @@
 ```powershell
 node scripts/verify-pi-sdk-imports.mjs  # ✓ 通过
 npx vitest run                           # ✓ 28 files / 175 tests
-npm run web:build                        # ✓ 生产构建
-npm run test --workspace=web             # ✓ 12 files / 135 tests
-npx playwright test                      # ✓ 10 passed
+npm run test --workspace=web             # ✓ 12 files / 142 tests
+npm run web:build                        # ✓ 生产构建 (270KB / gzip 82KB)
 npx tsc -p tsconfig.build.json           # ✓ 通过
+npx playwright test                      # ✓ 13 passed (含 Phase 4 新增 Focus/窄屏/设置 3 场景)
 ```
+
+> 注：`npm run check` 在默认并行模式下 supervisor/ws 集成测试偶有进程竞争（2/175），串行或独立运行全部通过，属于 Phase 3 既有环境抖动，非 Phase 4 引入。
 
 ## 已知偏差
 

@@ -29,10 +29,6 @@ export function SessionSidebar({
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
 
-  if (collapsed) {
-    return null;
-  }
-
   const active = sessions.filter((s) => !s.archived);
   const archived = sessions.filter((s) => s.archived);
   const filtered = (list: SessionView[]) =>

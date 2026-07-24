@@ -24,6 +24,7 @@ interface MessageListProps {
   readonly thinkingCollapsed: boolean;
   readonly onToggleThinking: () => void;
   readonly recovering: boolean;
+  readonly reducedMotion: boolean;
 }
 
 function sameMessage(
@@ -67,8 +68,9 @@ export function MessageList({
   thinkingCollapsed,
   onToggleThinking,
   recovering,
+  reducedMotion,
 }: MessageListProps) {
-  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(false);
+  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(reducedMotion);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
 
   // 每次 messages/timeline 变化后执行自动滚动

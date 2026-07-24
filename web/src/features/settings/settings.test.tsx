@@ -103,7 +103,7 @@ describe("SettingsNav component", () => {
 
 describe("SettingsPage shell", () => {
   it("renders a settings shell with nav + content area", () => {
-    const html = renderToStaticMarkup(<SettingsPage api={null as never} />);
+    const html = renderToStaticMarkup(<SettingsPage api={null as never} onBack={() => {}} />);
     // SettingsPage 至少渲染导航容器与内容容器；section 实际数据由 API 异步加载。
     expect(html).toContain("settings");
   });

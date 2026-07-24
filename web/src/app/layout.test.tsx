@@ -126,7 +126,7 @@ describe("route isolation", () => {
 
   it("settings page shell renders without SSE or WebSocket references", () => {
     // SettingsPage 渲染不应引用 EventSource 或 WebSocket——设置页不与 Agent 建立流连接。
-    const html = renderToStaticMarkup(<SettingsPage api={null as never} />);
+    const html = renderToStaticMarkup(<SettingsPage api={null as never} onBack={() => {}} />);
     expect(html).not.toContain("EventSource");
     expect(html).not.toContain("WebSocket");
     expect(html).toContain("settings");

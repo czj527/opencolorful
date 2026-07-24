@@ -15,6 +15,7 @@ interface ChatPaneProps {
   readonly onSelectModel: (providerId: string, modelId: string) => void;
   readonly sseConnected: boolean;
   readonly onSettingsClick?: () => void;
+  readonly reducedMotion?: boolean;
 }
 
 export function ChatPane({
@@ -28,6 +29,7 @@ export function ChatPane({
   onSelectModel,
   sseConnected,
   onSettingsClick,
+  reducedMotion,
 }: ChatPaneProps) {
   if (!session) {
     return (
@@ -108,6 +110,7 @@ export function ChatPane({
         thinkingCollapsed={chat.thinkingCollapsed}
         onToggleThinking={onToggleThinking}
         recovering={!sseConnected && running}
+        reducedMotion={reducedMotion ?? false}
       />
 
       <MessageComposer

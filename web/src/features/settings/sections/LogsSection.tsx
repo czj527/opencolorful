@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LogTail } from "../../../lib/types.js";
 
 export interface LogsSectionProps {
-  readonly getSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string }) => Promise<LogTail>;
+  readonly getSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<LogTail>;
 }
 
 export function LogsSection(props: LogsSectionProps) {
@@ -10,25 +10,43 @@ export function LogsSection(props: LogsSectionProps) {
   const [level, setLevel] = useState<"all" | "info" | "warn" | "error">("all");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(async (resetCursor: boolean) => {
     try {
-      const q: { limit: number; level?: "info" | "warn" | "error"; query?: string } = { limit: 200 };
+      const q: { limit: number; level?: "info" | "warn" | "error"; query?: string; since?: string | null } = { limit: 200 };
       if (level !== "all") q.level = level;
       if (search.length > 0) q.query = search;
+      // 增量读取：使用上次返回的 cursor，仅拉取新增行
+      if (!resetCursor && cursor !== null) q.since = cursor;
+
       const tail = await props.getSupervisorLogs(q);
-      setLogs(tail.logs);
+      if (resetCursor) {
+        setLogs(tail.logs);
+      } else if (tail.logs.length > 0) {
+        setLogs((prev) => prev + tail.logs);
+      }
+      if (tail.nextCursor !== null) setCursor(tail.nextCursor);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "日志加载失败");
     }
-  }, [props, level, search]);
+  }, [props, level, search, cursor]);
+
+  // level/search 变更时重置 cursor 并按需全量刷新
+  const refreshFull = useCallback(() => {
+    setCursor(null);
+  }, []);
 
   useEffect(() => {
-    void fetchLogs();
+    void fetchLogs(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [level, search]);
+
+  useEffect(() => {
     if (timerRef.current !== null) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => void fetchLogs(), 2_000);
+    timerRef.current = setInterval(() => void fetchLogs(false), 2_000);
     return () => {
       if (timerRef.current !== null) clearInterval(timerRef.current);
     };
@@ -52,7 +70,7 @@ export function LogsSection(props: LogsSectionProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button type="button" className="settings-btn" onClick={() => void fetchLogs()}>
+        <button type="button" className="settings-btn" onClick={() => void refreshFull()}>
           刷新
         </button>
       </div>

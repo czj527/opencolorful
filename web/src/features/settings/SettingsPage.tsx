@@ -16,11 +16,11 @@ import { LayoutSection } from "./sections/LayoutSection.js";
 import { LogsSection } from "./sections/LogsSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { UnavailableSection } from "./sections/UnavailableSection.js";
-import { navigateToWorkspace } from "../../app/page-router.js";
 import "./settings.css";
 
 export interface SettingsPageProps {
   readonly api: ApiClient;
+  readonly onBack: () => void;
 }
 
 export function SettingsPage(props: SettingsPageProps) {
@@ -36,23 +36,28 @@ export function SettingsPage(props: SettingsPageProps) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      // Supervisor 状态独立加载：Agent 停止时仍可访问
       try {
-        const [prefs, status, provs, mods] = await Promise.all([
-          props.api.getPreferences(),
-          props.api.getSupervisorStatus().catch(() => null),
+        const status = await props.api.getSupervisorStatus();
+        if (!cancelled) setSupervisorStatus(status);
+      } catch { /* Supervisor 不可达——日志与 Runtime section 各自处理 */ }
+
+      // Preferences 可能因 Agent 停止而 502，失败不阻塞整个页面
+      try {
+        const prefs = await props.api.getPreferences();
+        if (!cancelled) setPreferences(prefs);
+      } catch (error) {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "偏好加载失败");
+      }
+
+      // Provider/Model 异步加载，失败不影响诊断
+      try {
+        const [provs, mods] = await Promise.all([
           props.api.listProviders().catch(() => [] as ProviderView[]),
           props.api.listModels().catch(() => [] as ModelSummary[]),
         ]);
-        if (cancelled) return;
-        setPreferences(prefs);
-        if (status !== null) setSupervisorStatus(status);
-        setProviders(provs);
-        setModels(mods);
-      } catch (error) {
-        if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : "加载设置失败");
-        }
-      }
+        if (!cancelled) { setProviders(provs); setModels(mods); }
+      } catch { /* 忽略 */ }
     })();
     return () => { cancelled = true; };
   }, [props.api]);
@@ -66,6 +71,7 @@ export function SettingsPage(props: SettingsPageProps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "保存失败";
       setSaveError(msg);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -80,6 +86,7 @@ export function SettingsPage(props: SettingsPageProps) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "保存失败";
       setSaveError(msg);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -103,19 +110,20 @@ export function SettingsPage(props: SettingsPageProps) {
       setModels(mods);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Provider 保存失败");
+      throw err;
     } finally {
       setSaving(false);
     }
   };
 
-  const getSupervisorLogs = async (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string }) => {
+  const getSupervisorLogs = async (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => {
     return props.api.getSupervisorLogs(query);
   };
 
   return (
     <div className="settings-page" data-page="settings">
       <header className="settings-header">
-        <button type="button" className="settings-back" onClick={navigateToWorkspace} data-testid="settings-back">
+        <button type="button" className="settings-back" onClick={props.onBack} data-testid="settings-back">
           ← 返回聊天
         </button>
         <h1 className="settings-title">设置中心</h1>
@@ -130,24 +138,19 @@ export function SettingsPage(props: SettingsPageProps) {
           onSearch={(value) => dispatch({ type: "SET_SEARCH", search: value })}
         />
         <main className="settings-content" data-testid="settings-content">
-          {loadError !== null ? (
-            <div className="settings-load-error" role="alert">{loadError}</div>
-          ) : preferences === null ? (
-            <div className="settings-loading">加载中…</div>
-          ) : (
-            renderSection(nav.activeSection, {
-              preferences,
-              supervisorStatus,
-              providers,
-              models,
-              onSavePreferences: handleSavePreferences,
-              onSaveLayout: handleSaveLayout,
-              onSaveProvider: handleSaveProvider,
-              onGetSupervisorLogs: getSupervisorLogs,
-              saving,
-              saveError,
-            })
-          )}
+          {renderSection(nav.activeSection, {
+            preferences,
+            supervisorStatus,
+            providers,
+            models,
+            onSavePreferences: handleSavePreferences,
+            onSaveLayout: handleSaveLayout,
+            onSaveProvider: handleSaveProvider,
+            onGetSupervisorLogs: getSupervisorLogs,
+            saving,
+            saveError,
+            loadError,
+          })}
         </main>
       </div>
     </div>
@@ -155,19 +158,33 @@ export function SettingsPage(props: SettingsPageProps) {
 }
 
 interface SectionRenderProps {
-  readonly preferences: PreferencesDocument;
+  readonly preferences: PreferencesDocument | null;
   readonly supervisorStatus: SupervisorStatusResponse | null;
   readonly providers: readonly ProviderView[];
   readonly models: readonly ModelSummary[];
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
-  readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
+  readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
   readonly saving: boolean;
   readonly saveError: string | null;
+  readonly loadError: string | null;
 }
 
 function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
+  // 独立于 Agent 的 section：即使 Agent 停止也可用
+  if (active === "logs") return <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />;
+  if (active === "runtime") return <RuntimeSection supervisorStatus={props.supervisorStatus} />;
+  if (active === "future") return <UnavailableSection />;
+
+  // 以下 section 依赖 Agent/preferences
+  if (props.loadError !== null) {
+    return <div className="settings-load-error" role="alert">{props.loadError}</div>;
+  }
+  if (props.preferences === null) {
+    return <div className="settings-loading">加载中…</div>;
+  }
+
   switch (active) {
     case "models":
       return (
@@ -197,11 +214,7 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
           lastSaveError={props.saveError}
         />
       );
-    case "logs":
-      return <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />;
-    case "runtime":
-      return <RuntimeSection supervisorStatus={props.supervisorStatus} />;
-    case "future":
-      return <UnavailableSection />;
+    default:
+      return null;
   }
 }
