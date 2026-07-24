@@ -3,6 +3,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import type { RuntimePaths } from "../config/paths.js";
 import { PreferencesStore } from "../config/preferences-store.js";
 import { ProviderStore } from "../config/provider-store.js";
+import { AgentStore } from "../config/agent-store.js";
 import { EventReplayStore } from "../runtime/event-replay-store.js";
 import { ModelService } from "../runtime/model-service.js";
 import { PromptService } from "../runtime/prompt-service.js";
@@ -147,6 +148,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     const modelService = await ModelService.create(paths, providerStore);
     const sessionService = new SessionService(paths, sessionIndex);
     const preferencesStore = new PreferencesStore(paths.preferences);
+    const agentStore = new AgentStore(paths.agents);
     const promptService = new PromptService();
     const replayStore = new EventReplayStore();
     const wsRegistry = new ClientRegistry();
@@ -157,6 +159,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         modelService,
         sessionService,
         preferencesStore,
+        agentStore,
         promptService,
         replayStore,
         wsRegistry,

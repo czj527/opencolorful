@@ -64,6 +64,9 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.preferencesStore !== undefined) {
     registerSettingsRoutes(app, options.preferencesStore, options.modelService);
   }
+  if (options.agentStore !== undefined) {
+    registerAgentRoutes(app, options.agentStore, options.sessionService);
+  }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(
       app,
