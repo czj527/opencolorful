@@ -18,6 +18,8 @@ interface ChatPaneProps {
   readonly onToggleThinking: () => void;
   readonly onSelectModel: (providerId: string, modelId: string) => void;
   readonly onSelectAgent?: (agentId: string | null) => void;
+  readonly onToolModeChange?: (mode: string) => void;
+  readonly onThinkingLevelChange?: (level: string) => void;
   readonly sseConnected: boolean;
   readonly onSettingsClick?: () => void;
   readonly reducedMotion?: boolean;
@@ -38,6 +40,8 @@ export function ChatPane({
   sseConnected,
   onSettingsClick,
   reducedMotion,
+  onToolModeChange,
+  onThinkingLevelChange,
 }: ChatPaneProps) {
   if (!session) {
     return (
@@ -113,13 +117,10 @@ export function ChatPane({
         selectedModel={session.model}
         toolMode={session.toolMode}
         thinkingLevel={session.thinkingLevel}
-        running={running}
         disabled={false}
         onSelectModel={onSelectModel}
-        onToolModeChange={() => {}}
-        onThinkingLevelChange={() => {}}
-        onSend={() => onSend("")}
-        onAbort={onAbort}
+        onToolModeChange={onToolModeChange ?? (() => {})}
+        onThinkingLevelChange={onThinkingLevelChange ?? (() => {})}
         onSettingsClick={onSettingsClick}
       />
     </main>

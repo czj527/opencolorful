@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiClient } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
-import type { PlatformEventEnvelope, LayoutPreferences } from "../lib/types.js";
+import type { PlatformEventEnvelope, LayoutPreferences, AgentView } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor } from "../features/chat/chat-state.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
@@ -57,6 +57,8 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const [chat, dispatchChat] = useReducer(chatReducer, initialChatState);
   const [sseConnected, setSseConnected] = useState(false);
   const [layoutPrefs, setLayoutPrefs] = useState<LayoutPreferences>(DEFAULT_LAYOUT_ONLY);
+  const [agents, setAgents] = useState<AgentView[]>([]);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [breakpoints, setBreakpoints] = useState(() => ({
     leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
     rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
@@ -157,6 +159,15 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
   }, [api]);
 
+  const refreshAgents = useCallback(async () => {
+    try {
+      const list = await api.listAgents();
+      setAgents(list);
+    } catch {
+      // Server 可能未运行
+    }
+  }, [api]);
+
   useEffect(() => {
     if (!active) return undefined;
     void refreshSupervisorStatus();
@@ -168,6 +179,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     if (active && state.connectionStatus === "online") {
       void refreshSessions();
       void refreshProvidersAndModels();
+      void refreshAgents();
       // Agent 在线期间定期刷新模型与 Provider（Provider 可能在运行中被配置）
       const interval = setInterval(() => {
         void refreshProvidersAndModels();
@@ -368,6 +380,18 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     dispatch({ type: "UPSERT_SESSION", payload: session });
   }, [api, state.activeSessionId]);
 
+  const handleToolModeChange = useCallback(async (mode: string) => {
+    if (!state.activeSessionId) return;
+    const session = await api.updateSessionSettings(state.activeSessionId, { toolMode: mode as "off" | "read-only" | "all" });
+    dispatch({ type: "UPSERT_SESSION", payload: session });
+  }, [api, state.activeSessionId]);
+
+  const handleThinkingLevelChange = useCallback(async (level: string) => {
+    if (!state.activeSessionId) return;
+    const session = await api.updateSessionSettings(state.activeSessionId, { thinkingLevel: level });
+    dispatch({ type: "UPSERT_SESSION", payload: session });
+  }, [api, state.activeSessionId]);
+
   const handleShowLogs = useCallback(async () => {
     try {
       const { logs } = await api.getSupervisorLogs();
@@ -531,11 +555,16 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           session={activeSession}
           chat={chat}
           models={state.models}
+          agents={agents}
+          activeAgentId={activeAgentId}
           onSend={(content) => void handleSend(content)}
           onAbort={() => void handleAbort()}
           onCompact={() => void handleCompact()}
           onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
+          onSelectAgent={(id) => setActiveAgentId(id)}
+          onToolModeChange={(mode) => void handleToolModeChange(mode)}
+          onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
           onSettingsClick={onSettingsClick}
           reducedMotion={reducedMotion}
