@@ -173,4 +173,5 @@ export interface LogTail {
   readonly logs: string;
   readonly truncated: boolean;
   readonly nextCursor: string | null;
+  readonly status?: string;
 }

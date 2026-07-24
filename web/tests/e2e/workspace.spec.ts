@@ -161,6 +161,31 @@ async function selectFixtureModel(page: Page): Promise<void> {
   await select.selectOption(value!);
 }
 
+async function ensureAgentServerViaApi(page: Page): Promise<void> {
+  const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+  if (status.agentServer.status === "online") return;
+  const response = await page.request.post(`${baseUrl()}/api/supervisor/start`);
+  expect(response.ok()).toBe(true);
+  await expect.poll(async () => {
+    const current = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+    return current.agentServer.status;
+  }, { timeout: 30_000 }).toBe("online");
+}
+
+async function setDesktopLayout(page: Page, leftCollapsed: boolean, rightCollapsed: boolean): Promise<void> {
+  await ensureAgentServerViaApi(page);
+  const response = await page.request.put(`${baseUrl()}/api/settings/preferences`, {
+    data: {
+      layout: {
+        leftCollapsed,
+        rightCollapsed,
+        focusMode: leftCollapsed && rightCollapsed,
+      },
+    },
+  });
+  expect(response.ok()).toBe(true);
+}
+
 test.describe("web workspace 真实浏览器验收", () => {
   test("首屏加载工作台，显示 Supervisor 状态", async ({ page }) => {
     await page.goto(baseUrl());
@@ -293,6 +318,7 @@ test.describe("web workspace 真实浏览器验收", () => {
   });
 
   test("窄屏宽度：首屏无重叠，抽屉互斥且带遮罩", async ({ page }) => {
+    await setDesktopLayout(page, false, false);
     await page.setViewportSize({ width: 480, height: 800 });
     await page.goto(baseUrl());
 
@@ -429,8 +455,9 @@ test.describe("web workspace 真实浏览器验收", () => {
   // Phase 4 验收
 
   test("桌面宽度：两侧折叠进入 Focus 模式且可再展开", async ({ page }) => {
-    await page.goto(baseUrl());
+    await setDesktopLayout(page, false, false);
     await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(baseUrl());
 
     // 折叠左侧
     await page.getByRole("button", { name: "收起会话面板" }).click();
@@ -442,12 +469,17 @@ test.describe("web workspace 真实浏览器验收", () => {
     // Focus 模式激活
     await expect(page.locator(".app-layout[data-focus-mode='true']")).toBeVisible();
 
+    // 两侧状态写入偏好后，刷新仍保持 Focus 模式。
+    await page.reload();
+    await expect(page.locator(".app-layout[data-focus-mode='true']")).toBeVisible();
+
     // 重新展开左侧
     await page.getByRole("button", { name: "展开会话面板" }).click();
     await expect(page.locator(".app-layout[data-focus-mode='true']")).not.toBeVisible();
   });
 
   test("窄屏宽度：无横向溢出、抽屉正常打开和关闭", async ({ page }) => {
+    await setDesktopLayout(page, false, false);
     // 先设置 viewport 再 goto，使初始化时的 media query 匹配窄屏断点
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(baseUrl());
@@ -464,8 +496,60 @@ test.describe("web workspace 真实浏览器验收", () => {
     await expect(page.getByTestId("drawer-backdrop")).toBeVisible();
 
     // 点击遮罩关闭
-    await page.getByTestId("drawer-backdrop").click();
+    await page.getByTestId("drawer-backdrop").click({ position: { x: 380, y: 400 } });
     await expect(page.locator(".app-sidebar-left.collapsed")).toBeAttached();
+  });
+
+  test("桌面窗口缩窄后切换为互斥抽屉布局", async ({ page }) => {
+    await setDesktopLayout(page, false, false);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(baseUrl());
+    await expect(page.getByRole("complementary", { name: "会话列表" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "详情面板" })).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("complementary", { name: "会话列表" })).not.toBeVisible();
+    await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
+  });
+
+  test("1024px 右侧抽屉带遮罩并支持 Escape 关闭", async ({ page }) => {
+    await setDesktopLayout(page, false, false);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(baseUrl());
+
+    await expect(page.getByRole("complementary", { name: "会话列表" })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
+    await page.getByRole("button", { name: "展开详情面板" }).click();
+    await expect(page.getByTestId("drawer-backdrop")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("complementary", { name: "详情面板" })).not.toBeVisible();
+    await expect(page.getByRole("complementary", { name: "会话列表" })).toBeVisible();
+  });
+
+  test("移动端抽屉宽度不超过视口", async ({ page }) => {
+    await setDesktopLayout(page, false, false);
+    const response = await page.request.put(`${baseUrl()}/api/settings/preferences`, {
+      data: { layout: { rightSidebarWidth: 520 } },
+    });
+    expect(response.ok()).toBe(true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(baseUrl());
+
+    await page.getByRole("button", { name: "展开详情面板" }).click();
+    const box = await page.getByRole("complementary", { name: "详情面板" }).boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeLessThanOrEqual(390);
+  });
+
+  test("直接打开设置 section 并在刷新后保持", async ({ page }) => {
+    await ensureAgentServerViaApi(page);
+    await page.goto(`${baseUrl()}/settings?section=logs`);
+    await expect(page.getByTestId("settings-section-logs")).toBeVisible();
+    await expect(page.locator(".app-layout[data-workspace-active='false']")).toBeAttached();
+
+    await page.reload();
+    await expect(page.getByTestId("settings-section-logs")).toBeVisible();
   });
 
   test("进入 /settings 并导航 section，返回聊天保持会话", async ({ page }) => {

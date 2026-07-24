@@ -59,7 +59,7 @@ export function DefaultsSection(props: DefaultsSectionProps) {
       <label>
         工具模式
         <select value={form.toolMode} onChange={(e) => setForm((f) => ({ ...f, toolMode: e.target.value as PreferencesDocument["defaults"]["toolMode"] }))}>
-          {(["off", "read-only", "all"] as const).map((m) => <option key={m} value={m}>{m}</option>)}
+          {(["off", "read-only"] as const).map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </label>
 

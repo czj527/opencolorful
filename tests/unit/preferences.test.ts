@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
@@ -141,12 +141,12 @@ describe("preferences store persistence", () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it("returns version 1 defaults when the file is missing", () => {
+  it("creates a version 1 document when the file is missing", () => {
     const paths = tempPaths(home);
     const store = new PreferencesStore(paths.preferences);
 
     expect(store.get()).toEqual(defaultPreferences());
-    expect(fs.existsSync(paths.preferences)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(paths.preferences, "utf8"))).toEqual(defaultPreferences());
   });
 
   it("normalizes unknown fields before writing back", () => {
@@ -212,10 +212,14 @@ describe("preferences store persistence", () => {
     fs.mkdirSync(path.dirname(paths.preferences), { recursive: true });
     fs.writeFileSync(paths.preferences, "{ not valid json ", "utf8");
 
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const store = new PreferencesStore(paths.preferences);
 
     // 读取损坏文件后返回默认值，而不是抛出异常。
     expect(store.get()).toEqual(defaultPreferences());
+    expect(JSON.parse(fs.readFileSync(paths.preferences, "utf8"))).toEqual(defaultPreferences());
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("偏好文件损坏"));
+    warning.mockRestore();
   });
 
   it("writes through a temporary file and leaves no temporary file after success", () => {
@@ -254,5 +258,25 @@ describe("preferences store persistence", () => {
       modelId: "gpt-4o",
     });
     expect(reopened.get().defaults.thinkingLevel).toBe("high");
+  });
+
+  it("migrates a legacy all global default to read-only", () => {
+    const paths = tempPaths(home);
+    fs.mkdirSync(path.dirname(paths.preferences), { recursive: true });
+    fs.writeFileSync(
+      paths.preferences,
+      JSON.stringify({
+        ...defaultPreferences(),
+        defaults: { ...defaultPreferences().defaults, toolMode: "all" },
+      }),
+      "utf8",
+    );
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const store = new PreferencesStore(paths.preferences);
+    expect(store.get().defaults.toolMode).toBe("read-only");
+    expect(JSON.parse(fs.readFileSync(paths.preferences, "utf8")).defaults.toolMode).toBe("read-only");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("完整工具权限"));
+    warning.mockRestore();
   });
 });

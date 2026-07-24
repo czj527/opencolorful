@@ -55,6 +55,12 @@ export function registerSettingsRoutes(
         if (typeof mode !== "string" || !(TOOL_MODES as readonly string[]).includes(mode)) {
           return context.json(createApiError("INVALID_INPUT", "toolMode 不合法"), 400);
         }
+        if (mode === "all") {
+          return context.json(
+            createApiError("INVALID_INPUT", "完整工具权限必须在具体会话中确认工作目录"),
+            400,
+          );
+        }
       }
       if (Object.prototype.hasOwnProperty.call(rawDefaults, "thinkingLevel")) {
         const level = rawDefaults.thinkingLevel;

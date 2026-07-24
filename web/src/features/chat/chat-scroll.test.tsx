@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getScrollBehavior, shouldAutoScroll } from "./use-chat-scroll.js";
+import { getScrollBehavior, nextUnreadState, shouldAutoScroll } from "./use-chat-scroll.js";
 
 describe("shouldAutoScroll", () => {
   it("returns true when distance from bottom is less than 48px", () => {
@@ -23,5 +23,19 @@ describe("getScrollBehavior", () => {
 
   it("returns instant when reducedMotion is true", () => {
     expect(getScrollBehavior(true)).toBe("instant");
+  });
+});
+
+describe("nextUnreadState", () => {
+  it("does not mark history as unread merely because the user scrolls up", () => {
+    expect(nextUnreadState(false, false, false)).toBe(false);
+  });
+
+  it("marks unread only when content changes while away from the bottom", () => {
+    expect(nextUnreadState(false, true, false)).toBe(true);
+  });
+
+  it("clears unread when the user returns to the bottom", () => {
+    expect(nextUnreadState(true, false, true)).toBe(false);
   });
 });

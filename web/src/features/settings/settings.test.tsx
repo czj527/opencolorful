@@ -5,6 +5,8 @@ import {
   SETTINGS_SECTIONS,
   settingsNavReducer,
   initialSettingsNav,
+  createInitialSettingsNav,
+  settingsSectionUrl,
   type SettingsSectionId,
 } from "./settings-state.js";
 import { SettingsNav } from "./SettingsNav.js";
@@ -63,6 +65,17 @@ describe("settingsNavReducer", () => {
     let state = settingsNavReducer(initialSettingsNav, { type: "SELECT_SECTION", sectionId: "future" });
     expect(state.activeSection).toBe("future");
     // 不可用 section 标志由 section metadata 携带，reducer 不阻止选中。
+  });
+});
+
+describe("settings section URL state", () => {
+  it("restores a valid section from the query string", () => {
+    expect(createInitialSettingsNav("?section=logs").activeSection).toBe("logs");
+    expect(createInitialSettingsNav("?section=unknown").activeSection).toBe("models");
+  });
+
+  it("serializes the active section into the settings URL", () => {
+    expect(settingsSectionUrl("runtime")).toBe("/settings?section=runtime");
   });
 });
 

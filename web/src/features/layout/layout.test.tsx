@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { clampWidth, mergeLayoutPreferences, DEFAULT_LAYOUT_ONLY, type LayoutPreferences } from "./layout-preferences.js";
+import {
+  clampWidth,
+  mergeLayoutPreferences,
+  DEFAULT_LAYOUT_ONLY,
+  getSidebarPresentation,
+  isDrawerBackdropOpen,
+  resolveReducedMotion,
+  withSidebarCollapsed,
+  type LayoutPreferences,
+} from "./layout-preferences.js";
 
 describe("clampWidth", () => {
   it("clamps below minimum", () => {
@@ -66,5 +75,41 @@ describe("DEFAULT_LAYOUT_ONLY", () => {
   it("provides stable reference layout constants", () => {
     expect(DEFAULT_LAYOUT_ONLY.leftSidebarWidth).toBe(280);
     expect(DEFAULT_LAYOUT_ONLY.rightSidebarWidth).toBe(320);
+  });
+});
+
+describe("responsive layout state", () => {
+  it("keeps narrow drawers collapsed regardless of desktop preferences", () => {
+    const saved = { ...DEFAULT_LAYOUT_ONLY, leftCollapsed: false, rightCollapsed: false };
+    expect(getSidebarPresentation(saved, { leftNarrow: true, rightNarrow: true })).toEqual({
+      leftCollapsed: true,
+      rightCollapsed: true,
+    });
+  });
+
+  it("updates both collapse state and derived focus mode without losing sibling values", () => {
+    const leftCollapsed = withSidebarCollapsed(DEFAULT_LAYOUT_ONLY, "left", true);
+    const bothCollapsed = withSidebarCollapsed(leftCollapsed, "right", true);
+
+    expect(bothCollapsed.leftCollapsed).toBe(true);
+    expect(bothCollapsed.rightCollapsed).toBe(true);
+    expect(bothCollapsed.focusMode).toBe(true);
+  });
+
+  it("honors explicit motion settings before the system preference", () => {
+    expect(resolveReducedMotion("on", false)).toBe(true);
+    expect(resolveReducedMotion("off", true)).toBe(false);
+    expect(resolveReducedMotion("system", true)).toBe(true);
+  });
+
+  it("shows a backdrop when either responsive panel is open", () => {
+    expect(isDrawerBackdropOpen(
+      { leftNarrow: false, rightNarrow: true },
+      { leftCollapsed: false, rightCollapsed: false },
+    )).toBe(true);
+    expect(isDrawerBackdropOpen(
+      { leftNarrow: false, rightNarrow: true },
+      { leftCollapsed: false, rightCollapsed: true },
+    )).toBe(false);
   });
 });

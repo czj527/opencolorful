@@ -63,7 +63,8 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.2s ease, margin-left 0.2s ease;
+  opacity: 1;
+  transition: width var(--transition-duration) ease, opacity var(--transition-duration) ease;
 }
 
 .app-sidebar-left.collapsed {
@@ -71,6 +72,8 @@ body {
   border-right: none;
   overflow: hidden;
   margin-left: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .app-chat {
@@ -87,13 +90,16 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.2s ease;
+  opacity: 1;
+  transition: width var(--transition-duration) ease, opacity var(--transition-duration) ease;
 }
 
 .app-inspector.collapsed {
   width: 0;
   border-left: none;
   overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Responsive: narrow screens — 抽屉 + 遮罩，一次只开一个（由 App 状态保证） */
@@ -109,6 +115,13 @@ body {
 
   .app-inspector.collapsed {
     box-shadow: none;
+  }
+
+  .drawer-backdrop {
+    position: absolute;
+    inset: var(--statusbar-height) 0 0 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 15;
   }
 }
 
@@ -126,12 +139,6 @@ body {
     box-shadow: none;
   }
 
-  .drawer-backdrop {
-    position: absolute;
-    inset: var(--statusbar-height) 0 0 0;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 15;
-  }
 }
 
 /* Status indicators */
@@ -360,11 +367,11 @@ body {
 
 /* Layout 4.0 — CSS 变量驱动的可调宽侧栏 */
 .app-sidebar-left {
-  width: var(--left-sidebar-width);
+  width: min(var(--left-sidebar-width), 100vw);
 }
 
 .app-inspector {
-  width: var(--right-sidebar-width);
+  width: min(var(--right-sidebar-width), 100vw);
 }
 
 /* 拖拽手柄 */
@@ -387,8 +394,6 @@ body {
   position: relative;
 }
 
-.app-layout[data-focus-mode="true"] .app-sidebar-left,
-.app-layout[data-focus-mode="true"] .app-inspector,
 .app-layout[data-focus-mode="true"] .resize-handle {
   display: none;
 }
@@ -413,20 +418,13 @@ body {
   border-color: var(--accent);
 }
 
-/* 减少动态 — 跟随用户系统设置 */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --transition-duration: 0ms;
-  }
+.app-layout[data-reduced-motion="true"] *,
+.app-layout[data-reduced-motion="true"] *::before,
+.app-layout[data-reduced-motion="true"] *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}
 
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0ms !important;
-    animation-duration: 0ms !important;
-  }
-
-  .streaming-cursor {
-    animation: none;
-  }
+.app-layout[data-reduced-motion="true"] .streaming-cursor {
+  animation: none;
 }

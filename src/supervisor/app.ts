@@ -127,7 +127,7 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
     }
   });
 
-  app.get("/api/supervisor/logs", (context) => {
+  app.get("/api/supervisor/logs", async (context) => {
     const limitParam = context.req.query("limit");
     const limit = limitParam === undefined ? undefined : Math.max(1, Math.min(2000, Number.parseInt(limitParam, 10)));
     const since = context.req.query("since") ?? null;
@@ -145,11 +145,13 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
     const logs = "logs" in result ? result.logs : "";
     const truncated = result.truncated;
     const nextCursor = "nextCursor" in result ? result.nextCursor : null;
+    const status = await controller.getAgentServerStatus();
 
     return context.json({
       logs: sanitizeLogContent(logs),
       truncated,
       nextCursor,
+      status,
     });
   });
 

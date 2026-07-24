@@ -5,7 +5,8 @@ import type { ModelSummary, PreferencesDocument, ProviderView, SupervisorStatusR
 import type { ProviderFormData } from "../providers/provider-form.js";
 import {
   SETTINGS_SECTIONS,
-  initialSettingsNav,
+  createInitialSettingsNav,
+  settingsSectionUrl,
   settingsNavReducer,
   type SettingsSectionId,
 } from "./settings-state.js";
@@ -24,7 +25,11 @@ export interface SettingsPageProps {
 }
 
 export function SettingsPage(props: SettingsPageProps) {
-  const [nav, dispatch] = useReducer(settingsNavReducer, initialSettingsNav);
+  const [nav, dispatch] = useReducer(
+    settingsNavReducer,
+    undefined,
+    () => createInitialSettingsNav(typeof window === "undefined" ? "" : window.location.search),
+  );
   const [preferences, setPreferences] = useState<PreferencesDocument | null>(null);
   const [supervisorStatus, setSupervisorStatus] = useState<SupervisorStatusResponse | null>(null);
   const [providers, setProviders] = useState<ProviderView[]>([]);
@@ -134,7 +139,10 @@ export function SettingsPage(props: SettingsPageProps) {
           activeSection={nav.activeSection}
           visibleSectionIds={nav.visibleSectionIds}
           search={nav.search}
-          onSelect={(id) => dispatch({ type: "SELECT_SECTION", sectionId: id })}
+          onSelect={(id) => {
+            dispatch({ type: "SELECT_SECTION", sectionId: id });
+            window.history.replaceState({}, "", settingsSectionUrl(id));
+          }}
           onSearch={(value) => dispatch({ type: "SET_SEARCH", search: value })}
         />
         <main className="settings-content" data-testid="settings-content">

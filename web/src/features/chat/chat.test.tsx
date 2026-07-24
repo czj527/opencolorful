@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { chatReducer, initialChatState, getStreamCursor, sanitizeMarkdown, isSafeUrl, type ChatAction } from "./chat-state.js";
+import { MessageBlock } from "./MessageList.js";
 import type { PlatformEventEnvelope } from "../../lib/types.js";
 
 function makeEvent(type: string, payload: unknown, sequence = 1, streamId = "st1"): PlatformEventEnvelope {
@@ -15,6 +17,28 @@ function makeEvent(type: string, payload: unknown, sequence = 1, streamId = "st1
     payload,
   };
 }
+
+describe("MessageBlock", () => {
+  it("uses lightweight text while streaming and full markdown after completion", () => {
+    const baseMessage = {
+      id: "assistant-1",
+      role: "assistant" as const,
+      content: "**bold**",
+      timestamp: "",
+    };
+
+    const streaming = renderToStaticMarkup(
+      <MessageBlock message={{ ...baseMessage, streaming: true }} />,
+    );
+    const completed = renderToStaticMarkup(
+      <MessageBlock message={{ ...baseMessage, streaming: false }} />,
+    );
+
+    expect(streaming).toContain("**bold**");
+    expect(streaming).not.toContain("<strong>");
+    expect(completed).toContain("<strong>bold</strong>");
+  });
+});
 
 describe("chatReducer", () => {
   it("starts with initial state", () => {

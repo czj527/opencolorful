@@ -34,6 +34,18 @@ export const initialSettingsNav: SettingsNavState = {
   visibleSectionIds: SETTINGS_SECTIONS.map((s) => s.id),
 };
 
+export function createInitialSettingsNav(search: string): SettingsNavState {
+  const section = new URLSearchParams(search).get("section");
+  const activeSection = SETTINGS_SECTIONS.some((candidate) => candidate.id === section)
+    ? section as SettingsSectionId
+    : "models";
+  return { ...initialSettingsNav, activeSection };
+}
+
+export function settingsSectionUrl(sectionId: SettingsSectionId): string {
+  return `/settings?section=${encodeURIComponent(sectionId)}`;
+}
+
 export type SettingsNavAction =
   | { type: "SELECT_SECTION"; sectionId: SettingsSectionId }
   | { type: "SET_SEARCH"; search: string };

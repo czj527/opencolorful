@@ -24,6 +24,14 @@ export function LayoutSection(props: LayoutSectionProps) {
   };
 
   const update = (f: keyof typeof form, v: number | boolean | string) => setForm((p) => ({ ...p, [f]: v }));
+  const updateCollapsed = (side: "left" | "right", collapsed: boolean) => {
+    setForm((previous) => {
+      const next = side === "left"
+        ? { ...previous, leftCollapsed: collapsed }
+        : { ...previous, rightCollapsed: collapsed };
+      return { ...next, focusMode: next.leftCollapsed && next.rightCollapsed };
+    });
+  };
 
   return (
     <section className="settings-section" data-testid="settings-section-layout">
@@ -42,6 +50,23 @@ export function LayoutSection(props: LayoutSectionProps) {
             onChange={(e) => update("rightSidebarWidth", Number(e.target.value))} />
         </label>
       </div>
+
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={form.leftCollapsed}
+          onChange={(event) => updateCollapsed("left", event.target.checked)}
+        />
+        默认收起左侧栏
+      </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={form.rightCollapsed}
+          onChange={(event) => updateCollapsed("right", event.target.checked)}
+        />
+        默认收起右侧栏
+      </label>
 
       <label>
         动态效果

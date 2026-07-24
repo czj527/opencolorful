@@ -81,12 +81,15 @@ export function filterLogLines(input: string, query: LogQuery, sinceCursor: stri
     : null;
 
   const allLines = input.split("\n");
-  // split 会在末尾产生空串；若原文以 \n 结尾则忽略它，否则作为一行保留。
+  // 只消费以换行结束的完整日志行。未完成的尾行留到下一次读取，避免 cursor
+  // 越过仍会继续增长的内容。
   const trailingNewline = input.endsWith("\n");
-  const effective = trailingNewline ? allLines.slice(0, allLines.length - 1) : allLines;
+  const effective = trailingNewline
+    ? allLines.slice(0, allLines.length - 1)
+    : allLines.slice(0, Math.max(0, allLines.length - 1));
 
   // 计算每行的字节边界。
-  let byteOffset = 0;
+  let byteOffset = baseOffset;
   type IndexedLine = { readonly text: string; readonly start: number; readonly end: number };
   const indexed: IndexedLine[] = effective.map((line) => {
     const start = byteOffset;
@@ -121,8 +124,7 @@ export function filterLogLines(input: string, query: LogQuery, sinceCursor: stri
 
   const lastLine = window.length > 0 ? window[window.length - 1] : null;
   const last = lastLine !== undefined ? lastLine : null;
-  // cursor 是文件内的绝对字节偏移：chunk 内偏移 + chunk 在文件中的起始位置
-  const nextCursor = last !== null ? encodeCursor(baseOffset + last.end - 1) : sinceCursor;
+  const nextCursor = last !== null ? encodeCursor(last.end - 1) : sinceCursor;
 
   return { logs, truncated, nextCursor };
 }

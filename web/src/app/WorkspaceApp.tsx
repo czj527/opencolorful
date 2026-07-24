@@ -12,7 +12,14 @@ import { ChatPane } from "../components/ChatPane.jsx";
 import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
 import type { ProviderFormData } from "../features/providers/provider-form.js";
 import { usePanelResize } from "../features/layout/use-panel-resize.js";
-import { mergeLayoutPreferences, DEFAULT_LAYOUT_ONLY } from "../features/layout/layout-preferences.js";
+import {
+  mergeLayoutPreferences,
+  DEFAULT_LAYOUT_ONLY,
+  getSidebarPresentation,
+  isDrawerBackdropOpen,
+  resolveReducedMotion,
+  withSidebarCollapsed,
+} from "../features/layout/layout-preferences.js";
 import { StreamBuffer } from "../features/chat/stream-buffer.js";
 import "./layout.css";
 
@@ -22,16 +29,21 @@ const API_BASE = "";
 const NARROW_LEFT_QUERY = "(max-width: 768px)";
 const NARROW_RIGHT_QUERY = "(max-width: 1024px)";
 
-function applyLayoutVars(layout: LayoutPreferences) {
+function applyLayoutVars(layout: LayoutPreferences, reducedMotion: boolean) {
   document.documentElement.style.setProperty("--left-sidebar-width", `${layout.leftSidebarWidth}px`);
   document.documentElement.style.setProperty("--right-sidebar-width", `${layout.rightSidebarWidth}px`);
   document.documentElement.style.setProperty(
     "--transition-duration",
-    layout.reducedMotion === "on" ? "0ms" : "0.2s",
+    reducedMotion ? "0ms" : "0.2s",
   );
 }
 
-export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: () => void }) {
+export interface WorkspaceAppProps {
+  readonly onSettingsClick: () => void;
+  readonly active: boolean;
+}
+
+export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const [state, dispatch] = useReducer(appReducer, undefined, () => ({
     ...initialAppState,
     // 窄屏默认收起侧栏，避免首屏抽屉互相覆盖
@@ -41,6 +53,16 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   const [chat, dispatchChat] = useReducer(chatReducer, initialChatState);
   const [sseConnected, setSseConnected] = useState(false);
   const [layoutPrefs, setLayoutPrefs] = useState<LayoutPreferences>(DEFAULT_LAYOUT_ONLY);
+  const [breakpoints, setBreakpoints] = useState(() => ({
+    leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
+    rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
+  }));
+  const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
   const apiRef = useRef(new ApiClient(API_BASE));
   const sseRef = useRef<SseClient | null>(null);
   const wsRef = useRef<WsClient | null>(null);
@@ -52,26 +74,52 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   const api = apiRef.current;
 
   useEffect(() => {
+    if (!active) return undefined;
     let cancelled = false;
     api.getPreferences().then((prefs) => {
       if (cancelled) return;
       const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
       setLayoutPrefs(layout);
-      applyLayoutVars(layout);
-      // 同步本地折叠状态到持久化的偏好值
-      if (layout.leftCollapsed && state.leftSidebar === "expanded") {
-        dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
-      } else if (!layout.leftCollapsed && state.leftSidebar === "collapsed") {
-        dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
-      }
-      if (layout.rightCollapsed && state.rightSidebar === "expanded") {
-        dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
-      } else if (!layout.rightCollapsed && state.rightSidebar === "collapsed") {
-        dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
-      }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [api]);
+  }, [active, api]);
+
+  useEffect(() => {
+    const leftQuery = window.matchMedia(NARROW_LEFT_QUERY);
+    const rightQuery = window.matchMedia(NARROW_RIGHT_QUERY);
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => {
+      setBreakpoints({ leftNarrow: leftQuery.matches, rightNarrow: rightQuery.matches });
+      setSystemReducedMotion(motionQuery.matches);
+      setViewportWidth(window.innerWidth);
+    };
+    leftQuery.addEventListener("change", sync);
+    rightQuery.addEventListener("change", sync);
+    motionQuery.addEventListener("change", sync);
+    window.addEventListener("resize", sync);
+    sync();
+    return () => {
+      leftQuery.removeEventListener("change", sync);
+      rightQuery.removeEventListener("change", sync);
+      motionQuery.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, []);
+
+  const reducedMotion = resolveReducedMotion(layoutPrefs.reducedMotion, systemReducedMotion);
+
+  useEffect(() => {
+    applyLayoutVars(layoutPrefs, reducedMotion);
+    const presentation = getSidebarPresentation(layoutPrefs, breakpoints);
+    dispatch({
+      type: "SET_LEFT_SIDEBAR",
+      payload: presentation.leftCollapsed ? "collapsed" : "expanded",
+    });
+    dispatch({
+      type: "SET_RIGHT_SIDEBAR",
+      payload: presentation.rightCollapsed ? "collapsed" : "expanded",
+    });
+  }, [layoutPrefs, breakpoints, reducedMotion]);
 
   // --- 数据加载 ---
 
@@ -105,13 +153,14 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   }, [api]);
 
   useEffect(() => {
+    if (!active) return undefined;
     void refreshSupervisorStatus();
     const interval = setInterval(() => void refreshSupervisorStatus(), 5_000);
     return () => clearInterval(interval);
-  }, [refreshSupervisorStatus]);
+  }, [active, refreshSupervisorStatus]);
 
   useEffect(() => {
-    if (state.connectionStatus === "online") {
+    if (active && state.connectionStatus === "online") {
       void refreshSessions();
       void refreshProvidersAndModels();
       // Agent 在线期间定期刷新模型与 Provider（Provider 可能在运行中被配置）
@@ -121,7 +170,7 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
       return () => clearInterval(interval);
     }
     return undefined;
-  }, [state.connectionStatus, refreshSessions, refreshProvidersAndModels]);
+  }, [active, state.connectionStatus, refreshSessions, refreshProvidersAndModels]);
 
   // --- 事件流接线：SSE/WS 事件 → StreamBuffer → chatReducer EVENT_BATCH ---
 
@@ -144,7 +193,7 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   }, []);
 
   useEffect(() => {
-    if (state.activeSessionId && state.connectionStatus === "online") {
+    if (active && state.activeSessionId && state.connectionStatus === "online") {
       const sessionId = state.activeSessionId;
 
       sseRef.current?.dispose();
@@ -187,7 +236,7 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
       };
     }
     return undefined;
-  }, [state.activeSessionId, state.connectionStatus, handlePlatformEvent, refreshSessions]);
+  }, [active, state.activeSessionId, state.connectionStatus, handlePlatformEvent, refreshSessions]);
 
   // --- 会话操作 ---
 
@@ -343,8 +392,15 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   const leftCollapsed = state.leftSidebar === "collapsed";
   const rightCollapsed = state.rightSidebar === "collapsed";
   const focusMode = leftCollapsed && rightCollapsed;
-  const narrowLayout = typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches;
-  const drawerOpen = narrowLayout && (!leftCollapsed || !rightCollapsed);
+  const drawerOpen = isDrawerBackdropOpen(breakpoints, { leftCollapsed, rightCollapsed });
+  const leftMaxWidth = Math.max(
+    200,
+    Math.min(420, viewportWidth - (rightCollapsed ? 0 : layoutPrefs.rightSidebarWidth) - 430),
+  );
+  const rightMaxWidth = Math.max(
+    240,
+    Math.min(520, viewportWidth - (leftCollapsed ? 0 : layoutPrefs.leftSidebarWidth) - 430),
+  );
 
   // 拖拽调整大小（依赖 leftCollapsed/rightCollapsed，放在声明之后）
   const onResizeLeft = useCallback((w: number) => {
@@ -352,10 +408,10 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
     document.documentElement.style.setProperty("--left-sidebar-width", `${w}px`);
   }, []);
   const onResizeLeftEnd = useCallback((w: number) => {
-    api.updatePreferences({ layout: { ...layoutPrefs, leftSidebarWidth: w } }).catch(() => {});
-  }, [api, layoutPrefs]);
+    api.updatePreferences({ layout: { leftSidebarWidth: w } }).catch(() => {});
+  }, [api]);
   const leftResize = usePanelResize(leftResizeRef, {
-    side: "left", minWidth: 200, maxWidth: 420,
+    side: "left", minWidth: 200, maxWidth: leftMaxWidth,
     currentWidth: layoutPrefs.leftSidebarWidth,
     onResize: onResizeLeft, onResizeEnd: onResizeLeftEnd,
     disabled: leftCollapsed,
@@ -366,10 +422,10 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
     document.documentElement.style.setProperty("--right-sidebar-width", `${w}px`);
   }, []);
   const onResizeRightEnd = useCallback((w: number) => {
-    api.updatePreferences({ layout: { ...layoutPrefs, rightSidebarWidth: w } }).catch(() => {});
-  }, [api, layoutPrefs]);
+    api.updatePreferences({ layout: { rightSidebarWidth: w } }).catch(() => {});
+  }, [api]);
   const rightResize = usePanelResize(rightResizeRef, {
-    side: "right", minWidth: 240, maxWidth: 520,
+    side: "right", minWidth: 240, maxWidth: rightMaxWidth,
     currentWidth: layoutPrefs.rightSidebarWidth,
     onResize: onResizeRight, onResizeEnd: onResizeRightEnd,
     disabled: rightCollapsed,
@@ -378,29 +434,61 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
   // 窄屏一次只打开一个抽屉：打开一侧时收起另一侧
   const handleToggleLeft = useCallback(() => {
     const opening = state.leftSidebar === "collapsed";
-    dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
-    api.updatePreferences({ layout: { ...layoutPrefs, leftCollapsed: !leftCollapsed } }).catch(() => {});
-    if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.rightSidebar === "expanded") {
-      dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
+    const nextCollapsed = !leftCollapsed;
+    dispatch({ type: "SET_LEFT_SIDEBAR", payload: nextCollapsed ? "collapsed" : "expanded" });
+    if (!breakpoints.leftNarrow) {
+      const nextLayout = withSidebarCollapsed(layoutPrefs, "left", nextCollapsed);
+      setLayoutPrefs(nextLayout);
+      api.updatePreferences({
+        layout: { leftCollapsed: nextLayout.leftCollapsed, focusMode: nextLayout.focusMode },
+      }).catch(() => {});
     }
-  }, [state.leftSidebar, state.rightSidebar, leftCollapsed, api, layoutPrefs]);
+    if (opening && breakpoints.leftNarrow && state.rightSidebar === "expanded") {
+      dispatch({ type: "SET_RIGHT_SIDEBAR", payload: "collapsed" });
+    }
+  }, [state.leftSidebar, state.rightSidebar, leftCollapsed, breakpoints.leftNarrow, api, layoutPrefs]);
 
   const handleToggleRight = useCallback(() => {
     const opening = state.rightSidebar === "collapsed";
-    dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
-    api.updatePreferences({ layout: { ...layoutPrefs, rightCollapsed: !rightCollapsed } }).catch(() => {});
-    if (opening && window.matchMedia(NARROW_LEFT_QUERY).matches && state.leftSidebar === "expanded") {
-      dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
+    const nextCollapsed = !rightCollapsed;
+    dispatch({ type: "SET_RIGHT_SIDEBAR", payload: nextCollapsed ? "collapsed" : "expanded" });
+    if (!breakpoints.rightNarrow) {
+      const nextLayout = withSidebarCollapsed(layoutPrefs, "right", nextCollapsed);
+      setLayoutPrefs(nextLayout);
+      api.updatePreferences({
+        layout: { rightCollapsed: nextLayout.rightCollapsed, focusMode: nextLayout.focusMode },
+      }).catch(() => {});
     }
-  }, [state.leftSidebar, state.rightSidebar, rightCollapsed, api, layoutPrefs]);
+    if (opening && breakpoints.leftNarrow && state.leftSidebar === "expanded") {
+      dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
+    }
+  }, [state.leftSidebar, state.rightSidebar, rightCollapsed, breakpoints, api, layoutPrefs]);
 
   const closeDrawers = useCallback(() => {
-    if (state.leftSidebar === "expanded") dispatch({ type: "TOGGLE_LEFT_SIDEBAR" });
-    if (state.rightSidebar === "expanded") dispatch({ type: "TOGGLE_RIGHT_SIDEBAR" });
-  }, [state.leftSidebar, state.rightSidebar]);
+    if (breakpoints.leftNarrow && state.leftSidebar === "expanded") {
+      dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
+    }
+    if (breakpoints.rightNarrow && state.rightSidebar === "expanded") {
+      dispatch({ type: "SET_RIGHT_SIDEBAR", payload: "collapsed" });
+    }
+  }, [breakpoints, state.leftSidebar, state.rightSidebar]);
+
+  useEffect(() => {
+    if (!active || !drawerOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeDrawers();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [active, drawerOpen, closeDrawers]);
 
   return (
-    <div className="app-layout" data-focus-mode={focusMode ? "true" : undefined}>
+    <div
+      className="app-layout"
+      data-focus-mode={focusMode ? "true" : undefined}
+      data-workspace-active={active ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <ServerStatusBar
         status={state.supervisorStatus}
         connectionStatus={state.connectionStatus}
@@ -431,7 +519,7 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
           onUnarchive={(id) => void handleUnarchiveSession(id)}
           onToggle={handleToggleLeft}
         />
-        {!focusMode && !narrowLayout && (
+        {!focusMode && !breakpoints.leftNarrow && (
           <div ref={leftResizeRef} className="resize-handle" {...leftResize.resizeHandleProps} />
         )}
         <ChatPane
@@ -445,9 +533,9 @@ export function WorkspaceApp({ onSettingsClick }: { readonly onSettingsClick: ()
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
           onSettingsClick={onSettingsClick}
-          reducedMotion={layoutPrefs.reducedMotion === "on"}
+          reducedMotion={reducedMotion}
         />
-        {!focusMode && !narrowLayout && (
+        {!focusMode && !breakpoints.rightNarrow && (
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />
         )}
         <InspectorSidebar

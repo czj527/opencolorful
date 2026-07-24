@@ -40,7 +40,7 @@ export function App() {
   return (
     <>
       <div style={{ display: showSettings ? "none" : undefined }}>
-        <WorkspaceApp onSettingsClick={onOpenSettings} />
+        <WorkspaceApp onSettingsClick={onOpenSettings} active={!showSettings} />
       </div>
       {showSettings && (
         <SettingsPage api={api} onBack={onCloseSettings} />

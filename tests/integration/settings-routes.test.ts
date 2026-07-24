@@ -140,6 +140,29 @@ describe("preferences routes", () => {
     }
   });
 
+  it("rejects all as a global default because workspace confirmation is session-scoped", async () => {
+    const ctx = await createContext();
+    try {
+      const { app } = createServerApp({
+        modelService: ctx.modelService,
+        sessionService: ctx.sessionService,
+        preferencesStore: ctx.preferencesStore,
+      });
+
+      const resp = await app.request("http://local/api/settings/preferences", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ defaults: { toolMode: "all" } }),
+      });
+
+      expect(resp.status).toBe(400);
+      expect(ctx.preferencesStore.get().defaults.toolMode).toBe("read-only");
+    } finally {
+      ctx.sessionService.closeAll();
+      ctx.database.close();
+    }
+  });
+
   it("rejects an unavailable default model without changing the previous document", async () => {
     const ctx = await createContext();
     try {

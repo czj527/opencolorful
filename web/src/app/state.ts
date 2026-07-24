@@ -40,6 +40,8 @@ export type AppAction =
   | { type: "SET_MODELS"; payload: ModelSummary[] }
   | { type: "TOGGLE_LEFT_SIDEBAR" }
   | { type: "TOGGLE_RIGHT_SIDEBAR" }
+  | { type: "SET_LEFT_SIDEBAR"; payload: SidebarState }
+  | { type: "SET_RIGHT_SIDEBAR"; payload: SidebarState }
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null };
 
@@ -84,6 +86,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, leftSidebar: state.leftSidebar === "expanded" ? "collapsed" : "expanded" };
     case "TOGGLE_RIGHT_SIDEBAR":
       return { ...state, rightSidebar: state.rightSidebar === "expanded" ? "collapsed" : "expanded" };
+    case "SET_LEFT_SIDEBAR":
+      return { ...state, leftSidebar: action.payload };
+    case "SET_RIGHT_SIDEBAR":
+      return { ...state, rightSidebar: action.payload };
     case "SET_LOADING":
       return { ...state, loading: action.payload };
     case "SET_ERROR":

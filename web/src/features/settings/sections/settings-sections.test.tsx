@@ -85,6 +85,19 @@ describe("DefaultsSection", () => {
     );
     expect(html).toContain("模型不存在");
   });
+
+  it("does not offer all as a global tool default", () => {
+    const html = renderToStaticMarkup(
+      <DefaultsSection
+        preferences={fakePreferences}
+        models={[]}
+        onSave={async () => {}}
+        saving={false}
+        lastSaveError={null}
+      />,
+    );
+    expect(html).not.toContain('<option value="all"');
+  });
 });
 
 describe("LayoutSection", () => {
@@ -99,6 +112,8 @@ describe("LayoutSection", () => {
     );
     expect(html).toContain("280");
     expect(html).toContain("320");
+    expect(html).toContain("默认收起左侧栏");
+    expect(html).toContain("默认收起右侧栏");
   });
 });
 

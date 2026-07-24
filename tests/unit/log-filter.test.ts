@@ -70,6 +70,29 @@ describe("filterLogLines", () => {
     expect(second.logs).toContain("new failure after first read");
   });
 
+  it("compares an absolute cursor against absolute line offsets", () => {
+    const baseOffset = 1_048_576;
+    const first = filterLogLines("old-line\n", {}, null, baseOffset);
+
+    const second = filterLogLines(
+      "old-line\nnew-line\n",
+      {},
+      first.nextCursor,
+      baseOffset,
+    );
+
+    expect(second.logs).toBe("new-line\n");
+  });
+
+  it("does not advance past an incomplete trailing line", () => {
+    const first = filterLogLines("partial", {}, null);
+    expect(first.logs).toBe("");
+    expect(first.nextCursor).toBeNull();
+
+    const second = filterLogLines("partial-done\nnext\n", {}, first.nextCursor);
+    expect(second.logs).toBe("partial-done\nnext\n");
+  });
+
   it("matches a keyword query case-insensitively", () => {
     const tail = filterLogLines(LOG_SAMPLE, { query: "RETRYING" } as LogQuery, null);
     expect(tail.logs).toContain("retrying request");

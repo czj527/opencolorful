@@ -72,6 +72,16 @@ describe("appReducer", () => {
     expect(state.rightSidebar).toBe("expanded");
   });
 
+  it("sets sidebar states explicitly when preferences or breakpoints change", () => {
+    let state = appReducer(initialAppState, { type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
+    state = appReducer(state, { type: "SET_RIGHT_SIDEBAR", payload: "collapsed" });
+    expect(state.leftSidebar).toBe("collapsed");
+    expect(state.rightSidebar).toBe("collapsed");
+
+    state = appReducer(state, { type: "SET_LEFT_SIDEBAR", payload: "expanded" });
+    expect(state.leftSidebar).toBe("expanded");
+  });
+
   it("both sidebars can be collapsed for chat-first mode", () => {
     let state = appReducer(initialAppState, { type: "TOGGLE_LEFT_SIDEBAR" });
     state = appReducer(state, { type: "TOGGLE_RIGHT_SIDEBAR" });

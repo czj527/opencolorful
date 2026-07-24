@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { Brain, ArrowDown } from "lucide-react";
 import type {
   Attachment,
@@ -34,7 +34,7 @@ function sameMessage(
   return left.role === right.role && left.content === right.content;
 }
 
-function MessageBlock({ message }: { readonly message: ChatMessage }) {
+export const MessageBlock = memo(function MessageBlock({ message }: { readonly message: ChatMessage }) {
   return (
     <div
       style={{
@@ -49,13 +49,17 @@ function MessageBlock({ message }: { readonly message: ChatMessage }) {
       <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>
         {message.role === "user" ? "你" : "助手"}
       </div>
-      {message.role === "assistant"
+      {message.role === "assistant" && !message.streaming
         ? renderSafeMarkdown(message.content)
         : <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
       {message.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
     </div>
   );
-}
+}, (previous, next) =>
+  previous.message.role === next.message.role &&
+  previous.message.content === next.message.content &&
+  previous.message.streaming === next.message.streaming,
+);
 
 export function MessageList({
   messages,
@@ -76,7 +80,15 @@ export function MessageList({
   // 每次 messages/timeline 变化后执行自动滚动
   useEffect(() => {
     autoScrollIfAtBottom();
-  }, [messages, timeline, autoScrollIfAtBottom]);
+  }, [
+    messages,
+    timeline,
+    toolCalls,
+    thinking,
+    planItems,
+    attachments,
+    autoScrollIfAtBottom,
+  ]);
   const timelineMessageIds = new Set(
     timeline.filter((item) => item.kind === "message").map((item) => item.id),
   );

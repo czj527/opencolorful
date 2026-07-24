@@ -20,15 +20,34 @@ export class PreferencesStore {
 
   get(): PreferencesDocument {
     if (!fs.existsSync(this.filePath)) {
-      return defaultPreferences();
+      const defaults = defaultPreferences();
+      this.write(defaults);
+      return defaults;
     }
+    let raw: unknown;
     try {
-      const raw = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
-      return normalizePreferences(raw);
+      raw = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
     } catch {
-      // 损坏 JSON：回退默认值，不抛出，避免阻塞 Server 启动。
-      return defaultPreferences();
+      const defaults = defaultPreferences();
+      console.warn("偏好文件损坏，已恢复默认设置");
+      this.write(defaults);
+      return defaults;
     }
+
+    const normalized = normalizePreferences(raw);
+    const migrated = normalized.defaults.toolMode === "all"
+      ? {
+          ...normalized,
+          defaults: { ...normalized.defaults, toolMode: "read-only" as const },
+        }
+      : normalized;
+    if (normalized.defaults.toolMode === "all") {
+      console.warn("全局默认完整工具权限缺少会话工作区确认，已恢复为 read-only");
+    }
+    if (JSON.stringify(raw) !== JSON.stringify(migrated)) {
+      this.write(migrated);
+    }
+    return migrated;
   }
 
   update(patch: PreferencesPatch): PreferencesDocument {

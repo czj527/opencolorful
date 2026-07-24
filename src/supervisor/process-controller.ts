@@ -273,18 +273,23 @@ export class ProcessController {
       const fd = fs.openSync(this.paths.serverLog, "r");
       fs.readSync(fd, buffer, 0, MAX_BYTES, chunkStart);
       fs.closeSync(fd);
-      raw = buffer.toString("utf8");
-      // 丢弃可能不完整的首行，并调整 chunk 起始偏移
-      const firstNewline = raw.indexOf("\n");
+      // 在字节层丢弃可能不完整的首行，避免多字节字符让绝对偏移漂移。
+      const firstNewline = buffer.indexOf(0x0a);
       if (firstNewline >= 0) {
-        raw = raw.slice(firstNewline + 1);
+        raw = buffer.subarray(firstNewline + 1).toString("utf8");
         chunkStart += firstNewline + 1;
+      } else {
+        raw = buffer.toString("utf8");
       }
     }
 
     const query = queryOrMaxBytes ?? {};
     const since = query.since ?? null;
-    return filterLogLines(raw, query, since, chunkStart);
+    const result = filterLogLines(raw, query, since, chunkStart);
+    return {
+      ...result,
+      truncated: result.truncated || chunkStart > 0,
+    };
   }
 
   private async waitForHealth(

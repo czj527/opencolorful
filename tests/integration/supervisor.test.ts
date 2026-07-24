@@ -174,8 +174,9 @@ describe("supervisor", () => {
     // No log file yet
     const empty = await app.request("http://127.0.0.1/api/supervisor/logs");
     expect(empty.status).toBe(200);
-    const emptyBody = (await empty.json()) as { logs: string; truncated: boolean };
+    const emptyBody = (await empty.json()) as { logs: string; truncated: boolean; status: string };
     expect(emptyBody.logs).toBe("");
+    expect(emptyBody.status).toBe("stopped");
 
     // Start server to generate logs
     await controller.startAgentServer();

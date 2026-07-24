@@ -96,8 +96,8 @@ export class ApiClient {
   }
 
   async updatePreferences(patch: {
-    defaults?: PreferencesDocument["defaults"];
-    layout?: PreferencesDocument["layout"];
+    defaults?: Partial<PreferencesDocument["defaults"]>;
+    layout?: Partial<PreferencesDocument["layout"]>;
   }): Promise<PreferencesDocument> {
     return this.request("PUT", "/api/settings/preferences", patch);
   }

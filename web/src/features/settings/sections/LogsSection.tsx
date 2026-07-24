@@ -34,12 +34,6 @@ export function LogsSection(props: LogsSectionProps) {
     }
   }, [props, level, search, cursor]);
 
-  // level/search 变更时重置 cursor 并清空日志重新加载
-  const refreshFull = useCallback(() => {
-    setLogs("");
-    setCursor(null);
-  }, []);
-
   useEffect(() => {
     setLogs("");
     setCursor(null);
