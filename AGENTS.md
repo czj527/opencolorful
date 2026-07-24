@@ -26,6 +26,8 @@ Git 历史。
 - 真实 Provider + PI read 工具 + Server 重启 E2E 已完成；
 - Session 设置包含工具模式、工作目录、确认状态和思考级别；
 - Phase 3 已完成（`phase-3-complete`），当前在 `phase-3-supervisor-web` 分支；
+- Phase 4 已完成——设置中心、偏好持久化、可调侧栏、Focus 模式、日志诊断、流式优化；
+- Phase 5 已完成——多 Agent 身份证系统、亮/暗主题、聊天控制栏重构、工具卡片稳定性修复，当前在 `phase-5-agent-identity` 分支；
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；

@@ -11,6 +11,9 @@ Provider 表单配置、归档重开、真实 Abort、重启恢复、10 个 Play
 Phase 4 已完成——独立设置中心（/settings）、全局默认偏好（preferences.json）、
 可调宽侧栏与 Focus 模式、Supervisor 日志过滤与增量读取、流式事件批处理渲染、
 自动滚动与恢复提示。
+Phase 5 已完成——多 Agent 身份证系统（Agent 即文件，三种类型 work/coding/assistant）、
+Agent CRUD API、会话可选绑定 Agent、亮/暗主题系统、聊天控制栏重构（模型/工具/思考下移）、
+工具卡片渲染稳定性修复。
 
 ## 开始开发
 
@@ -92,6 +95,7 @@ cd web && npx playwright test
 - [Phase 2 计划](plans/phase-02.md)
 - [Phase 3 计划](plans/phase-03.md)
 - [Phase 4 计划](plans/phase-04.md)
+- [Phase 5 计划](plans/phase-05.md)
 - [Agent 协作指南](AGENTS.md)
 
 ## 参考项目

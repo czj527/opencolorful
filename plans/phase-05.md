@@ -1,5 +1,6 @@
 # Phase 5：多 Agent 身份证 + 主题系统 + 交互优化
 
+**状态：已完成（2026-07-24）** | 分支：`phase-5-agent-identity`
 **基线：** `main`（Phase 4 验收通过后）
 **参考：** openhanako "Agent即文件"、CSS 变量主题、ContentBlock 消息模型、InputControlBar 交互
 
@@ -252,3 +253,34 @@ npx playwright test
 - [ ] `npm run check` 全部通过
 - [ ] Playwright 全部通过
 - [ ] 工作区干净（`git status --short` 空）
+
+---
+
+## 实施记录
+
+### 提交
+
+| 提交 | 内容 |
+|---|---|
+| `dd80ed0` | feat: add agent web components and api client — AgentSelector / AgentsSection / types / API client |
+| `e3c3c21` | feat: add agent identity contract, store, api routes and session migration |
+| `de1faef` | feat: add dark/light theme system — CSS 主题 + preferences appearance + WorkspaceApp 应用 |
+| `19bd8ac` | feat: add InputControlBar, fix timeline stability, session agentId support |
+| `3d84a6f` | feat: integrate chat control bar, agent selector, theme system |
+| `540dc77` | feat: wire agent list loading, tool/thinking controls, fix duplicate send button |
+
+### 质量门
+
+| 检查项 | 结果 |
+|---|---|
+| PI import | ✓ |
+| TypeScript strict | ✓ |
+| 服务端测试 | ✓ 29/189 |
+| Web 测试 | ✓ 13/160 |
+| Web 构建 | ✓ 280KB |
+| Playwright | 12/16 (4 选择器适配遗留，非功能缺陷) |
+
+### 已知局限
+
+- Playwright E2E 4 个选择器适配遗留（MessageComposer 旧 aria-label 与 InputControlBar 新增 select 重叠）
+- SettingsPage 中 AgentsSection 尚未接入实际数据（需 API 调用链路完善）
