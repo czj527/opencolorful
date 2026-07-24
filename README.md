@@ -8,6 +8,9 @@ Provider 错误映射、思考级别和真实 Provider/工具重启 E2E。
 Phase 3 已完成——Supervisor 进程管理（Web 静态托管、HTTP/SSE/WS 代理、健康检查 PID 验证、
 串行化 start、进程树清理）与 React Web 工作台（三栏布局、per-stream 游标、安全 Markdown、
 Provider 表单配置、归档重开、真实 Abort、重启恢复、10 个 Playwright 浏览器验收测试）。
+Phase 4 已完成——独立设置中心（/settings）、全局默认偏好（preferences.json）、
+可调宽侧栏与 Focus 模式、Supervisor 日志过滤与增量读取、流式事件批处理渲染、
+自动滚动与恢复提示。
 
 ## 开始开发
 
@@ -67,6 +70,18 @@ npm run web:test
 cd web && npx playwright test
 ```
 
+### 设置中心
+
+从工作台顶部齿轮图标进入 `/settings`，提供：
+
+- **模型与 Provider**：管理 Provider 配置和 API Key 凭据
+- **默认对话**：设置新建 Session 的默认模型、思考级别和工具模式
+- **界面与布局**：侧栏宽度、动态效果偏好
+- **日志与诊断**：按级别/关键词过滤 Supervisor 日志，支持增量读取
+- **运行时与关于**：Supervisor 和 Agent Server 的 PID、端口、版本
+
+全局默认值仅在创建新 Session 时应用，已有 Session 的显式设置不受影响。
+
 ## 文档
 
 - [产品说明](docs/product.md)
@@ -76,6 +91,7 @@ cd web && npx playwright test
 - [Phase 1 计划](plans/phase-01.md)
 - [Phase 2 计划](plans/phase-02.md)
 - [Phase 3 计划](plans/phase-03.md)
+- [Phase 4 计划](plans/phase-04.md)
 - [Agent 协作指南](AGENTS.md)
 
 ## 参考项目
