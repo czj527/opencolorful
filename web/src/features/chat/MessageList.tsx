@@ -1,5 +1,6 @@
 import { memo, useEffect } from "react";
 import { Brain, ArrowDown } from "lucide-react";
+import type { TokenUsage } from "../../lib/types.js";
 import type {
   Attachment,
   ChatMessage,
@@ -27,6 +28,16 @@ interface MessageListProps {
   readonly reducedMotion: boolean;
   readonly showThinking?: boolean;
   readonly showToolCalls?: boolean;
+  /** 本 turn 各 assistant 消息的用量（messageId → usage） */
+  readonly turnUsages?: ReadonlyMap<string, TokenUsage>;
+}
+
+function formatTurnUsage(usage: TokenUsage): string {
+  let line = `↑${usage.input} ↓${usage.output}`;
+  if (usage.cacheRead > 0 || usage.cacheWrite > 0) {
+    line += ` R${usage.cacheRead} W${usage.cacheWrite}`;
+  }
+  return line;
 }
 
 function sameMessage(
@@ -36,7 +47,13 @@ function sameMessage(
   return left.role === right.role && left.content === right.content;
 }
 
-export const MessageBlock = memo(function MessageBlock({ message }: { readonly message: ChatMessage }) {
+export const MessageBlock = memo(function MessageBlock({
+  message,
+  turnUsage,
+}: {
+  readonly message: ChatMessage;
+  readonly turnUsage?: TokenUsage;
+}) {
   return (
     <div
       style={{
@@ -55,12 +72,18 @@ export const MessageBlock = memo(function MessageBlock({ message }: { readonly m
         ? renderSafeMarkdown(message.content)
         : <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
       {message.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
+      {message.role === "assistant" && !message.streaming && turnUsage && (
+        <div className="turn-usage-line" data-testid={`turn-usage-${message.id}`}>
+          {formatTurnUsage(turnUsage)}
+        </div>
+      )}
     </div>
   );
 }, (previous, next) =>
   previous.message.role === next.message.role &&
   previous.message.content === next.message.content &&
-  previous.message.streaming === next.message.streaming,
+  previous.message.streaming === next.message.streaming &&
+  previous.turnUsage === next.turnUsage,
 );
 
 export function MessageList({
@@ -77,6 +100,7 @@ export function MessageList({
   reducedMotion,
   showThinking = true,
   showToolCalls = true,
+  turnUsages,
 }: MessageListProps) {
   const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(reducedMotion);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
@@ -132,7 +156,15 @@ export function MessageList({
   const renderTimelineItem = (item: ChatTimelineItem) => {
     if (item.kind === "message") {
       const message = messagesById.get(item.id);
-      return message ? <MessageBlock key={`message-${item.id}`} message={message} /> : null;
+      if (!message) return null;
+      const turnUsage = turnUsages?.get(message.id);
+      return (
+        <MessageBlock
+          key={`message-${item.id}`}
+          message={message}
+          {...(turnUsage !== undefined ? { turnUsage } : {})}
+        />
+      );
     }
     if (item.kind === "thinking") {
       if (!showThinking) return null;

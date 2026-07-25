@@ -194,6 +194,22 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
 
   // --- 事件流接线：SSE/WS 事件 → StreamBuffer → chatReducer EVENT_BATCH ---
 
+  // 拉取会话用量基线（进入会话 / 压缩后刷新）
+  const refreshSessionUsage = useCallback(async (sessionId: string) => {
+    try {
+      const usage = await api.sessionUsage(sessionId);
+      dispatchChat({
+        type: "USAGE_BASELINE",
+        totals: usage.totals,
+        cacheHitRate: usage.cacheHitRate,
+        turns: usage.turns,
+        context: usage.context,
+      });
+    } catch {
+      // Server 可能未运行或会话无用量数据，保持现有状态
+    }
+  }, [api]);
+
   useEffect(() => {
     const buffer = new StreamBuffer((events) => {
       dispatchChat({ type: "EVENT_BATCH", events });
@@ -203,10 +219,17 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           break;
         }
       }
+      // 压缩完成后重新拉取用量，刷新上下文占比
+      for (const e of events) {
+        if (e.type === "session.compacted" && e.sessionId !== null) {
+          void refreshSessionUsage(e.sessionId);
+          break;
+        }
+      }
     });
     bufferRef.current = buffer;
     return () => buffer.dispose();
-  }, []);
+  }, [refreshSessionUsage]);
 
   const handlePlatformEvent = useCallback((event: PlatformEventEnvelope) => {
     bufferRef.current?.push(event);
@@ -274,12 +297,14 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       } else {
         dispatchChat({ type: "RESET" });
       }
+      // 用量基线
+      void refreshSessionUsage(id);
       // WS 订阅该会话
       if (wsRef.current?.isConnected()) {
         wsRef.current.subscribe(id);
       }
     } catch { /* 会话可能不存在 */ }
-  }, [api]);
+  }, [api, refreshSessionUsage]);
 
   const handleCreateSession = useCallback(async (title: string, cwd: string) => {
     try {

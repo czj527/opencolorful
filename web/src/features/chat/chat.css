@@ -55,6 +55,82 @@
   flex-shrink: 0;
 }
 
+/* 上下文用量圆环 */
+.context-usage-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.context-ring-track {
+  stroke: var(--border-color);
+}
+
+.context-ring-fill {
+  transition: stroke-dashoffset var(--transition-duration, 0.2s) ease;
+}
+
+.context-ring-accent {
+  stroke: var(--accent);
+}
+
+.context-ring-warning {
+  stroke: var(--warning);
+}
+
+.context-ring-danger {
+  stroke: var(--danger);
+}
+
+.context-ring-empty {
+  stroke: var(--text-secondary);
+  opacity: 0.4;
+}
+
+.context-ring-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.context-ring-section + .context-ring-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.context-ring-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.context-ring-row {
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* assistant 卡片底部本 turn 用量行 */
+.turn-usage-line {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .composer-control-select {
   padding: 4px 8px;
   border-radius: 5px;

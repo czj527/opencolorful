@@ -94,6 +94,7 @@ export function ChatPane({
         reducedMotion={reducedMotion ?? false}
         showThinking={showThinking ?? true}
         showToolCalls={showToolCalls ?? true}
+        turnUsages={chat.turnUsages}
       />
 
       <MessageComposer
@@ -108,6 +109,9 @@ export function ChatPane({
         onToolModeChange={onToolModeChange ?? (() => {})}
         thinkingLevel={session.thinkingLevel}
         onThinkingLevelChange={onThinkingLevelChange ?? (() => {})}
+        contextUsage={chat.contextUsage}
+        usageTotals={chat.usageTotals}
+        cacheHitRate={chat.cacheHitRate}
       />
     </main>
   );

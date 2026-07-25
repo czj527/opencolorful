@@ -195,6 +195,30 @@ export interface LogTail {
   readonly status?: string;
 }
 
+// --- Token 用量（src/contracts/events.ts TokenUsageSchema / ContextUsageSchema）---
+export interface TokenUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+}
+
+export interface ContextUsage {
+  readonly tokens: number | null;
+  readonly contextWindow: number;
+  readonly percent: number | null;
+}
+
+// GET /api/sessions/:id/usage 响应
+export interface SessionUsageResponse {
+  readonly sessionId: string;
+  readonly totals: TokenUsage;
+  readonly cacheHitRate: number | null;
+  readonly turns: number;
+  readonly context: ContextUsage | null;
+}
+
 // --- Agent ---
 export interface AgentIdentity {
   readonly id: string;

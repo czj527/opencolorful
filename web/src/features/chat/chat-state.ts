@@ -1,4 +1,4 @@
-import type { PlatformEventEnvelope } from "../../lib/types.js";
+import type { ContextUsage, PlatformEventEnvelope, TokenUsage } from "../../lib/types.js";
 
 // --- Chat message types ---
 
@@ -52,6 +52,16 @@ export interface ChatState {
   readonly collapsedThinkingBlocks: ReadonlySet<string>;
   readonly status: "idle" | "running" | "error";
   readonly error: string | null;
+  /** 会话累计 token 用量（基线 + turn.completed 累加） */
+  readonly usageTotals: TokenUsage;
+  /** 会话累计缓存命中率（null 表示分母为 0） */
+  readonly cacheHitRate: number | null;
+  /** 已完成轮次数 */
+  readonly usageTurns: number;
+  /** 上下文窗口占用（null 表示空会话/无数据） */
+  readonly contextUsage: ContextUsage | null;
+  /** 本 turn 各 assistant 消息的用量：messageId → usage */
+  readonly turnUsages: ReadonlyMap<string, TokenUsage>;
 }
 
 export const initialChatState: ChatState = {
@@ -68,6 +78,11 @@ export const initialChatState: ChatState = {
   collapsedThinkingBlocks: new Set(),
   status: "idle",
   error: null,
+  usageTotals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+  cacheHitRate: null,
+  usageTurns: 0,
+  contextUsage: null,
+  turnUsages: new Map(),
 };
 
 /** 读取指定 stream 的游标（WS stream.resume 使用） */
@@ -94,7 +109,14 @@ export type ChatAction =
   | { type: "EVENT"; event: PlatformEventEnvelope }
   | { type: "EVENT_BATCH"; events: readonly PlatformEventEnvelope[] }
   | { type: "TOGGLE_THINKING"; id: string }
-  | { type: "SET_ERROR"; error: string };
+  | { type: "SET_ERROR"; error: string }
+  | {
+      type: "USAGE_BASELINE";
+      totals: TokenUsage;
+      cacheHitRate: number | null;
+      turns: number;
+      context: ContextUsage | null;
+    };
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
@@ -370,8 +392,46 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return { ...base, status: "error", error: payload.message };
         }
 
-        case "turn.completed":
-          return { ...base, status: "idle" };
+        case "turn.completed": {
+          const payload = event.payload as {
+            turnId?: string;
+            usage?: TokenUsage;
+            context?: ContextUsage;
+          };
+          let next: ChatState = { ...base, status: "idle" };
+          if (payload.usage) {
+            const usage = payload.usage;
+            const totals: TokenUsage = {
+              input: base.usageTotals.input + usage.input,
+              output: base.usageTotals.output + usage.output,
+              cacheRead: base.usageTotals.cacheRead + usage.cacheRead,
+              cacheWrite: base.usageTotals.cacheWrite + usage.cacheWrite,
+              totalTokens: base.usageTotals.totalTokens + usage.totalTokens,
+            };
+            const denominator = totals.input + totals.cacheRead;
+            const turnUsages = new Map(base.turnUsages);
+            const lastMessage = base.messages[base.messages.length - 1];
+            if (lastMessage && lastMessage.role === "assistant") {
+              turnUsages.set(lastMessage.id, usage);
+            }
+            next = {
+              ...next,
+              usageTotals: totals,
+              cacheHitRate: denominator > 0 ? totals.cacheRead / denominator : null,
+              usageTurns: base.usageTurns + 1,
+              turnUsages,
+            };
+          }
+          if (payload.context) {
+            next = { ...next, contextUsage: payload.context };
+          }
+          return next;
+        }
+
+        case "session.compacting":
+        case "session.compacted":
+          // 压缩卡片由 T7 实现；此处安全忽略，仅推进游标
+          return base;
 
         default:
           return base;
@@ -396,6 +456,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         pendingStreamId: null,
         status: "error",
         error: action.error,
+      };
+
+    case "USAGE_BASELINE":
+      return {
+        ...state,
+        usageTotals: action.totals,
+        cacheHitRate: action.cacheHitRate,
+        usageTurns: action.turns,
+        contextUsage: action.context,
       };
   }
 }

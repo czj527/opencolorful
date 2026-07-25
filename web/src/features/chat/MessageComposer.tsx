@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Send, Square } from "lucide-react";
-import type { ModelSummary } from "../../lib/types.js";
+import type { ContextUsage, ModelSummary, TokenUsage } from "../../lib/types.js";
+import { ContextUsageRing } from "./ContextUsageRing.jsx";
 import "./chat.css";
 
 interface MessageComposerProps {
@@ -18,6 +19,10 @@ interface MessageComposerProps {
   /** 控件：思考级别 */
   readonly thinkingLevel: string;
   readonly onThinkingLevelChange: (level: string) => void;
+  /** 用量：上下文占用 + 会话累计（可选，缺省不渲染圆环） */
+  readonly contextUsage?: ContextUsage | null;
+  readonly usageTotals?: TokenUsage;
+  readonly cacheHitRate?: number | null;
 }
 
 const TOOL_MODES: { value: string; label: string }[] = [
@@ -50,6 +55,9 @@ export function MessageComposer({
   onToolModeChange,
   thinkingLevel,
   onThinkingLevelChange,
+  contextUsage,
+  usageTotals,
+  cacheHitRate,
 }: MessageComposerProps) {
   const [value, setValue] = useState("");
 
@@ -129,6 +137,14 @@ export function MessageComposer({
             <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.name}</option>
           ))}
         </select>
+
+        {usageTotals !== undefined && (
+          <ContextUsageRing
+            context={contextUsage ?? null}
+            totals={usageTotals}
+            cacheHitRate={cacheHitRate ?? null}
+          />
+        )}
 
         {running ? (
           <button

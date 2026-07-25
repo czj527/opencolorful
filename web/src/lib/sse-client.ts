@@ -13,6 +13,8 @@ const KNOWN_EVENT_TYPES = [
   "tool.completed",
   "turn.started",
   "turn.completed",
+  "session.compacting",
+  "session.compacted",
   "plan.updated",
   "attachment.available",
   "error",
