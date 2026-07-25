@@ -8,6 +8,7 @@ export type ApiErrorCode =
   | "RATE_LIMITED"
   | "AUTHENTICATION_FAILED"
   | "SESSION_ERROR"
+  | "SESSION_BUSY"
   | "INTERNAL_ERROR";
 
 export interface ApiError {
