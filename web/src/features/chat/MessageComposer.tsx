@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Send, Square } from "lucide-react";
 import type { ContextUsage, ModelSummary, TokenUsage } from "../../lib/types.js";
+import { IconButton, Select } from "../../components/ui/index.js";
 import { ContextUsageRing } from "./ContextUsageRing.jsx";
 import { extractCommandQuery, filterCommands, parseCommandName, type CommandName } from "./commands.js";
-import "./chat.css";
+import styles from "./MessageComposer.module.css";
 
 interface MessageComposerProps {
   readonly disabled: boolean;
@@ -120,12 +121,22 @@ export function MessageComposer({
     ? `${selectedModel.providerId}:${selectedModel.modelId}`
     : "";
 
+  // Select 原语修饰类（module 作用域，string|undefined 兜底）
+  const controlSelectClass = styles.controlSelect ?? "";
+  const modelSelectClass = `${styles.controlSelect ?? ""} ${styles.modelSelect ?? ""}`.trim();
+
   return (
+    // 结构类名以普通字符串保留，供 SSR 测试匹配（:global 样式见 MessageComposer.module.css）
     <div className="chat-composer-card" ref={containerRef}>
       {/* 输入区：textarea + 命令面板 */}
       <div className="chat-composer-input-area">
         {showPanel && (
-          <div className="command-panel" role="listbox" aria-label="会话命令" data-testid="command-panel">
+          <div
+            className="command-panel"
+            role="listbox"
+            aria-label="会话命令"
+            data-testid="command-panel"
+          >
             {filteredCommands.map((command, index) => (
               <button
                 key={command.name}
@@ -144,7 +155,7 @@ export function MessageComposer({
           </div>
         )}
         <textarea
-          className="chat-input"
+          className={styles.input ?? ""}
           placeholder={disabled ? "请先选择会话" : "输入消息，Enter 发送，Shift+Enter 换行，/ 打开命令"}
           aria-label="消息输入"
           value={value}
@@ -182,82 +193,82 @@ export function MessageComposer({
         />
       </div>
 
-      {/* 控件行：工具模式 | 思考级别 | 模型选择 | 发送 */}
+      {/* 控件行：工具模式 | 思考级别 | 模型选择 | 圆环 | 发送 */}
       <div className="chat-composer-controls">
-        <select
-          className="composer-control-select"
+        <Select
           value={toolMode}
-          onChange={(e) => onToolModeChange(e.target.value)}
+          onChange={onToolModeChange}
           disabled={disabled}
           aria-label="工具模式"
+          className={controlSelectClass}
         >
           {TOOL_MODES.map((m) => (
             <option key={m.value} value={m.value}>🔧 {m.label}</option>
           ))}
-        </select>
+        </Select>
 
         <div className="composer-separator" />
 
-        <select
-          className="composer-control-select"
+        <Select
           value={thinkingLevel}
-          onChange={(e) => onThinkingLevelChange(e.target.value)}
+          onChange={onThinkingLevelChange}
           disabled={disabled}
           aria-label="思考级别"
+          className={controlSelectClass}
         >
           {THINKING_LEVELS.map((l) => (
             <option key={l} value={l}>🧠 {THINKING_LABELS[l]}</option>
           ))}
-        </select>
+        </Select>
 
         <div className="composer-separator" />
 
-        <select
-          className="composer-control-select composer-model-select"
+        <Select
           value={modelValue}
-          onChange={(e) => {
-            const [providerId, modelId] = e.target.value.split(":");
+          onChange={(v) => {
+            const [providerId, modelId] = v.split(":");
             if (providerId && modelId) onSelectModel(providerId, modelId);
           }}
           disabled={disabled}
           aria-label="选择模型"
+          className={modelSelectClass}
         >
           <option value="">未选择模型</option>
           {models.map((m) => (
             <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.name}</option>
           ))}
-        </select>
+        </Select>
 
         {usageTotals !== undefined && (
-          <ContextUsageRing
-            context={contextUsage ?? null}
-            totals={usageTotals}
-            cacheHitRate={cacheHitRate ?? null}
-          />
+          <div className={styles.ringSlot ?? ""}>
+            <ContextUsageRing
+              context={contextUsage ?? null}
+              totals={usageTotals}
+              cacheHitRate={cacheHitRate ?? null}
+            />
+          </div>
         )}
 
-        {running ? (
-          <button
-            className="icon-button danger composer-send-btn"
-            onClick={onAbort}
-            type="button"
-            aria-label="中断生成"
-            title="中断当前生成"
-          >
-            <Square size={14} aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            className="icon-button primary composer-send-btn"
-            onClick={submit}
-            disabled={disabled || !value.trim()}
-            type="button"
-            aria-label="发送消息"
-            title="发送消息"
-          >
-            <Send size={14} aria-hidden="true" />
-          </button>
-        )}
+        <div className={styles.sendSlot ?? ""}>
+          {running ? (
+            <IconButton
+              icon={<Square size={14} aria-hidden="true" />}
+              label="中断生成"
+              variant="danger"
+              size="sm"
+              onClick={onAbort}
+            />
+          ) : (
+            <IconButton
+              icon={<Send size={14} aria-hidden="true" />}
+              label="发送消息"
+              variant="primary"
+              size="sm"
+              onClick={submit}
+              disabled={disabled || !value.trim()}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

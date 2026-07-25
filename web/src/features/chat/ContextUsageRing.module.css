@@ -1,0 +1,78 @@
+/**
+ * ContextUsageRing 样式（CSS Module）。
+ * 圆环颜色阈值逻辑（accent / warning / danger / empty）通过 svg[data-level]
+ * 选择器实现，保持与既有测试对 data-level 属性值的字符串断言兼容。
+ * 颜色全部来自 themes/*.css 的 --accent / --warning / --danger 令牌；
+ * 禁止硬编码颜色/尺寸。亮/暗主题由 [data-theme] 切换覆盖变量自动适配。
+ * prefers-reduced-motion 由 tokens.css 中 --duration-* 归零兜底。
+ */
+
+.ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: var(--space-6);
+  flex-shrink: 0;
+}
+
+.track {
+  stroke: var(--border-color);
+}
+
+.fill {
+  transition:
+    stroke-dashoffset var(--duration-normal) var(--ease-out);
+}
+
+/* 颜色阈值：data-level 携带稳定语义名，供样式与测试共同消费 */
+.fill:global([data-level="context-ring-accent"]) {
+  stroke: var(--accent);
+}
+
+.fill:global([data-level="context-ring-warning"]) {
+  stroke: var(--warning);
+}
+
+.fill:global([data-level="context-ring-danger"]) {
+  stroke: var(--danger);
+}
+
+.fill:global([data-level="context-ring-empty"]) {
+  stroke: var(--text-secondary);
+  opacity: 0.4;
+}
+
+/* 悬停详情卡片 */
+.popover {
+  position: absolute;
+  bottom: calc(100% + var(--space-8));
+  right: 0;
+  z-index: var(--z-dropdown);
+  min-width: 12.5rem;
+  padding: var(--space-8) var(--space-10);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-caption);
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.popoverSection + .popoverSection {
+  margin-top: var(--space-6);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-color);
+}
+
+.popoverTitle {
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.popoverRow {
+  line-height: 1.5;
+  white-space: nowrap;
+}

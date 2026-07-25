@@ -1,0 +1,172 @@
+/**
+ * MessageComposer 样式（CSS Module）。
+ * 全部引用 tokens.css 中的结构令牌与 themes/*.css 中的主题色变量；
+ * 禁止硬编码颜色/尺寸/时长。亮/暗主题由 [data-theme] 切换覆盖变量自动适配。
+ * prefers-reduced-motion 由 tokens.css 中 --duration-* 归零兜底。
+ *
+ * 为保持 SSR（renderToStaticMarkup）测试对结构类名的字符串断言兼容，
+ * 以下与 MessageList.module.css 同样的约定：测试断言的结构类名以 :global()
+ * 声明并作为普通字符串在组件中使用；其余仅组件内部消费的类用 module 作用域。
+ */
+
+/* === 一体化 Composer 卡片（:global 供 SSR 测试匹配） === */
+
+:global(.chat-composer-card) {
+  border-top: 1px solid var(--border-color);
+  margin: var(--space-12);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 输入区：textarea + 内部命令面板 */
+:global(.chat-composer-input-area) {
+  position: relative;
+  padding: var(--space-10) var(--space-12) var(--space-4);
+}
+
+.input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--space-8) var(--space-12);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  resize: none;
+  min-height: 2.5rem;
+  max-height: 7.5rem;
+  box-sizing: border-box;
+}
+
+.input:focus {
+  outline: none;
+}
+
+/* 控件行（:global 供 SSR 测试匹配） */
+:global(.chat-composer-controls) {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: var(--space-4) var(--space-12) var(--space-8);
+}
+
+/* 控件间分隔线（:global 供 SSR 测试匹配） */
+:global(.composer-separator) {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--border-color);
+  margin: 0 var(--space-6);
+  flex-shrink: 0;
+}
+
+/* === 命令面板（:global 供 SSR 测试匹配类名） === */
+
+:global(.command-panel) {
+  position: absolute;
+  bottom: calc(100% + var(--space-6));
+  left: var(--space-12);
+  right: var(--space-12);
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+:global(.command-panel-item) {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-10);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  transition:
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+:global(.command-panel-item:hover),
+:global(.command-panel-item.active) {
+  background: var(--bg-tertiary);
+}
+
+:global(.command-panel-name) {
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+:global(.command-panel-desc) {
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === 仅组件内部使用的 module 作用域类 === */
+
+/* 圆环容器：占位，主样式见 ContextUsageRing.module.css */
+.ringSlot {
+  margin-right: var(--space-6);
+  flex-shrink: 0;
+}
+
+/* 发送按钮：推到行尾 */
+.sendSlot {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 控件行内的 Select 原语视觉修饰（透明边框、更紧凑）。
+   Select 原语接受 className 并追加到内部 <select> 上。 */
+.controlSelect {
+  height: 1.5rem;
+  min-width: auto;
+  padding: 0 var(--space-10) 0 var(--space-6);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.controlSelect:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: transparent;
+}
+
+.controlSelect:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.controlSelect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 模型选择：允许更宽以容纳模型名 */
+.modelSelect {
+  min-width: 8rem;
+}
