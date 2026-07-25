@@ -13,7 +13,7 @@ import { SettingsNav } from "./SettingsNav.js";
 import { SettingsPage } from "./SettingsPage.js";
 
 describe("SETTINGS_SECTIONS", () => {
-  it("exposes fixed sections models/defaults/layout/agents/logs/runtime/future", () => {
+  it("exposes fixed sections models/defaults/layout/agents/logs/usage/runtime/future", () => {
     const ids = SETTINGS_SECTIONS.map((s) => s.id);
     expect(ids).toEqual([
       "models",
@@ -21,6 +21,7 @@ describe("SETTINGS_SECTIONS", () => {
       "layout",
       "agents",
       "logs",
+      "usage",
       "runtime",
       "future",
     ]);
@@ -30,6 +31,13 @@ describe("SETTINGS_SECTIONS", () => {
     const agents = SETTINGS_SECTIONS.find((s) => s.id === "agents");
     expect(agents?.available).toBe(true);
     expect(agents?.group).toBe("general");
+  });
+
+  it("marks usage section as available in general group", () => {
+    const usage = SETTINGS_SECTIONS.find((s) => s.id === "usage");
+    expect(usage?.available).toBe(true);
+    expect(usage?.group).toBe("general");
+    expect(usage?.label).toBe("用量统计");
   });
 
   it("marks future sections as unavailable", () => {

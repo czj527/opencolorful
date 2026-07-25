@@ -461,6 +461,122 @@
   font-size: 13px;
 }
 
+/* --- Usage section --- */
+.usage-range-selector {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 3px;
+  width: fit-content;
+}
+
+.usage-range-btn {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.usage-range-btn:hover {
+  color: var(--text-primary);
+}
+
+.usage-range-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.usage-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.usage-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.usage-card-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.usage-card-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+}
+
+.usage-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.usage-table th {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.usage-table td {
+  color: var(--text-primary);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: 12px;
+}
+
+.usage-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.usage-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+}
+
+.usage-empty p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.usage-empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
 /* --- Responsive --- */
 @media (max-width: 768px) {
   .settings-nav {

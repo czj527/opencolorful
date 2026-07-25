@@ -171,6 +171,7 @@ export interface AppearancePreferences {
   readonly theme: "dark" | "light";
   readonly showToolCalls: boolean;
   readonly showThinking: boolean;
+  readonly timelineVisible?: boolean;
 }
 
 export interface PreferencesDocument {
@@ -217,6 +218,26 @@ export interface SessionUsageResponse {
   readonly cacheHitRate: number | null;
   readonly turns: number;
   readonly context: ContextUsage | null;
+}
+
+// GET /api/usage/summary?days=N 响应
+export interface UsageSummaryResponse {
+  readonly days: number;
+  readonly totals: TokenUsage;
+  readonly cacheHitRate: number | null;
+  readonly sessions: number;
+  readonly turns: number;
+  readonly byDay: readonly UsageSummaryByDay[];
+  readonly byModel: readonly UsageSummaryByModel[];
+}
+
+export interface UsageSummaryByDay extends TokenUsage {
+  readonly date: string;
+}
+
+export interface UsageSummaryByModel extends TokenUsage {
+  readonly provider: string;
+  readonly model: string;
 }
 
 // --- Agent ---

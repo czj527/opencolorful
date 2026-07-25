@@ -15,6 +15,7 @@ import type {
   SessionSettings,
   SessionUsageResponse,
   SessionView,
+  UsageSummaryResponse,
   SupervisorStatusResponse,
 } from "./types.js";
 
@@ -171,6 +172,10 @@ export class ApiClient {
   // Usage
   async sessionUsage(sessionId: string): Promise<SessionUsageResponse> {
     return this.request("GET", `/api/sessions/${sessionId}/usage`);
+  }
+
+  async usageSummary(days: number): Promise<UsageSummaryResponse> {
+    return this.request("GET", `/api/usage/summary?days=${days}`);
   }
 
   // Agents

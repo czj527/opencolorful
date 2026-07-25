@@ -18,6 +18,7 @@ import { LogsSection } from "./sections/LogsSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { UnavailableSection } from "./sections/UnavailableSection.js";
 import { AgentsSection } from "./sections/AgentsSection.js";
+import { UsageSection } from "./sections/UsageSection.js";
 import type { AgentProfile } from "../../lib/types.js";
 import "./settings.css";
 
@@ -198,6 +199,10 @@ export function SettingsPage(props: SettingsPageProps) {
     return props.api.getSupervisorLogs(query);
   };
 
+  const getUsageSummary = async (days: number) => {
+    return props.api.usageSummary(days);
+  };
+
   return (
     <div className="settings-page" data-page="settings">
       <header className="settings-header">
@@ -230,6 +235,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onSaveTheme: handleSaveAppearance,
             onSaveProvider: handleSaveProvider,
             onGetSupervisorLogs: getSupervisorLogs,
+            onGetUsageSummary: getUsageSummary,
             onCreateAgent: handleCreateAgent,
             onSaveAgentProfile: handleSaveAgentProfile,
             onArchiveAgent: handleArchiveAgent,
@@ -254,6 +260,7 @@ interface SectionRenderProps {
   readonly onSaveTheme: (appearance: Partial<PreferencesDocument["appearance"]>) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
   readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
+  readonly onGetUsageSummary: (days: number) => Promise<import("../../lib/types.js").UsageSummaryResponse>;
   readonly onCreateAgent: (type: string, name: string) => Promise<void>;
   readonly onSaveAgentProfile: (id: string, profile: Partial<AgentProfile>) => Promise<void>;
   readonly onArchiveAgent: (id: string) => Promise<void>;
@@ -265,6 +272,7 @@ interface SectionRenderProps {
 function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
   // 独立于 Agent 的 section：即使 Agent 停止也可用
   if (active === "logs") return <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />;
+  if (active === "usage") return <UsageSection getUsageSummary={props.onGetUsageSummary} />;
   if (active === "runtime") return <RuntimeSection supervisorStatus={props.supervisorStatus} />;
   if (active === "agents") return (
     <AgentsSection
