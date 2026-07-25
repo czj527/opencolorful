@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { chatReducer, initialChatState, getStreamCursor, sanitizeMarkdown, isSafeUrl, type ChatAction } from "./chat-state.js";
+import { chatReducer, initialChatState, getStreamCursor, sanitizeMarkdown, isSafeUrl, buildChatStateFromHistory, type ChatAction, type ChatState } from "./chat-state.js";
 import { MessageBlock, MessageList } from "./MessageList.js";
-import { InputControlBar } from "./InputControlBar.js";
+import { MessageComposer } from "./MessageComposer.jsx";
 import type { PlatformEventEnvelope, ModelSummary } from "../../lib/types.js";
 
 function makeEvent(type: string, payload: unknown, sequence = 1, streamId = "st1"): PlatformEventEnvelope {
@@ -455,7 +455,7 @@ describe("timeline ordering with tool calls and historyEntries", () => {
   });
 });
 
-describe("InputControlBar settings button accessibility", () => {
+describe("MessageComposer integrated controls", () => {
   const fakeModels: ModelSummary[] = [
     {
       providerId: "test-provider",
@@ -468,39 +468,260 @@ describe("InputControlBar settings button accessibility", () => {
     },
   ];
 
-  it("uses unique aria-label '打开设置' distinct from ChatPane header '设置中心'", () => {
+  it("renders tool mode, thinking level, and model select inside the composer card with preserved aria-labels", () => {
     const html = renderToStaticMarkup(
-      <InputControlBar
+      <MessageComposer
+        disabled={false}
+        running={false}
+        onSend={() => {}}
+        onAbort={() => {}}
+        onCompact={() => {}}
         models={fakeModels}
         selectedModel={null}
-        toolMode="read-only"
-        thinkingLevel="medium"
-        disabled={false}
         onSelectModel={() => {}}
+        toolMode="read-only"
         onToolModeChange={() => {}}
+        thinkingLevel="medium"
         onThinkingLevelChange={() => {}}
-        onSettingsClick={() => {}}
       />,
     );
-    expect(html).toContain('aria-label="打开设置"');
-    // 确保不再使用重复标签
+    // 控件存在且 aria-label 保持不变
+    expect(html).toContain('aria-label="工具模式"');
+    expect(html).toContain('aria-label="思考级别"');
+    expect(html).toContain('aria-label="选择模型"');
+    expect(html).toContain('aria-label="发送消息"');
+    // 不在 composer 内渲染设置按钮
     expect(html).not.toContain('aria-label="设置中心"');
+    expect(html).not.toContain('aria-label="打开设置"');
   });
 
-  it("does not render settings button when onSettingsClick is not provided", () => {
+  it("renders composer inside a unified card container with controls row", () => {
     const html = renderToStaticMarkup(
-      <InputControlBar
+      <MessageComposer
+        disabled={false}
+        running={false}
+        onSend={() => {}}
+        onAbort={() => {}}
+        onCompact={() => {}}
         models={fakeModels}
         selectedModel={null}
-        toolMode="read-only"
-        thinkingLevel="medium"
-        disabled={false}
         onSelectModel={() => {}}
+        toolMode="off"
         onToolModeChange={() => {}}
+        thinkingLevel="low"
         onThinkingLevelChange={() => {}}
       />,
     );
-    expect(html).not.toContain("设置中心");
-    expect(html).not.toContain("打开设置");
+    // 一体化卡片容器
+    expect(html).toContain("chat-composer-card");
+    expect(html).toContain("chat-composer-input-row");
+    expect(html).toContain("chat-composer-controls");
+    // 控件间细分隔线
+    expect(html).toContain("composer-separator");
+  });
+});
+
+describe("buildChatStateFromHistory", () => {
+  it("builds messages and timeline from simple user/assistant entries", () => {
+    const state = buildChatStateFromHistory([
+      { role: "user", content: "你好" },
+      { role: "assistant", content: "你好！有什么可以帮你的？" },
+    ]);
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]!.role).toBe("user");
+    expect(state.messages[0]!.content).toBe("你好");
+    expect(state.messages[1]!.role).toBe("assistant");
+    expect(state.messages[1]!.content).toBe("你好！有什么可以帮你的？");
+    // timeline: user message → assistant message
+    expect(state.timeline.map((i) => i.kind)).toEqual(["message", "message"]);
+  });
+
+  it("reconstructs thinking block from assistant entry", () => {
+    const state = buildChatStateFromHistory([
+      { role: "user", content: "问题" },
+      { role: "assistant", content: "回答", thinking: "让我思考一下..." },
+    ]);
+    expect(state.thinking).toBe("让我思考一下...");
+    // timeline: user message → thinking → assistant message
+    expect(state.timeline.map((i) => i.kind)).toEqual(["message", "thinking", "message"]);
+    const thinkingItem = state.timeline.find((i) => i.kind === "thinking");
+    expect(thinkingItem).toBeDefined();
+    if (thinkingItem?.kind === "thinking") {
+      expect(thinkingItem.content).toBe("让我思考一下...");
+    }
+  });
+
+  it("reconstructs tool cards with completed/error status from assistant entry", () => {
+    const state = buildChatStateFromHistory([
+      { role: "user", content: "读取文件" },
+      {
+        role: "assistant",
+        content: "读取完成",
+        toolCalls: [
+          { toolCallId: "tc-1", toolName: "read", status: "completed", result: "file content here" },
+          { toolCallId: "tc-2", toolName: "bash", status: "error", result: "permission denied" },
+        ],
+      },
+    ]);
+    // timeline: user msg → tool tc-1 → tool tc-2 → assistant msg
+    expect(state.timeline.map((i) => i.kind)).toEqual(["message", "tool", "tool", "message"]);
+    expect(state.toolCalls.get("tc-1")?.status).toBe("completed");
+    expect(state.toolCalls.get("tc-1")?.result).toBe("file content here");
+    expect(state.toolCalls.get("tc-2")?.status).toBe("error");
+    expect(state.toolCalls.get("tc-2")?.result).toBe("permission denied");
+  });
+
+  it("places tool cards before final answer in timeline order", () => {
+    const state = buildChatStateFromHistory([
+      { role: "user", content: "帮我查一下" },
+      {
+        role: "assistant",
+        content: "查到了，结果是 X",
+        thinking: "需要调用 search 工具",
+        toolCalls: [{ toolCallId: "tc-search", toolName: "search", status: "completed", result: "X" }],
+      },
+    ]);
+    const kinds = state.timeline.map((i) => i.kind);
+    const toolIdx = kinds.indexOf("tool");
+    const lastMsgIdx = kinds.lastIndexOf("message");
+    // 工具卡片在最后一条消息之前
+    expect(toolIdx).toBeGreaterThan(0);
+    expect(toolIdx).toBeLessThan(lastMsgIdx);
+    // 顺序：user msg → thinking → tool → assistant msg
+    expect(kinds).toEqual(["message", "thinking", "tool", "message"]);
+  });
+
+  it("handles multiple turns with interleaved thinking and tools", () => {
+    const state = buildChatStateFromHistory([
+      { role: "user", content: "第一问" },
+      { role: "assistant", content: "第一答", thinking: "想一" },
+      { role: "user", content: "第二问" },
+      {
+        role: "assistant",
+        content: "第二答",
+        toolCalls: [{ toolCallId: "tc-a", toolName: "read", status: "completed" }],
+      },
+    ]);
+    // timeline: user1 → thinking1 → assistant1 → user2 → tool → assistant2
+    expect(state.timeline.map((i) => i.kind)).toEqual([
+      "message", "thinking", "message", "message", "tool", "message",
+    ]);
+    expect(state.toolCalls.get("tc-a")?.status).toBe("completed");
+  });
+});
+
+describe("LOAD_HISTORY action", () => {
+  it("replaces chat state with reconstructed history state", () => {
+    const historyState = buildChatStateFromHistory([
+      { role: "user", content: "test" },
+      { role: "assistant", content: "response" },
+    ]);
+    const state = chatReducer(initialChatState, { type: "LOAD_HISTORY", state: historyState });
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]!.content).toBe("test");
+    expect(state.status).toBe("idle");
+  });
+});
+
+describe("MessageList display toggles", () => {
+  it("hides thinking blocks when showThinking is false", () => {
+    const messages = [
+      { id: "u1", role: "user" as const, content: "hi", timestamp: "", streaming: false },
+      { id: "a1", role: "assistant" as const, content: "hello", timestamp: "", streaming: false },
+    ];
+    const timeline: import("./chat-state.js").ChatTimelineItem[] = [
+      { kind: "message", id: "u1" },
+      { kind: "thinking", id: "think-1", content: "hidden thought" },
+      { kind: "message", id: "a1" },
+    ];
+
+    const htmlWithThinking = renderToStaticMarkup(
+      <MessageList
+        messages={messages}
+        historyEntries={[]}
+        timeline={timeline}
+        toolCalls={new Map()}
+        planItems={[]}
+        attachments={[]}
+        thinking="hidden thought"
+        thinkingCollapsed={false}
+        onToggleThinking={() => {}}
+        recovering={false}
+        reducedMotion
+        showThinking={true}
+        showToolCalls={true}
+      />,
+    );
+    expect(htmlWithThinking).toContain("hidden thought");
+
+    const htmlWithoutThinking = renderToStaticMarkup(
+      <MessageList
+        messages={messages}
+        historyEntries={[]}
+        timeline={timeline}
+        toolCalls={new Map()}
+        planItems={[]}
+        attachments={[]}
+        thinking="hidden thought"
+        thinkingCollapsed={false}
+        onToggleThinking={() => {}}
+        recovering={false}
+        reducedMotion
+        showThinking={false}
+        showToolCalls={true}
+      />,
+    );
+    expect(htmlWithoutThinking).not.toContain("hidden thought");
+  });
+
+  it("hides tool call cards when showToolCalls is false", () => {
+    const messages = [
+      { id: "u1", role: "user" as const, content: "read", timestamp: "", streaming: false },
+    ];
+    const timeline: import("./chat-state.js").ChatTimelineItem[] = [
+      { kind: "message", id: "u1" },
+      { kind: "tool", id: "tc-1" },
+    ];
+    const toolCalls = new Map([
+      ["tc-1", { toolCallId: "tc-1", toolName: "read", status: "completed" as const, result: "data" }],
+    ]);
+
+    const htmlWithTools = renderToStaticMarkup(
+      <MessageList
+        messages={messages}
+        historyEntries={[]}
+        timeline={timeline}
+        toolCalls={toolCalls}
+        planItems={[]}
+        attachments={[]}
+        thinking=""
+        thinkingCollapsed
+        onToggleThinking={() => {}}
+        recovering={false}
+        reducedMotion
+        showThinking={true}
+        showToolCalls={true}
+      />,
+    );
+    expect(htmlWithTools).toContain('data-testid="tool-call-tc-1"');
+
+    const htmlWithoutTools = renderToStaticMarkup(
+      <MessageList
+        messages={messages}
+        historyEntries={[]}
+        timeline={timeline}
+        toolCalls={toolCalls}
+        planItems={[]}
+        attachments={[]}
+        thinking=""
+        thinkingCollapsed
+        onToggleThinking={() => {}}
+        recovering={false}
+        reducedMotion
+        showThinking={true}
+        showToolCalls={false}
+      />,
+    );
+    expect(htmlWithoutTools).not.toContain('data-testid="tool-call-tc-1"');
   });
 });

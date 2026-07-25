@@ -5,7 +5,7 @@ import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
 import type { PlatformEventEnvelope, LayoutPreferences, AgentView } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
-import { chatReducer, initialChatState, getStreamCursor } from "../features/chat/chat-state.js";
+import { chatReducer, initialChatState, getStreamCursor, buildChatStateFromHistory } from "../features/chat/chat-state.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
@@ -59,6 +59,8 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const [layoutPrefs, setLayoutPrefs] = useState<LayoutPreferences>(DEFAULT_LAYOUT_ONLY);
   const [agents, setAgents] = useState<AgentView[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [showThinking, setShowThinking] = useState(true);
+  const [showToolCalls, setShowToolCalls] = useState(true);
   const [breakpoints, setBreakpoints] = useState(() => ({
     leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
     rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
@@ -87,6 +89,8 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
       setLayoutPrefs(layout);
       applyTheme(prefs.appearance.theme);
+      setShowThinking(prefs.appearance.showThinking ?? true);
+      setShowToolCalls(prefs.appearance.showToolCalls ?? true);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [active, api]);
@@ -259,10 +263,18 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
 
   const handleSelectSession = useCallback(async (id: string) => {
     dispatch({ type: "SET_ACTIVE_SESSION", payload: id });
-    dispatchChat({ type: "RESET" });
     try {
       const session = await api.getSession(id);
       dispatch({ type: "UPSERT_SESSION", payload: session });
+      // Agent 跟随会话：用 session.agentId 更新 activeAgentId
+      setActiveAgentId(session.agentId ?? null);
+      // 从历史 messageEntries 重建 chat state（timeline、toolCalls、thinking）
+      if (session.messageEntries.length > 0) {
+        const historyState = buildChatStateFromHistory(session.messageEntries);
+        dispatchChat({ type: "LOAD_HISTORY", state: historyState });
+      } else {
+        dispatchChat({ type: "RESET" });
+      }
       // WS 订阅该会话
       if (wsRef.current?.isConnected()) {
         wsRef.current.subscribe(id);
@@ -392,6 +404,42 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     const session = await api.updateSessionSettings(state.activeSessionId, { thinkingLevel: level });
     dispatch({ type: "UPSERT_SESSION", payload: session });
   }, [api, state.activeSessionId]);
+
+  // --- Agent 选择 ---
+
+  const handleSelectAgent = useCallback(async (agentId: string | null) => {
+    setActiveAgentId(agentId);
+    if (agentId === null) {
+      // "默认（无 Agent）"：切换到无 Agent 的最近会话或清空
+      const nullAgentSessions = state.sessions.filter((s) => s.agentId === null);
+      if (nullAgentSessions.length > 0) {
+        const recent = nullAgentSessions.reduce((a, b) =>
+          a.updatedAt > b.updatedAt ? a : b
+        );
+        await handleSelectSession(recent.id);
+      } else {
+        dispatch({ type: "SET_ACTIVE_SESSION", payload: null });
+        dispatchChat({ type: "RESET" });
+      }
+      return;
+    }
+    // 切换到指定 Agent：加载其最近会话，否则进入空状态
+    try {
+      const agentSessions = await api.getAgentSessions(agentId);
+      if (agentSessions.length > 0) {
+        const recent = agentSessions.reduce((a, b) =>
+          a.updatedAt > b.updatedAt ? a : b
+        );
+        await handleSelectSession(recent.id);
+      } else {
+        dispatch({ type: "SET_ACTIVE_SESSION", payload: null });
+        dispatchChat({ type: "RESET" });
+      }
+    } catch {
+      dispatch({ type: "SET_ACTIVE_SESSION", payload: null });
+      dispatchChat({ type: "RESET" });
+    }
+  }, [api, state.sessions, handleSelectSession]);
 
   const handleShowLogs = useCallback(async () => {
     try {
@@ -563,12 +611,14 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           onCompact={() => void handleCompact()}
           onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
-          onSelectAgent={(id) => setActiveAgentId(id)}
+          onSelectAgent={(id) => void handleSelectAgent(id)}
           onToolModeChange={(mode) => void handleToolModeChange(mode)}
           onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
           onSettingsClick={onSettingsClick}
           reducedMotion={reducedMotion}
+          showThinking={showThinking}
+          showToolCalls={showToolCalls}
         />
         {!focusMode && !breakpoints.rightNarrow && (
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />

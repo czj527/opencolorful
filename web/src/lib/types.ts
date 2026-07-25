@@ -55,9 +55,19 @@ export interface ModelSummary {
 }
 
 // --- Session（与服务端 src/runtime/session-service.ts SessionView 对齐）---
+
+export interface HistoryToolCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly status: "completed" | "error";
+  readonly result?: string;
+}
+
 export interface MessageEntry {
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly thinking?: string;
+  readonly toolCalls?: readonly HistoryToolCall[];
 }
 
 export interface SessionModelRef {
@@ -159,6 +169,8 @@ export interface LayoutPreferences {
 
 export interface AppearancePreferences {
   readonly theme: "dark" | "light";
+  readonly showToolCalls: boolean;
+  readonly showThinking: boolean;
 }
 
 export interface PreferencesDocument {

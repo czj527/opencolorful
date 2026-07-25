@@ -25,6 +25,8 @@ interface MessageListProps {
   readonly onToggleThinking: () => void;
   readonly recovering: boolean;
   readonly reducedMotion: boolean;
+  readonly showThinking?: boolean;
+  readonly showToolCalls?: boolean;
 }
 
 function sameMessage(
@@ -73,6 +75,8 @@ export function MessageList({
   onToggleThinking,
   recovering,
   reducedMotion,
+  showThinking = true,
+  showToolCalls = true,
 }: MessageListProps) {
   const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(reducedMotion);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
@@ -131,7 +135,9 @@ export function MessageList({
       return message ? <MessageBlock key={`message-${item.id}`} message={message} /> : null;
     }
     if (item.kind === "thinking") {
-      if (!thinking) return null;
+      if (!showThinking) return null;
+      const thinkingText = item.content ?? thinking;
+      if (!thinkingText) return null;
       return (
         <div
           key={item.id}
@@ -153,12 +159,13 @@ export function MessageList({
             思考过程 {thinkingCollapsed ? "（点击展开）" : "（点击收起）"}
           </button>
           {!thinkingCollapsed && (
-            <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{thinking}</div>
+            <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{thinkingText}</div>
           )}
         </div>
       );
     }
     if (item.kind === "tool") {
+      if (!showToolCalls) return null;
       const toolCall = toolCalls.get(item.id);
       return toolCall ? <ToolCallItem key={`tool-${item.id}`} toolCall={toolCall} /> : null;
     }

@@ -31,7 +31,7 @@ export interface Attachment {
 
 export type ChatTimelineItem =
   | { readonly kind: "message"; readonly id: string }
-  | { readonly kind: "thinking"; readonly id: string }
+  | { readonly kind: "thinking"; readonly id: string; readonly content?: string }
   | { readonly kind: "tool"; readonly id: string }
   | { readonly kind: "plan"; readonly id: string }
   | { readonly kind: "attachment"; readonly id: string };
@@ -87,6 +87,7 @@ function appendTimelineItem(
 
 export type ChatAction =
   | { type: "RESET" }
+  | { type: "LOAD_HISTORY"; state: ChatState }
   | { type: "PROMPT_PENDING"; userContent: string }
   | { type: "PROMPT_SENT"; streamId: string; userContent: string }
   | { type: "EVENT"; event: PlatformEventEnvelope }
@@ -98,6 +99,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "RESET":
       return { ...initialChatState };
+
+    case "LOAD_HISTORY":
+      return action.state;
 
     case "EVENT_BATCH": {
       let next = state;
@@ -406,4 +410,81 @@ export function isSafeUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+// --- History reconstruction ---
+
+export interface HistoryMessageEntry {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+  readonly thinking?: string;
+  readonly toolCalls?: readonly { toolCallId: string; toolName: string; status: "completed" | "error"; result?: string }[];
+}
+
+/**
+ * 从 Session 历史 messageEntries 重建 ChatState。
+ * 按条目顺序构建 messages、timeline、toolCalls 和 thinking，
+ * DOM 顺序：用户消息 → (思考) → 工具卡片 → 助手回答。
+ */
+export function buildChatStateFromHistory(entries: readonly HistoryMessageEntry[]): ChatState {
+  const messages: ChatMessage[] = [];
+  const timeline: ChatTimelineItem[] = [];
+  const toolCalls = new Map<string, ToolCall>();
+  let thinkingText = "";
+  let entryIndex = 0;
+
+  for (const entry of entries) {
+    const msgId = `history-msg-${entryIndex}`;
+
+    if (entry.role === "user") {
+      messages.push({
+        id: msgId,
+        role: "user",
+        content: entry.content,
+        timestamp: "",
+        streaming: false,
+      });
+      timeline.push({ kind: "message", id: msgId });
+    } else {
+      // assistant: thinking block → tool cards → message
+      if (entry.thinking) {
+        const thinkingId = `history-thinking-${entryIndex}`;
+        thinkingText = entry.thinking;
+        timeline.push({ kind: "thinking", id: thinkingId, content: entry.thinking });
+      }
+
+      if (entry.toolCalls && entry.toolCalls.length > 0) {
+        for (const tc of entry.toolCalls) {
+          toolCalls.set(tc.toolCallId, {
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+            status: tc.status,
+            result: tc.result,
+          });
+          timeline.push({ kind: "tool", id: tc.toolCallId });
+        }
+      }
+
+      messages.push({
+        id: msgId,
+        role: "assistant",
+        content: entry.content,
+        timestamp: "",
+        streaming: false,
+      });
+      timeline.push({ kind: "message", id: msgId });
+    }
+
+    entryIndex += 1;
+  }
+
+  return {
+    ...initialChatState,
+    messages,
+    timeline,
+    toolCalls,
+    thinking: thinkingText,
+    thinkingCollapsed: true,
+    status: "idle",
+  };
 }

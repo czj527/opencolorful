@@ -2,9 +2,9 @@ import type { SessionView, ModelSummary, AgentView } from "../lib/types.js";
 import type { ChatState } from "../features/chat/chat-state.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
-import { InputControlBar } from "../features/chat/InputControlBar.js";
 import { AgentSelector } from "../features/chat/AgentSelector.js";
-import { MessageSquare, Settings } from "lucide-react";
+import { MessageSquare, Settings, Bot } from "lucide-react";
+import "../features/chat/chat.css";
 
 interface ChatPaneProps {
   readonly session: SessionView | null;
@@ -23,7 +23,15 @@ interface ChatPaneProps {
   readonly sseConnected: boolean;
   readonly onSettingsClick?: () => void;
   readonly reducedMotion?: boolean;
+  readonly showThinking?: boolean;
+  readonly showToolCalls?: boolean;
 }
+
+const TYPE_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
+  assistant: { bg: "rgba(74,158,255,0.15)", fg: "var(--accent)" },
+  coding: { bg: "rgba(74,255,120,0.12)", fg: "var(--success)" },
+  work: { bg: "rgba(255,166,74,0.15)", fg: "var(--warning)" },
+};
 
 export function ChatPane({
   session,
@@ -42,8 +50,46 @@ export function ChatPane({
   reducedMotion,
   onToolModeChange,
   onThinkingLevelChange,
+  showThinking = true,
+  showToolCalls = true,
 }: ChatPaneProps) {
+  const activeAgent = agents.find((a) => a.identity.id === activeAgentId) ?? null;
+
   if (!session) {
+    // 空状态：无会话选中时显示 Agent 欢迎卡片（若有 Agent）或默认欢迎
+    if (activeAgent) {
+      const colors = TYPE_BADGE_COLORS[activeAgent.identity.type] ?? { bg: "var(--bg-tertiary)", fg: "var(--text-secondary)" };
+      return (
+        <main className="app-chat" role="main" aria-label="聊天区域">
+          <div className="agent-welcome-card">
+            <div className="agent-welcome-icon">
+              <Bot size={32} style={{ color: "var(--accent)" }} aria-hidden="true" />
+            </div>
+            <div className="agent-welcome-name">
+              你好，我是 {activeAgent.identity.name}
+            </div>
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "2px 8px",
+                borderRadius: 8,
+                background: colors.bg,
+                color: colors.fg,
+                textTransform: "uppercase",
+                letterSpacing: "0.3px",
+              }}
+            >
+              {activeAgent.identity.type}
+            </span>
+            <div className="agent-welcome-subtitle">
+              从左侧面板选择或创建新会话开始对话
+            </div>
+          </div>
+        </main>
+      );
+    }
+
     return (
       <main className="app-chat" role="main" aria-label="聊天区域">
         <div className="empty-state" style={{ flex: 1 }}>
@@ -102,6 +148,8 @@ export function ChatPane({
         onToggleThinking={onToggleThinking}
         recovering={!sseConnected && running}
         reducedMotion={reducedMotion ?? false}
+        showThinking={showThinking ?? true}
+        showToolCalls={showToolCalls ?? true}
       />
 
       <MessageComposer
@@ -110,18 +158,13 @@ export function ChatPane({
         onSend={onSend}
         onAbort={onAbort}
         onCompact={onCompact}
-      />
-
-      <InputControlBar
         models={models}
         selectedModel={session.model}
-        toolMode={session.toolMode}
-        thinkingLevel={session.thinkingLevel}
-        disabled={false}
         onSelectModel={onSelectModel}
+        toolMode={session.toolMode}
         onToolModeChange={onToolModeChange ?? (() => {})}
+        thinkingLevel={session.thinkingLevel}
         onThinkingLevelChange={onThinkingLevelChange ?? (() => {})}
-        onSettingsClick={onSettingsClick}
       />
     </main>
   );
