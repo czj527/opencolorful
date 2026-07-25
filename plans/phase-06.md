@@ -1,6 +1,6 @@
 # Phase 6：Token 用量 + 对话时间线 + 会话命令系统 + 开发流程规范化
 
-**状态：规划中** | 分支：`phase-6-usage-timeline`（待创建）
+**状态：进行中** | 分支：`phase-6-usage-timeline`
 **基线：** `main`（Phase 5b 验收通过后，`e7e09bd`）
 **参考：** PI SDK `Usage`/`AgentSession.getSessionStats()`/compaction 事件、openhanako 消息模型与输入交互、主流 Agent 侧边时间线导航
 
@@ -334,7 +334,10 @@ cd web; npx playwright test
 
 | 提交 | 内容 |
 |---|---|
-| （待回填） | |
+| `14c4b17` | docs: add phase 6 plan — usage timeline, commands, dev workflow |
+| `9338b14` | feat: carry token usage and compaction events through platform event chain（T1） |
+| `fcd5025` | feat: emit compaction events on control stream when idle, add PromptService.isBusy（T1 补充 infra） |
+| `6b4c5d2` | docs: add development workflow guide and streamline AGENTS.md process section（T8） |
 
 ### 质量门
 
