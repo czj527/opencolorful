@@ -3,8 +3,12 @@
   border: 2px solid var(--bg-tertiary);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation-name: :global(pa-spin);
+  animation-name: spin;
   animation-duration: var(--duration-slow);
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }

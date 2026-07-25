@@ -16,8 +16,12 @@
     var(--bg-secondary),
     transparent
   );
-  animation-name: :global(pa-shimmer);
+  animation-name: shimmer;
   animation-duration: var(--duration-slow);
   animation-timing-function: var(--ease-standard);
   animation-iteration-count: infinite;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
 }
