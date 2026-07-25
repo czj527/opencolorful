@@ -35,6 +35,8 @@ describe("preferences document normalization", () => {
     expect(prefs.layout.rightCollapsed).toBe(false);
     expect(prefs.layout.focusMode).toBe(false);
     expect(prefs.layout.reducedMotion).toBe("system");
+    expect(prefs.appearance.showToolCalls).toBe(true);
+    expect(prefs.appearance.showThinking).toBe(true);
   });
 
   it("matches defaultPreferences()", () => {
@@ -127,6 +129,53 @@ describe("preferences document normalization", () => {
     });
 
     expect(prefs.defaults.model).toEqual({ providerId: "openai", modelId: "gpt-4o" });
+  });
+
+  it("falls back to default appearance values when fields are missing or invalid", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
+      layout: {
+        leftSidebarWidth: 280,
+        rightSidebarWidth: 320,
+        leftCollapsed: false,
+        rightCollapsed: false,
+        focusMode: false,
+        reducedMotion: "system",
+      },
+      appearance: {
+        theme: "dark",
+        showToolCalls: "not-a-boolean",
+        // showThinking 缺失
+      },
+    });
+
+    expect(prefs.appearance.showToolCalls).toBe(true); // 回退默认
+    expect(prefs.appearance.showThinking).toBe(true);  // 缺失字段回退默认
+  });
+
+  it("preserves explicit false values for showToolCalls and showThinking", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
+      layout: {
+        leftSidebarWidth: 280,
+        rightSidebarWidth: 320,
+        leftCollapsed: false,
+        rightCollapsed: false,
+        focusMode: false,
+        reducedMotion: "system",
+      },
+      appearance: {
+        theme: "light",
+        showToolCalls: false,
+        showThinking: false,
+      },
+    });
+
+    expect(prefs.appearance.showToolCalls).toBe(false);
+    expect(prefs.appearance.showThinking).toBe(false);
+    expect(prefs.appearance.theme).toBe("light");
   });
 });
 

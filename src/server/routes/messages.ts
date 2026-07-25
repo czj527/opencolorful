@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 
 import type { RuntimePaths } from "../../config/paths.js";
+import type { AgentStore } from "../../config/agent-store.js";
 import { createApiError } from "../../contracts/api-error.js";
 import type { ToolMode } from "../../contracts/session-settings.js";
 import type { EventReplayStore } from "../../runtime/event-replay-store.js";
@@ -16,10 +17,31 @@ export interface MessageRoutesOptions {
   readonly replayStore?: EventReplayStore;
   readonly paths?: RuntimePaths;
   readonly modelService?: ModelService;
+  readonly agentStore?: AgentStore;
 }
 
 export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions): void {
-  const { promptService, sessionService, replayStore, paths, modelService } = options;
+  const { promptService, sessionService, replayStore, paths, modelService, agentStore } = options;
+
+  // 跟踪每个 session 运行时使用的 systemPrompt，用于检测 profile 更新
+  const runtimeSystemPrompt = new Map<string, string | undefined>();
+
+  function buildSystemPrompt(agentId: string): string | undefined {
+    if (agentStore === undefined) return undefined;
+    const profile = agentStore.getProfile(agentId);
+    if (profile === null) return undefined;
+    const parts: string[] = [];
+    if (profile.persona) {
+      parts.push(profile.persona);
+    }
+    if (profile.replyStyle) {
+      parts.push(`回复风格: ${profile.replyStyle}`);
+    }
+    if (profile.personality.length > 0) {
+      parts.push(`性格标签: ${profile.personality.join("、")}`);
+    }
+    return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
 
   app.post("/api/sessions/:id/messages", async (context) => {
     const sessionId = context.req.param("id");
@@ -52,6 +74,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
           const runtimeCwd = view.workspaceCwd || process.cwd();
 
+          // 构建 Agent 人设 system prompt（仅当会话绑定了 Agent 且 profile 存在时）
+          const systemPrompt = view.agentId ? buildSystemPrompt(view.agentId) : undefined;
+
           // 如果 session 选择了模型且有 modelService，使用真实模型
           const selectedModel = session.model;
           if (selectedModel && modelService && selectedModel.providerId !== "faux") {
@@ -67,9 +92,11 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               ...(noTools ? { noTools } : {}),
               ...(tools.length > 0 && !noTools ? { tools } : {}),
               thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
+              ...(systemPrompt ? { systemPrompt } : {}),
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
+            runtimeSystemPrompt.set(sessionId, systemPrompt);
           } else {
             const runtime = await SessionRuntime.create({
               sessionId,
@@ -84,12 +111,80 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
               ...(noTools ? { noTools } : {}),
               ...(tools.length > 0 && !noTools ? { tools } : {}),
               thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
+              ...(systemPrompt ? { systemPrompt } : {}),
               ...(replayStore ? { replayStore } : {}),
             });
             promptService.register(runtime);
+            runtimeSystemPrompt.set(sessionId, systemPrompt);
           }
         } catch {
           return context.json(createApiError("SESSION_ERROR", "无法创建 Session Runtime"), 500);
+        }
+      } else {
+        // Runtime 已存在：检查 Agent profile 是否有更新，如有则重建 runtime
+        const view = sessionService?.getView(sessionId);
+        if (view?.agentId && agentStore) {
+          const currentPrompt = buildSystemPrompt(view.agentId);
+          const lastPrompt = runtimeSystemPrompt.get(sessionId);
+          if (currentPrompt !== lastPrompt) {
+            // profile 已更新，使旧 runtime 失效，下次循环会重建
+            promptService.invalidate(sessionId);
+            runtimeSystemPrompt.delete(sessionId);
+            // 重新创建
+            try {
+              const session = sessionService!.open(sessionId);
+              const toolMode = (view.toolMode ?? "off") as ToolMode;
+              const toolPolicy = new ToolPolicy();
+              const tools = toolPolicy.resolveTools(
+                toolMode,
+                view.workspaceCwd ?? undefined,
+                view.workspaceConfirmed,
+              );
+              const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
+              const runtimeCwd = view.workspaceCwd || process.cwd();
+              const selectedModel = session.model;
+              if (selectedModel && modelService && selectedModel.providerId !== "faux") {
+                const runtime = await SessionRuntime.create({
+                  sessionId,
+                  cwd: runtimeCwd,
+                  authPath: paths!.authFile,
+                  publish: () => {},
+                  sessionHandle: session,
+                  modelService,
+                  resolveProviderId: selectedModel.providerId,
+                  resolveModelId: selectedModel.modelId,
+                  ...(noTools ? { noTools } : {}),
+                  ...(tools.length > 0 && !noTools ? { tools } : {}),
+                  thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
+                  ...(currentPrompt ? { systemPrompt: currentPrompt } : {}),
+                  ...(replayStore ? { replayStore } : {}),
+                });
+                promptService.register(runtime);
+                runtimeSystemPrompt.set(sessionId, currentPrompt);
+              } else {
+                const runtime = await SessionRuntime.create({
+                  sessionId,
+                  cwd: process.cwd(),
+                  sessionDir: paths!.sessions,
+                  authPath: paths!.authFile,
+                  providerId: "faux",
+                  modelId: "faux-1",
+                  faux: { response: "已收到您的消息", tokensPerSecond: 20 },
+                  publish: () => {},
+                  sessionHandle: session,
+                  ...(noTools ? { noTools } : {}),
+                  ...(tools.length > 0 && !noTools ? { tools } : {}),
+                  thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
+                  ...(currentPrompt ? { systemPrompt: currentPrompt } : {}),
+                  ...(replayStore ? { replayStore } : {}),
+                });
+                promptService.register(runtime);
+                runtimeSystemPrompt.set(sessionId, currentPrompt);
+              }
+            } catch {
+              return context.json(createApiError("SESSION_ERROR", "无法重建 Session Runtime"), 500);
+            }
+          }
         }
       }
 

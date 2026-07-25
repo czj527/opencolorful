@@ -208,6 +208,40 @@ describe("preferences routes", () => {
     }
   });
 
+  it("PUT /api/settings/preferences persists showToolCalls and showThinking", async () => {
+    const ctx = await createContext();
+    try {
+      const { app } = createServerApp({
+        modelService: ctx.modelService,
+        sessionService: ctx.sessionService,
+        preferencesStore: ctx.preferencesStore,
+      });
+
+      // 写入新的 appearance 值
+      const resp = await app.request("http://local/api/settings/preferences", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          appearance: { showToolCalls: false, showThinking: false },
+        }),
+      });
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as { appearance: { showToolCalls: boolean; showThinking: boolean; theme: string } };
+      expect(body.appearance.showToolCalls).toBe(false);
+      expect(body.appearance.showThinking).toBe(false);
+      // 未修改的 theme 保留原值
+      expect(body.appearance.theme).toBe("dark");
+
+      // 新 store 从磁盘复读得到持久化的值
+      const reopened = new PreferencesStore(ctx.paths.preferences);
+      expect(reopened.get().appearance.showToolCalls).toBe(false);
+      expect(reopened.get().appearance.showThinking).toBe(false);
+    } finally {
+      ctx.sessionService.closeAll();
+      ctx.database.close();
+    }
+  });
+
   it("does not expose credentials in the preferences response", async () => {
     const ctx = await createContext();
     try {

@@ -35,6 +35,7 @@ export interface SessionRuntimeOptions {
   readonly tools?: readonly string[];
   readonly noTools?: "all";
   readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  readonly systemPrompt?: string;
 }
 
 export interface PromptRun {
@@ -79,6 +80,7 @@ export class SessionRuntime {
           ? { tokensPerSecond: options.faux.tokensPerSecond }
           : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+        ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -97,6 +99,7 @@ export class SessionRuntime {
         ...(options.tools ? { tools: options.tools } : {}),
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+        ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");

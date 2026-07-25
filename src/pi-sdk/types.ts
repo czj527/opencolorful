@@ -1,6 +1,14 @@
+export interface HistoryToolCall {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly status: "completed" | "error";
+  readonly result?: string; // 截断后的摘要，遵循现有脱敏/限长约定
+}
 export interface PiMessageEntry {
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly thinking?: string;
+  readonly toolCalls?: readonly HistoryToolCall[];
 }
 
 export interface PiSessionHandle {
@@ -120,6 +128,7 @@ export interface PiFauxAgentOptions {
   readonly tokensPerSecond?: number;
   readonly sessionHandle?: PiSessionHandle;
   readonly thinkingLevel?: PiThinkingLevel;
+  readonly systemPrompt?: string;
 }
 
 export interface PiResolvedModel {
@@ -141,4 +150,5 @@ export interface PiAgentSessionOptions {
   readonly tools?: readonly string[];
   readonly noTools?: "all";
   readonly thinkingLevel?: PiThinkingLevel;
+  readonly systemPrompt?: string;
 }

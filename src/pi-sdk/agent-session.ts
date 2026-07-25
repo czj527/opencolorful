@@ -89,14 +89,14 @@ function mapAgentEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
   return undefined;
 }
 
-function minimalResourceLoader(): ResourceLoader {
+function minimalResourceLoader(systemPrompt?: string): ResourceLoader {
   return {
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => "You are a concise assistant.",
+    getSystemPrompt: () => systemPrompt ?? "You are a concise assistant.",
     getAppendSystemPrompt: () => [],
     extendResources: () => {},
     reload: async () => {},
@@ -164,7 +164,7 @@ export async function createPiFauxAgentSession(
     model,
     settingsManager,
     sessionManager,
-    resourceLoader: minimalResourceLoader(),
+    resourceLoader: minimalResourceLoader(options.systemPrompt),
     noTools: "all",
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
@@ -214,7 +214,7 @@ export async function createPiAgentSession(
     model,
     settingsManager,
     sessionManager,
-    resourceLoader: minimalResourceLoader(),
+    resourceLoader: minimalResourceLoader(options.systemPrompt),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };
 

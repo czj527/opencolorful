@@ -13,6 +13,7 @@ import path from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import type {
+  HistoryToolCall,
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
@@ -29,6 +30,7 @@ export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./
 export { createPiModelRuntime } from "./model-runtime.js";
 export { createPiAgentSession, createPiFauxAgentSession } from "./agent-session.js";
 export type {
+  HistoryToolCall,
   OfflineCompletionResult,
   PiCredentialInfo,
   PiCredentialStore,
@@ -66,23 +68,95 @@ export function openPersistentSession(
   return wrapSessionManager(SessionManager.open(sessionPath, sessionDir, cwd));
 }
 
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (block): block is { type: "text"; text: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
+    .map((block) => block.text)
+    .join("");
+}
+
+function extractThinkingContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const thinking = content
+    .filter(
+      (block): block is { type: "thinking"; thinking: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: unknown }).type === "thinking" &&
+        typeof (block as { thinking?: unknown }).thinking === "string",
+    )
+    .map((block) => block.thinking)
+    .join("");
+  return thinking || undefined;
+}
+
 function wrapSessionManager(manager: SessionManager): PiSessionHandle {
-  const getEntries = (): PiMessageEntry[] =>
-    manager
-      .getBranch()
-      .filter((entry) => entry.type === "message")
-      .flatMap((entry) => {
-        const message = entry.message;
-        if (message.role !== "user" && message.role !== "assistant") return [];
-        const content =
-          typeof message.content === "string"
-            ? message.content
-            : message.content
-                .filter((block) => block.type === "text")
-                .map((block) => block.text)
-                .join("");
-        return [{ role: message.role, content }];
+  const getEntries = (): PiMessageEntry[] => {
+    const branch = manager.getBranch();
+    // 第一遍：构建 toolCallId → tool result 映射
+    const toolResults = new Map<string, { status: "completed" | "error"; result: string }>();
+    for (const entry of branch) {
+      if (entry.type !== "message") continue;
+      const message = entry.message as { role?: string; toolCallId?: string; isError?: boolean; content?: unknown };
+      if (message.role !== "toolResult" || typeof message.toolCallId !== "string") continue;
+      const resultText = extractTextContent(message.content);
+      // 截断结果，遵循现有脱敏/限长约定
+      const truncated = resultText.length > 500 ? `${resultText.slice(0, 500)}…` : resultText;
+      toolResults.set(message.toolCallId, {
+        status: message.isError === true ? "error" : "completed",
+        result: truncated,
       });
+    }
+
+    // 第二遍：构建消息条目
+    const entries: PiMessageEntry[] = [];
+    for (const entry of branch) {
+      if (entry.type !== "message") continue;
+      const message = entry.message as {
+        role?: string;
+        content?: unknown;
+      };
+      if (message.role !== "user" && message.role !== "assistant") continue;
+      const content = extractTextContent(message.content);
+
+      if (message.role === "user") {
+        entries.push({ role: "user", content });
+      } else {
+        // assistant 消息
+        const thinking = extractThinkingContent(message.content);
+        const toolCalls: HistoryToolCall[] = [];
+        if (Array.isArray(message.content)) {
+          for (const block of message.content as Array<{ type?: string; id?: string; name?: string }>) {
+            if (block?.type === "toolCall" && typeof block.id === "string" && typeof block.name === "string") {
+              const tr = toolResults.get(block.id);
+              toolCalls.push({
+                toolCallId: block.id,
+                toolName: block.name,
+                status: tr?.status ?? "completed",
+                ...(tr?.result !== undefined ? { result: tr.result } : {}),
+              } as HistoryToolCall);
+            }
+          }
+        }
+        const entry: PiMessageEntry = {
+          role: "assistant",
+          content,
+          ...(thinking ? { thinking } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        };
+        entries.push(entry);
+      }
+    }
+    return entries;
+  };
   const getMessages = (): string[] => getEntries().map((entry) => entry.content);
   const getModel = (): { providerId: string; modelId: string } | null => {
     const modelEntry = [...manager.getBranch()].reverse().find((entry) => {
