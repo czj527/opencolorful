@@ -1,10 +1,12 @@
 import { memo, useEffect } from "react";
-import { Brain, ArrowDown } from "lucide-react";
+import { Brain, ArrowDown, Terminal, Archive } from "lucide-react";
 import type { TokenUsage } from "../../lib/types.js";
 import type {
   Attachment,
   ChatMessage,
   ChatTimelineItem,
+  CommandCard,
+  CompactionCard,
   PlanItem as PlanItemData,
   ToolCall,
 } from "./chat-state.js";
@@ -30,6 +32,10 @@ interface MessageListProps {
   readonly showToolCalls?: boolean;
   /** 本 turn 各 assistant 消息的用量（messageId → usage） */
   readonly turnUsages?: ReadonlyMap<string, TokenUsage>;
+  /** 本地命令结果卡片（cardId → 卡片） */
+  readonly commandCards?: ReadonlyMap<string, CommandCard>;
+  /** 压缩卡片（cardId → 卡片） */
+  readonly compactionCards?: ReadonlyMap<string, CompactionCard>;
   /** 外部传入的 scroll 状态（提升层级时由 ChatPane 统一管理） */
   readonly scroll?: UseChatScrollResult;
 }
@@ -90,6 +96,60 @@ export const MessageBlock = memo(function MessageBlock({
   previous.turnUsage === next.turnUsage,
 );
 
+/** 本地命令结果卡片（弱化样式，与消息区分） */
+function CommandCardBlock({ card }: { readonly card: CommandCard }) {
+  return (
+    <div
+      className={`command-card${card.tone === "error" ? " command-card-error" : ""}`}
+      data-testid={`command-card-${card.id}`}
+    >
+      <div className="command-card-title">
+        <Terminal size={12} aria-hidden="true" />
+        {card.title}
+      </div>
+      <div className="command-card-body">
+        {card.lines.map((line, index) => (
+          <div key={index} className="command-card-line">{line}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 压缩结果卡片 */
+function CompactionCardBlock({ card }: { readonly card: CompactionCard }) {
+  return (
+    <div
+      className={`compaction-card${card.status === "failed" ? " compaction-card-failed" : ""}`}
+      data-testid={`compaction-card-${card.id}`}
+    >
+      <div className="compaction-card-title">
+        <Archive size={12} aria-hidden="true" />
+        {card.status === "compacting"
+          ? "正在压缩会话上下文…"
+          : card.status === "failed"
+            ? "压缩未完成"
+            : "上下文已压缩"}
+      </div>
+      {card.status !== "compacting" && (
+        <div className="compaction-card-body">
+          {(card.tokensBefore !== null || card.tokensAfter !== null) && (
+            <div className="compaction-card-line">
+              {card.tokensBefore ?? "?"} → {card.tokensAfter ?? "?"} tokens
+            </div>
+          )}
+          {card.summary !== null && (
+            <div className="compaction-card-line compaction-card-summary">{card.summary}</div>
+          )}
+          {card.errorMessage !== null && (
+            <div className="compaction-card-line compaction-card-error">{card.errorMessage}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   historyEntries,
@@ -105,6 +165,8 @@ export function MessageList({
   showThinking = true,
   showToolCalls = true,
   turnUsages,
+  commandCards,
+  compactionCards,
   scroll,
 }: MessageListProps) {
   const internalScroll = useChatScroll(reducedMotion);
@@ -210,6 +272,14 @@ export function MessageList({
     }
     if (item.kind === "plan") {
       return planItems.length > 0 ? <PlanList key={item.id} items={planItems} /> : null;
+    }
+    if (item.kind === "command") {
+      const card = commandCards?.get(item.id);
+      return card ? <CommandCardBlock key={`command-${item.id}`} card={card} /> : null;
+    }
+    if (item.kind === "compaction") {
+      const card = compactionCards?.get(item.id);
+      return card ? <CompactionCardBlock key={`compaction-${item.id}`} card={card} /> : null;
     }
     const attachment = attachments.find((candidate) => candidate.attachmentId === item.id);
     return attachment

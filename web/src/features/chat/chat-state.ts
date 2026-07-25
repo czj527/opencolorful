@@ -34,7 +34,27 @@ export type ChatTimelineItem =
   | { readonly kind: "thinking"; readonly id: string; readonly content?: string }
   | { readonly kind: "tool"; readonly id: string }
   | { readonly kind: "plan"; readonly id: string }
-  | { readonly kind: "attachment"; readonly id: string };
+  | { readonly kind: "attachment"; readonly id: string }
+  | { readonly kind: "command"; readonly id: string }
+  | { readonly kind: "compaction"; readonly id: string };
+
+/** 本地命令结果卡片（不进入 PI JSONL、不产生平台事件） */
+export interface CommandCard {
+  readonly id: string;
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly tone: "info" | "error";
+}
+
+/** 压缩结果卡片（session.compacting/session.compacted 事件驱动） */
+export interface CompactionCard {
+  readonly id: string;
+  readonly status: "compacting" | "completed" | "failed";
+  readonly tokensBefore: number | null;
+  readonly tokensAfter: number | null;
+  readonly summary: string | null;
+  readonly errorMessage: string | null;
+}
 
 export interface ChatState {
   readonly messages: ChatMessage[];
@@ -62,6 +82,14 @@ export interface ChatState {
   readonly contextUsage: ContextUsage | null;
   /** 本 turn 各 assistant 消息的用量：messageId → usage */
   readonly turnUsages: ReadonlyMap<string, TokenUsage>;
+  /** 本地命令结果卡片：cardId → 卡片 */
+  readonly commandCards: ReadonlyMap<string, CommandCard>;
+  /** 压缩卡片：cardId → 卡片 */
+  readonly compactionCards: ReadonlyMap<string, CompactionCard>;
+  /** 当前进行中的压缩卡片 id（session.compacted 到达时更新为完成/失败） */
+  readonly activeCompactionId: string | null;
+  /** 本地卡片自增序号（生成稳定 id） */
+  readonly localCardSeq: number;
 }
 
 export const initialChatState: ChatState = {
@@ -83,6 +111,10 @@ export const initialChatState: ChatState = {
   usageTurns: 0,
   contextUsage: null,
   turnUsages: new Map(),
+  commandCards: new Map(),
+  compactionCards: new Map(),
+  activeCompactionId: null,
+  localCardSeq: 0,
 };
 
 /** 读取指定 stream 的游标（WS stream.resume 使用） */
@@ -116,6 +148,12 @@ export type ChatAction =
       cacheHitRate: number | null;
       turns: number;
       context: ContextUsage | null;
+    }
+  | {
+      type: "ADD_COMMAND_CARD";
+      title: string;
+      lines: readonly string[];
+      tone?: "info" | "error";
     };
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -148,7 +186,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...state.messages.filter((message) => message.id !== pendingMessage.id),
           pendingMessage,
         ],
-        timeline: [{ kind: "message", id: pendingMessage.id }],
+        // 保留本地命令卡片与压缩卡片：它们属于会话视图而非单个 turn
+        timeline: [
+          ...state.timeline.filter((item) => item.kind === "command" || item.kind === "compaction"),
+          { kind: "message", id: pendingMessage.id },
+        ],
         currentStreamId: null,
         pendingPrompt: true,
         pendingStreamId: null,
@@ -184,6 +226,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const userTimelineItem: ChatTimelineItem = { kind: "message", id: userMessage.id };
       const earlyTimeline = state.timeline.filter((item) =>
         !(item.kind === "message" && (item.id === "user-pending" || item.id === userMessage.id)));
+      // 本地命令卡片与压缩卡片跨 turn 保留
+      const preservedCards = earlyTimeline.filter(
+        (item) => item.kind === "command" || item.kind === "compaction");
+      const turnTimeline = earlyTimeline.filter(
+        (item) => item.kind !== "command" && item.kind !== "compaction");
       return {
         ...state,
         currentStreamId: action.streamId,
@@ -192,8 +239,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         cursors,
         messages,
         timeline: earlyEventsReceived
-          ? [userTimelineItem, ...earlyTimeline]
-          : [userTimelineItem],
+          ? [...preservedCards, userTimelineItem, ...turnTimeline]
+          : [...preservedCards, userTimelineItem],
         status: "running",
         error: null,
         thinking: earlyEventsReceived ? state.thinking : "",
@@ -206,8 +253,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "EVENT": {
       const event = action.event;
 
-      // 只处理当前 stream 的事件：旧 stream 的重放事件不污染当前视图
-      if (event.streamId !== null && state.currentStreamId !== null && event.streamId !== state.currentStreamId) {
+      // 只处理当前 stream 的事件：旧 stream 的重放事件不污染当前视图。
+      // 例外：compact 在独立的 ctrl-<uuid> control stream 上（sequence 从 1），
+      // 与当前 prompt stream 无关，必须放行。
+      const isControlStreamEvent =
+        event.type === "session.compacting" || event.type === "session.compacted";
+      if (
+        !isControlStreamEvent &&
+        event.streamId !== null &&
+        state.currentStreamId !== null &&
+        event.streamId !== state.currentStreamId
+      ) {
         return state;
       }
       if (event.streamId !== null && state.pendingPrompt && state.currentStreamId === null) {
@@ -428,10 +484,73 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return next;
         }
 
-        case "session.compacting":
-        case "session.compacted":
-          // 压缩卡片由 T7 实现；此处安全忽略，仅推进游标
-          return base;
+        case "session.compacting": {
+          // 压缩开始：插入「正在压缩…」临时卡片（id 取事件 id，天然去重）
+          const id = `compaction-${event.eventId}`;
+          if (base.compactionCards.has(id)) return base;
+          const card: CompactionCard = {
+            id,
+            status: "compacting",
+            tokensBefore: null,
+            tokensAfter: null,
+            summary: null,
+            errorMessage: null,
+          };
+          const compactionCards = new Map(base.compactionCards);
+          compactionCards.set(id, card);
+          return {
+            ...base,
+            compactionCards,
+            activeCompactionId: id,
+            timeline: appendTimelineItem(base.timeline, { kind: "compaction", id }),
+          };
+        }
+
+        case "session.compacted": {
+          const payload = event.payload as {
+            reason?: string;
+            tokensBefore?: number;
+            tokensAfter?: number;
+            summary?: string;
+            aborted?: boolean;
+            errorMessage?: string;
+          };
+          const failed = payload.errorMessage !== undefined || payload.aborted === true;
+          const activeId = base.activeCompactionId;
+          const existing = activeId !== null ? base.compactionCards.get(activeId) : undefined;
+          const compactionCards = new Map(base.compactionCards);
+          let cardId: string;
+          if (existing !== undefined && activeId !== null) {
+            // 更新「正在压缩…」卡片为完成/失败
+            cardId = activeId;
+            compactionCards.set(activeId, {
+              ...existing,
+              status: failed ? "failed" : "completed",
+              tokensBefore: payload.tokensBefore ?? null,
+              tokensAfter: payload.tokensAfter ?? null,
+              summary: payload.summary ?? null,
+              errorMessage: payload.errorMessage ?? null,
+            });
+          } else {
+            // 没有进行中的卡片（例如重放时只有 compacted），直接插入结果卡片
+            cardId = `compaction-${event.eventId}`;
+            const card: CompactionCard = {
+              id: cardId,
+              status: failed ? "failed" : "completed",
+              tokensBefore: payload.tokensBefore ?? null,
+              tokensAfter: payload.tokensAfter ?? null,
+              summary: payload.summary ?? null,
+              errorMessage: payload.errorMessage ?? null,
+            };
+            compactionCards.set(cardId, card);
+          }
+          return {
+            ...base,
+            compactionCards,
+            activeCompactionId: null,
+            timeline: appendTimelineItem(base.timeline, { kind: "compaction", id: cardId }),
+          };
+        }
 
         default:
           return base;
@@ -466,6 +585,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         usageTurns: action.turns,
         contextUsage: action.context,
       };
+
+    case "ADD_COMMAND_CARD": {
+      const seq = state.localCardSeq + 1;
+      const id = `cmd-card-${seq}`;
+      const card: CommandCard = {
+        id,
+        title: action.title,
+        lines: action.lines,
+        tone: action.tone ?? "info",
+      };
+      const commandCards = new Map(state.commandCards);
+      commandCards.set(id, card);
+      return {
+        ...state,
+        commandCards,
+        localCardSeq: seq,
+        timeline: [...state.timeline, { kind: "command", id }],
+      };
+    }
   }
 }
 

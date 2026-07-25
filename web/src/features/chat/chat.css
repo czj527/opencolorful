@@ -311,3 +311,145 @@
 .anchor-highlight {
   animation: anchor-flash 1.2s ease-out;
 }
+
+/* === 会话命令面板 === */
+
+.command-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.command-panel-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-size: 13px;
+  transition: background var(--transition-duration, 0.2s) ease;
+}
+
+.command-panel-item:hover,
+.command-panel-item.active {
+  background: var(--bg-tertiary);
+}
+
+.command-panel-name {
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.command-panel-desc {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === 本地命令结果卡片（弱化样式，与消息区分） === */
+
+.command-card {
+  align-self: center;
+  max-width: 85%;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.command-card-error {
+  border-color: var(--danger);
+}
+
+.command-card-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.command-card-error .command-card-title {
+  color: var(--danger);
+}
+
+.command-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-card-line {
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* === 压缩结果卡片 === */
+
+.compaction-card {
+  align-self: center;
+  max-width: 85%;
+  padding: 6px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.compaction-card-failed {
+  border-color: var(--warning);
+}
+
+.compaction-card-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.compaction-card-body {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.compaction-card-line {
+  line-height: 1.5;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.compaction-card-summary {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.compaction-card-error {
+  color: var(--warning);
+}

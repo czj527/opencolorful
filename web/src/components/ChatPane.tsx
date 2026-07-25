@@ -1,5 +1,6 @@
 import type { SessionView, ModelSummary } from "../lib/types.js";
 import type { ChatState } from "../features/chat/chat-state.js";
+import type { CommandName } from "../features/chat/commands.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
 import { ChatTimelineNav } from "../features/chat/ChatTimelineNav.jsx";
@@ -13,6 +14,8 @@ interface ChatPaneProps {
   readonly models: ModelSummary[];
   readonly onSend: (content: string) => void;
   readonly onAbort: () => void;
+  /** 会话命令执行回调（可选，缺省时命令面板不可用） */
+  readonly onExecuteCommand?: (name: CommandName) => void;
   readonly onToggleThinking: (id: string) => void;
   readonly onSelectModel: (providerId: string, modelId: string) => void;
   readonly onToolModeChange?: (mode: string) => void;
@@ -36,6 +39,7 @@ export function ChatPane({
   models,
   onSend,
   onAbort,
+  onExecuteCommand,
   onToggleThinking,
   onSelectModel,
   sseConnected,
@@ -124,6 +128,8 @@ export function ChatPane({
             showThinking={showThinking ?? true}
             showToolCalls={showToolCalls ?? true}
             turnUsages={chat.turnUsages}
+            commandCards={chat.commandCards}
+            compactionCards={chat.compactionCards}
             scroll={scroll}
           />
 
@@ -132,6 +138,7 @@ export function ChatPane({
             running={running}
             onSend={onSend}
             onAbort={onAbort}
+            {...(onExecuteCommand !== undefined ? { onExecuteCommand } : {})}
             models={models}
             selectedModel={session.model}
             onSelectModel={onSelectModel}

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import { ApiClient } from "../lib/api-client.js";
+import { ApiClient, ApiClientError } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
 import type { PlatformEventEnvelope, LayoutPreferences, AgentView } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor, buildChatStateFromHistory } from "../features/chat/chat-state.js";
+import { executeCommand, type CommandName } from "../features/chat/commands.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
@@ -368,6 +369,59 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
   }, [api, state.activeSessionId, chat.currentStreamId]);
 
+  // --- 会话命令（/help /compact /new /abort /clear）---
+
+  const handleCompactCommand = useCallback(async (): Promise<
+    import("../features/chat/commands.js").CommandOutcome
+  > => {
+    const sessionId = state.activeSessionId;
+    if (sessionId === null) {
+      return { kind: "card", title: "压缩", lines: ["请先选择会话"], tone: "error" };
+    }
+    try {
+      await api.compact(sessionId);
+      // 成功：等待 session.compacting/session.compacted 事件插入压缩卡片
+      return { kind: "none" };
+    } catch (error) {
+      if (error instanceof ApiClientError && error.code === "SESSION_BUSY") {
+        return { kind: "card", title: "压缩失败", lines: ["会话正在生成，无法压缩"], tone: "error" };
+      }
+      return {
+        kind: "card",
+        title: "压缩失败",
+        lines: [error instanceof Error ? error.message : "压缩请求失败"],
+        tone: "error",
+      };
+    }
+  }, [api, state.activeSessionId]);
+
+  const handleNewSessionCommand = useCallback(() => {
+    // 走现有新建流程：标题/cwd 复用当前会话（无当前会话时使用默认值）
+    const current = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
+    const title = current !== null ? `${current.title}（副本）` : "新会话";
+    const cwd = current?.workspaceCwd ?? ".";
+    void handleCreateSession(title, cwd);
+  }, [state.sessions, state.activeSessionId, handleCreateSession]);
+
+  const handleExecuteCommand = useCallback((name: CommandName) => {
+    void executeCommand(name, {
+      running: chatRef.current.status === "running",
+      onCompact: handleCompactCommand,
+      onNewSession: handleNewSessionCommand,
+      onAbort: () => void handleAbort(),
+    }).then((outcome) => {
+      if (outcome.kind === "card") {
+        dispatchChat({
+          type: "ADD_COMMAND_CARD",
+          title: outcome.title,
+          lines: outcome.lines,
+          ...(outcome.tone !== undefined ? { tone: outcome.tone } : {}),
+        });
+      }
+      // "clear" 与 "none" 无需插入卡片（输入框清空由 Composer 处理）
+    });
+  }, [handleCompactCommand, handleNewSessionCommand, handleAbort]);
+
   const handleSelectModel = useCallback(async (providerId: string, modelId: string) => {
     if (!state.activeSessionId) return;
     try {
@@ -595,6 +649,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           models={state.models}
           onSend={(content) => void handleSend(content)}
           onAbort={() => void handleAbort()}
+          onExecuteCommand={handleExecuteCommand}
           onToggleThinking={(id) => dispatchChat({ type: "TOGGLE_THINKING", id })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
           onToolModeChange={(mode) => void handleToolModeChange(mode)}
