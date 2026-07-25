@@ -4,9 +4,13 @@ import type { CommandName } from "../features/chat/commands.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
 import { ChatTimelineNav } from "../features/chat/ChatTimelineNav.jsx";
+import { deriveRenderableUserMessages } from "../features/chat/timeline-turns.js";
 import { useChatScroll } from "../features/chat/use-chat-scroll.js";
+import { useMemo } from "react";
 import { MessageSquare, Settings, ListTree } from "lucide-react";
 import "../features/chat/chat.css";
+
+const EMPTY_HISTORY: readonly { role: "user" | "assistant"; content: string }[] = [];
 
 interface ChatPaneProps {
   readonly session: SessionView | null;
@@ -54,6 +58,12 @@ export function ChatPane({
   narrowScreen = false,
 }: ChatPaneProps) {
   const scroll = useChatScroll(reducedMotion ?? false);
+  const historyEntries = session?.messageEntries ?? EMPTY_HISTORY;
+  // 时间线导航必须使用与 MessageList 实际渲染一致的用户消息序列，否则锚点失配
+  const navMessages = useMemo(
+    () => deriveRenderableUserMessages(historyEntries, chat.messages, chat.timeline),
+    [historyEntries, chat.messages, chat.timeline],
+  );
 
   if (!session) {
     return (
@@ -68,7 +78,6 @@ export function ChatPane({
   }
 
   const running = chat.status === "running";
-  const historyEntries = session.messageEntries;
   const showTimeline = timelineVisible && !narrowScreen && chat.messages.length > 0;
 
   return (
@@ -154,7 +163,7 @@ export function ChatPane({
 
         {showTimeline && (
           <ChatTimelineNav
-            messages={chat.messages}
+            messages={navMessages}
             activeAnchor={scroll.activeAnchor}
             onSelectTurn={scroll.scrollToAnchor}
           />

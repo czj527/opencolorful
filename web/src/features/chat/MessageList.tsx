@@ -15,6 +15,7 @@ import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
 import { renderSafeMarkdown } from "./safe-markdown.jsx";
 import { useChatScroll, type UseChatScrollResult } from "./use-chat-scroll.js";
+import { sameMessage } from "./timeline-turns.js";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -46,13 +47,6 @@ function formatTurnUsage(usage: TokenUsage): string {
     line += ` R${usage.cacheRead} W${usage.cacheWrite}`;
   }
   return line;
-}
-
-function sameMessage(
-  left: { readonly role: string; readonly content: string },
-  right: { readonly role: string; readonly content: string },
-): boolean {
-  return left.role === right.role && left.content === right.content;
 }
 
 export const MessageBlock = memo(function MessageBlock({
