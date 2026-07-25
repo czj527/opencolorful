@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
-import "./Modal.css";
+import { IconButton } from "./ui/IconButton.js";
+import styles from "./Modal.module.css";
 
 export interface ModalProps {
   readonly open: boolean;
@@ -8,6 +9,9 @@ export interface ModalProps {
   readonly title: string;
   readonly children: ReactNode;
 }
+
+// 引用 module 以确保样式被打包；类名以 :global 暴露在 Modal.module.css。
+void styles;
 
 export function Modal({ open, onClose, title, children }: ModalProps) {
   if (!open) return null;
@@ -17,9 +21,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
       <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button className="icon-button modal-close" onClick={onClose} type="button" aria-label="关闭">
-            <X size={14} aria-hidden="true" />
-          </button>
+          <IconButton icon={<X size={14} aria-hidden="true" />} label="关闭" onClick={onClose} className="modal-close" />
         </div>
         <div className="modal-body">
           {children}

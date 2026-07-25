@@ -8,6 +8,8 @@ import { deriveRenderableUserMessages } from "../features/chat/timeline-turns.js
 import { useChatScroll } from "../features/chat/use-chat-scroll.js";
 import { useMemo } from "react";
 import { MessageSquare, Settings, ListTree } from "lucide-react";
+import { IconButton } from "./ui/IconButton.js";
+import styles from "./ChatPane.module.css";
 import "../features/chat/chat.css";
 
 const EMPTY_HISTORY: readonly { role: "user" | "assistant"; content: string }[] = [];
@@ -37,6 +39,18 @@ interface ChatPaneProps {
   readonly narrowScreen?: boolean;
 }
 
+const headerClass = styles.header ?? "";
+const titleClass = styles.title ?? "";
+const titleTextClass = styles.titleText ?? "";
+const headerActionsClass = styles.headerActions ?? "";
+const errorBarClass = styles.errorBar ?? "";
+const bodyClass = styles.body ?? "";
+const bodyMainClass = styles.bodyMain ?? "";
+const emptyWrapClass = styles.emptyWrap ?? "";
+const emptyIconClass = styles.emptyIcon ?? "";
+const emptyTitleClass = styles.emptyTitle ?? "";
+const emptyHintClass = styles.emptyHint ?? "";
+
 export function ChatPane({
   session,
   chat,
@@ -59,7 +73,6 @@ export function ChatPane({
 }: ChatPaneProps) {
   const scroll = useChatScroll(reducedMotion ?? false);
   const historyEntries = session?.messageEntries ?? EMPTY_HISTORY;
-  // 时间线导航必须使用与 MessageList 实际渲染一致的用户消息序列，否则锚点失配
   const navMessages = useMemo(
     () => deriveRenderableUserMessages(historyEntries, chat.messages, chat.timeline),
     [historyEntries, chat.messages, chat.timeline],
@@ -68,10 +81,10 @@ export function ChatPane({
   if (!session) {
     return (
       <main className="app-chat" role="main" aria-label="聊天区域">
-        <div className="empty-state" style={{ flex: 1 }}>
-          <MessageSquare size={32} strokeWidth={1.5} aria-hidden="true" style={{ opacity: 0.4 }} />
-          <div style={{ fontSize: "16px", fontWeight: 500 }}>选择一个会话开始对话</div>
-          <div style={{ fontSize: "13px" }}>从左侧面板选择或创建新会话</div>
+        <div className={`empty-state ${emptyWrapClass}`.trim()}>
+          <MessageSquare size={32} strokeWidth={1.5} aria-hidden="true" className={emptyIconClass} />
+          <div className={emptyTitleClass}>选择一个会话开始对话</div>
+          <div className={emptyHintClass}>从左侧面板选择或创建新会话</div>
         </div>
       </main>
     );
@@ -79,49 +92,46 @@ export function ChatPane({
 
   const running = chat.status === "running";
   const showTimeline = timelineVisible && !narrowScreen && chat.messages.length > 0;
+  const sseLabel = sseConnected ? "事件流已连接" : "事件流未连接";
 
   return (
     <main className="app-chat" role="main" aria-label="聊天区域">
-      {/* 标题栏：Session 名 + SSE 状态 + 设置 */}
-      <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <span style={{ fontWeight: 600 }}>{session.title}</span>
+      <div className={headerClass}>
+        <div className={titleClass}>
+          <span className={titleTextClass}>{session.title}</span>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-          {/* 时间线开关（窄屏隐藏） */}
+        <div className={headerActionsClass}>
           {!narrowScreen && (
-            <button
-              type="button"
-              className={`icon-button${timelineVisible ? " active" : ""}`}
-              onClick={onToggleTimeline}
-              title={timelineVisible ? "隐藏时间线" : "显示时间线"}
-              aria-label={timelineVisible ? "隐藏时间线" : "显示时间线"}
-              data-testid="toggle-timeline"
-            >
-              <ListTree size={14} />
-            </button>
+            <IconButton
+              icon={<ListTree size={14} aria-hidden="true" />}
+              label={timelineVisible ? "隐藏时间线" : "显示时间线"}
+              active={timelineVisible}
+              {...(onToggleTimeline !== undefined ? { onClick: onToggleTimeline } : {})}
+            />
           )}
           <span
             className={`status-dot ${sseConnected ? "online" : "stopped"}`}
-            title={sseConnected ? "事件流已连接" : "事件流未连接"}
-            aria-label={sseConnected ? "事件流已连接" : "事件流未连接"}
+            title={sseLabel}
+            aria-label={sseLabel}
           />
           {onSettingsClick && (
-            <button type="button" className="icon-button" onClick={onSettingsClick} title="设置中心" aria-label="设置中心">
-              <Settings size={14} />
-            </button>
+            <IconButton
+              icon={<Settings size={14} aria-hidden="true" />}
+              label="设置中心"
+              onClick={onSettingsClick}
+            />
           )}
         </div>
       </div>
 
       {chat.error && (
-        <div role="alert" style={{ padding: "6px 16px", background: "rgba(255,74,74,0.1)", color: "var(--danger)", fontSize: 13, borderBottom: "1px solid var(--border-color)" }}>
+        <div role="alert" className={errorBarClass}>
           {chat.error}
         </div>
       )}
 
-      <div className="chat-body" style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div className={bodyClass}>
+        <div className={bodyMainClass}>
           <MessageList
             messages={chat.messages}
             historyEntries={historyEntries}

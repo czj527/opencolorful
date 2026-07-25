@@ -1,0 +1,67 @@
+/* AppShell 布局壳样式 —— 结构类名以 :global 暴露，供 Playwright e2e 与
+ * SSR 测试稳定匹配（.app-layout / .app-main / .drawer-backdrop / .resize-handle）。
+ * 组件内部样式走 module 局部类。颜色 / 尺寸 / 时长一律引用 tokens.css 令牌。
+ */
+
+/* === 根布局容器 === */
+:global(.app-layout) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+:global(.app-main) {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* === 抽屉遮罩（窄屏侧栏打开时） === */
+:global(.drawer-backdrop) {
+  position: absolute;
+  inset: var(--statusbar-height) 0 0 0;
+  background: var(--scrim-45);
+  z-index: 15;
+}
+
+/* === 拖拽手柄 === */
+:global(.resize-handle) {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background var(--duration-normal) var(--ease-out);
+  user-select: none;
+}
+
+:global(.resize-handle:hover),
+:global(.resize-handle:active) {
+  background: var(--accent);
+}
+
+/* === Focus 模式：两侧完全收起时中央聊天区占满 === */
+:global(.app-layout[data-focus-mode='true']) .app-main {
+  position: relative;
+}
+
+:global(.app-layout[data-focus-mode='true']) .resize-handle {
+  display: none;
+}
+
+:global(.app-layout[data-focus-mode='true']) .app-chat {
+  width: 100%;
+}
+
+/* === reduced-motion 兜底 === */
+:global(.app-layout[data-reduced-motion='true']) *,
+:global(.app-layout[data-reduced-motion='true']) *::before,
+:global(.app-layout[data-reduced-motion='true']) *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}
+
+:global(.app-layout[data-reduced-motion='true']) .streaming-cursor {
+  animation: none;
+}

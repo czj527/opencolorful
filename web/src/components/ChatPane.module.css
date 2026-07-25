@@ -1,0 +1,75 @@
+/* ChatPane —— 聊天区容器与标题栏。
+ * 根元素 .app-chat 以 :global 暴露（focus-mode CSS 与既有 chat.css 引用）。
+ * 共享工具类 .empty-state / .status-dot / .icon-button 保留在 app/layout.css。
+ * 颜色 / 尺寸 / 时长一律引用 tokens.css 令牌。
+ */
+
+:global(.app-chat) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.header {
+  padding: var(--space-8) var(--space-16);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.title {
+  min-width: 0;
+}
+
+.titleText {
+  font-weight: 600;
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.errorBar {
+  padding: var(--space-6) var(--space-16);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: var(--fs-ui);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.bodyMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 空会话状态：复用全局 .empty-state，仅补充布局与字号 */
+.emptyWrap {
+  flex: 1;
+}
+
+.emptyIcon {
+  opacity: 0.4;
+}
+
+.emptyTitle {
+  font-size: var(--fs-title);
+  font-weight: 500;
+}
+
+.emptyHint {
+  font-size: var(--fs-ui);
+}
