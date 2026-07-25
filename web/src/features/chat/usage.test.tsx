@@ -86,7 +86,7 @@ describe("chatReducer usage/context", () => {
     expect(state.cacheHitRate).toBeNull();
   });
 
-  it("safely ignores session.compacting and session.compacted", () => {
+  it("session.compacting/compacted insert compaction cards without touching usage state", () => {
     let state = chatReducer(initialChatState, { type: "PROMPT_SENT", streamId: "st1", userContent: "问" });
     const before = state;
     state = chatReducer(state, { type: "EVENT", event: makeEvent("session.compacting", { reason: "manual" }, 1) });
@@ -96,6 +96,12 @@ describe("chatReducer usage/context", () => {
     });
     expect(state.messages).toEqual(before.messages);
     expect(state.usageTotals).toEqual(before.usageTotals);
+    // T7：压缩事件生成压缩卡片而非被忽略
+    expect(state.compactionCards.size).toBe(1);
+    const card = state.compactionCards.get("compaction-evt-st1-1");
+    expect(card?.status).toBe("completed");
+    expect(card?.tokensBefore).toBe(1000);
+    expect(card?.tokensAfter).toBe(200);
   });
 
   it("USAGE_BASELINE sets totals, hit rate, turns and context", () => {
