@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
+
 import type { PlatformEventEnvelope } from "../contracts/events.js";
 import {
   createPiAgentSession,
   createPiFauxAgentSession,
+  type PiAgentEvent,
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
   type PiSessionHandle,
@@ -46,6 +49,7 @@ export interface PromptRun {
 export class SessionRuntime {
   private readonly executions = new ExecutionRegistry();
   private mapper: PlatformEventMapper | undefined;
+  private controlMapper: PlatformEventMapper | undefined;
   private readonly unsubscribe: () => void;
 
   private constructor(
@@ -55,9 +59,28 @@ export class SessionRuntime {
     private readonly replayStore: EventReplayStore | undefined,
   ) {
     this.unsubscribe = agent.subscribe((event) => {
-      if (!this.mapper) return;
-      for (const mapped of this.mapper.map(event)) this.emit(mapped);
+      const mapper = this.mapper ?? this.resolveControlMapper(event);
+      if (!mapper) return;
+      for (const mapped of mapper.map(event)) this.emit(mapped);
     });
+  }
+
+  // 手动 compact 在空闲时触发，没有活动 prompt stream；
+  // compaction 事件改走独立的 control stream（新 streamId、sequence 从 1 开始）
+  private resolveControlMapper(event: PiAgentEvent): PlatformEventMapper | undefined {
+    if (event.type === "compaction_start") {
+      this.controlMapper = new PlatformEventMapper(
+        this.sessionId,
+        `ctrl-${crypto.randomUUID()}`,
+      );
+      return this.controlMapper;
+    }
+    if (event.type === "compaction_end") {
+      const mapper = this.controlMapper;
+      this.controlMapper = undefined;
+      return mapper;
+    }
+    return undefined;
   }
 
   static async create(options: SessionRuntimeOptions): Promise<SessionRuntime> {
