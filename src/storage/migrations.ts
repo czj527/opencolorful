@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export function applyMigrations(database: Database.Database): void {
   database.exec(`
@@ -54,6 +54,31 @@ export function applyMigrations(database: Database.Database): void {
   if (current < 4) {
     database.exec("ALTER TABLE sessions ADD COLUMN agent_id TEXT");
     database.prepare("UPDATE schema_version SET version = 4").run();
+  }
+
+  if (current < 5) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS usage_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input INTEGER NOT NULL,
+        output INTEGER NOT NULL,
+        cache_read INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL,
+        context_tokens INTEGER,
+        context_window INTEGER,
+        created_at TEXT NOT NULL,
+        UNIQUE(session_id, turn_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_usage_records_created_at
+        ON usage_records (created_at);
+    `);
+    database.prepare("UPDATE schema_version SET version = 5").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

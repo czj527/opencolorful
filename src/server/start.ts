@@ -10,6 +10,8 @@ import { PromptService } from "../runtime/prompt-service.js";
 import { SessionService } from "../runtime/session-service.js";
 import { openMetadataDatabase } from "../storage/database.js";
 import { SessionIndex } from "../storage/session-index.js";
+import { UsageStore } from "../storage/usage-store.js";
+import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -152,6 +154,15 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     const promptService = new PromptService();
     const replayStore = new EventReplayStore();
     const wsRegistry = new ClientRegistry();
+    const usageStore = new UsageStore(database);
+    const usageRecorder = new UsageRecorder(replayStore, usageStore, (sessionId) => {
+      try {
+        const view = sessionService.getView(sessionId);
+        return view.model;
+      } catch {
+        return null;
+      }
+    });
     let disposed = false;
 
     return {
@@ -162,6 +173,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         agentStore,
         promptService,
         replayStore,
+        usageStore,
         wsRegistry,
         wsPromptService: promptService,
         wsReplayStore: replayStore,
@@ -169,6 +181,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       dispose() {
         if (disposed) return;
         disposed = true;
+        usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();
         database.close();

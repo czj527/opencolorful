@@ -1,9 +1,16 @@
 import type { SessionView, ModelSummary } from "../lib/types.js";
 import type { ChatState } from "../features/chat/chat-state.js";
+import type { CommandName } from "../features/chat/commands.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
-import { MessageSquare, Settings } from "lucide-react";
+import { ChatTimelineNav } from "../features/chat/ChatTimelineNav.jsx";
+import { deriveRenderableUserMessages } from "../features/chat/timeline-turns.js";
+import { useChatScroll } from "../features/chat/use-chat-scroll.js";
+import { useMemo } from "react";
+import { MessageSquare, Settings, ListTree } from "lucide-react";
 import "../features/chat/chat.css";
+
+const EMPTY_HISTORY: readonly { role: "user" | "assistant"; content: string }[] = [];
 
 interface ChatPaneProps {
   readonly session: SessionView | null;
@@ -11,6 +18,8 @@ interface ChatPaneProps {
   readonly models: ModelSummary[];
   readonly onSend: (content: string) => void;
   readonly onAbort: () => void;
+  /** 会话命令执行回调（可选，缺省时命令面板不可用） */
+  readonly onExecuteCommand?: (name: CommandName) => void;
   readonly onToggleThinking: (id: string) => void;
   readonly onSelectModel: (providerId: string, modelId: string) => void;
   readonly onToolModeChange?: (mode: string) => void;
@@ -20,6 +29,12 @@ interface ChatPaneProps {
   readonly reducedMotion?: boolean;
   readonly showThinking?: boolean;
   readonly showToolCalls?: boolean;
+  /** 时间线栏是否可见（窄屏自动隐藏且不可展开） */
+  readonly timelineVisible?: boolean;
+  /** 切换时间线显隐 */
+  readonly onToggleTimeline?: () => void;
+  /** 是否窄屏（自动隐藏时间线） */
+  readonly narrowScreen?: boolean;
 }
 
 export function ChatPane({
@@ -28,6 +43,7 @@ export function ChatPane({
   models,
   onSend,
   onAbort,
+  onExecuteCommand,
   onToggleThinking,
   onSelectModel,
   sseConnected,
@@ -37,7 +53,18 @@ export function ChatPane({
   onThinkingLevelChange,
   showThinking = true,
   showToolCalls = true,
+  timelineVisible = true,
+  onToggleTimeline,
+  narrowScreen = false,
 }: ChatPaneProps) {
+  const scroll = useChatScroll(reducedMotion ?? false);
+  const historyEntries = session?.messageEntries ?? EMPTY_HISTORY;
+  // 时间线导航必须使用与 MessageList 实际渲染一致的用户消息序列，否则锚点失配
+  const navMessages = useMemo(
+    () => deriveRenderableUserMessages(historyEntries, chat.messages, chat.timeline),
+    [historyEntries, chat.messages, chat.timeline],
+  );
+
   if (!session) {
     return (
       <main className="app-chat" role="main" aria-label="聊天区域">
@@ -51,7 +78,7 @@ export function ChatPane({
   }
 
   const running = chat.status === "running";
-  const historyEntries = session.messageEntries;
+  const showTimeline = timelineVisible && !narrowScreen && chat.messages.length > 0;
 
   return (
     <main className="app-chat" role="main" aria-label="聊天区域">
@@ -61,6 +88,19 @@ export function ChatPane({
           <span style={{ fontWeight: 600 }}>{session.title}</span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          {/* 时间线开关（窄屏隐藏） */}
+          {!narrowScreen && (
+            <button
+              type="button"
+              className={`icon-button${timelineVisible ? " active" : ""}`}
+              onClick={onToggleTimeline}
+              title={timelineVisible ? "隐藏时间线" : "显示时间线"}
+              aria-label={timelineVisible ? "隐藏时间线" : "显示时间线"}
+              data-testid="toggle-timeline"
+            >
+              <ListTree size={14} />
+            </button>
+          )}
           <span
             className={`status-dot ${sseConnected ? "online" : "stopped"}`}
             title={sseConnected ? "事件流已连接" : "事件流未连接"}
@@ -80,35 +120,55 @@ export function ChatPane({
         </div>
       )}
 
-      <MessageList
-        messages={chat.messages}
-        historyEntries={historyEntries}
-        timeline={chat.timeline}
-        toolCalls={chat.toolCalls}
-        planItems={chat.planItems}
-        attachments={chat.attachments}
-        thinking={chat.thinking}
-        collapsedThinkingBlocks={chat.collapsedThinkingBlocks}
-        onToggleThinking={onToggleThinking}
-        recovering={!sseConnected && running}
-        reducedMotion={reducedMotion ?? false}
-        showThinking={showThinking ?? true}
-        showToolCalls={showToolCalls ?? true}
-      />
+      <div className="chat-body" style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <MessageList
+            messages={chat.messages}
+            historyEntries={historyEntries}
+            timeline={chat.timeline}
+            toolCalls={chat.toolCalls}
+            planItems={chat.planItems}
+            attachments={chat.attachments}
+            thinking={chat.thinking}
+            collapsedThinkingBlocks={chat.collapsedThinkingBlocks}
+            onToggleThinking={onToggleThinking}
+            recovering={!sseConnected && running}
+            reducedMotion={reducedMotion ?? false}
+            showThinking={showThinking ?? true}
+            showToolCalls={showToolCalls ?? true}
+            turnUsages={chat.turnUsages}
+            commandCards={chat.commandCards}
+            compactionCards={chat.compactionCards}
+            scroll={scroll}
+          />
 
-      <MessageComposer
-        disabled={false}
-        running={running}
-        onSend={onSend}
-        onAbort={onAbort}
-        models={models}
-        selectedModel={session.model}
-        onSelectModel={onSelectModel}
-        toolMode={session.toolMode}
-        onToolModeChange={onToolModeChange ?? (() => {})}
-        thinkingLevel={session.thinkingLevel}
-        onThinkingLevelChange={onThinkingLevelChange ?? (() => {})}
-      />
+          <MessageComposer
+            disabled={false}
+            running={running}
+            onSend={onSend}
+            onAbort={onAbort}
+            {...(onExecuteCommand !== undefined ? { onExecuteCommand } : {})}
+            models={models}
+            selectedModel={session.model}
+            onSelectModel={onSelectModel}
+            toolMode={session.toolMode}
+            onToolModeChange={onToolModeChange ?? (() => {})}
+            thinkingLevel={session.thinkingLevel}
+            onThinkingLevelChange={onThinkingLevelChange ?? (() => {})}
+            contextUsage={chat.contextUsage}
+            usageTotals={chat.usageTotals}
+            cacheHitRate={chat.cacheHitRate}
+          />
+        </div>
+
+        {showTimeline && (
+          <ChatTimelineNav
+            messages={navMessages}
+            activeAnchor={scroll.activeAnchor}
+            onSelectTurn={scroll.scrollToAnchor}
+          />
+        )}
+      </div>
     </main>
   );
 }

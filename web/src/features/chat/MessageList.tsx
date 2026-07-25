@@ -1,9 +1,12 @@
 import { memo, useEffect } from "react";
-import { Brain, ArrowDown } from "lucide-react";
+import { Brain, ArrowDown, Terminal, Archive } from "lucide-react";
+import type { TokenUsage } from "../../lib/types.js";
 import type {
   Attachment,
   ChatMessage,
   ChatTimelineItem,
+  CommandCard,
+  CompactionCard,
   PlanItem as PlanItemData,
   ToolCall,
 } from "./chat-state.js";
@@ -11,7 +14,8 @@ import { ToolCallItem } from "./ToolCallItem.jsx";
 import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
 import { renderSafeMarkdown } from "./safe-markdown.jsx";
-import { useChatScroll } from "./use-chat-scroll.js";
+import { useChatScroll, type UseChatScrollResult } from "./use-chat-scroll.js";
+import { sameMessage } from "./timeline-turns.js";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -27,18 +31,35 @@ interface MessageListProps {
   readonly reducedMotion: boolean;
   readonly showThinking?: boolean;
   readonly showToolCalls?: boolean;
+  /** 本 turn 各 assistant 消息的用量（messageId → usage） */
+  readonly turnUsages?: ReadonlyMap<string, TokenUsage>;
+  /** 本地命令结果卡片（cardId → 卡片） */
+  readonly commandCards?: ReadonlyMap<string, CommandCard>;
+  /** 压缩卡片（cardId → 卡片） */
+  readonly compactionCards?: ReadonlyMap<string, CompactionCard>;
+  /** 外部传入的 scroll 状态（提升层级时由 ChatPane 统一管理） */
+  readonly scroll?: UseChatScrollResult;
 }
 
-function sameMessage(
-  left: { readonly role: string; readonly content: string },
-  right: { readonly role: string; readonly content: string },
-): boolean {
-  return left.role === right.role && left.content === right.content;
+function formatTurnUsage(usage: TokenUsage): string {
+  let line = `↑${usage.input} ↓${usage.output}`;
+  if (usage.cacheRead > 0 || usage.cacheWrite > 0) {
+    line += ` R${usage.cacheRead} W${usage.cacheWrite}`;
+  }
+  return line;
 }
 
-export const MessageBlock = memo(function MessageBlock({ message }: { readonly message: ChatMessage }) {
+export const MessageBlock = memo(function MessageBlock({
+  message,
+  turnUsage,
+}: {
+  readonly message: ChatMessage;
+  readonly turnUsage?: TokenUsage;
+}) {
+  const anchorAttr = message.role === "user" ? { "data-anchor": `turn-${message.id}` } : {};
   return (
     <div
+      {...anchorAttr}
       style={{
         padding: "8px 12px",
         background: message.role === "user" ? "var(--bg-tertiary)" : "transparent",
@@ -55,13 +76,73 @@ export const MessageBlock = memo(function MessageBlock({ message }: { readonly m
         ? renderSafeMarkdown(message.content)
         : <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
       {message.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
+      {message.role === "assistant" && !message.streaming && turnUsage && (
+        <div className="turn-usage-line" data-testid={`turn-usage-${message.id}`}>
+          {formatTurnUsage(turnUsage)}
+        </div>
+      )}
     </div>
   );
 }, (previous, next) =>
   previous.message.role === next.message.role &&
   previous.message.content === next.message.content &&
-  previous.message.streaming === next.message.streaming,
+  previous.message.streaming === next.message.streaming &&
+  previous.turnUsage === next.turnUsage,
 );
+
+/** 本地命令结果卡片（弱化样式，与消息区分） */
+function CommandCardBlock({ card }: { readonly card: CommandCard }) {
+  return (
+    <div
+      className={`command-card${card.tone === "error" ? " command-card-error" : ""}`}
+      data-testid={`command-card-${card.id}`}
+    >
+      <div className="command-card-title">
+        <Terminal size={12} aria-hidden="true" />
+        {card.title}
+      </div>
+      <div className="command-card-body">
+        {card.lines.map((line, index) => (
+          <div key={index} className="command-card-line">{line}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 压缩结果卡片 */
+function CompactionCardBlock({ card }: { readonly card: CompactionCard }) {
+  return (
+    <div
+      className={`compaction-card${card.status === "failed" ? " compaction-card-failed" : ""}`}
+      data-testid={`compaction-card-${card.id}`}
+    >
+      <div className="compaction-card-title">
+        <Archive size={12} aria-hidden="true" />
+        {card.status === "compacting"
+          ? "正在压缩会话上下文…"
+          : card.status === "failed"
+            ? "压缩未完成"
+            : "上下文已压缩"}
+      </div>
+      {card.status !== "compacting" && (
+        <div className="compaction-card-body">
+          {(card.tokensBefore !== null || card.tokensAfter !== null) && (
+            <div className="compaction-card-line">
+              {card.tokensBefore ?? "?"} → {card.tokensAfter ?? "?"} tokens
+            </div>
+          )}
+          {card.summary !== null && (
+            <div className="compaction-card-line compaction-card-summary">{card.summary}</div>
+          )}
+          {card.errorMessage !== null && (
+            <div className="compaction-card-line compaction-card-error">{card.errorMessage}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function MessageList({
   messages,
@@ -77,8 +158,13 @@ export function MessageList({
   reducedMotion,
   showThinking = true,
   showToolCalls = true,
+  turnUsages,
+  commandCards,
+  compactionCards,
+  scroll,
 }: MessageListProps) {
-  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(reducedMotion);
+  const internalScroll = useChatScroll(reducedMotion);
+  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = scroll ?? internalScroll;
   const messagesById = new Map(messages.map((message) => [message.id, message]));
 
   // 每次 messages/timeline 变化后执行自动滚动
@@ -132,7 +218,15 @@ export function MessageList({
   const renderTimelineItem = (item: ChatTimelineItem) => {
     if (item.kind === "message") {
       const message = messagesById.get(item.id);
-      return message ? <MessageBlock key={`message-${item.id}`} message={message} /> : null;
+      if (!message) return null;
+      const turnUsage = turnUsages?.get(message.id);
+      return (
+        <MessageBlock
+          key={`message-${item.id}`}
+          message={message}
+          {...(turnUsage !== undefined ? { turnUsage } : {})}
+        />
+      );
     }
     if (item.kind === "thinking") {
       if (!showThinking) return null;
@@ -172,6 +266,14 @@ export function MessageList({
     }
     if (item.kind === "plan") {
       return planItems.length > 0 ? <PlanList key={item.id} items={planItems} /> : null;
+    }
+    if (item.kind === "command") {
+      const card = commandCards?.get(item.id);
+      return card ? <CommandCardBlock key={`command-${item.id}`} card={card} /> : null;
+    }
+    if (item.kind === "compaction") {
+      const card = compactionCards?.get(item.id);
+      return card ? <CompactionCardBlock key={`compaction-${item.id}`} card={card} /> : null;
     }
     const attachment = attachments.find((candidate) => candidate.attachmentId === item.id);
     return attachment

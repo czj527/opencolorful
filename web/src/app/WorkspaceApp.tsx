@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
-import { ApiClient } from "../lib/api-client.js";
+import { ApiClient, ApiClientError } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
 import type { PlatformEventEnvelope, LayoutPreferences, AgentView } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor, buildChatStateFromHistory } from "../features/chat/chat-state.js";
+import { executeCommand, type CommandName } from "../features/chat/commands.js";
 import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
@@ -60,6 +61,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState(true);
   const [showToolCalls, setShowToolCalls] = useState(true);
+  const [timelineVisible, setTimelineVisible] = useState(true);
   const [breakpoints, setBreakpoints] = useState(() => ({
     leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
     rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
@@ -90,6 +92,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       applyTheme(prefs.appearance.theme);
       setShowThinking(prefs.appearance.showThinking ?? true);
       setShowToolCalls(prefs.appearance.showToolCalls ?? true);
+      setTimelineVisible(prefs.appearance.timelineVisible ?? true);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [active, api]);
@@ -194,6 +197,22 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
 
   // --- 事件流接线：SSE/WS 事件 → StreamBuffer → chatReducer EVENT_BATCH ---
 
+  // 拉取会话用量基线（进入会话 / 压缩后刷新）
+  const refreshSessionUsage = useCallback(async (sessionId: string) => {
+    try {
+      const usage = await api.sessionUsage(sessionId);
+      dispatchChat({
+        type: "USAGE_BASELINE",
+        totals: usage.totals,
+        cacheHitRate: usage.cacheHitRate,
+        turns: usage.turns,
+        context: usage.context,
+      });
+    } catch {
+      // Server 可能未运行或会话无用量数据，保持现有状态
+    }
+  }, [api]);
+
   useEffect(() => {
     const buffer = new StreamBuffer((events) => {
       dispatchChat({ type: "EVENT_BATCH", events });
@@ -203,10 +222,17 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           break;
         }
       }
+      // 压缩完成后重新拉取用量，刷新上下文占比
+      for (const e of events) {
+        if (e.type === "session.compacted" && e.sessionId !== null) {
+          void refreshSessionUsage(e.sessionId);
+          break;
+        }
+      }
     });
     bufferRef.current = buffer;
     return () => buffer.dispose();
-  }, []);
+  }, [refreshSessionUsage]);
 
   const handlePlatformEvent = useCallback((event: PlatformEventEnvelope) => {
     bufferRef.current?.push(event);
@@ -274,12 +300,14 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       } else {
         dispatchChat({ type: "RESET" });
       }
+      // 用量基线
+      void refreshSessionUsage(id);
       // WS 订阅该会话
       if (wsRef.current?.isConnected()) {
         wsRef.current.subscribe(id);
       }
     } catch { /* 会话可能不存在 */ }
-  }, [api]);
+  }, [api, refreshSessionUsage]);
 
   const handleCreateSession = useCallback(async (title: string, cwd: string) => {
     try {
@@ -340,6 +368,59 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       wsRef.current?.abort(sessionId);
     }
   }, [api, state.activeSessionId, chat.currentStreamId]);
+
+  // --- 会话命令（/help /compact /new /abort /clear）---
+
+  const handleCompactCommand = useCallback(async (): Promise<
+    import("../features/chat/commands.js").CommandOutcome
+  > => {
+    const sessionId = state.activeSessionId;
+    if (sessionId === null) {
+      return { kind: "card", title: "压缩", lines: ["请先选择会话"], tone: "error" };
+    }
+    try {
+      await api.compact(sessionId);
+      // 成功：等待 session.compacting/session.compacted 事件插入压缩卡片
+      return { kind: "none" };
+    } catch (error) {
+      if (error instanceof ApiClientError && error.code === "SESSION_BUSY") {
+        return { kind: "card", title: "压缩失败", lines: ["会话正在生成，无法压缩"], tone: "error" };
+      }
+      return {
+        kind: "card",
+        title: "压缩失败",
+        lines: [error instanceof Error ? error.message : "压缩请求失败"],
+        tone: "error",
+      };
+    }
+  }, [api, state.activeSessionId]);
+
+  const handleNewSessionCommand = useCallback(() => {
+    // 走现有新建流程：标题/cwd 复用当前会话（无当前会话时使用默认值）
+    const current = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
+    const title = current !== null ? `${current.title}（副本）` : "新会话";
+    const cwd = current?.workspaceCwd ?? ".";
+    void handleCreateSession(title, cwd);
+  }, [state.sessions, state.activeSessionId, handleCreateSession]);
+
+  const handleExecuteCommand = useCallback((name: CommandName) => {
+    void executeCommand(name, {
+      running: chatRef.current.status === "running",
+      onCompact: handleCompactCommand,
+      onNewSession: handleNewSessionCommand,
+      onAbort: () => void handleAbort(),
+    }).then((outcome) => {
+      if (outcome.kind === "card") {
+        dispatchChat({
+          type: "ADD_COMMAND_CARD",
+          title: outcome.title,
+          lines: outcome.lines,
+          ...(outcome.tone !== undefined ? { tone: outcome.tone } : {}),
+        });
+      }
+      // "clear" 与 "none" 无需插入卡片（输入框清空由 Composer 处理）
+    });
+  }, [handleCompactCommand, handleNewSessionCommand, handleAbort]);
 
   const handleSelectModel = useCallback(async (providerId: string, modelId: string) => {
     if (!state.activeSessionId) return;
@@ -494,6 +575,13 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
   }, [state.leftSidebar, state.rightSidebar, rightCollapsed, breakpoints, api, layoutPrefs]);
 
+  // 时间线显隐切换（持久化到偏好）
+  const handleToggleTimeline = useCallback(() => {
+    const next = !timelineVisible;
+    setTimelineVisible(next);
+    api.updatePreferences({ appearance: { timelineVisible: next } }).catch(() => {});
+  }, [timelineVisible, api]);
+
   const closeDrawers = useCallback(() => {
     if (breakpoints.leftNarrow && state.leftSidebar === "expanded") {
       dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
@@ -561,6 +649,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           models={state.models}
           onSend={(content) => void handleSend(content)}
           onAbort={() => void handleAbort()}
+          onExecuteCommand={handleExecuteCommand}
           onToggleThinking={(id) => dispatchChat({ type: "TOGGLE_THINKING", id })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
           onToolModeChange={(mode) => void handleToolModeChange(mode)}
@@ -570,6 +659,9 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           reducedMotion={reducedMotion}
           showThinking={showThinking}
           showToolCalls={showToolCalls}
+          timelineVisible={timelineVisible}
+          onToggleTimeline={handleToggleTimeline}
+          narrowScreen={breakpoints.rightNarrow}
         />
         {!focusMode && !breakpoints.rightNarrow && (
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />

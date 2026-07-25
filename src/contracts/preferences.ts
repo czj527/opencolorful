@@ -37,6 +37,7 @@ export const PreferencesDocumentSchema = Type.Object(
       theme: Type.Union([Type.Literal("dark"), Type.Literal("light")]),
       showToolCalls: Type.Boolean(),
       showThinking: Type.Boolean(),
+      timelineVisible: Type.Optional(Type.Boolean()),
     }),
   },
   { additionalProperties: false },
@@ -66,6 +67,7 @@ export interface AppearancePreferences {
   readonly theme: "dark" | "light";
   readonly showToolCalls: boolean;
   readonly showThinking: boolean;
+  readonly timelineVisible?: boolean;
 }
 
 export interface PreferencesDocument {
@@ -103,6 +105,7 @@ export function defaultPreferences(): PreferencesDocument {
       theme: "dark",
       showToolCalls: true,
       showThinking: true,
+      timelineVisible: true,
     },
   };
 }
@@ -191,6 +194,10 @@ function normalizeAppearance(value: unknown, fallback: AppearancePreferences): A
       typeof value.showToolCalls === "boolean" ? value.showToolCalls : fallback.showToolCalls,
     showThinking:
       typeof value.showThinking === "boolean" ? value.showThinking : fallback.showThinking,
+    timelineVisible:
+      typeof value.timelineVisible === "boolean"
+        ? value.timelineVisible
+        : (fallback.timelineVisible ?? true),
   };
 }
 

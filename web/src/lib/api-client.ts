@@ -13,7 +13,9 @@ import type {
   PromptResponse,
   ProviderView,
   SessionSettings,
+  SessionUsageResponse,
   SessionView,
+  UsageSummaryResponse,
   SupervisorStatusResponse,
 } from "./types.js";
 
@@ -165,6 +167,15 @@ export class ApiClient {
 
   async compact(sessionId: string): Promise<{ status: string }> {
     return this.request("POST", `/api/sessions/${sessionId}/compact`);
+  }
+
+  // Usage
+  async sessionUsage(sessionId: string): Promise<SessionUsageResponse> {
+    return this.request("GET", `/api/sessions/${sessionId}/usage`);
+  }
+
+  async usageSummary(days: number): Promise<UsageSummaryResponse> {
+    return this.request("GET", `/api/usage/summary?days=${days}`);
   }
 
   // Agents
