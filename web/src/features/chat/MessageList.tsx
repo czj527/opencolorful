@@ -12,7 +12,7 @@ import { ToolCallItem } from "./ToolCallItem.jsx";
 import { PlanList } from "./PlanItem.jsx";
 import { UiProjection } from "./UiProjection.jsx";
 import { renderSafeMarkdown } from "./safe-markdown.jsx";
-import { useChatScroll } from "./use-chat-scroll.js";
+import { useChatScroll, type UseChatScrollResult } from "./use-chat-scroll.js";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -30,6 +30,8 @@ interface MessageListProps {
   readonly showToolCalls?: boolean;
   /** 本 turn 各 assistant 消息的用量（messageId → usage） */
   readonly turnUsages?: ReadonlyMap<string, TokenUsage>;
+  /** 外部传入的 scroll 状态（提升层级时由 ChatPane 统一管理） */
+  readonly scroll?: UseChatScrollResult;
 }
 
 function formatTurnUsage(usage: TokenUsage): string {
@@ -54,8 +56,10 @@ export const MessageBlock = memo(function MessageBlock({
   readonly message: ChatMessage;
   readonly turnUsage?: TokenUsage;
 }) {
+  const anchorAttr = message.role === "user" ? { "data-anchor": `turn-${message.id}` } : {};
   return (
     <div
+      {...anchorAttr}
       style={{
         padding: "8px 12px",
         background: message.role === "user" ? "var(--bg-tertiary)" : "transparent",
@@ -101,8 +105,10 @@ export function MessageList({
   showThinking = true,
   showToolCalls = true,
   turnUsages,
+  scroll,
 }: MessageListProps) {
-  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = useChatScroll(reducedMotion);
+  const internalScroll = useChatScroll(reducedMotion);
+  const { containerRef, hasUnread, scrollToLatest, autoScrollIfAtBottom } = scroll ?? internalScroll;
   const messagesById = new Map(messages.map((message) => [message.id, message]));
 
   // 每次 messages/timeline 变化后执行自动滚动

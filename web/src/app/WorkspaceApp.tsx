@@ -60,6 +60,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState(true);
   const [showToolCalls, setShowToolCalls] = useState(true);
+  const [timelineVisible, setTimelineVisible] = useState(true);
   const [breakpoints, setBreakpoints] = useState(() => ({
     leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
     rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
@@ -90,6 +91,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       applyTheme(prefs.appearance.theme);
       setShowThinking(prefs.appearance.showThinking ?? true);
       setShowToolCalls(prefs.appearance.showToolCalls ?? true);
+      setTimelineVisible(prefs.appearance.timelineVisible ?? true);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [active, api]);
@@ -519,6 +521,13 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
   }, [state.leftSidebar, state.rightSidebar, rightCollapsed, breakpoints, api, layoutPrefs]);
 
+  // 时间线显隐切换（持久化到偏好）
+  const handleToggleTimeline = useCallback(() => {
+    const next = !timelineVisible;
+    setTimelineVisible(next);
+    api.updatePreferences({ appearance: { timelineVisible: next } }).catch(() => {});
+  }, [timelineVisible, api]);
+
   const closeDrawers = useCallback(() => {
     if (breakpoints.leftNarrow && state.leftSidebar === "expanded") {
       dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
@@ -595,6 +604,9 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           reducedMotion={reducedMotion}
           showThinking={showThinking}
           showToolCalls={showToolCalls}
+          timelineVisible={timelineVisible}
+          onToggleTimeline={handleToggleTimeline}
+          narrowScreen={breakpoints.rightNarrow}
         />
         {!focusMode && !breakpoints.rightNarrow && (
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />
