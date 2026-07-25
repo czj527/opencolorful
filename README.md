@@ -87,6 +87,7 @@ cd web && npx playwright test
 
 - [产品说明](docs/product.md)
 - [架构说明](docs/architecture.md)
+- [开发流程](docs/development.md)
 - [基础设施设计](docs/superpowers/specs/2026-07-21-agent-platform-foundation-design.md)
 - [Phase 0 计划](plans/phase-00.md)
 - [Phase 1 计划](plans/phase-01.md)
