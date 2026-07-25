@@ -1,6 +1,6 @@
 # Phase 5：多 Agent 身份证 + 主题系统 + 交互优化
 
-**状态：已完成（2026-07-25 验收通过）** | 分支：`phase-5-agent-identity`
+**状态：已完成（2026-07-25 验收通过）** | 补充轮（5b）：用户验收反馈 6 项修复完成（2026-07-25） | 分支：`phase-5-agent-identity`
 **基线：** `main`（Phase 4 验收通过后）
 **参考：** openhanako "Agent即文件"、CSS 变量主题、ContentBlock 消息模型、InputControlBar 交互
 
@@ -296,3 +296,43 @@ npx playwright test
 ### 最终验收结论
 
 Phase 5 全部 6 项阻断已修复，质量门全部通过：服务端 31 文件/209 用例、Web 13 文件/167 用例、Playwright 17/17 全部通过。验收通过，可作为后续 Phase 稳定基线。
+
+---
+
+## Phase 5b：用户验收反馈修复
+
+用户人工验收 Phase 5 后报告 6 项问题，已全部修复并通过最终验收（2026-07-25）。
+
+### 修复清单
+
+1. **历史卡片重建**：此前离开会话再返回，工具调用/思考卡片消失。根因：PiMessageEntry 未持久化 reasoning/toolCall 字段。修复：pi-sdk adapter 两遍扫描 PI JSONL（先收集 toolResult 再映射消息），PiMessageEntry 增加 thinking/toolCalls（含 500 字符截断的结果摘要）；Web 端 buildChatStateFromHistory 按 用户→思考→工具卡片→回答 顺序重建。
+
+2. **卡片显示开关**：根因：缺乏用户可见的显示偏好控制。修复：preferences.appearance 新增 showToolCalls/showThinking（默认 true），设置中心"界面与布局"提供开关，MessageList 响应。
+
+3. **一体化输入框**：根因：模型选择/思考级别/工具模式在独立 InputControlBar 渲染，占用额外垂直空间。修复：并入 MessageComposer 卡片内底行（参考 openhanako，细分隔线），InputControlBar 不再单独渲染；全应用只保留标题栏右上角一个设置入口（aria-label="设置中心"）。
+
+4. **人设注入**：根因：Agent profile 只存储未注入（功能遗漏）。修复：Prompt 执行时经 PI ResourceLoader.getSystemPrompt() 注入 persona+replyStyle+personality；profile 变更后自动重建运行时生效；无 Agent 会话不注入。新增 tests/integration/persona-injection.test.ts（4 用例）。
+
+5. **Agent 跟随会话**：根因：切换会话时 Agent 选择器不联动，手动切换 Agent 后仍显示旧会话。修复：语义修正为"会话属于 Agent"——切换会话时 Agent 选择器同步 session.agentId；手动切换 Agent 时进入其最近会话或空状态；空状态显示"你好，我是 {name}"欢迎卡片；侧栏会话项显示 Agent 名称徽标。
+
+6. **主题修复与样式优化**：根因：layout.css :root 硬编码暗色 token 覆盖主题文件（加载顺序在后）。修复：颜色 token 归 themes/dark.css（:root 默认暗色）与 light.css（[data-theme="light"]）独占，index.html 预置 data-theme 防首屏闪烁，新增静态守护测试；亮色改温暖米白系（#f7f5f0/#fcfaf8/#f0ede8/#e8e4dc），暗色三色阶精细化。
+
+### 质量门（2026-07-25 最终验收）
+
+| 检查项 | 结果 |
+|---|---|
+| PI import | ✓ `node scripts/verify-pi-sdk-imports.mjs` |
+| TypeScript strict | ✓ `npx tsc --noEmit -p tsconfig.json` |
+| 服务端测试 | ✓ 32 文件、219 用例 |
+| 服务端构建 | ✓ `npx tsc -p tsconfig.build.json` |
+| Web 测试 | ✓ 13 文件、177 用例 |
+| Web 构建 | ✓ Vite 生产构建通过 |
+| Playwright | ✓ 17/17 全部通过（`cd web && npx playwright test`） |
+
+### 提交
+
+| 提交 | 内容 |
+|---|---|
+| `067655a` | feat: inject agent persona into system prompt, expose history thinking and tool calls, add display toggles |
+| `062a851` | feat: unify composer controls, sync agent with session, rebuild history cards |
+| `9906a01` | fix: repair theme token cascade, refine palettes, add display toggles and agent badges |

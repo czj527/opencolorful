@@ -27,7 +27,7 @@ Git 历史。
 - Session 设置包含工具模式、工作目录、确认状态和思考级别；
 - Phase 3 已完成（`phase-3-complete`），当前在 `phase-3-supervisor-web` 分支；
 - Phase 4 已完成——设置中心、偏好持久化、可调侧栏、Focus 模式、日志诊断、流式优化；
-- Phase 5 已完成并通过最终验收（2026-07-25）：多 Agent 身份证（UUID 服务端生成）、会话可选绑定 Agent（含重启恢复）、Agent 管理设置页、亮/暗主题、控制栏下移、工具卡片时间线稳定；质量门与 Playwright 17/17 通过；
+- Phase 5 已完成并通过最终验收（2026-07-25）：多 Agent 身份证（UUID 服务端生成）、会话可选绑定 Agent（含重启恢复）、Agent 管理设置页、亮/暗主题、控制栏下移、工具卡片时间线稳定；质量门与 Playwright 17/17 通过；5b 补充轮已完成——人设注入、历史卡片重建、显示开关、一体化输入框、Agent 跟随会话、主题修复（2026-07-25 验收全绿）；
 - `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
 - P1-02 Session 生命周期已完成：`6eada4b`；
 - P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；
