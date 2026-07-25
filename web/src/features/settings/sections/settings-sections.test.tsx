@@ -32,7 +32,7 @@ const fakePreferences: PreferencesDocument = {
   version: 1,
   defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
   layout: { leftSidebarWidth: 280, rightSidebarWidth: 320, leftCollapsed: false, rightCollapsed: false, focusMode: false, reducedMotion: "system" },
-  appearance: { theme: "dark" },
+  appearance: { theme: "dark", showToolCalls: true, showThinking: true },
 };
 
 const fakeSupervisorStatus: SupervisorStatusResponse = {
@@ -116,6 +116,20 @@ describe("LayoutSection", () => {
     expect(html).toContain("320");
     expect(html).toContain("默认收起左侧栏");
     expect(html).toContain("默认收起右侧栏");
+  });
+
+  it("renders show tool calls and show thinking toggles", () => {
+    const html = renderToStaticMarkup(
+      <LayoutSection
+        preferences={fakePreferences}
+        onSave={async () => {}}
+        onSaveTheme={async () => {}}
+        saving={false}
+        lastSaveError={null}
+      />,
+    );
+    expect(html).toContain("显示工具调用卡片");
+    expect(html).toContain("显示思考过程");
   });
 });
 

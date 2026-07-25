@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { SessionView } from "../lib/types.js";
-import { Plus, Archive, ArchiveRestore, Search, FolderOpen } from "lucide-react";
+import type { SessionView, AgentView } from "../lib/types.js";
+import { Plus, Archive, ArchiveRestore, Search, FolderOpen, Bot } from "lucide-react";
 
 interface SessionSidebarProps {
   readonly sessions: SessionView[];
@@ -11,6 +11,7 @@ interface SessionSidebarProps {
   readonly onArchive: (id: string) => void;
   readonly onUnarchive: (id: string) => void;
   readonly onToggle: () => void;
+  readonly agents?: readonly AgentView[];
 }
 
 export function SessionSidebar({
@@ -22,6 +23,7 @@ export function SessionSidebar({
   onArchive,
   onUnarchive,
   onToggle,
+  agents,
 }: SessionSidebarProps) {
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -35,6 +37,12 @@ export function SessionSidebar({
     search.trim()
       ? list.filter((s) => s.title.toLowerCase().includes(search.trim().toLowerCase()))
       : list;
+
+  const resolveAgentName = (agentId: string | null): string | null => {
+    if (!agentId || !agents) return null;
+    const agent = agents.find((a) => a.identity.id === agentId);
+    return agent?.identity.name ?? null;
+  };
 
   const handleCreate = () => {
     const title = newTitle.trim();
@@ -133,6 +141,12 @@ export function SessionSidebar({
                 </button>
               </div>
               <div className="sidebar-item-meta">
+                {resolveAgentName(session.agentId) !== null && (
+                  <span className="sidebar-agent-badge">
+                    <Bot size={10} aria-hidden="true" />
+                    {resolveAgentName(session.agentId)}
+                  </span>
+                )}
                 {session.messages.length} 条消息 · {session.toolMode}
               </div>
             </div>

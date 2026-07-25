@@ -106,11 +106,11 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   };
 
-  const handleSaveAppearance = async (theme: PreferencesDocument["appearance"]["theme"]) => {
+  const handleSaveAppearance = async (appearance: Partial<PreferencesDocument["appearance"]>) => {
     setSaving(true);
     setSaveError(null);
     try {
-      const updated = await props.api.updatePreferences({ appearance: { theme } });
+      const updated = await props.api.updatePreferences({ appearance });
       setPreferences(updated);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "保存失败";
@@ -251,7 +251,7 @@ interface SectionRenderProps {
   readonly agents: readonly AgentView[];
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
-  readonly onSaveTheme: (theme: PreferencesDocument["appearance"]["theme"]) => Promise<void>;
+  readonly onSaveTheme: (appearance: Partial<PreferencesDocument["appearance"]>) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
   readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
   readonly onCreateAgent: (type: string, name: string) => Promise<void>;

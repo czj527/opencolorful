@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   clampWidth,
@@ -111,5 +113,48 @@ describe("responsive layout state", () => {
       { leftNarrow: false, rightNarrow: true },
       { leftCollapsed: false, rightCollapsed: true },
     )).toBe(false);
+  });
+});
+
+// 静态守护：layout.css 的 :root 不得重复定义颜色 token
+// 颜色 token 由 themes/dark.css (:root) 和 themes/light.css ([data-theme="light"]) 独占定义
+const COLOR_TOKEN_NAMES = [
+  "--bg-primary",
+  "--bg-secondary",
+  "--bg-tertiary",
+  "--text-primary",
+  "--text-secondary",
+  "--accent",
+  "--accent-hover",
+  "--border-color",
+  "--danger",
+  "--success",
+  "--warning",
+];
+
+describe("layout.css :root should not define color tokens", () => {
+  it("contains no color token definitions in :root block", () => {
+    const layoutCssPath = resolve(import.meta.dirname ?? __dirname, "../../app/layout.css");
+    const css = readFileSync(layoutCssPath, "utf-8");
+
+    // Extract the :root block content (everything between :root { and the closing })
+    const rootMatch = css.match(/:root\s*\{([^}]*)\}/s);
+    expect(rootMatch).not.toBeNull();
+    const rootBlock = rootMatch![1] ?? "";
+
+    for (const token of COLOR_TOKEN_NAMES) {
+      // Each line starting with the token name followed by : should not exist in :root
+      if (rootBlock.includes(token)) {
+        // Extract the specific line for a better error message
+        const lines = rootBlock.split("\n");
+        for (const line of lines) {
+          if (line.includes(token)) {
+            expect.fail(`layout.css :root should not define ${token}. Found: "${line.trim()}". Color tokens must be defined exclusively in themes/dark.css and themes/light.css.`);
+          }
+        }
+      }
+    }
+    // If we got here, none of the tokens were found — pass silently
+    expect(true).toBe(true);
   });
 });
