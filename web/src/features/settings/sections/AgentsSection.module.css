@@ -1,0 +1,69 @@
+.emptyHint {
+  margin: 0 0 var(--space-16);
+  color: var(--text-secondary);
+  font-size: var(--fs-ui);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-10) var(--space-16);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-color);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  cursor: pointer;
+}
+
+.archiveWrap {
+  display: inline-flex;
+}
+
+.agentName {
+  font-weight: 600;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+}
+
+.sessionCount {
+  margin-left: auto;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  margin-top: var(--space-4);
+}
+
+.editorActions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.toggleRow {
+  display: flex;
+  gap: var(--space-8);
+  margin-bottom: var(--space-12);
+}

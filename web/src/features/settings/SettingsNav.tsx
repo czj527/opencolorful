@@ -1,4 +1,5 @@
 import type { SettingsSectionId, SettingsSectionMeta } from "./settings-state.js";
+import styles from "./SettingsNav.module.css";
 
 export interface SettingsNavProps {
   readonly sections: readonly SettingsSectionMeta[];
@@ -20,43 +21,52 @@ export function SettingsNav(props: SettingsNavProps) {
   let lastGroup = "";
 
   return (
-    <nav className="settings-nav" aria-label="设置导航">
+    <nav className={styles.nav} aria-label="设置导航">
       <input
         type="search"
-        className="settings-search"
+        className={styles.search}
         placeholder="搜索设置项..."
         value={props.search}
         onChange={(e) => props.onSearch(e.currentTarget.value)}
         aria-label="搜索设置项"
       />
-      <ul className="settings-nav-list">
+      <ul className={styles.list}>
         {visible.map((section) => {
           const isActive = section.id === props.activeSection;
           const disabled = !section.available;
 
-          // 无搜索时在分组切换处渲染分组标签
-          const groupHeader = showGroups && section.group !== lastGroup
-            ? (lastGroup = section.group, (
-                <li key={`group-${section.group}`} className="settings-nav-group-label">
-                  {groupLabel(section.group)}
-                </li>
-              ))
-            : null;
+          const groupHeader =
+            showGroups && section.group !== lastGroup
+              ? ((lastGroup = section.group),
+                (
+                  <li key={`group-${section.group}`} className={styles.groupLabel}>
+                    {groupLabel(section.group)}
+                  </li>
+                ))
+              : null;
           if (!showGroups) lastGroup = section.group;
+
+          const itemClass = [
+            styles.item,
+            isActive ? styles.active : "",
+            disabled ? styles.unavailable : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
 
           return (
             <li key={section.id}>
               {groupHeader}
               <button
                 type="button"
-                className={`settings-nav-item ${isActive ? "active" : ""} ${disabled ? "unavailable" : ""}`}
+                className={itemClass}
                 aria-current={isActive ? "true" : undefined}
                 aria-disabled={disabled ? "true" : undefined}
                 onClick={disabled ? undefined : () => props.onSelect(section.id)}
                 data-testid={`settings-nav-${section.id}`}
               >
                 {section.label}
-                {disabled && <span className="settings-nav-hint">规划中</span>}
+                {disabled && <span className={styles.hint}>规划中</span>}
               </button>
             </li>
           );

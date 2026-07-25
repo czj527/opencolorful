@@ -1,0 +1,10 @@
+.notice {
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-card);
+  background: var(--bg-secondary);
+  color: var(--danger);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+}

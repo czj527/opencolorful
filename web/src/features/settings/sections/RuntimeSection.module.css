@@ -1,0 +1,31 @@
+.info {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  gap: var(--space-6) var(--space-16);
+  margin: 0;
+  font-size: var(--fs-ui);
+}
+
+.info dt {
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-align: right;
+}
+
+.info dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: var(--fs-caption);
+  word-break: break-all;
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-card);
+  background: var(--bg-secondary);
+  color: var(--danger);
+  font-size: var(--fs-ui);
+}

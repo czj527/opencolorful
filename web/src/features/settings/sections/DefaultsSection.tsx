@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { PreferencesDocument, ModelSummary } from "../../../lib/types.js";
+import { Button, Select } from "../../../components/ui/index.js";
+import { SettingsRow, SettingsSaveFeedback } from "../widgets/index.js";
+import styles from "./DefaultsSection.module.css";
 
 export interface DefaultsSectionProps {
   readonly preferences: PreferencesDocument;
@@ -9,33 +12,39 @@ export interface DefaultsSectionProps {
   readonly lastSaveError: string | null;
 }
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const TOOL_MODES = ["off", "read-only"] as const;
+
 export function DefaultsSection(props: DefaultsSectionProps) {
   const def = props.preferences.defaults;
   const [form, setForm] = useState(def);
-  const [msg, setMsg] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const handleSave = async () => {
-    setMsg("");
+    setSaved(false);
+    setLocalError(null);
     try {
       await props.onSave(form);
-      setMsg("saved");
+      setSaved(true);
     } catch (err) {
-      setMsg(err instanceof Error ? err.message : "保存失败");
+      setLocalError(err instanceof Error ? err.message : "保存失败");
     }
   };
 
-  return (
-    <section className="settings-section" data-testid="settings-section-defaults">
-      <h2>默认对话</h2>
-      <p className="settings-desc">新建 Session 时的默认行为。已有 Session 的显式设置不受影响。</p>
+  const currentModelValue = form.model ? `${form.model.providerId}:${form.model.modelId}` : "";
 
-      <label>
-        默认模型
-        <select
-          value={form.model ? `${form.model.providerId}:${form.model.modelId}` : ""}
-          onChange={(e) => {
-            const val = e.target.value;
-            if (val === "") { setForm((f) => ({ ...f, model: null })); return; }
+  return (
+    <>
+      <SettingsRow label="默认模型" htmlFor="defaults-model">
+        <Select
+          id="defaults-model"
+          value={currentModelValue}
+          onChange={(val) => {
+            if (val === "") {
+              setForm((f) => ({ ...f, model: null }));
+              return;
+            }
             const [providerId, modelId] = val.split(":");
             if (providerId && modelId) setForm((f) => ({ ...f, model: { providerId, modelId } }));
           }}
@@ -46,30 +55,58 @@ export function DefaultsSection(props: DefaultsSectionProps) {
               {m.name} ({m.providerId})
             </option>
           ))}
-        </select>
-      </label>
+        </Select>
+      </SettingsRow>
 
-      <label>
-        思考级别
-        <select value={form.thinkingLevel} onChange={(e) => setForm((f) => ({ ...f, thinkingLevel: e.target.value as PreferencesDocument["defaults"]["thinkingLevel"] }))}>
-          {(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const).map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
-      </label>
+      <SettingsRow label="思考级别" htmlFor="defaults-thinking">
+        <Select
+          id="defaults-thinking"
+          value={form.thinkingLevel}
+          onChange={(v) =>
+            setForm((f) => ({
+              ...f,
+              thinkingLevel: v as PreferencesDocument["defaults"]["thinkingLevel"],
+            }))
+          }
+        >
+          {THINKING_LEVELS.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </Select>
+      </SettingsRow>
 
-      <label>
-        工具模式
-        <select value={form.toolMode} onChange={(e) => setForm((f) => ({ ...f, toolMode: e.target.value as PreferencesDocument["defaults"]["toolMode"] }))}>
-          {(["off", "read-only"] as const).map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-      </label>
+      <SettingsRow label="工具模式" htmlFor="defaults-toolmode">
+        <Select
+          id="defaults-toolmode"
+          value={form.toolMode}
+          onChange={(v) =>
+            setForm((f) => ({
+              ...f,
+              toolMode: v as PreferencesDocument["defaults"]["toolMode"],
+            }))
+          }
+        >
+          {TOOL_MODES.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </Select>
+      </SettingsRow>
 
-      {props.lastSaveError && <div className="save-error" role="alert">{props.lastSaveError}</div>}
-      {msg === "saved" && <div className="save-ok">已保存</div>}
-      {msg && msg !== "saved" && <div className="save-error">{msg}</div>}
+      <SettingsSaveFeedback
+        saving={props.saving}
+        saved={saved}
+        error={localError ?? props.lastSaveError}
+      />
 
-      <button className="settings-btn primary" onClick={handleSave} disabled={props.saving} type="button">
-        {props.saving ? "保存中..." : "保存默认值"}
-      </button>
-    </section>
+      <div className={styles.actions}>
+        <Button variant="primary" onClick={handleSave} disabled={props.saving} loading={props.saving}>
+          {props.saving ? "保存中…" : "保存默认值"}
+        </Button>
+      </div>
+    </>
   );
 }

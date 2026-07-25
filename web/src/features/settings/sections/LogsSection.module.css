@@ -1,0 +1,38 @@
+.toolbar {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.levelSelect {
+  flex: 0 0 auto;
+}
+
+.searchInput {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--danger);
+}
+
+.viewer {
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  /* 日志查看器使用等宽字体 + 主题背景/前景，保证亮/暗主题下均可读 */
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  max-height: 480px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
