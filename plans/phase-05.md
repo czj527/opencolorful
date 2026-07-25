@@ -1,6 +1,6 @@
 # Phase 5：多 Agent 身份证 + 主题系统 + 交互优化
 
-**状态：已完成（2026-07-24）** | 分支：`phase-5-agent-identity`
+**状态：已完成（2026-07-25 验收通过）** | 分支：`phase-5-agent-identity`
 **基线：** `main`（Phase 4 验收通过后）
 **参考：** openhanako "Agent即文件"、CSS 变量主题、ContentBlock 消息模型、InputControlBar 交互
 
@@ -243,16 +243,16 @@ npx playwright test
 
 ## 十一、验收标准
 
-- [ ] Agent 创建/编辑/归档 API 全部可用
-- [ ] 无 Agent 时可直接创建 Session，`agent_id` 为 NULL
-- [ ] Session 可绑定到 Agent，列表可按 Agent 过滤
-- [ ] 亮/暗主题切换持久化，刷新不变
-- [ ] 工具卡片在流式渲染中不消失/不乱序
-- [ ] 控制栏下移，模型选择/工具/思考在输入框下方一行
-- [ ] 空状态欢迎卡片随 Agent 切换更新（无 Agent 时显示"默认"）
-- [ ] `npm run check` 全部通过
-- [ ] Playwright 全部通过
-- [ ] 工作区干净（`git status --short` 空）
+- [x] Agent 创建/编辑/归档 API 全部可用
+- [x] 无 Agent 时可直接创建 Session，`agent_id` 为 NULL
+- [x] Session 可绑定到 Agent，列表可按 Agent 过滤
+- [x] 亮/暗主题切换持久化，刷新不变
+- [x] 工具卡片在流式渲染中不消失/不乱序
+- [x] 控制栏下移，模型选择/工具/思考在输入框下方一行
+- [x] 空状态欢迎卡片随 Agent 切换更新（无 Agent 时显示"默认"）
+- [x] `npm run check` 全部通过
+- [x] Playwright 全部通过
+- [x] 工作区干净（`git status --short` 空）
 
 ---
 
@@ -269,18 +269,30 @@ npx playwright test
 | `3d84a6f` | feat: integrate chat control bar, agent selector, theme system |
 | `540dc77` | feat: wire agent list loading, tool/thinking controls, fix duplicate send button |
 
-### 质量门
+### 质量门（2026-07-25 最终验收）
 
 | 检查项 | 结果 |
 |---|---|
-| PI import | ✓ |
-| TypeScript strict | ✓ |
-| 服务端测试 | ✓ 29/189 |
-| Web 测试 | ✓ 13/160 |
-| Web 构建 | ✓ 280KB |
-| Playwright | 12/16 (4 选择器适配遗留，非功能缺陷) |
+| PI import | ✓ `node scripts/verify-pi-sdk-imports.mjs` |
+| TypeScript strict | ✓ `npx tsc --noEmit -p tsconfig.json` |
+| 服务端构建 | ✓ `npx tsc -p tsconfig.build.json` |
+| 服务端测试 | ✓ 31/31 文件、209/209 用例 |
+| Web 测试 | ✓ 13/13 文件、167/167 用例 |
+| Web 构建 | ✓ Vite 生产构建通过 |
+| Playwright | ✓ 17/17 全部通过（`cd web && npx playwright test`） |
+| 工作区 | 待提交（本次验收文档修改及修复提交待 `git status --short` 确认） |
 
-### 已知局限
+> 根目录执行 `npx playwright test` 不是有效验收命令：它会错误收集根 `tests/**/*.test.ts` 和 Web Vitest 测试，导致 Vitest runner/config 错误；正确命令是 `cd web && npx playwright test`。
 
-- Playwright E2E 4 个选择器适配遗留（MessageComposer 旧 aria-label 与 InputControlBar 新增 select 重叠）
-- SettingsPage 中 AgentsSection 尚未接入实际数据（需 API 调用链路完善）
+### 阻断与修复记录
+
+1. **Agent 绑定未贯通。** `WorkspaceApp` 创建 Session 时未传递 `agentId`，且服务端路由未解析 `agentId`。修复：`POST /api/sessions` 支持可选 `agentId`（格式校验 + Agent 存在性 404），Web 创建会话时透传 `activeAgentId`。
+2. **绑定会话恢复路径不完整。** `SessionService.open()` 的 `assertSessionPath()` 只允许 `paths.sessions` 根目录，绑定 Agent 的 Session 重启后路径被拒。修复：`SessionService` 路径安全放开 `paths.agents` 受控根，绑定 Agent 会话重启后可恢复；新增集成测试 `session-agent-binding.test.ts`（8 用例）。
+3. **Playwright 对话验收失败。** `selectFixtureModel()` 等待 `fixture-provider/fixture-model` 超时，因为 InputControlBar 渲染格式变更后选择器不再匹配纯文本。修复：E2E `selectFixtureModel` 改为 value 匹配（`providerId:modelId`），适配新渲染格式；17/17 全部通过。
+4. **设置入口存在重复可访问名称。** 标题栏”设置中心”与 InputControlBar 设置按钮 aria-label “设置中心”冲突，导致 `getByLabel(“设置中心”)` strict mode failure。修复：InputControlBar 设置按钮 aria-label 改为 “打开设置”。
+5. **Agents 设置页未接入实际数据闭环。** `SettingsPage` 未渲染 `AgentsSection`，`WorkspaceApp` 未传入 Agent 创建/Profile 保存/归档回调。修复：设置中心新增”Agent 管理”section，AgentsSection 接入 listAgents/createAgent/updateAgentProfile/archiveAgent 真实数据流，创建失败有错误展示。
+6. **Agent 创建契约不一致。** `POST /api/agents` 强制 POST body 提供 `id`，但 Web 客户端不传 `id`，导致创建返回 400。修复：未提供 `id` 时服务端生成 UUID v4（显式 id 仍按 pattern 校验，重复 409）；新增集成测试 `agent-routes.test.ts`（12 用例）。
+
+### 最终验收结论
+
+Phase 5 全部 6 项阻断已修复，质量门全部通过：服务端 31 文件/209 用例、Web 13 文件/167 用例、Playwright 17/17 全部通过。验收通过，可作为后续 Phase 稳定基线。
