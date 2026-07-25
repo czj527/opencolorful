@@ -1,0 +1,34 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--fs-ui);
+  color: var(--text-primary);
+}
+
+.required {
+  color: var(--danger);
+}
+
+.control {
+  width: 100%;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--danger);
+}
