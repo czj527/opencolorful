@@ -77,7 +77,8 @@ create(request: CreateSessionRequest): PiSessionHandle {
     this.assertSessionPath(metadata.sessionPath);
     const active = this.active.get(id);
     if (active) return active;
-    const session = openPersistentSession(metadata.sessionPath, this.paths.sessions);
+    const sessionDir = path.dirname(metadata.sessionPath);
+    const session = openPersistentSession(metadata.sessionPath, sessionDir);
     if (session.id !== id) throw new Error("Session 文件身份与索引不一致");
     this.active.set(id, session);
     return session;
@@ -128,12 +129,16 @@ create(request: CreateSessionRequest): PiSessionHandle {
     return { ...metadata, messages: session.messages, messageEntries: session.messageEntries, model: session.model };
   }
 
-  private assertSessionPath(sessionPath: string): void {
-    const root = path.resolve(this.paths.sessions);
+  private isPathWithinRoot(sessionPath: string, root: string): boolean {
     const resolved = path.resolve(sessionPath);
-    const relative = path.relative(root, resolved);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) {
-      throw new Error("Session 路径不在受控目录内");
-    }
+    const resolvedRoot = path.resolve(root);
+    const relative = path.relative(resolvedRoot, resolved);
+    return !relative.startsWith("..") && !path.isAbsolute(relative);
+  }
+
+  private assertSessionPath(sessionPath: string): void {
+    if (this.isPathWithinRoot(sessionPath, this.paths.sessions)) return;
+    if (this.isPathWithinRoot(sessionPath, this.paths.agents)) return;
+    throw new Error("Session 路径不在受控目录内");
   }
 }

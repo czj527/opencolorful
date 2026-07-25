@@ -10,6 +10,9 @@ import type { SessionService } from "../../runtime/session-service.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PreferencesStore } from "../../config/preferences-store.js";
+import type { AgentStore } from "../../config/agent-store.js";
+
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export function registerSessionRoutes(
   app: Hono,
@@ -17,6 +20,7 @@ export function registerSessionRoutes(
   modelService?: ModelService,
   promptService?: PromptService,
   preferencesStore?: PreferencesStore,
+  agentStore?: AgentStore,
 ): void {
   app.get("/api/sessions", (context) => {
     const includeArchived = context.req.query("includeArchived") === "true";
@@ -27,6 +31,7 @@ export function registerSessionRoutes(
     const body = (await context.req.json()) as {
       title?: unknown;
       cwd?: unknown;
+      agentId?: unknown;
       toolMode?: unknown;
       workspaceCwd?: unknown;
       workspaceConfirmed?: unknown;
@@ -34,6 +39,21 @@ export function registerSessionRoutes(
     };
     if (typeof body.title !== "string" || typeof body.cwd !== "string" || !body.cwd.trim()) {
       return context.json(createApiError("INVALID_INPUT", "Session title 和 cwd 必须是字符串"), 400);
+    }
+    // 解析可选的 agentId，校验格式与存在性
+    let agentId: string | undefined;
+    if (body.agentId !== undefined) {
+      if (typeof body.agentId !== "string" || !AGENT_ID_PATTERN.test(body.agentId)) {
+        return context.json(createApiError("INVALID_INPUT", "Agent ID 格式无效"), 400);
+      }
+      if (agentStore !== undefined) {
+        try {
+          agentStore.load(body.agentId);
+        } catch {
+          return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
+        }
+      }
+      agentId = body.agentId;
     }
     let settings: ReturnType<typeof parseSessionSettings> | undefined;
     if (
@@ -59,7 +79,9 @@ export function registerSessionRoutes(
       }
     }
 
-    const session = sessionService.create({ title: body.title, cwd: body.cwd });
+    const session = agentId !== undefined
+      ? sessionService.create({ title: body.title, cwd: body.cwd, agentId })
+      : sessionService.create({ title: body.title, cwd: body.cwd });
 
     // 合并设置：请求显式字段优先，缺失字段回退到全局偏好默认值。
     const preferences = preferencesStore?.get();

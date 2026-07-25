@@ -79,6 +79,7 @@ export interface SessionView {
   readonly messages: readonly string[];
   readonly messageEntries: readonly MessageEntry[];
   readonly model: SessionModelRef | null;
+  readonly agentId: string | null;
 }
 
 export interface SessionSettings {
@@ -86,6 +87,7 @@ export interface SessionSettings {
   readonly workspaceCwd?: string;
   readonly workspaceConfirmed?: boolean;
   readonly thinkingLevel?: string;
+  readonly agentId?: string;
 }
 
 // --- Supervisor ---

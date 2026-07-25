@@ -1,8 +1,12 @@
+import crypto from "node:crypto";
+
 import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
 import type { AgentStore } from "../../config/agent-store.js";
 import type { SessionService } from "../../runtime/session-service.js";
+
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export function registerAgentRoutes(
   app: Hono,
@@ -27,8 +31,15 @@ export function registerAgentRoutes(
         type?: unknown;
         name?: unknown;
       };
-      if (typeof body.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(body.id)) {
-        return context.json(createApiError("INVALID_INPUT", "Agent ID 格式无效"), 400);
+      // id 可选：提供时校验格式，未提供时服务端生成 UUID
+      let agentId: string;
+      if (body.id !== undefined) {
+        if (typeof body.id !== "string" || !AGENT_ID_PATTERN.test(body.id)) {
+          return context.json(createApiError("INVALID_INPUT", "Agent ID 格式无效"), 400);
+        }
+        agentId = body.id;
+      } else {
+        agentId = crypto.randomUUID();
       }
       if (body.type !== "assistant" && body.type !== "coding" && body.type !== "work") {
         return context.json(createApiError("INVALID_INPUT", "Agent type 必须为 assistant/coding/work"), 400);
@@ -38,7 +49,7 @@ export function registerAgentRoutes(
       }
 
       const identity = agentStore.create({
-        id: body.id,
+        id: agentId,
         type: body.type,
         name: body.name.trim(),
       });

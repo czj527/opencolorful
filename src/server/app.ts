@@ -74,6 +74,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       options.modelService,
       options.promptService,
       options.preferencesStore,
+      options.agentStore,
     );
   }
   if (options.promptService !== undefined) {
