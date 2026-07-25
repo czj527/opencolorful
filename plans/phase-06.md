@@ -1,6 +1,6 @@
 # Phase 6：Token 用量 + 对话时间线 + 会话命令系统 + 开发流程规范化
 
-**状态：进行中** | 分支：`phase-6-usage-timeline`
+**状态：已完成（2026-07-25）** | 分支：`phase-6-usage-timeline`
 **基线：** `main`（Phase 5b 验收通过后，`e7e09bd`）
 **参考：** PI SDK `Usage`/`AgentSession.getSessionStats()`/compaction 事件、openhanako 消息模型与输入交互、主流 Agent 侧边时间线导航
 
@@ -312,17 +312,17 @@ cd web; npx playwright test
 
 ## 十、验收标准
 
-- [ ] `turn.completed` 事件携带完整 usage 与 context，SSE/WS 均可收到，重启重放不重复
-- [ ] 发送按钮左侧圆环实时反映上下文占比，颜色阈值正确；悬停详情展示上下文用量、会话累计 tokens、缓存命中率
-- [ ] assistant 回答卡片显示本 turn 用量行；全平台（事件/API/界面/数据库）不出现金额字段
-- [ ] 设置中心「用量统计」展示按日/按模型聚合、加权平均缓存命中率，时间范围可切换
-- [ ] 时间线导航点击可定位到指定轮次并高亮，窄屏自动隐藏，显隐偏好持久化
-- [ ] 输入框首字符 `/` 弹出命令面板，五个 v1 命令全部可用
-- [ ] `/compact` 完成后时间线出现压缩卡片，上下文占比随之刷新
-- [ ] 重启后未发消息的会话可 compact；生成中 compact 返回 409
-- [ ] `docs/development.md` 落地，AGENTS.md 流程节同步
-- [ ] `npm run check` 全部通过；Playwright（含新用例）全部通过
-- [ ] 工作区干净（`git status --short` 空）
+- [x] `turn.completed` 事件携带完整 usage 与 context，SSE/WS 均可收到，重启重放不重复（契约/集成测试 + e2e 用量行）
+- [x] 发送按钮左侧圆环实时反映上下文占比，颜色阈值正确；悬停详情展示上下文用量、会话累计 tokens、缓存命中率（e2e 悬停断言）
+- [x] assistant 回答卡片显示本 turn 用量行；全平台（事件/API/界面/数据库）不出现金额字段（契约无 cost 字段，usage_records 无 cost 列）
+- [x] 设置中心「用量统计」展示按日/按模型聚合、加权平均缓存命中率，时间范围可切换（e2e 聚合断言）
+- [x] 时间线导航点击可定位到指定轮次并高亮，窄屏自动隐藏，显隐偏好持久化（e2e 定位/开关断言；锚点失配已修复）
+- [x] 输入框首字符 `/` 弹出命令面板，五个 v1 命令全部可用（e2e 面板/过滤/执行断言）
+- [x] `/compact` 完成后时间线出现压缩卡片，上下文占比随之刷新（reducer 单测 + compacted 重拉用量）
+- [x] 重启后未发消息的会话可 compact；生成中 compact 返回 409（compact-route 集成测试）
+- [x] `docs/development.md` 落地，AGENTS.md 流程节同步
+- [x] 质量门全部通过；Playwright 23/23（含 6 个新用例）通过
+- [x] 工作区干净（`git status --short` 空）
 
 ---
 
@@ -343,12 +343,21 @@ cd web; npx playwright test
 | `a993c71` | feat: web realtime token usage — context ring, turn usage line, sse event sync（T4，团队成员实现 + 主 Agent 审查） |
 | `9677ef0` | feat: settings usage statistics page with daily and per-model breakdown（T5，团队成员实现 + 主 Agent 审查） |
 | `468c363` | feat: chat timeline navigation with anchors, scroll sync and visibility preference（T6，团队成员实现 + 主 Agent 审查） |
+| `c25271d` | feat: web session command palette with local cards and compaction feedback（T7，团队成员实现 + 主 Agent 审查） |
+| `9c11102` | fix: align timeline nav anchors with rendered messages; add phase 6 e2e coverage（T9，主 Agent 修复 + e2e） |
 
 ### 质量门
 
 | 检查项 | 结果 |
 |---|---|
-| （待回填） | |
+| `node scripts/verify-pi-sdk-imports.mjs` | 通过 |
+| `npx tsc --noEmit -p tsconfig.json` | 通过 |
+| `npx vitest run` | 35 测试文件全部通过 |
+| `npm run test --workspace=web` | 243 用例全部通过 |
+| `npx tsc --noEmit -p web/tsconfig.json` | 通过 |
+| `npm run web:build` | 通过 |
+| `npx tsc -p tsconfig.build.json` | 通过 |
+| `cd web; npx playwright test` | 23/23 通过（含 6 个 Phase 6 新用例） |
 
 ### 阻断与修复记录
 
@@ -356,3 +365,13 @@ cd web; npx playwright test
 2. **SESSION_BUSY 类型强转（T3 审查发现）**：`createApiError("SESSION_BUSY" as never, …)` 绕过类型。修复：`ApiErrorCode` 联合类型正式纳入 `SESSION_BUSY`，移除强转。
 3. **团队成员静默停止（流程问题）**：团队模式成员在轮次结束后会静默挂起，mailbox 无新消息。修复：按原名同队重 spawn 即可恢复并继续任务；主 Agent 需主动轮询 git 产出而非空等汇报。
 4. **exactOptionalPropertyTypes 违规（T6，主 Agent 独立验证发现）**：成员汇报前未真正运行根 tsconfig，`normalizeAppearance` 把 `boolean \| undefined` 赋给可选非 undefined 字段。修复：`fallback.timelineVisible ?? true`。教训再次印证「子 Agent 报告不作为验收证据」。
+5. **时间线锚点失配（T6 集成缺陷，e2e 暴露）**：MessageList 对「JSONL 历史 + 实时消息」做去重合并，已完成轮次改由 `history-<序号>` 合成 id 渲染，而 ChatTimelineNav 仅从实时 `chat.messages` 派生节点，第一轮锚点在 DOM 中不存在，点击无效。修复：新建 `timeline-turns.ts` 共享去重逻辑（`deriveRenderableUserMessages` 与 MessageList 渲染严格同构），ChatPane 以渲染一致的消息序列喂给导航；补 5 个单元用例与 e2e 定位断言。
+
+### 最终验收结论
+
+Phase 6 全部 10 项验收标准达成，质量门 8 项全绿，Playwright 23/23。
+功能：token 用量全链路（事件 → SQLite → API → 圆环/用量行/统计页）、对话时间线导航、
+Web 会话命令系统（/help /compact /new /abort /clear）、compact 服务端补齐、开发流程文档化。
+本 Phase 采用「主 Agent 计划/审查/验收 + 团队成员并行实现」流程，成员产出 5 个任务，
+主 Agent 审查独立发现并修复 4 处缺陷（percent 量纲、SESSION_BUSY 强转、
+exactOptionalPropertyTypes 违规、时间线锚点失配）。
