@@ -338,6 +338,9 @@ cd web; npx playwright test
 | `9338b14` | feat: carry token usage and compaction events through platform event chain（T1） |
 | `fcd5025` | feat: emit compaction events on control stream when idle, add PromptService.isBusy（T1 补充 infra） |
 | `6b4c5d2` | docs: add development workflow guide and streamline AGENTS.md process section（T8） |
+| `6040628` | feat: persist turn token usage to sqlite and expose usage query apis（T2，团队成员实现 + 主 Agent 审查） |
+| `ff29942` | feat: compact route lazy rebuild, busy rejection and runtime extraction（T3，团队成员实现 + 主 Agent 审查） |
+| `a993c71` | feat: web realtime token usage — context ring, turn usage line, sse event sync（T4，团队成员实现 + 主 Agent 审查） |
 
 ### 质量门
 
@@ -347,4 +350,6 @@ cd web; npx playwright test
 
 ### 阻断与修复记录
 
-（待回填）
+1. **percent 量纲不一致（T2↔T4 跨契约，主 Agent 审查发现）**：PI `ContextUsage.percent` 为 0–100 刻度，T2 的 `/api/sessions/:id/usage` 返回 0–1 比率，而 T4 的 ContextUsageRing 按 0–100 渲染，基线会缩小 100 倍。修复：路由改为 `(tokens/contextWindow)*100` 并同步测试断言。
+2. **SESSION_BUSY 类型强转（T3 审查发现）**：`createApiError("SESSION_BUSY" as never, …)` 绕过类型。修复：`ApiErrorCode` 联合类型正式纳入 `SESSION_BUSY`，移除强转。
+3. **团队成员静默停止（流程问题）**：团队模式成员在轮次结束后会静默挂起，mailbox 无新消息。修复：按原名同队重 spawn 即可恢复并继续任务；主 Agent 需主动轮询 git 产出而非空等汇报。
