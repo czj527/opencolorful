@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useState } from "react";
 
 import { ApiClient } from "../../lib/api-client.js";
-import type { ModelSummary, PreferencesDocument, ProviderView, SupervisorStatusResponse } from "../../lib/types.js";
+import type { AgentView, ModelSummary, PreferencesDocument, ProviderView, SupervisorStatusResponse } from "../../lib/types.js";
 import type { ProviderFormData } from "../providers/provider-form.js";
 import {
   SETTINGS_SECTIONS,
@@ -17,6 +17,8 @@ import { LayoutSection } from "./sections/LayoutSection.js";
 import { LogsSection } from "./sections/LogsSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { UnavailableSection } from "./sections/UnavailableSection.js";
+import { AgentsSection } from "./sections/AgentsSection.js";
+import type { AgentProfile } from "../../lib/types.js";
 import "./settings.css";
 
 export interface SettingsPageProps {
@@ -37,6 +39,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentView[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +66,12 @@ export function SettingsPage(props: SettingsPageProps) {
         ]);
         if (!cancelled) { setProviders(provs); setModels(mods); }
       } catch { /* 忽略 */ }
+
+      // Agent 列表异步加载，失败不阻塞其他 section
+      try {
+        const agentList = await props.api.listAgents();
+        if (!cancelled) setAgents(agentList);
+      } catch { /* Agent 列表加载失败，不影响其他功能 */ }
     })();
     return () => { cancelled = true; };
   }, [props.api]);
@@ -136,6 +145,55 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   };
 
+  const refreshAgents = async () => {
+    try {
+      const list = await props.api.listAgents();
+      setAgents(list);
+    } catch { /* 忽略 */ }
+  };
+
+  const handleCreateAgent = async (type: string, name: string) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await props.api.createAgent(type, name);
+      await refreshAgents();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Agent 创建失败");
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveAgentProfile = async (id: string, profile: Partial<AgentProfile>) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await props.api.updateAgentProfile(id, profile);
+      await refreshAgents();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Profile 保存失败");
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleArchiveAgent = async (id: string) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await props.api.archiveAgent(id);
+      await refreshAgents();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Agent 归档失败");
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const getSupervisorLogs = async (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => {
     return props.api.getSupervisorLogs(query);
   };
@@ -166,11 +224,15 @@ export function SettingsPage(props: SettingsPageProps) {
             supervisorStatus,
             providers,
             models,
+            agents,
             onSavePreferences: handleSavePreferences,
             onSaveLayout: handleSaveLayout,
             onSaveTheme: handleSaveAppearance,
             onSaveProvider: handleSaveProvider,
             onGetSupervisorLogs: getSupervisorLogs,
+            onCreateAgent: handleCreateAgent,
+            onSaveAgentProfile: handleSaveAgentProfile,
+            onArchiveAgent: handleArchiveAgent,
             saving,
             saveError,
             loadError,
@@ -186,11 +248,15 @@ interface SectionRenderProps {
   readonly supervisorStatus: SupervisorStatusResponse | null;
   readonly providers: readonly ProviderView[];
   readonly models: readonly ModelSummary[];
+  readonly agents: readonly AgentView[];
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
   readonly onSaveTheme: (theme: PreferencesDocument["appearance"]["theme"]) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
   readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
+  readonly onCreateAgent: (type: string, name: string) => Promise<void>;
+  readonly onSaveAgentProfile: (id: string, profile: Partial<AgentProfile>) => Promise<void>;
+  readonly onArchiveAgent: (id: string) => Promise<void>;
   readonly saving: boolean;
   readonly saveError: string | null;
   readonly loadError: string | null;
@@ -200,6 +266,16 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
   // 独立于 Agent 的 section：即使 Agent 停止也可用
   if (active === "logs") return <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />;
   if (active === "runtime") return <RuntimeSection supervisorStatus={props.supervisorStatus} />;
+  if (active === "agents") return (
+    <AgentsSection
+      agents={props.agents}
+      onCreate={props.onCreateAgent}
+      onSaveProfile={props.onSaveAgentProfile}
+      onArchive={props.onArchiveAgent}
+      saving={props.saving}
+      lastSaveError={props.saveError}
+    />
+  );
   if (active === "future") return <UnavailableSection />;
 
   // 以下 section 依赖 Agent/preferences

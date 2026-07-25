@@ -45,6 +45,7 @@ describe("ApiClient", () => {
       thinkingLevel: "medium",
       messages: [],
       messageEntries: [],
+      agentId: null,
     };
     mockFetch.mockResolvedValueOnce(jsonResponse(session, 201));
 
@@ -130,5 +131,62 @@ describe("ApiClient", () => {
 
     const result = await client.compact("s1");
     expect(result.status).toBe("completed");
+  });
+
+  it("includes agentId in POST body when creating session with agent binding", async () => {
+    const session: SessionView = {
+      id: "agent-session",
+      title: "Agent Session",
+      sessionPath: "/tmp/agent-session",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      archived: false,
+      model: null,
+      toolMode: "read-only",
+      workspaceCwd: "/tmp",
+      workspaceConfirmed: false,
+      thinkingLevel: "medium",
+      messages: [],
+      messageEntries: [],
+      agentId: "agent-123",
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(session, 201));
+
+    await client.createSession("Agent Test", "/work", { agentId: "agent-123" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:4310/api/sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "Agent Test", cwd: "/work", agentId: "agent-123" }),
+      }),
+    );
+  });
+
+  it("omits agentId when creating session without agent binding", async () => {
+    const session: SessionView = {
+      id: "no-agent-session",
+      title: "No Agent",
+      sessionPath: "/tmp/no-agent",
+      createdAt: "2026-01-01",
+      updatedAt: "2026-01-01",
+      archived: false,
+      model: null,
+      toolMode: "read-only",
+      workspaceCwd: "/tmp",
+      workspaceConfirmed: false,
+      thinkingLevel: "medium",
+      messages: [],
+      messageEntries: [],
+      agentId: null,
+    };
+    mockFetch.mockResolvedValueOnce(jsonResponse(session, 201));
+
+    await client.createSession("No Agent", "/tmp");
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(mockFetch.mock.calls[0]![1]!.body as string);
+    expect(body).not.toHaveProperty("agentId");
+    expect(body).toEqual({ title: "No Agent", cwd: "/tmp" });
   });
 });

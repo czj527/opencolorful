@@ -50,9 +50,14 @@ export function AgentsSection(props: AgentsSectionProps) {
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    await props.onCreate(newType, newName.trim());
-    setNewName("");
-    setShowCreateForm(false);
+    setSaveMsg("");
+    try {
+      await props.onCreate(newType, newName.trim());
+      setNewName("");
+      setShowCreateForm(false);
+    } catch (err) {
+      setSaveMsg(err instanceof Error ? err.message : "创建失败");
+    }
   };
 
   const openEdit = (agent: AgentView) => {
@@ -241,6 +246,9 @@ export function AgentsSection(props: AgentsSectionProps) {
               placeholder="Agent 名称"
             />
           </label>
+
+          {saveMsg === "saved" && <div className="save-ok">已保存</div>}
+          {saveMsg && saveMsg !== "saved" && <div className="save-error">{saveMsg}</div>}
 
           <button
             className="settings-btn primary"

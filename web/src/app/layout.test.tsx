@@ -105,6 +105,7 @@ describe("appReducer", () => {
         messages: [],
         messageEntries: [],
         model: null,
+        agentId: null,
       },
     ];
     let state = appReducer(initialAppState, { type: "SET_SESSIONS", payload: sessions });

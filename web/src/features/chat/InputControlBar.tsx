@@ -67,7 +67,7 @@ export function InputControlBar(props: InputControlBarProps) {
       </select>
 
       {props.onSettingsClick && (
-        <button type="button" className="control-btn" onClick={props.onSettingsClick} title="设置中心" aria-label="设置中心">
+        <button type="button" className="control-btn" onClick={props.onSettingsClick} title="打开设置" aria-label="打开设置">
           <Settings size={15} />
         </button>
       )}

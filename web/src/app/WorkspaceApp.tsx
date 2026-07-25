@@ -272,14 +272,15 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
 
   const handleCreateSession = useCallback(async (title: string, cwd: string) => {
     try {
-      const session = await api.createSession(title, cwd);
+      const settings = activeAgentId !== null ? { agentId: activeAgentId } : undefined;
+      const session = await api.createSession(title, cwd, settings);
       dispatch({ type: "UPSERT_SESSION", payload: session });
       dispatch({ type: "SET_ACTIVE_SESSION", payload: session.id });
       dispatchChat({ type: "RESET" });
     } catch (error) {
       dispatch({ type: "SET_ERROR", payload: error instanceof Error ? error.message : "创建会话失败" });
     }
-  }, [api]);
+  }, [api, activeAgentId]);
 
   const handleArchiveSession = useCallback(async (id: string) => {
     try {

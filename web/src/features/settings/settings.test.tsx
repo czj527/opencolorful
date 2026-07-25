@@ -13,16 +13,23 @@ import { SettingsNav } from "./SettingsNav.js";
 import { SettingsPage } from "./SettingsPage.js";
 
 describe("SETTINGS_SECTIONS", () => {
-  it("exposes fixed sections models/defaults/layout/logs/runtime/future", () => {
+  it("exposes fixed sections models/defaults/layout/agents/logs/runtime/future", () => {
     const ids = SETTINGS_SECTIONS.map((s) => s.id);
     expect(ids).toEqual([
       "models",
       "defaults",
       "layout",
+      "agents",
       "logs",
       "runtime",
       "future",
     ]);
+  });
+
+  it("marks agents section as available", () => {
+    const agents = SETTINGS_SECTIONS.find((s) => s.id === "agents");
+    expect(agents?.available).toBe(true);
+    expect(agents?.group).toBe("general");
   });
 
   it("marks future sections as unavailable", () => {
