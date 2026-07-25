@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { SessionView, AgentView } from "../lib/types.js";
+import { AgentSelector } from "../features/chat/AgentSelector.js";
+import { Modal } from "./Modal.js";
 import { Plus, Archive, ArchiveRestore, Search, FolderOpen, Bot } from "lucide-react";
 
 interface SessionSidebarProps {
@@ -12,6 +14,8 @@ interface SessionSidebarProps {
   readonly onUnarchive: (id: string) => void;
   readonly onToggle: () => void;
   readonly agents?: readonly AgentView[];
+  readonly activeAgentId?: string | null;
+  readonly onSelectAgent?: (id: string | null) => void;
 }
 
 export function SessionSidebar({
@@ -24,8 +28,10 @@ export function SessionSidebar({
   onUnarchive,
   onToggle,
   agents,
+  activeAgentId,
+  onSelectAgent,
 }: SessionSidebarProps) {
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCwd, setNewCwd] = useState("");
   const [search, setSearch] = useState("");
@@ -51,7 +57,13 @@ export function SessionSidebar({
     onCreate(title, cwd);
     setNewTitle("");
     setNewCwd("");
-    setShowCreate(false);
+    setShowCreateModal(false);
+  };
+
+  const openCreateModal = () => {
+    setNewTitle("");
+    setNewCwd("");
+    setShowCreateModal(true);
   };
 
   return (
@@ -60,7 +72,7 @@ export function SessionSidebar({
         <span className="sidebar-title">会话</span>
         <button
           className="icon-button"
-          onClick={() => setShowCreate(!showCreate)}
+          onClick={openCreateModal}
           type="button"
           aria-label="新建会话"
           title="新建会话"
@@ -68,6 +80,47 @@ export function SessionSidebar({
           <Plus size={14} aria-hidden="true" />
         </button>
       </div>
+
+      {/* Agent 选择器 */}
+      {agents && agents.length > 0 && onSelectAgent && (
+        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-color)" }}>
+          <AgentSelector
+            agents={agents}
+            activeAgentId={activeAgentId ?? null}
+            onSelect={onSelectAgent}
+          />
+        </div>
+      )}
+
+      {/* Create session modal */}
+      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="新建会话">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <input
+            type="text"
+            placeholder="会话标题"
+            aria-label="会话标题"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            style={{ padding: "6px 10px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 6, color: "var(--text-primary)", fontSize: 13, outline: "none" }}
+          />
+          <input
+            type="text"
+            placeholder="工作目录（如 D:\\projects\\demo）"
+            aria-label="工作目录"
+            value={newCwd}
+            onChange={(e) => setNewCwd(e.target.value)}
+            style={{ padding: "6px 10px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 6, color: "var(--text-primary)", fontSize: 13, outline: "none" }}
+          />
+          <button
+            className="icon-button primary"
+            onClick={handleCreate}
+            disabled={!newTitle.trim() || !newCwd.trim()}
+            type="button"
+          >
+            创建
+          </button>
+        </div>
+      </Modal>
 
       <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", gap: 6 }}>
         <Search size={12} aria-hidden="true" style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
@@ -80,35 +133,6 @@ export function SessionSidebar({
           style={{ flex: 1, background: "none", border: "none", color: "var(--text-primary)", fontSize: 12, outline: "none" }}
         />
       </div>
-
-      {showCreate && (
-        <div style={{ padding: 12, borderBottom: "1px solid var(--border-color)", display: "flex", flexDirection: "column", gap: 8 }}>
-          <input
-            type="text"
-            placeholder="会话标题"
-            aria-label="会话标题"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            style={{ padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
-          />
-          <input
-            type="text"
-            placeholder="工作目录（如 D:\projects\demo）"
-            aria-label="工作目录"
-            value={newCwd}
-            onChange={(e) => setNewCwd(e.target.value)}
-            style={{ padding: "4px 8px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 4, color: "var(--text-primary)", fontSize: 13 }}
-          />
-          <button
-            className="icon-button primary"
-            onClick={handleCreate}
-            disabled={!newTitle.trim() || !newCwd.trim()}
-            type="button"
-          >
-            创建
-          </button>
-        </div>
-      )}
 
       <div className="sidebar-content">
         {filtered(active).length === 0 ? (

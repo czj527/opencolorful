@@ -10,7 +10,6 @@ import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
 import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
-import type { ProviderFormData } from "../features/providers/provider-form.js";
 import { usePanelResize } from "../features/layout/use-panel-resize.js";
 import {
   mergeLayoutPreferences,
@@ -342,16 +341,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
   }, [api, state.activeSessionId, chat.currentStreamId]);
 
-  const handleCompact = useCallback(async () => {
-    if (!state.activeSessionId) return;
-    const sessionId = state.activeSessionId;
-    try {
-      await api.compact(sessionId);
-    } catch {
-      wsRef.current?.compact(sessionId);
-    }
-  }, [api, state.activeSessionId]);
-
   const handleSelectModel = useCallback(async (providerId: string, modelId: string) => {
     if (!state.activeSessionId) return;
     try {
@@ -363,35 +352,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   }, [api, state.activeSessionId]);
 
   // --- 设置操作 ---
-
-  const handleSaveProvider = useCallback(async (data: ProviderFormData) => {
-    await api.updateProvider(
-      {
-        providerId: data.providerId,
-        name: data.name,
-        protocol: data.protocol,
-        baseUrl: data.baseUrl,
-        models: [{
-          modelId: data.modelId,
-          name: data.modelName || data.modelId,
-          capabilities: {
-            reasoning: data.reasoning,
-            input: ["text"],
-            contextWindow: data.contextWindow,
-            maxTokens: data.maxTokens,
-          },
-        }],
-      },
-      data.apiKey || undefined,
-    );
-    await refreshProvidersAndModels();
-  }, [api, refreshProvidersAndModels]);
-
-  const handleSaveSessionSettings = useCallback(async (settings: Record<string, unknown>) => {
-    if (!state.activeSessionId) return;
-    const session = await api.updateSessionSettings(state.activeSessionId, settings);
-    dispatch({ type: "UPSERT_SESSION", payload: session });
-  }, [api, state.activeSessionId]);
 
   const handleToolModeChange = useCallback(async (mode: string) => {
     if (!state.activeSessionId) return;
@@ -440,14 +400,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       dispatchChat({ type: "RESET" });
     }
   }, [api, state.sessions, handleSelectSession]);
-
-  const handleShowLogs = useCallback(async () => {
-    try {
-      const { logs } = await api.getSupervisorLogs();
-      const container = document.getElementById("supervisor-logs");
-      if (container) container.textContent = logs || "暂无日志";
-    } catch { /* 忽略 */ }
-  }, [api]);
 
   // --- Supervisor 操作 ---
 
@@ -596,6 +548,9 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           onArchive={(id) => void handleArchiveSession(id)}
           onUnarchive={(id) => void handleUnarchiveSession(id)}
           onToggle={handleToggleLeft}
+          agents={agents}
+          activeAgentId={activeAgentId}
+          onSelectAgent={(id) => void handleSelectAgent(id)}
         />
         {!focusMode && !breakpoints.leftNarrow && (
           <div ref={leftResizeRef} className="resize-handle" {...leftResize.resizeHandleProps} />
@@ -604,14 +559,10 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           session={activeSession}
           chat={chat}
           models={state.models}
-          agents={agents}
-          activeAgentId={activeAgentId}
           onSend={(content) => void handleSend(content)}
           onAbort={() => void handleAbort()}
-          onCompact={() => void handleCompact()}
-          onToggleThinking={() => dispatchChat({ type: "TOGGLE_THINKING" })}
+          onToggleThinking={(id) => dispatchChat({ type: "TOGGLE_THINKING", id })}
           onSelectModel={(providerId, modelId) => void handleSelectModel(providerId, modelId)}
-          onSelectAgent={(id) => void handleSelectAgent(id)}
           onToolModeChange={(mode) => void handleToolModeChange(mode)}
           onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
@@ -624,14 +575,8 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />
         )}
         <InspectorSidebar
-          session={activeSession}
-          providers={state.providers}
           collapsed={rightCollapsed}
-          saving={state.loading}
           onToggle={handleToggleRight}
-          onSaveProvider={handleSaveProvider}
-          onSaveSessionSettings={handleSaveSessionSettings}
-          onShowLogs={() => void handleShowLogs()}
         />
       </div>
     </div>

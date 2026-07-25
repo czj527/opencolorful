@@ -10,39 +10,41 @@
   flex-shrink: 0;
 }
 
-/* 输入行：textarea + 操作按钮 */
-.chat-composer-input-row {
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px 8px;
-  align-items: flex-end;
+/* 输入区：textarea + 内部绝对定位按钮 */
+.chat-composer-input-area {
+  position: relative;
+  padding: 10px 12px 4px;
 }
 
-.chat-composer-input-row .chat-input {
-  flex: 1;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+.chat-composer-input-area .chat-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   padding: 8px 12px;
   color: var(--text-primary);
   font-size: 14px;
   resize: none;
   min-height: 40px;
   max-height: 120px;
+  box-sizing: border-box;
 }
 
-.chat-composer-input-row .chat-input:focus {
+.chat-composer-input-area .chat-input:focus {
   outline: none;
-  border-color: var(--accent);
 }
 
-/* 控件底行：工具模式 | 思考级别 | 模型选择 */
+.composer-send-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 控件行：工具模式 | 思考级别 | 模型选择 */
 .chat-composer-controls {
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 6px 12px 8px;
-  border-top: 1px solid var(--border-color);
+  padding: 4px 12px 8px;
 }
 
 .composer-separator {
@@ -81,8 +83,6 @@
 }
 
 .composer-model-select {
-  flex: 1;
-  min-width: 0;
 }
 
 /* === Agent 欢迎卡片 === */

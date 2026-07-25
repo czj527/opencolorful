@@ -354,19 +354,15 @@ test.describe("web workspace 真实浏览器验收", () => {
       await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
     }
 
-    // 桌面宽度默认右栏已展开，无需点击；若已折叠则展开
-    const rightToggle = page.getByRole("button", { name: /详情面板/ });
-    const label = await rightToggle.getAttribute("aria-label");
-    if (label?.includes("展开")) {
-      await rightToggle.click();
-    }
+    // 直接导航到设置页面
+    await page.goto(`${baseUrl()}/settings`);
+    await expect(page.getByTestId("settings-content")).toBeVisible({ timeout: 10_000 });
 
-    // 切换到 Provider 页签
-    await page.getByRole("button", { name: "Provider" }).click();
-    await page.getByRole("button", { name: "Provider" }).click();
+    // 在设置导航中切换到 "模型与 Provider" section（默认已选中，但确保一下）
+    await page.getByTestId("settings-nav-models").click();
 
     // 打开添加表单
-    await page.getByRole("button", { name: "+ 添加" }).click();
+    await page.getByRole("button", { name: "+ 添加 Provider" }).click();
 
     // 填写表单
     await page.getByLabel("Provider ID").fill("form-provider");
@@ -380,7 +376,7 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 验证已配置凭据（fixture-provider 已存在，form-provider 新增后有两项）
     await expect(page.getByText("Form Provider")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("✓ 已配置凭据").first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText("已配置凭据").first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("真实 Abort：慢速流中点击中断，生成终止", async ({ page }) => {

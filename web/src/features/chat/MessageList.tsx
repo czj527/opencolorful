@@ -21,8 +21,8 @@ interface MessageListProps {
   readonly planItems: readonly PlanItemData[];
   readonly attachments: readonly Attachment[];
   readonly thinking: string;
-  readonly thinkingCollapsed: boolean;
-  readonly onToggleThinking: () => void;
+  readonly collapsedThinkingBlocks: ReadonlySet<string>;
+  readonly onToggleThinking: (id: string) => void;
   readonly recovering: boolean;
   readonly reducedMotion: boolean;
   readonly showThinking?: boolean;
@@ -71,7 +71,7 @@ export function MessageList({
   planItems,
   attachments,
   thinking,
-  thinkingCollapsed,
+  collapsedThinkingBlocks,
   onToggleThinking,
   recovering,
   reducedMotion,
@@ -138,6 +138,7 @@ export function MessageList({
       if (!showThinking) return null;
       const thinkingText = item.content ?? thinking;
       if (!thinkingText) return null;
+      const collapsed = collapsedThinkingBlocks.has(item.id);
       return (
         <div
           key={item.id}
@@ -151,14 +152,14 @@ export function MessageList({
         >
           <button
             type="button"
-            onClick={onToggleThinking}
+            onClick={() => onToggleThinking(item.id)}
             style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: 12 }}
-            aria-expanded={!thinkingCollapsed}
+            aria-expanded={!collapsed}
           >
             <Brain size={12} aria-hidden="true" />
-            思考过程 {thinkingCollapsed ? "（点击展开）" : "（点击收起）"}
+            思考过程 {collapsed ? "（点击展开）" : "（点击收起）"}
           </button>
-          {!thinkingCollapsed && (
+          {!collapsed && (
             <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{thinkingText}</div>
           )}
         </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Send, Square, Package } from "lucide-react";
+import { Send, Square } from "lucide-react";
 import type { ModelSummary } from "../../lib/types.js";
 import "./chat.css";
 
@@ -8,7 +8,6 @@ interface MessageComposerProps {
   readonly running: boolean;
   readonly onSend: (content: string) => void;
   readonly onAbort: () => void;
-  readonly onCompact: () => void;
   /** 控件：模型选择 */
   readonly models: readonly ModelSummary[];
   readonly selectedModel: { providerId: string; modelId: string } | null;
@@ -29,12 +28,21 @@ const TOOL_MODES: { value: string; label: string }[] = [
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
+const THINKING_LABELS: Record<string, string> = {
+  off: "关闭",
+  minimal: "极简",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "很高",
+  max: "最高",
+};
+
 export function MessageComposer({
   disabled,
   running,
   onSend,
   onAbort,
-  onCompact,
   models,
   selectedModel,
   onSelectModel,
@@ -58,8 +66,8 @@ export function MessageComposer({
 
   return (
     <div className="chat-composer-card">
-      {/* 输入行 */}
-      <div className="chat-composer-input-row">
+      {/* 输入区：textarea */}
+      <div className="chat-composer-input-area">
         <textarea
           className="chat-input"
           placeholder={disabled ? "请先选择会话" : "输入消息，Enter 发送，Shift+Enter 换行"}
@@ -74,41 +82,9 @@ export function MessageComposer({
             }
           }}
         />
-        {running ? (
-          <button
-            className="icon-button danger"
-            onClick={onAbort}
-            type="button"
-            aria-label="中断生成"
-            title="中断当前生成"
-          >
-            <Square size={14} aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            className="icon-button primary"
-            onClick={submit}
-            disabled={disabled || !value.trim()}
-            type="button"
-            aria-label="发送消息"
-            title="发送消息"
-          >
-            <Send size={14} aria-hidden="true" />
-          </button>
-        )}
-        <button
-          className="icon-button"
-          onClick={onCompact}
-          disabled={disabled || running}
-          type="button"
-          aria-label="压缩上下文"
-          title="压缩会话上下文"
-        >
-          <Package size={14} aria-hidden="true" />
-        </button>
       </div>
 
-      {/* 控件底行 */}
+      {/* 控件行：工具模式 | 思考级别 | 模型选择 | 发送 */}
       <div className="chat-composer-controls">
         <select
           className="composer-control-select"
@@ -132,7 +108,7 @@ export function MessageComposer({
           aria-label="思考级别"
         >
           {THINKING_LEVELS.map((l) => (
-            <option key={l} value={l}>🧠 {l}</option>
+            <option key={l} value={l}>🧠 {THINKING_LABELS[l]}</option>
           ))}
         </select>
 
@@ -153,6 +129,29 @@ export function MessageComposer({
             <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.name}</option>
           ))}
         </select>
+
+        {running ? (
+          <button
+            className="icon-button danger composer-send-btn"
+            onClick={onAbort}
+            type="button"
+            aria-label="中断生成"
+            title="中断当前生成"
+          >
+            <Square size={14} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            className="icon-button primary composer-send-btn"
+            onClick={submit}
+            disabled={disabled || !value.trim()}
+            type="button"
+            aria-label="发送消息"
+            title="发送消息"
+          >
+            <Send size={14} aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );

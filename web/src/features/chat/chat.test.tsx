@@ -191,11 +191,15 @@ describe("chatReducer", () => {
     expect(state.currentStreamId).toBeNull();
   });
 
-  it("toggles thinking visibility", () => {
-    let state = chatReducer(initialChatState, { type: "TOGGLE_THINKING" });
-    expect(state.thinkingCollapsed).toBe(false);
-    state = chatReducer(state, { type: "TOGGLE_THINKING" });
-    expect(state.thinkingCollapsed).toBe(true);
+  it("toggles per-block thinking visibility", () => {
+    let state = chatReducer(initialChatState, { type: "TOGGLE_THINKING", id: "think-1" });
+    expect(state.collapsedThinkingBlocks.has("think-1")).toBe(true);
+    state = chatReducer(state, { type: "TOGGLE_THINKING", id: "think-1" });
+    expect(state.collapsedThinkingBlocks.has("think-1")).toBe(false);
+    // independent block
+    state = chatReducer(state, { type: "TOGGLE_THINKING", id: "think-2" });
+    expect(state.collapsedThinkingBlocks.has("think-1")).toBe(false);
+    expect(state.collapsedThinkingBlocks.has("think-2")).toBe(true);
   });
 });
 
@@ -439,7 +443,7 @@ describe("timeline ordering with tool calls and historyEntries", () => {
         planItems={[]}
         attachments={[]}
         thinking=""
-        thinkingCollapsed
+        collapsedThinkingBlocks={new Set()}
         onToggleThinking={() => {}}
         recovering={false}
         reducedMotion
@@ -475,7 +479,6 @@ describe("MessageComposer integrated controls", () => {
         running={false}
         onSend={() => {}}
         onAbort={() => {}}
-        onCompact={() => {}}
         models={fakeModels}
         selectedModel={null}
         onSelectModel={() => {}}
@@ -502,7 +505,6 @@ describe("MessageComposer integrated controls", () => {
         running={false}
         onSend={() => {}}
         onAbort={() => {}}
-        onCompact={() => {}}
         models={fakeModels}
         selectedModel={null}
         onSelectModel={() => {}}
@@ -514,7 +516,7 @@ describe("MessageComposer integrated controls", () => {
     );
     // 一体化卡片容器
     expect(html).toContain("chat-composer-card");
-    expect(html).toContain("chat-composer-input-row");
+    expect(html).toContain("chat-composer-input-area");
     expect(html).toContain("chat-composer-controls");
     // 控件间细分隔线
     expect(html).toContain("composer-separator");
@@ -644,7 +646,7 @@ describe("MessageList display toggles", () => {
         planItems={[]}
         attachments={[]}
         thinking="hidden thought"
-        thinkingCollapsed={false}
+        collapsedThinkingBlocks={new Set()}
         onToggleThinking={() => {}}
         recovering={false}
         reducedMotion
@@ -663,7 +665,7 @@ describe("MessageList display toggles", () => {
         planItems={[]}
         attachments={[]}
         thinking="hidden thought"
-        thinkingCollapsed={false}
+        collapsedThinkingBlocks={new Set()}
         onToggleThinking={() => {}}
         recovering={false}
         reducedMotion
@@ -695,7 +697,7 @@ describe("MessageList display toggles", () => {
         planItems={[]}
         attachments={[]}
         thinking=""
-        thinkingCollapsed
+        collapsedThinkingBlocks={new Set()}
         onToggleThinking={() => {}}
         recovering={false}
         reducedMotion
@@ -714,7 +716,7 @@ describe("MessageList display toggles", () => {
         planItems={[]}
         attachments={[]}
         thinking=""
-        thinkingCollapsed
+        collapsedThinkingBlocks={new Set()}
         onToggleThinking={() => {}}
         recovering={false}
         reducedMotion

@@ -48,7 +48,8 @@ export interface ChatState {
   /** 每个 stream 的独立 sequence 游标（同一 Session 的每个 stream 从 1 开始） */
   readonly cursors: ReadonlyMap<string, number>;
   readonly thinking: string;
-  readonly thinkingCollapsed: boolean;
+  /** 每个思考块的展开/收起状态：存在=收起，不存在=展开 */
+  readonly collapsedThinkingBlocks: ReadonlySet<string>;
   readonly status: "idle" | "running" | "error";
   readonly error: string | null;
 }
@@ -64,7 +65,7 @@ export const initialChatState: ChatState = {
   pendingStreamId: null,
   cursors: new Map(),
   thinking: "",
-  thinkingCollapsed: true,
+  collapsedThinkingBlocks: new Set(),
   status: "idle",
   error: null,
 };
@@ -92,7 +93,7 @@ export type ChatAction =
   | { type: "PROMPT_SENT"; streamId: string; userContent: string }
   | { type: "EVENT"; event: PlatformEventEnvelope }
   | { type: "EVENT_BATCH"; events: readonly PlatformEventEnvelope[] }
-  | { type: "TOGGLE_THINKING" }
+  | { type: "TOGGLE_THINKING"; id: string }
   | { type: "SET_ERROR"; error: string };
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -132,6 +133,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         status: "running",
         error: null,
         thinking: "",
+        collapsedThinkingBlocks: new Set(),
         toolCalls: new Map(),
         planItems: [],
         attachments: [],
@@ -376,8 +378,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       }
     }
 
-    case "TOGGLE_THINKING":
-      return { ...state, thinkingCollapsed: !state.thinkingCollapsed };
+    case "TOGGLE_THINKING": {
+      const next = new Set(state.collapsedThinkingBlocks);
+      if (next.has(action.id)) {
+        next.delete(action.id);
+      } else {
+        next.add(action.id);
+      }
+      return { ...state, collapsedThinkingBlocks: next };
+    }
 
     case "SET_ERROR":
       return {
@@ -484,7 +493,7 @@ export function buildChatStateFromHistory(entries: readonly HistoryMessageEntry[
     timeline,
     toolCalls,
     thinking: thinkingText,
-    thinkingCollapsed: true,
+    collapsedThinkingBlocks: new Set(),
     status: "idle",
   };
 }
