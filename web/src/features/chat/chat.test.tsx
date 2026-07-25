@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { chatReducer, initialChatState, getStreamCursor, sanitizeMarkdown, isSafeUrl, type ChatAction } from "./chat-state.js";
-import { MessageBlock } from "./MessageList.js";
-import type { PlatformEventEnvelope } from "../../lib/types.js";
+import { MessageBlock, MessageList } from "./MessageList.js";
+import { InputControlBar } from "./InputControlBar.js";
+import type { PlatformEventEnvelope, ModelSummary } from "../../lib/types.js";
 
 function makeEvent(type: string, payload: unknown, sequence = 1, streamId = "st1"): PlatformEventEnvelope {
   return {
@@ -338,5 +339,168 @@ describe("chatReducer EVENT_BATCH", () => {
     expect(kinds).toContain("tool");
     expect(kinds).toContain("plan");
     expect(kinds).toContain("attachment");
+  });
+});
+
+describe("timeline ordering with tool calls and historyEntries", () => {
+  it("timeline message items use real message ids, not synthetic stream-key ids", () => {
+    // 模拟 E2E 完整对话流程：Provider → 工具调用 → 工具跟进回复
+    let state = chatReducer(initialChatState, {
+      type: "PROMPT_SENT",
+      streamId: "st-e2e",
+      userContent: "读取 target.txt",
+    });
+
+    // 第一段：模型返回 tool_calls（无文本内容）
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("message.started", { role: "assistant" }, 1, "st-e2e"),
+    });
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("tool.started", { toolCallId: "call-read", toolName: "read" }, 2, "st-e2e"),
+    });
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("tool.completed", { toolCallId: "call-read", result: "E2E_WORKSPACE_CONTENT\n", isError: false }, 3, "st-e2e"),
+    });
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("message.completed", { role: "assistant", content: "" }, 4, "st-e2e"),
+    });
+
+    // 第二段：工具跟进回复 "读取完成"
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("message.started", { role: "assistant" }, 5, "st-e2e"),
+    });
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("message.delta", { role: "assistant", delta: "读取完成" }, 6, "st-e2e"),
+    });
+    state = chatReducer(state, {
+      type: "EVENT",
+      event: makeEvent("message.completed", { role: "assistant", content: "读取完成" }, 7, "st-e2e"),
+    });
+
+    // 验证 timeline 中每个 message item 都能在 messages 中找到
+    const messagesById = new Map(state.messages.map((m) => [m.id, m]));
+    for (const item of state.timeline) {
+      if (item.kind !== "message") continue;
+      const message = messagesById.get(item.id);
+      expect(message, `timeline message item id="${item.id}" not found in messages`).toBeDefined();
+    }
+
+    // 验证 timeline 顺序：message → tool → message（第二个 assistant message）
+    expect(state.timeline.map((i) => i.kind)).toEqual([
+      "message", // user
+      "message", // first assistant (empty)
+      "tool",    // call-read
+      "message", // second assistant ("读取完成")
+    ]);
+
+    // 验证工具卡片在最终答案之前
+    const toolIndex = state.timeline.findIndex((i) => i.kind === "tool" && i.id === "call-read");
+    const finalAnswerTimelineIndex = state.timeline.findIndex(
+      (i) => i.kind === "message" && messagesById.get(i.id)?.content === "读取完成",
+    );
+    expect(toolIndex).toBeGreaterThanOrEqual(0);
+    expect(finalAnswerTimelineIndex).toBeGreaterThan(toolIndex);
+  });
+
+  it("dedup with historyEntries: tool card renders before final answer in MessageList", () => {
+    // 使用 renderToStaticMarkup 检查 MessageList 渲染顺序
+    const messages = [
+      { id: "user-st-e2e", role: "user" as const, content: "读取 target.txt", timestamp: "", streaming: false },
+      { id: "msg-1", role: "assistant" as const, content: "", timestamp: "", streaming: false },
+      { id: "msg-2", role: "assistant" as const, content: "读取完成", timestamp: "", streaming: false },
+    ];
+    const timeline: import("./chat-state.js").ChatTimelineItem[] = [
+      { kind: "message", id: "user-st-e2e" },
+      { kind: "message", id: "msg-1" },
+      { kind: "tool", id: "call-read" },
+      { kind: "message", id: "msg-2" },
+    ];
+    const toolCalls = new Map([
+      ["call-read", { toolCallId: "call-read", toolName: "read", status: "completed" as const, result: "result" }],
+    ]);
+    const historyEntries = [
+      { role: "user" as const, content: "读取 target.txt" },
+      { role: "assistant" as const, content: "" },
+      { role: "assistant" as const, content: "读取完成" },
+    ];
+
+    const html = renderToStaticMarkup(
+      <MessageList
+        messages={messages}
+        historyEntries={historyEntries}
+        timeline={timeline}
+        toolCalls={toolCalls}
+        planItems={[]}
+        attachments={[]}
+        thinking=""
+        thinkingCollapsed
+        onToggleThinking={() => {}}
+        recovering={false}
+        reducedMotion
+      />,
+    );
+
+    // 工具卡片 (data-testid="tool-call-call-read") 应在 "读取完成" 文本之前
+    const toolPos = html.indexOf('data-testid="tool-call-call-read"');
+    const finalAnswerPos = html.indexOf("读取完成");
+    expect(toolPos).toBeGreaterThanOrEqual(0);
+    expect(finalAnswerPos).toBeGreaterThanOrEqual(0);
+    expect(toolPos).toBeLessThan(finalAnswerPos);
+  });
+});
+
+describe("InputControlBar settings button accessibility", () => {
+  const fakeModels: ModelSummary[] = [
+    {
+      providerId: "test-provider",
+      modelId: "test-model",
+      name: "Test Model",
+      protocol: "openai-completions",
+      baseUrl: "http://localhost:8080/v1",
+      capabilities: { reasoning: true, input: ["text"], contextWindow: 32768, maxTokens: 4096 },
+      credentialConfigured: true,
+    },
+  ];
+
+  it("uses unique aria-label '打开设置' distinct from ChatPane header '设置中心'", () => {
+    const html = renderToStaticMarkup(
+      <InputControlBar
+        models={fakeModels}
+        selectedModel={null}
+        toolMode="read-only"
+        thinkingLevel="medium"
+        disabled={false}
+        onSelectModel={() => {}}
+        onToolModeChange={() => {}}
+        onThinkingLevelChange={() => {}}
+        onSettingsClick={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-label="打开设置"');
+    // 确保不再使用重复标签
+    expect(html).not.toContain('aria-label="设置中心"');
+  });
+
+  it("does not render settings button when onSettingsClick is not provided", () => {
+    const html = renderToStaticMarkup(
+      <InputControlBar
+        models={fakeModels}
+        selectedModel={null}
+        toolMode="read-only"
+        thinkingLevel="medium"
+        disabled={false}
+        onSelectModel={() => {}}
+        onToolModeChange={() => {}}
+        onThinkingLevelChange={() => {}}
+      />,
+    );
+    expect(html).not.toContain("设置中心");
+    expect(html).not.toContain("打开设置");
   });
 });
