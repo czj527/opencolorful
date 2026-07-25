@@ -14,10 +14,28 @@ export const EVENT_TYPES = [
   "turn.completed",
   "plan.updated",
   "attachment.available",
+  "session.compacting",
+  "session.compacted",
   "error",
 ] as const;
 
 export type PlatformEventType = (typeof EVENT_TYPES)[number];
+
+export const TokenUsageSchema = Type.Object({
+  input: Type.Integer({ minimum: 0 }),
+  output: Type.Integer({ minimum: 0 }),
+  cacheRead: Type.Integer({ minimum: 0 }),
+  cacheWrite: Type.Integer({ minimum: 0 }),
+  totalTokens: Type.Integer({ minimum: 0 }),
+});
+export type TokenUsage = Static<typeof TokenUsageSchema>;
+
+export const ContextUsageSchema = Type.Object({
+  tokens: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  contextWindow: Type.Integer({ minimum: 1 }),
+  percent: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+});
+export type ContextUsage = Static<typeof ContextUsageSchema>;
 
 const EventPayloadSchema = Type.Union([
   Type.Object({ status: Type.String() }),
@@ -28,13 +46,25 @@ const EventPayloadSchema = Type.Union([
   Type.Object({ toolCallId: Type.String(), toolName: Type.String() }),
   Type.Object({ toolCallId: Type.String(), delta: Type.String() }),
   Type.Object({ toolCallId: Type.String(), result: Type.Unknown() }),
-  Type.Object({ turnId: Type.String() }),
-  Type.Object({ turnId: Type.String(), usage: Type.Optional(Type.Unknown()) }),
+  Type.Object({
+    turnId: Type.String(),
+    usage: Type.Optional(TokenUsageSchema),
+    context: Type.Optional(ContextUsageSchema),
+  }),
   Type.Object({ items: Type.Array(Type.String()) }),
   Type.Object({
     attachmentId: Type.String(),
     name: Type.String(),
     mimeType: Type.Optional(Type.String()),
+  }),
+  Type.Object({ reason: Type.String() }),
+  Type.Object({
+    reason: Type.String(),
+    tokensBefore: Type.Optional(Type.Integer({ minimum: 0 })),
+    tokensAfter: Type.Optional(Type.Integer({ minimum: 0 })),
+    summary: Type.Optional(Type.String()),
+    aborted: Type.Optional(Type.Boolean()),
+    errorMessage: Type.Optional(Type.String()),
   }),
   Type.Object({ code: Type.String(), message: Type.String(), retryable: Type.Boolean() }),
 ]);

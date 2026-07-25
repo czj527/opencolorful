@@ -28,7 +28,30 @@ export class PlatformEventMapper {
       return [this.envelope("turn.started", { turnId: this.turnId })];
     }
     if (event.type === "turn_end") {
-      return [this.envelope("turn.completed", { turnId: this.turnId })];
+      const payload: Record<string, unknown> = { turnId: this.turnId };
+      if (event.usage) payload.usage = event.usage;
+      if (event.context) payload.context = event.context;
+      return [this.envelope("turn.completed", payload)];
+    }
+    if (event.type === "compaction_start") {
+      return [this.envelope("session.compacting", { reason: event.reason })];
+    }
+    if (event.type === "compaction_end") {
+      const payload: Record<string, unknown> = {
+        reason: event.reason,
+        aborted: event.aborted,
+      };
+      if (event.tokensBefore !== undefined) payload.tokensBefore = event.tokensBefore;
+      if (event.estimatedTokensAfter !== undefined) {
+        payload.tokensAfter = event.estimatedTokensAfter;
+      }
+      if (event.summary !== undefined) {
+        payload.summary = sanitizeSensitiveText(event.summary, 500);
+      }
+      if (event.errorMessage !== undefined) {
+        payload.errorMessage = sanitizeSensitiveText(event.errorMessage, 200);
+      }
+      return [this.envelope("session.compacted", payload)];
     }
     if (event.type === "message_start") {
       return event.role === "assistant"

@@ -53,6 +53,78 @@ describe("platform events", () => {
 
     expect(result.ok).toBe(false);
   });
+
+  it("accepts turn.completed carrying usage and context", () => {
+    const result = validatePlatformEvent(
+      messageEvent({
+        type: "turn.completed",
+        payload: {
+          turnId: "turn-1",
+          usage: { input: 1200, output: 340, cacheRead: 800, cacheWrite: 100, totalTokens: 2440 },
+          context: { tokens: 15000, contextWindow: 200000, percent: 7.5 },
+        },
+      } as never),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts turn.completed without usage and nullable context fields", () => {
+    const bare = validatePlatformEvent(
+      messageEvent({ type: "turn.completed", payload: { turnId: "turn-1" } } as never),
+    );
+    const nullContext = validatePlatformEvent(
+      messageEvent({
+        type: "turn.completed",
+        payload: {
+          turnId: "turn-1",
+          context: { tokens: null, contextWindow: 200000, percent: null },
+        },
+      } as never),
+    );
+
+    expect(bare.ok).toBe(true);
+    expect(nullContext.ok).toBe(true);
+  });
+
+  it("rejects malformed usage on turn.completed", () => {
+    const negative = validatePlatformEvent(
+      messageEvent({
+        type: "turn.completed",
+        payload: { turnId: "turn-1", usage: { input: -1, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 } },
+      } as never),
+    );
+    const missing = validatePlatformEvent(
+      messageEvent({
+        type: "turn.completed",
+        payload: { turnId: "turn-1", usage: { input: 1 } },
+      } as never),
+    );
+
+    expect(negative.ok).toBe(false);
+    expect(missing.ok).toBe(false);
+  });
+
+  it("accepts session.compacting and session.compacted events", () => {
+    const compacting = validatePlatformEvent(
+      messageEvent({ type: "session.compacting", payload: { reason: "manual" } } as never),
+    );
+    const compacted = validatePlatformEvent(
+      messageEvent({
+        type: "session.compacted",
+        payload: {
+          reason: "manual",
+          tokensBefore: 120000,
+          tokensAfter: 30000,
+          summary: "摘要",
+          aborted: false,
+        },
+      } as never),
+    );
+
+    expect(compacting.ok).toBe(true);
+    expect(compacted.ok).toBe(true);
+  });
 });
 
 describe("event sequence", () => {

@@ -11,11 +11,13 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import type { ContextUsage, TokenUsage } from "../contracts/events.js";
 import type {
   PiAgentEvent,
   PiAgentSessionHandle,
   PiAgentSessionOptions,
   PiFauxAgentOptions,
+  PiSessionUsageStats,
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
 
@@ -35,21 +37,101 @@ function messageText(message: unknown): string {
     .join("");
 }
 
-function mapAgentEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
-  if (
-    event.type === "agent_start" ||
-    event.type === "agent_end" ||
-    event.type === "turn_start" ||
-    event.type === "turn_end"
-  ) {
-    return { type: event.type };
-  }
-  if (event.type === "message_start") {
-    return { type: "message_start", role: event.message.role };
-  }
-  if (event.type === "message_end") {
-    return { type: "message_end", role: event.message.role, content: messageText(event.message) };
-  }
+function toNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
+
+function extractUsage(message: unknown): TokenUsage | undefined {
+  const usage = (message as { usage?: unknown } | undefined)?.usage;
+  if (typeof usage !== "object" || usage === null) return undefined;
+  const raw = usage as Record<string, unknown>;
+  return {
+    input: toNonNegativeInteger(raw.input),
+    output: toNonNegativeInteger(raw.output),
+    cacheRead: toNonNegativeInteger(raw.cacheRead),
+    cacheWrite: toNonNegativeInteger(raw.cacheWrite),
+    totalTokens: toNonNegativeInteger(raw.totalTokens),
+  };
+}
+
+function addUsage(total: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+  if (!total) return next;
+  return {
+    input: total.input + next.input,
+    output: total.output + next.output,
+    cacheRead: total.cacheRead + next.cacheRead,
+    cacheWrite: total.cacheWrite + next.cacheWrite,
+    totalTokens: total.totalTokens + next.totalTokens,
+  };
+}
+
+function toContextUsage(raw: {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}): ContextUsage {
+  return {
+    tokens: raw.tokens,
+    contextWindow: raw.contextWindow,
+    percent: raw.percent,
+  };
+}
+
+function createSessionEventMapper(
+  getContextUsage: () => ContextUsage | undefined,
+): (event: AgentSessionEvent) => PiAgentEvent | undefined {
+  // 同一 turn 内可能有多条 assistant 消息（工具调用链），usage 需要累计到 turn_end 一并发出
+  let turnUsage: TokenUsage | undefined;
+
+  return (event: AgentSessionEvent): PiAgentEvent | undefined => {
+    if (event.type === "turn_start") {
+      turnUsage = undefined;
+      return { type: "turn_start" };
+    }
+    if (event.type === "turn_end") {
+      const usage = turnUsage ?? extractUsage(event.message);
+      turnUsage = undefined;
+      const context = getContextUsage();
+      return {
+        type: "turn_end",
+        ...(usage ? { usage } : {}),
+        ...(context ? { context } : {}),
+      };
+    }
+    if (event.type === "compaction_start") {
+      return { type: "compaction_start", reason: event.reason };
+    }
+    if (event.type === "compaction_end") {
+      const result = event.result;
+      return {
+        type: "compaction_end",
+        reason: event.reason,
+        aborted: event.aborted,
+        ...(result ? { tokensBefore: result.tokensBefore, summary: result.summary } : {}),
+        ...(result?.estimatedTokensAfter !== undefined
+          ? { estimatedTokensAfter: result.estimatedTokensAfter }
+          : {}),
+        ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}),
+      };
+    }
+    if (event.type === "agent_start" || event.type === "agent_end") {
+      return { type: event.type };
+    }
+    if (event.type === "message_start") {
+      return { type: "message_start", role: event.message.role };
+    }
+    if (event.type === "message_end") {
+      if (event.message.role === "assistant") {
+        const usage = extractUsage(event.message);
+        if (usage) turnUsage = addUsage(turnUsage, usage);
+      }
+      return { type: "message_end", role: event.message.role, content: messageText(event.message) };
+    }
+    return mapRemainingEvent(event);
+  };
+}
+
+function mapRemainingEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
   if (event.type === "message_update") {
     const update = event.assistantMessageEvent;
     if (update.type === "text_delta") return { type: "text_delta", delta: update.delta };
@@ -169,11 +251,16 @@ export async function createPiFauxAgentSession(
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
 
+  const mapEvent = createSessionEventMapper(() => {
+    const usage = session.getContextUsage();
+    return usage ? toContextUsage(usage) : undefined;
+  });
+
   return {
     sessionId: session.sessionId,
     subscribe(listener) {
       return session.subscribe((event) => {
-        const mapped = mapAgentEvent(event);
+        const mapped = mapEvent(event);
         if (mapped) listener(mapped);
       });
     },
@@ -185,6 +272,9 @@ export async function createPiFauxAgentSession(
     },
     async compact() {
       await session.compact();
+    },
+    getUsageStats() {
+      return readUsageStats(session);
     },
     dispose() {
       session.dispose();
@@ -226,11 +316,16 @@ export async function createPiAgentSession(
 
   const { session } = await createAgentSession(createOptions);
 
+  const mapEvent = createSessionEventMapper(() => {
+    const usage = session.getContextUsage();
+    return usage ? toContextUsage(usage) : undefined;
+  });
+
   return {
     sessionId: session.sessionId,
     subscribe(listener) {
       return session.subscribe((event) => {
-        const mapped = mapAgentEvent(event);
+        const mapped = mapEvent(event);
         if (mapped) listener(mapped);
       });
     },
@@ -243,8 +338,39 @@ export async function createPiAgentSession(
     async compact() {
       await session.compact();
     },
+    getUsageStats() {
+      return readUsageStats(session);
+    },
     dispose() {
       session.dispose();
     },
+  };
+}
+
+type SessionWithUsageStats = {
+  getSessionStats(): {
+    tokens: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+  };
+  getContextUsage(): { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
+};
+
+function readUsageStats(session: SessionWithUsageStats): PiSessionUsageStats {
+  const stats = session.getSessionStats();
+  const context = session.getContextUsage();
+  return {
+    tokens: {
+      input: toNonNegativeInteger(stats.tokens.input),
+      output: toNonNegativeInteger(stats.tokens.output),
+      cacheRead: toNonNegativeInteger(stats.tokens.cacheRead),
+      cacheWrite: toNonNegativeInteger(stats.tokens.cacheWrite),
+      total: toNonNegativeInteger(stats.tokens.total),
+    },
+    ...(context ? { context: toContextUsage(context) } : {}),
   };
 }

@@ -1,3 +1,16 @@
+import type { ContextUsage, TokenUsage } from "../contracts/events.js";
+
+export interface PiSessionUsageStats {
+  readonly tokens: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly total: number;
+  };
+  readonly context?: ContextUsage;
+}
+
 export interface HistoryToolCall {
   readonly toolCallId: string;
   readonly toolName: string;
@@ -87,7 +100,22 @@ export interface PiModelRuntimeHandle {
 }
 
 export type PiAgentEvent =
-  | { readonly type: "agent_start" | "agent_end" | "turn_start" | "turn_end" }
+  | { readonly type: "agent_start" | "agent_end" | "turn_start" }
+  | {
+      readonly type: "turn_end";
+      readonly usage?: TokenUsage;
+      readonly context?: ContextUsage;
+    }
+  | { readonly type: "compaction_start"; readonly reason: string }
+  | {
+      readonly type: "compaction_end";
+      readonly reason: string;
+      readonly aborted: boolean;
+      readonly tokensBefore?: number;
+      readonly estimatedTokensAfter?: number;
+      readonly summary?: string;
+      readonly errorMessage?: string;
+    }
   | { readonly type: "message_start"; readonly role: string }
   | { readonly type: "message_end"; readonly role: string; readonly content: string }
   | { readonly type: "text_delta" | "thinking_delta"; readonly delta: string }
@@ -114,6 +142,7 @@ export interface PiAgentSessionHandle {
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
   compact(): Promise<void>;
+  getUsageStats(): PiSessionUsageStats | undefined;
   dispose(): void;
 }
 
