@@ -1,0 +1,28 @@
+/* === 计划列表卡片 === */
+
+.planList {
+  padding: var(--space-8) var(--space-12);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  border-left: 2px solid var(--accent);
+  font-size: var(--fs-ui);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.list {
+  margin: 0;
+  padding-left: var(--space-20);
+}
+
+.item {
+  margin-bottom: var(--space-2);
+  line-height: 1.5;
+}

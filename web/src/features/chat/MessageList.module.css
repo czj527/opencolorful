@@ -1,0 +1,196 @@
+/* === 聊天消息列表容器 === */
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12) var(--space-12) var(--space-16);
+  scroll-behavior: smooth;
+}
+
+/* === 消息块（用户 / assistant 统一卡片语言） === */
+
+.block {
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-chat-card);
+  max-width: 85%;
+  word-break: break-word;
+  font-size: var(--fs-chat-message);
+  line-height: 1.6;
+}
+
+.blockUser {
+  background: var(--bg-tertiary);
+  align-self: flex-end;
+}
+
+.blockAssistant {
+  background: transparent;
+  align-self: flex-start;
+}
+
+.roleLabel {
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.streamingText {
+  white-space: pre-wrap;
+}
+
+.streamingCursor {
+  display: inline-block;
+  animation: pa-blink var(--duration-slow) var(--ease-standard) infinite;
+  margin-left: var(--space-2);
+  color: var(--accent);
+}
+
+/* assistant 卡片底部本 turn 用量行 —— 保留全局类名供 SSR 测试匹配 */
+:global(.turn-usage-line) {
+  margin-top: var(--space-4);
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* === 恢复中提示 === */
+
+.recovering {
+  padding: var(--space-4) var(--space-12);
+  font-size: var(--fs-caption);
+  color: var(--warning);
+  text-align: center;
+}
+
+/* === 思考过程块 === */
+
+.thinkingBlock {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.thinkingToggle {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0;
+  font-size: var(--fs-caption);
+  font-family: inherit;
+}
+
+.thinkingToggle:hover {
+  color: var(--text-primary);
+}
+
+.thinkingContent {
+  margin-top: var(--space-4);
+  white-space: pre-wrap;
+}
+
+/* === 跳到最新按钮 === */
+
+.scrollToLatest {
+  position: sticky;
+  bottom: var(--space-8);
+  align-self: center;
+  z-index: var(--z-sticky);
+}
+
+/* === 本地命令结果卡片 —— 保留全局类名供 SSR 测试匹配 === */
+
+:global(.command-card) {
+  align-self: center;
+  max-width: 85%;
+  padding: var(--space-6) var(--space-12);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-chat-card);
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+:global(.command-card-error) {
+  border-color: var(--danger);
+}
+
+:global(.command-card-title) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+:global(.command-card-error .command-card-title) {
+  color: var(--danger);
+}
+
+:global(.command-card-body) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+:global(.command-card-line) {
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* === 压缩结果卡片 —— 保留全局类名供 SSR 测试匹配 === */
+
+:global(.compaction-card) {
+  align-self: center;
+  max-width: 85%;
+  padding: var(--space-6) var(--space-12);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-chat-card);
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+:global(.compaction-card-failed) {
+  border-color: var(--warning);
+}
+
+:global(.compaction-card-title) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+:global(.compaction-card-body) {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+:global(.compaction-card-line) {
+  line-height: 1.5;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+:global(.compaction-card-summary) {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+:global(.compaction-card-error) {
+  color: var(--warning);
+}

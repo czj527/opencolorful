@@ -1,0 +1,33 @@
+/* === Agent 选择器 === */
+
+.wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.select {
+  appearance: none;
+  width: 100%;
+  padding: var(--space-6) var(--space-10);
+  padding-right: var(--space-20);
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.select:hover {
+  border-color: var(--accent);
+}
+
+.select:focus {
+  border-color: var(--accent);
+}
+
+.select::after {
+  content: "";
+}

@@ -1,0 +1,61 @@
+/* === 工具调用卡片 === */
+
+.toolCall {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  border-left: 2px solid var(--warning);
+  font-size: var(--fs-caption);
+  font-family: monospace;
+}
+
+.toolCallError {
+  border-left-color: var(--danger);
+}
+
+.toolCallCompleted {
+  border-left-color: var(--success);
+}
+
+.toolCallRunning {
+  border-left-color: var(--warning);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-2);
+}
+
+.toolName {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.statusIcon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.statusText {
+  color: var(--text-secondary);
+}
+
+.delta {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: var(--space-2);
+}
+
+.result {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: var(--space-2);
+}
+
+.spinnerIcon {
+  animation: pa-spin var(--duration-slow) linear infinite;
+}

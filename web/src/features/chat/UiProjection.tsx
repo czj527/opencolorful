@@ -1,6 +1,7 @@
 import { AlertTriangle, Paperclip } from "lucide-react";
 import type { Attachment } from "./chat-state.js";
 import { isSafeUrl } from "./chat-state.js";
+import styles from "./UiProjection.module.css";
 
 interface UiProjectionProps {
   readonly attachments: readonly Attachment[];
@@ -13,24 +14,13 @@ export function UiProjection({ attachments }: UiProjectionProps) {
   if (attachments.length === 0) return null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="ui-projection">
+    <div className={styles.attachments ?? ""} data-testid="ui-projection">
       {attachments.map((attachment) => (
-        <div
-          key={attachment.attachmentId}
-          style={{
-            padding: "6px 10px",
-            background: "var(--bg-tertiary)",
-            borderRadius: 6,
-            fontSize: 12,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
+        <div key={attachment.attachmentId} className={styles.attachment ?? ""}>
           <Paperclip size={12} aria-hidden="true" />
           <span>{attachment.name}</span>
           {attachment.mimeType && (
-            <span style={{ color: "var(--text-secondary)" }}>({attachment.mimeType})</span>
+            <span className={styles.mimeType ?? ""}>({attachment.mimeType})</span>
           )}
         </div>
       ))}
@@ -44,19 +34,7 @@ interface UnsafePayloadNoticeProps {
 
 export function UnsafePayloadNotice({ reason }: UnsafePayloadNoticeProps) {
   return (
-    <div
-      style={{
-        padding: "6px 10px",
-        background: "var(--bg-tertiary)",
-        borderRadius: 6,
-        borderLeft: "2px solid var(--danger)",
-        fontSize: 12,
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-      }}
-      role="alert"
-    >
+    <div className={styles.unsafeNotice ?? ""} role="alert">
       <AlertTriangle size={12} color="var(--danger)" aria-hidden="true" />
       <span>已阻止不安全的 UI 内容：{reason}</span>
     </div>
@@ -142,22 +120,22 @@ function renderA2uiComponent(component: A2uiComponentData): React.ReactNode {
       const title = typeof component["title"] === "string" ? component["title"] : "";
       const body = typeof component["body"] === "string" ? component["body"] : "";
       return (
-        <div key={component.id} style={{ padding: 10, background: "var(--bg-tertiary)", borderRadius: 6 }}>
-          {title && <div style={{ fontWeight: 600, marginBottom: 4 }}>{title}</div>}
-          {body && <div style={{ fontSize: 13 }}>{body}</div>}
+        <div key={component.id} className={styles.a2uiCard ?? ""}>
+          {title && <div className={styles.a2uiCardTitle ?? ""}>{title}</div>}
+          {body && <div className={styles.a2uiCardBody ?? ""}>{body}</div>}
         </div>
       );
     }
     case "Badge": {
       const text = typeof component["text"] === "string" ? component["text"] : "";
       return (
-        <span key={component.id} style={{ padding: "2px 8px", background: "var(--bg-tertiary)", borderRadius: 10, fontSize: 11 }}>
+        <span key={component.id} className={styles.a2uiBadge ?? ""}>
           {text}
         </span>
       );
     }
     case "Divider":
-      return <hr key={component.id} style={{ border: "none", borderTop: "1px solid var(--border-color)" }} />;
+      return <hr key={component.id} className={styles.a2uiDivider ?? ""} />;
     default:
       return null;
   }
@@ -173,9 +151,9 @@ export function A2uiProjection({ messages }: A2uiProjectionProps) {
   const { surfaces, rejected } = buildSurfaces(messages);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }} data-testid="a2ui-projection">
+    <div className={styles.a2uiProjection ?? ""} data-testid="a2ui-projection">
       {Array.from(surfaces.entries()).map(([surfaceId, surface]) => (
-        <div key={surfaceId} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div key={surfaceId} className={styles.a2uiSurface ?? ""}>
           {Array.from(surface.components.values()).map((component) => renderA2uiComponent(component))}
         </div>
       ))}
@@ -204,7 +182,7 @@ export function TokuiProjection({ chunk }: TokuiProjectionProps) {
   }
   return (
     <div
-      style={{ padding: "6px 10px", background: "var(--bg-tertiary)", borderRadius: 6, fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+      className={styles.tokuiProjection ?? ""}
       data-testid="tokui-projection"
     >
       {chunk}

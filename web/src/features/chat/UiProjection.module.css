@@ -1,0 +1,92 @@
+/* === 附件投影列表 === */
+
+.attachments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.attachment {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  font-size: var(--fs-caption);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-primary);
+}
+
+.mimeType {
+  color: var(--text-secondary);
+}
+
+/* === 不安全载荷提示 === */
+
+.unsafeNotice {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  border-left: 2px solid var(--danger);
+  font-size: var(--fs-caption);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-primary);
+}
+
+/* === A2UI 投影 === */
+
+.a2uiProjection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.a2uiSurface {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.a2uiCard {
+  padding: var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+}
+
+.a2uiCardTitle {
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+}
+
+.a2uiCardBody {
+  font-size: var(--fs-ui);
+  color: var(--text-primary);
+}
+
+.a2uiBadge {
+  padding: var(--space-2) var(--space-8);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  font-size: var(--fs-hint);
+  color: var(--text-primary);
+}
+
+.a2uiDivider {
+  border: none;
+  border-top: 1px solid var(--border-color);
+}
+
+/* === TokUI 投影 === */
+
+.tokuiProjection {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-chat-card);
+  font-size: var(--fs-caption);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}

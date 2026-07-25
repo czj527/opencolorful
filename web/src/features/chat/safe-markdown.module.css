@@ -1,0 +1,52 @@
+/* === safe-markdown 渲染样式 === */
+
+.paragraph {
+  margin: 0 0 var(--space-8);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.inlineCode {
+  background: var(--bg-tertiary);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-xs);
+  font-size: 0.9em;
+  font-family: monospace;
+  color: var(--text-primary);
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.codeBlock {
+  background: var(--bg-tertiary);
+  padding: var(--space-8);
+  border-radius: var(--radius-chat-card);
+  overflow-x: auto;
+  font-size: var(--fs-caption);
+  margin: 0 0 var(--space-8);
+  font-family: monospace;
+}
+
+.heading {
+  margin: var(--space-8) 0 var(--space-4);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.list {
+  margin: 0 0 var(--space-8);
+  padding-left: var(--space-20);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.listItem {
+  margin-bottom: var(--space-2);
+}
