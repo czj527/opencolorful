@@ -1,7 +1,6 @@
 import { memo, useMemo } from "react";
 import type { ChatMessage } from "./chat-state.js";
-// 导入 module.css 以激活 :global() 规则（chat-timeline-nav 等全局类名样式）
-import "./ChatTimelineNav.module.css";
+import "./ChatTimelineNav.css";
 
 /** 从用户消息内容提取摘要（前 20 字） */
 function extractSummary(content: string): string {
