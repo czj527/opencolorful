@@ -154,11 +154,9 @@ async function ensureFixtureProvider(page: Page): Promise<void> {
 
 async function selectFixtureModel(page: Page): Promise<void> {
   const select = page.getByLabel("选择模型");
-  const option = select.locator("option").filter({ hasText: "fixture-provider/fixture-model" });
-  await expect(option).toBeAttached({ timeout: 15_000 });
-  const value = await option.getAttribute("value");
-  expect(value).not.toBeNull();
-  await select.selectOption(value!);
+  const value = "fixture-provider:fixture-model";
+  await expect(select.locator(`option[value="${value}"]`)).toBeAttached({ timeout: 15_000 });
+  await select.selectOption(value);
 }
 
 async function ensureAgentServerViaApi(page: Page): Promise<void> {
