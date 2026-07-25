@@ -1,12 +1,4 @@
-:root {
-  /* 结构型变量，颜色 token 由 themes/dark.css 和 themes/light.css 独占定义 */
-  --sidebar-width: 260px;
-  --inspector-width: 300px;
-  --left-sidebar-width: 280px;
-  --right-sidebar-width: 320px;
-  --statusbar-height: 40px;
-  --transition-duration: 0.2s;
-}
+/* 结构令牌已迁移到 src/styles/tokens.css；颜色令牌在 themes/*.css */
 
 * {
   box-sizing: border-box;
