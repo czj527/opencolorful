@@ -1,5 +1,7 @@
 import type { SupervisorStatusResponse } from "../lib/types.js";
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Square, RotateCw, Loader2 } from "lucide-react";
+import { IconButton, Button } from "./ui/index.js";
+import styles from "./ServerStatusBar.module.css";
 
 interface ServerStatusBarProps {
   readonly status: SupervisorStatusResponse | null;
@@ -12,6 +14,9 @@ interface ServerStatusBarProps {
   readonly leftCollapsed: boolean;
   readonly rightCollapsed: boolean;
 }
+
+const metaClass = styles.meta ?? "";
+const spacerClass = styles.spacer ?? "";
 
 export function ServerStatusBar({
   status,
@@ -30,15 +35,13 @@ export function ServerStatusBar({
 
   return (
     <div className="app-statusbar" role="banner">
-      <button
-        className="icon-button"
+      <IconButton
+        icon={leftCollapsed
+          ? <PanelLeftOpen size={14} aria-hidden="true" />
+          : <PanelLeftClose size={14} aria-hidden="true" />}
+        label={leftCollapsed ? "展开会话面板" : "收起会话面板"}
         onClick={onToggleLeft}
-        type="button"
-        aria-label={leftCollapsed ? "展开会话面板" : "收起会话面板"}
-        title={leftCollapsed ? "展开会话面板" : "收起会话面板"}
-      >
-        {leftCollapsed ? <PanelLeftOpen size={14} aria-hidden="true" /> : <PanelLeftClose size={14} aria-hidden="true" />}
-      </button>
+      />
 
       <span className={`status-dot ${connectionStatus}`} aria-hidden="true" />
       <span data-testid="connection-status">
@@ -52,60 +55,54 @@ export function ServerStatusBar({
       </span>
 
       {agentPort !== null && agentPort !== undefined && (
-        <span style={{ color: "var(--text-secondary)" }} data-testid="agent-port">:{agentPort}</span>
+        <span className={metaClass} data-testid="agent-port">:{agentPort}</span>
       )}
-      {version && <span style={{ color: "var(--text-secondary)" }}>v{version}</span>}
+      {version && <span className={metaClass}>v{version}</span>}
 
-      <div style={{ flex: 1 }} />
+      <div className={spacerClass} />
 
       {(agentStatus === "stopped" || agentStatus === "error") && (
-        <button
-          className="icon-button primary"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={onStart}
-          type="button"
           aria-label="启动 Server"
           title="启动 Agent Server"
         >
           <Play size={14} aria-hidden="true" />
           启动
-        </button>
+        </Button>
       )}
       {agentStatus === "online" && (
         <>
-          <button
-            className="icon-button danger"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={onStop}
-            type="button"
             aria-label="停止 Server"
             title="停止 Agent Server"
           >
             <Square size={14} aria-hidden="true" />
             停止
-          </button>
-          <button
-            className="icon-button"
+          </Button>
+          <IconButton
+            icon={<RotateCw size={14} aria-hidden="true" />}
+            label="重启 Server"
             onClick={onRestart}
-            type="button"
-            aria-label="重启 Server"
-            title="重启 Agent Server"
-          >
-            <RotateCw size={14} aria-hidden="true" />
-          </button>
+          />
         </>
       )}
       {(agentStatus === "starting" || agentStatus === "stopping" || agentStatus === "degraded") && (
         <Loader2 size={14} className="spinner-icon" aria-label="处理中" />
       )}
 
-      <button
-        className="icon-button"
+      <IconButton
+        icon={rightCollapsed
+          ? <PanelRightOpen size={14} aria-hidden="true" />
+          : <PanelRightClose size={14} aria-hidden="true" />}
+        label={rightCollapsed ? "展开详情面板" : "收起详情面板"}
         onClick={onToggleRight}
-        type="button"
-        aria-label={rightCollapsed ? "展开详情面板" : "收起详情面板"}
-        title={rightCollapsed ? "展开详情面板" : "收起详情面板"}
-      >
-        {rightCollapsed ? <PanelRightOpen size={14} aria-hidden="true" /> : <PanelRightClose size={14} aria-hidden="true" />}
-      </button>
+      />
     </div>
   );
 }

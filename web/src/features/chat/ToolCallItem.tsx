@@ -1,5 +1,6 @@
 import type { ToolCall } from "./chat-state.js";
 import { Wrench, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import styles from "./ToolCallItem.module.css";
 
 interface ToolCallItemProps {
   readonly toolCall: ToolCall;
@@ -11,38 +12,42 @@ function summarizeResult(result: unknown): string {
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
+const statusBorderClass: Record<ToolCall["status"], string | undefined> = {
+  running: styles.toolCallRunning,
+  completed: styles.toolCallCompleted,
+  error: styles.toolCallError,
+};
+
 export function ToolCallItem({ toolCall }: ToolCallItemProps) {
   const { toolName, status, result, delta } = toolCall;
 
+  const cardClass = [
+    styles.toolCall ?? "",
+    statusBorderClass[status] ?? "",
+  ].filter(Boolean).join(" ");
+
   return (
     <div
-      style={{
-        padding: "6px 10px",
-        background: "var(--bg-tertiary)",
-        borderRadius: 6,
-        borderLeft: `2px solid ${status === "error" ? "var(--danger)" : status === "completed" ? "var(--success)" : "var(--warning)"}`,
-        fontSize: 12,
-        fontFamily: "monospace",
-      }}
+      className={cardClass}
       data-testid={`tool-call-${toolCall.toolCallId}`}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+      <div className={styles.header ?? ""}>
         <Wrench size={12} aria-hidden="true" />
-        <span style={{ fontWeight: 600 }}>{toolName}</span>
-        {status === "running" && <Loader2 size={12} className="spinner-icon" aria-label="运行中" />}
+        <span className={styles.toolName ?? ""}>{toolName}</span>
+        {status === "running" && <Loader2 size={12} className={`spinner-icon ${styles.spinnerIcon ?? ""}`} aria-label="运行中" />}
         {status === "completed" && <CheckCircle2 size={12} color="var(--success)" aria-label="已完成" />}
         {status === "error" && <XCircle size={12} color="var(--danger)" aria-label="失败" />}
-        <span style={{ color: "var(--text-secondary)" }}>
+        <span className={styles.statusText ?? ""}>
           {status === "running" ? "运行中" : status === "completed" ? "完成" : "失败"}
         </span>
       </div>
       {delta && status === "running" && (
-        <div style={{ color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+        <div className={styles.delta ?? ""}>
           {delta.slice(-200)}
         </div>
       )}
       {status !== "running" && result !== undefined && (
-        <div style={{ color: "var(--text-secondary)", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+        <div className={styles.result ?? ""}>
           {summarizeResult(result)}
         </div>
       )}

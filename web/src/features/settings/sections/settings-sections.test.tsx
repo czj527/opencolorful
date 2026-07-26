@@ -140,8 +140,10 @@ describe("LogsSection", () => {
         getSupervisorLogs={async () => fakeLogTail}
       />,
     );
-    // Effect 未在服务端渲染执行，初始渲染 logs 为空占位
-    expect(html).toContain("logs");
+    // Phase 7 重构后 LogsSection 返回 fragment（标题由 SettingsPage 的 SettingsSection 包装），
+    // 验证日志工具栏与级别选择器渲染。
+    expect(html).toContain("日志级别");
+    expect(html).toContain("关键词过滤");
   });
 });
 

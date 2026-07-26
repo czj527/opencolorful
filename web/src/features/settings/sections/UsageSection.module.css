@@ -1,0 +1,129 @@
+.rangeSelector {
+  display: flex;
+  gap: var(--space-4);
+  width: fit-content;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+
+.rangeBtn {
+  padding: var(--space-6) var(--space-16);
+  border: none;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-ui);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.rangeBtn:hover {
+  color: var(--text-primary);
+}
+
+.rangeBtnActive {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  padding: var(--space-20) 0;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--danger);
+}
+
+.overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-10);
+}
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  padding: var(--space-12) var(--space-16);
+}
+
+.cardLabel {
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-6);
+}
+
+.cardValue {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+}
+
+.empty {
+  padding: var(--space-40) var(--space-20);
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-card);
+}
+
+.empty p {
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-body);
+}
+
+.emptyHint {
+  font-size: var(--fs-caption);
+  opacity: 0.8;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-ui);
+}
+
+.table th,
+.table td {
+  padding: var(--space-8) var(--space-12);
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.table th {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: var(--fs-caption);
+}
+
+.table td {
+  color: var(--text-primary);
+  font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
+  font-size: var(--fs-caption);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}

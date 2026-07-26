@@ -31,12 +31,16 @@ const emptySummary: UsageSummaryResponse = {
 };
 
 describe("UsageSection", () => {
-  it("renders section title and description", () => {
+  it("renders range selector and loading state", () => {
     const html = renderToStaticMarkup(
       <UsageSection getUsageSummary={async () => fakeSummary} />,
     );
-    expect(html).toContain("用量统计");
-    expect(html).toContain("Token 消耗与缓存命中情况");
+    // Phase 7 重构后标题/描述由 SettingsPage 的 SettingsSection 包装；
+    // UsageSection 自身渲染时间范围选择器与加载占位。
+    expect(html).toContain('aria-label="时间范围"');
+    expect(html).toContain("7 天");
+    expect(html).toContain("30 天");
+    expect(html).toContain("90 天");
   });
 
   it("renders range selector buttons", () => {
@@ -60,16 +64,17 @@ describe("UsageSection", () => {
       <UsageSection getUsageSummary={async () => fakeSummary} />,
     );
     // 服务端渲染时 useEffect 不执行，初始为 loading；验证静态结构包含关键文案
-    expect(html).toContain("usage-range-selector");
-    expect(html).toContain("settings-loading");
+    // Phase 7 重构后类名走 CSS Modules（hash），改为检查 aria-label 与文本。
+    expect(html).toContain('aria-label="时间范围"');
+    expect(html).toContain("加载中");
   });
 
   it("renders empty state when no usage data", () => {
     const html = renderToStaticMarkup(
       <UsageSection getUsageSummary={async () => emptySummary} />,
     );
-    // 初始渲染为 loading，空状态在 effect 后展示；验证组件包含空状态结构
-    expect(html).toContain("usage-range-selector");
-    expect(html).toContain("settings-loading");
+    // 初始渲染为 loading，空状态在 effect 后展示；验证组件包含时间范围选择与加载文案
+    expect(html).toContain('aria-label="时间范围"');
+    expect(html).toContain("加载中");
   });
 });

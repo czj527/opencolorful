@@ -1,0 +1,110 @@
+.row {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr;
+  gap: var(--space-16);
+  align-items: start;
+}
+
+.labelCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.required {
+  color: var(--danger);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.controlCol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.control {
+  width: 100%;
+  min-width: 0;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-4);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--danger);
+}
+
+/* —— 横向并排 —— */
+.inlineRow {
+  display: flex;
+  gap: var(--space-12);
+  width: 100%;
+}
+
+.inlineRow > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* —— 保存反馈 —— */
+.feedbackSaved {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-ui);
+  color: var(--success);
+}
+
+.feedbackSaving {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.feedbackError {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-ui);
+  color: var(--danger);
+}
+
+/* —— 窄屏：label 与控件上下堆叠 —— */
+@media (max-width: 600px) {
+  .row {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+  }
+
+  .labelCol {
+    padding-top: 0;
+  }
+}

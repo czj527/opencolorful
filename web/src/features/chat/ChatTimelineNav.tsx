@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import type { ChatMessage } from "./chat-state.js";
+import "./ChatTimelineNav.css";
 
 /** 从用户消息内容提取摘要（前 20 字） */
 function extractSummary(content: string): string {

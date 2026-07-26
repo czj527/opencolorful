@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ContextUsage, TokenUsage } from "../../lib/types.js";
+import styles from "./ContextUsageRing.module.css";
 
 interface ContextUsageRingProps {
   /** 上下文占用（null 表示空会话/无数据，置灰空环） */
@@ -26,6 +27,9 @@ function formatPercent(value: number | null): string {
 /**
  * 环形上下文用量组件：随 context.percent 填充，悬停展示详情卡片。
  * 颜色阈值：<60% accent；60–85% warning；>85% danger。
+ * 颜色等级以 svg[data-level] 携带稳定语义名（context-ring-*），
+ * 样式由 ContextUsageRing.module.css 按 [data-level] 选择器应用，
+ * 既保证令牌化、又保持测试对属性值的字符串断言兼容。
  */
 export function ContextUsageRing({ context, totals, cacheHitRate }: ContextUsageRingProps) {
   const [hover, setHover] = useState(false);
@@ -49,7 +53,7 @@ export function ContextUsageRing({ context, totals, cacheHitRate }: ContextUsage
 
   return (
     <div
-      className="context-usage-ring"
+      className={styles.ring}
       data-testid="context-usage-ring"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
@@ -60,10 +64,9 @@ export function ContextUsageRing({ context, totals, cacheHitRate }: ContextUsage
         viewBox={`0 0 ${SIZE} ${SIZE}`}
         role="img"
         aria-label={ariaLabel}
-        data-level={colorClass}
       >
         <circle
-          className="context-ring-track"
+          className={styles.track}
           cx={SIZE / 2}
           cy={SIZE / 2}
           r={RADIUS}
@@ -71,7 +74,8 @@ export function ContextUsageRing({ context, totals, cacheHitRate }: ContextUsage
           strokeWidth={STROKE}
         />
         <circle
-          className={`context-ring-fill ${colorClass}`}
+          className={styles.fill}
+          data-level={colorClass}
           cx={SIZE / 2}
           cy={SIZE / 2}
           r={RADIUS}
@@ -85,28 +89,28 @@ export function ContextUsageRing({ context, totals, cacheHitRate }: ContextUsage
       </svg>
 
       {hover && (
-        <div className="context-ring-popover" role="tooltip" data-testid="context-ring-popover">
-          <div className="context-ring-section">
-            <div className="context-ring-title">上下文</div>
+        <div className={styles.popover} role="tooltip" data-testid="context-ring-popover">
+          <div className={styles.popoverSection}>
+            <div className={styles.popoverTitle}>上下文</div>
             {context === null || context.tokens === null ? (
-              <div className="context-ring-row">等待下一次响应</div>
+              <div className={styles.popoverRow}>等待下一次响应</div>
             ) : (
-              <div className="context-ring-row">
+              <div className={styles.popoverRow}>
                 {formatNumber(context.tokens)} / {formatNumber(context.contextWindow)}
                 {percent !== null ? `（${percent.toFixed(1)}%）` : ""}
               </div>
             )}
           </div>
-          <div className="context-ring-section">
-            <div className="context-ring-title">会话累计</div>
-            <div className="context-ring-row">输入 {formatNumber(totals.input)}</div>
-            <div className="context-ring-row">输出 {formatNumber(totals.output)}</div>
-            <div className="context-ring-row">缓存读 {formatNumber(totals.cacheRead)}</div>
-            <div className="context-ring-row">缓存写 {formatNumber(totals.cacheWrite)}</div>
-            <div className="context-ring-row">总计 {formatNumber(totals.totalTokens)}</div>
+          <div className={styles.popoverSection}>
+            <div className={styles.popoverTitle}>会话累计</div>
+            <div className={styles.popoverRow}>输入 {formatNumber(totals.input)}</div>
+            <div className={styles.popoverRow}>输出 {formatNumber(totals.output)}</div>
+            <div className={styles.popoverRow}>缓存读 {formatNumber(totals.cacheRead)}</div>
+            <div className={styles.popoverRow}>缓存写 {formatNumber(totals.cacheWrite)}</div>
+            <div className={styles.popoverRow}>总计 {formatNumber(totals.totalTokens)}</div>
           </div>
-          <div className="context-ring-section">
-            <div className="context-ring-row">缓存命中率 {formatPercent(cacheHitRate)}</div>
+          <div className={styles.popoverSection}>
+            <div className={styles.popoverRow}>缓存命中率 {formatPercent(cacheHitRate)}</div>
           </div>
         </div>
       )}

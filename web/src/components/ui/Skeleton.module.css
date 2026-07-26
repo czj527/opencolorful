@@ -1,0 +1,27 @@
+.skeleton {
+  display: inline-block;
+  background: var(--bg-tertiary);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--bg-secondary),
+    transparent
+  );
+  animation-name: shimmer;
+  animation-duration: var(--duration-slow);
+  animation-timing-function: var(--ease-standard);
+  animation-iteration-count: infinite;
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}

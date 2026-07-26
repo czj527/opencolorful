@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiClient, ApiClientError } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
-import type { PlatformEventEnvelope, LayoutPreferences, AgentView } from "../lib/types.js";
+import type { PlatformEventEnvelope, AgentView } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor, buildChatStateFromHistory } from "../features/chat/chat-state.js";
 import { executeCommand, type CommandName } from "../features/chat/commands.js";
@@ -11,36 +11,13 @@ import { ServerStatusBar } from "../components/ServerStatusBar.jsx";
 import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
 import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
-import { usePanelResize } from "../features/layout/use-panel-resize.js";
-import {
-  mergeLayoutPreferences,
-  DEFAULT_LAYOUT_ONLY,
-  getSidebarPresentation,
-  isDrawerBackdropOpen,
-  resolveReducedMotion,
-  withSidebarCollapsed,
-} from "../features/layout/layout-preferences.js";
+import { AppShell } from "../components/AppShell.jsx";
+import { useLayoutState, NARROW_LEFT_QUERY, NARROW_RIGHT_QUERY } from "../features/layout/useLayoutState.js";
 import { StreamBuffer } from "../features/chat/stream-buffer.js";
 import "./layout.css";
 
 // 同源部署：Supervisor 托管 Web 并代理 Agent API
 const API_BASE = "";
-
-const NARROW_LEFT_QUERY = "(max-width: 768px)";
-const NARROW_RIGHT_QUERY = "(max-width: 1024px)";
-
-function applyTheme(theme: "dark" | "light") {
-  document.documentElement.dataset.theme = theme;
-}
-
-function applyLayoutVars(layout: LayoutPreferences, reducedMotion: boolean) {
-  document.documentElement.style.setProperty("--left-sidebar-width", `${layout.leftSidebarWidth}px`);
-  document.documentElement.style.setProperty("--right-sidebar-width", `${layout.rightSidebarWidth}px`);
-  document.documentElement.style.setProperty(
-    "--transition-duration",
-    reducedMotion ? "0ms" : "0.2s",
-  );
-}
 
 export interface WorkspaceAppProps {
   readonly onSettingsClick: () => void;
@@ -56,83 +33,35 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   }));
   const [chat, dispatchChat] = useReducer(chatReducer, initialChatState);
   const [sseConnected, setSseConnected] = useState(false);
-  const [layoutPrefs, setLayoutPrefs] = useState<LayoutPreferences>(DEFAULT_LAYOUT_ONLY);
   const [agents, setAgents] = useState<AgentView[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [showThinking, setShowThinking] = useState(true);
   const [showToolCalls, setShowToolCalls] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(true);
-  const [breakpoints, setBreakpoints] = useState(() => ({
-    leftNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_LEFT_QUERY).matches,
-    rightNarrow: typeof window !== "undefined" && window.matchMedia(NARROW_RIGHT_QUERY).matches,
-  }));
-  const [systemReducedMotion, setSystemReducedMotion] = useState(() =>
-    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  const [viewportWidth, setViewportWidth] = useState(() =>
-    typeof window === "undefined" ? 1440 : window.innerWidth,
-  );
   const apiRef = useRef(new ApiClient(API_BASE));
   const sseRef = useRef<SseClient | null>(null);
   const wsRef = useRef<WsClient | null>(null);
-  const leftResizeRef = useRef<HTMLDivElement | null>(null);
-  const rightResizeRef = useRef<HTMLDivElement | null>(null);
   const bufferRef = useRef<StreamBuffer | null>(null);
   const chatRef = useRef(chat);
   chatRef.current = chat;
   const api = apiRef.current;
 
-  useEffect(() => {
-    if (!active) return undefined;
-    let cancelled = false;
-    api.getPreferences().then((prefs) => {
-      if (cancelled) return;
-      const layout = mergeLayoutPreferences(prefs.layout, DEFAULT_LAYOUT_ONLY);
-      setLayoutPrefs(layout);
-      applyTheme(prefs.appearance.theme);
-      setShowThinking(prefs.appearance.showThinking ?? true);
-      setShowToolCalls(prefs.appearance.showToolCalls ?? true);
-      setTimelineVisible(prefs.appearance.timelineVisible ?? true);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [active, api]);
-
-  useEffect(() => {
-    const leftQuery = window.matchMedia(NARROW_LEFT_QUERY);
-    const rightQuery = window.matchMedia(NARROW_RIGHT_QUERY);
-    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const sync = () => {
-      setBreakpoints({ leftNarrow: leftQuery.matches, rightNarrow: rightQuery.matches });
-      setSystemReducedMotion(motionQuery.matches);
-      setViewportWidth(window.innerWidth);
-    };
-    leftQuery.addEventListener("change", sync);
-    rightQuery.addEventListener("change", sync);
-    motionQuery.addEventListener("change", sync);
-    window.addEventListener("resize", sync);
-    sync();
-    return () => {
-      leftQuery.removeEventListener("change", sync);
-      rightQuery.removeEventListener("change", sync);
-      motionQuery.removeEventListener("change", sync);
-      window.removeEventListener("resize", sync);
-    };
-  }, []);
-
-  const reducedMotion = resolveReducedMotion(layoutPrefs.reducedMotion, systemReducedMotion);
-
-  useEffect(() => {
-    applyLayoutVars(layoutPrefs, reducedMotion);
-    const presentation = getSidebarPresentation(layoutPrefs, breakpoints);
-    dispatch({
-      type: "SET_LEFT_SIDEBAR",
-      payload: presentation.leftCollapsed ? "collapsed" : "expanded",
-    });
-    dispatch({
-      type: "SET_RIGHT_SIDEBAR",
-      payload: presentation.rightCollapsed ? "collapsed" : "expanded",
-    });
-  }, [layoutPrefs, breakpoints, reducedMotion]);
+  // 布局状态：断点 / reducedMotion / viewport / 侧栏开关 / 主题 / CSS 变量 / resize
+  // 全部封装在 useLayoutState，本组件只持有业务数据与会话事件接线。
+  const layout = useLayoutState({
+    active,
+    api,
+    dispatchSidebar: dispatch,
+    leftSidebar: state.leftSidebar,
+    rightSidebar: state.rightSidebar,
+    onPreferencesLoaded: useCallback((appearance) => {
+      setShowThinking(appearance.showThinking);
+      setShowToolCalls(appearance.showToolCalls);
+      if (appearance.timelineVisible !== undefined) {
+        setTimelineVisible(appearance.timelineVisible);
+      }
+    }, []),
+  });
 
   // --- 数据加载 ---
 
@@ -141,7 +70,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       const status = await api.getSupervisorStatus();
       dispatch({ type: "SET_SUPERVISOR_STATUS", payload: status });
     } catch {
-      // Supervisor 的轮询请求短暂失败时仍可恢复，不把网络抖动误报成服务端硬错误。
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "degraded" });
     }
   }, [api]);
@@ -186,7 +114,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       void refreshSessions();
       void refreshProvidersAndModels();
       void refreshAgents();
-      // Agent 在线期间定期刷新模型与 Provider（Provider 可能在运行中被配置）
       const interval = setInterval(() => {
         void refreshProvidersAndModels();
       }, 10_000);
@@ -197,7 +124,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
 
   // --- 事件流接线：SSE/WS 事件 → StreamBuffer → chatReducer EVENT_BATCH ---
 
-  // 拉取会话用量基线（进入会话 / 压缩后刷新）
   const refreshSessionUsage = useCallback(async (sessionId: string) => {
     try {
       const usage = await api.sessionUsage(sessionId);
@@ -209,7 +135,7 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
         context: usage.context,
       });
     } catch {
-      // Server 可能未运行或会话无用量数据，保持现有状态
+      // Server 可能未运行或会话无用量数据
     }
   }, [api]);
 
@@ -222,7 +148,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           break;
         }
       }
-      // 压缩完成后重新拉取用量，刷新上下文占比
       for (const e of events) {
         if (e.type === "session.compacted" && e.sessionId !== null) {
           void refreshSessionUsage(e.sessionId);
@@ -248,7 +173,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
         sessionId,
         onEvent: handlePlatformEvent,
         onReset: () => {
-          // 缓存截断：重置聊天状态，从历史重新加载
           dispatchChat({ type: "RESET" });
           void refreshSessions();
         },
@@ -263,7 +187,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
         baseUrl: API_BASE || window.location.origin,
         onEvent: handlePlatformEvent,
         onOpen: () => {
-          // WS（重）连后：订阅会话并按 stream 游标 Resume 补发缺失事件
           ws.subscribe(sessionId);
           const { currentStreamId } = chatRef.current;
           if (currentStreamId !== null) {
@@ -291,18 +214,14 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     try {
       const session = await api.getSession(id);
       dispatch({ type: "UPSERT_SESSION", payload: session });
-      // Agent 跟随会话：用 session.agentId 更新 activeAgentId
       setActiveAgentId(session.agentId ?? null);
-      // 从历史 messageEntries 重建 chat state（timeline、toolCalls、thinking）
       if (session.messageEntries.length > 0) {
         const historyState = buildChatStateFromHistory(session.messageEntries);
         dispatchChat({ type: "LOAD_HISTORY", state: historyState });
       } else {
         dispatchChat({ type: "RESET" });
       }
-      // 用量基线
       void refreshSessionUsage(id);
-      // WS 订阅该会话
       if (wsRef.current?.isConnected()) {
         wsRef.current.subscribe(id);
       }
@@ -348,7 +267,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     try {
       const result = await api.sendPrompt(sessionId, content);
       dispatchChat({ type: "PROMPT_SENT", streamId: result.streamId, userContent: content });
-      // WS 订阅（幂等）确保收到控制事件
       if (wsRef.current && !wsRef.current.isSubscribed(sessionId)) {
         wsRef.current.subscribe(sessionId);
       }
@@ -364,7 +282,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     try {
       await api.abort(sessionId, streamId);
     } catch {
-      // 通过 WS 兜底
       wsRef.current?.abort(sessionId);
     }
   }, [api, state.activeSessionId, chat.currentStreamId]);
@@ -380,7 +297,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     }
     try {
       await api.compact(sessionId);
-      // 成功：等待 session.compacting/session.compacted 事件插入压缩卡片
       return { kind: "none" };
     } catch (error) {
       if (error instanceof ApiClientError && error.code === "SESSION_BUSY") {
@@ -396,7 +312,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   }, [api, state.activeSessionId]);
 
   const handleNewSessionCommand = useCallback(() => {
-    // 走现有新建流程：标题/cwd 复用当前会话（无当前会话时使用默认值）
     const current = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
     const title = current !== null ? `${current.title}（副本）` : "新会话";
     const cwd = current?.workspaceCwd ?? ".";
@@ -418,7 +333,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           ...(outcome.tone !== undefined ? { tone: outcome.tone } : {}),
         });
       }
-      // "clear" 与 "none" 无需插入卡片（输入框清空由 Composer 处理）
     });
   }, [handleCompactCommand, handleNewSessionCommand, handleAbort]);
 
@@ -451,12 +365,9 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
   const handleSelectAgent = useCallback(async (agentId: string | null) => {
     setActiveAgentId(agentId);
     if (agentId === null) {
-      // "默认（无 Agent）"：切换到无 Agent 的最近会话或清空
       const nullAgentSessions = state.sessions.filter((s) => s.agentId === null);
       if (nullAgentSessions.length > 0) {
-        const recent = nullAgentSessions.reduce((a, b) =>
-          a.updatedAt > b.updatedAt ? a : b
-        );
+        const recent = nullAgentSessions.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
         await handleSelectSession(recent.id);
       } else {
         dispatch({ type: "SET_ACTIVE_SESSION", payload: null });
@@ -464,13 +375,10 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       }
       return;
     }
-    // 切换到指定 Agent：加载其最近会话，否则进入空状态
     try {
       const agentSessions = await api.getAgentSessions(agentId);
       if (agentSessions.length > 0) {
-        const recent = agentSessions.reduce((a, b) =>
-          a.updatedAt > b.updatedAt ? a : b
-        );
+        const recent = agentSessions.reduce((a, b) => a.updatedAt > b.updatedAt ? a : b);
         await handleSelectSession(recent.id);
       } else {
         dispatch({ type: "SET_ACTIVE_SESSION", payload: null });
@@ -499,82 +407,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     await refreshSupervisorStatus();
   }, [api, refreshSupervisorStatus]);
 
-  const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
-  const leftCollapsed = state.leftSidebar === "collapsed";
-  const rightCollapsed = state.rightSidebar === "collapsed";
-  const focusMode = leftCollapsed && rightCollapsed;
-  const drawerOpen = isDrawerBackdropOpen(breakpoints, { leftCollapsed, rightCollapsed });
-  const leftMaxWidth = Math.max(
-    200,
-    Math.min(420, viewportWidth - (rightCollapsed ? 0 : layoutPrefs.rightSidebarWidth) - 430),
-  );
-  const rightMaxWidth = Math.max(
-    240,
-    Math.min(520, viewportWidth - (leftCollapsed ? 0 : layoutPrefs.leftSidebarWidth) - 430),
-  );
-
-  // 拖拽调整大小（依赖 leftCollapsed/rightCollapsed，放在声明之后）
-  const onResizeLeft = useCallback((w: number) => {
-    setLayoutPrefs((prev) => ({ ...prev, leftSidebarWidth: w }));
-    document.documentElement.style.setProperty("--left-sidebar-width", `${w}px`);
-  }, []);
-  const onResizeLeftEnd = useCallback((w: number) => {
-    api.updatePreferences({ layout: { leftSidebarWidth: w } }).catch(() => {});
-  }, [api]);
-  const leftResize = usePanelResize(leftResizeRef, {
-    side: "left", minWidth: 200, maxWidth: leftMaxWidth,
-    currentWidth: layoutPrefs.leftSidebarWidth,
-    onResize: onResizeLeft, onResizeEnd: onResizeLeftEnd,
-    disabled: leftCollapsed,
-  });
-
-  const onResizeRight = useCallback((w: number) => {
-    setLayoutPrefs((prev) => ({ ...prev, rightSidebarWidth: w }));
-    document.documentElement.style.setProperty("--right-sidebar-width", `${w}px`);
-  }, []);
-  const onResizeRightEnd = useCallback((w: number) => {
-    api.updatePreferences({ layout: { rightSidebarWidth: w } }).catch(() => {});
-  }, [api]);
-  const rightResize = usePanelResize(rightResizeRef, {
-    side: "right", minWidth: 240, maxWidth: rightMaxWidth,
-    currentWidth: layoutPrefs.rightSidebarWidth,
-    onResize: onResizeRight, onResizeEnd: onResizeRightEnd,
-    disabled: rightCollapsed,
-  });
-
-  // 窄屏一次只打开一个抽屉：打开一侧时收起另一侧
-  const handleToggleLeft = useCallback(() => {
-    const opening = state.leftSidebar === "collapsed";
-    const nextCollapsed = !leftCollapsed;
-    dispatch({ type: "SET_LEFT_SIDEBAR", payload: nextCollapsed ? "collapsed" : "expanded" });
-    if (!breakpoints.leftNarrow) {
-      const nextLayout = withSidebarCollapsed(layoutPrefs, "left", nextCollapsed);
-      setLayoutPrefs(nextLayout);
-      api.updatePreferences({
-        layout: { leftCollapsed: nextLayout.leftCollapsed, focusMode: nextLayout.focusMode },
-      }).catch(() => {});
-    }
-    if (opening && breakpoints.leftNarrow && state.rightSidebar === "expanded") {
-      dispatch({ type: "SET_RIGHT_SIDEBAR", payload: "collapsed" });
-    }
-  }, [state.leftSidebar, state.rightSidebar, leftCollapsed, breakpoints.leftNarrow, api, layoutPrefs]);
-
-  const handleToggleRight = useCallback(() => {
-    const opening = state.rightSidebar === "collapsed";
-    const nextCollapsed = !rightCollapsed;
-    dispatch({ type: "SET_RIGHT_SIDEBAR", payload: nextCollapsed ? "collapsed" : "expanded" });
-    if (!breakpoints.rightNarrow) {
-      const nextLayout = withSidebarCollapsed(layoutPrefs, "right", nextCollapsed);
-      setLayoutPrefs(nextLayout);
-      api.updatePreferences({
-        layout: { rightCollapsed: nextLayout.rightCollapsed, focusMode: nextLayout.focusMode },
-      }).catch(() => {});
-    }
-    if (opening && breakpoints.leftNarrow && state.leftSidebar === "expanded") {
-      dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
-    }
-  }, [state.leftSidebar, state.rightSidebar, rightCollapsed, breakpoints, api, layoutPrefs]);
-
   // 时间线显隐切换（持久化到偏好）
   const handleToggleTimeline = useCallback(() => {
     const next = !timelineVisible;
@@ -582,67 +414,41 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
     api.updatePreferences({ appearance: { timelineVisible: next } }).catch(() => {});
   }, [timelineVisible, api]);
 
-  const closeDrawers = useCallback(() => {
-    if (breakpoints.leftNarrow && state.leftSidebar === "expanded") {
-      dispatch({ type: "SET_LEFT_SIDEBAR", payload: "collapsed" });
-    }
-    if (breakpoints.rightNarrow && state.rightSidebar === "expanded") {
-      dispatch({ type: "SET_RIGHT_SIDEBAR", payload: "collapsed" });
-    }
-  }, [breakpoints, state.leftSidebar, state.rightSidebar]);
-
-  useEffect(() => {
-    if (!active || !drawerOpen) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDrawers();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, drawerOpen, closeDrawers]);
+  const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
 
   return (
-    <div
-      className="app-layout"
-      data-focus-mode={focusMode ? "true" : undefined}
-      data-workspace-active={active ? "true" : "false"}
-      data-reduced-motion={reducedMotion ? "true" : "false"}
-    >
-      <ServerStatusBar
-        status={state.supervisorStatus}
-        connectionStatus={state.connectionStatus}
-        onStart={handleStart}
-        onStop={handleStop}
-        onRestart={handleRestart}
-        onToggleLeft={handleToggleLeft}
-        onToggleRight={handleToggleRight}
-        leftCollapsed={leftCollapsed}
-        rightCollapsed={rightCollapsed}
-      />
-      <div className="app-main">
-        {drawerOpen && (
-          <div
-            className="drawer-backdrop"
-            onClick={closeDrawers}
-            aria-hidden="true"
-            data-testid="drawer-backdrop"
-          />
-        )}
+    <AppShell
+      layout={layout}
+      active={active}
+      titlebar={
+        <ServerStatusBar
+          status={state.supervisorStatus}
+          connectionStatus={state.connectionStatus}
+          onStart={handleStart}
+          onStop={handleStop}
+          onRestart={handleRestart}
+          onToggleLeft={layout.handleToggleLeft}
+          onToggleRight={layout.handleToggleRight}
+          leftCollapsed={layout.leftCollapsed}
+          rightCollapsed={layout.rightCollapsed}
+        />
+      }
+      left={
         <SessionSidebar
           sessions={state.sessions}
           activeSessionId={state.activeSessionId}
-          collapsed={leftCollapsed}
+          collapsed={layout.leftCollapsed}
           onSelect={(id) => void handleSelectSession(id)}
           onCreate={(title, cwd) => void handleCreateSession(title, cwd)}
           onArchive={(id) => void handleArchiveSession(id)}
           onUnarchive={(id) => void handleUnarchiveSession(id)}
-          onToggle={handleToggleLeft}
+          onToggle={layout.handleToggleLeft}
           agents={agents}
           activeAgentId={activeAgentId}
           onSelectAgent={(id) => void handleSelectAgent(id)}
         />
-        {!focusMode && !breakpoints.leftNarrow && (
-          <div ref={leftResizeRef} className="resize-handle" {...leftResize.resizeHandleProps} />
-        )}
+      }
+      center={
         <ChatPane
           session={activeSession}
           chat={chat}
@@ -656,21 +462,20 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
           sseConnected={sseConnected && state.connectionStatus === "online"}
           onSettingsClick={onSettingsClick}
-          reducedMotion={reducedMotion}
+          reducedMotion={layout.reducedMotion}
           showThinking={showThinking}
           showToolCalls={showToolCalls}
           timelineVisible={timelineVisible}
           onToggleTimeline={handleToggleTimeline}
-          narrowScreen={breakpoints.rightNarrow}
+          narrowScreen={layout.breakpoints.rightNarrow}
         />
-        {!focusMode && !breakpoints.rightNarrow && (
-          <div ref={rightResizeRef} className="resize-handle" {...rightResize.resizeHandleProps} />
-        )}
+      }
+      right={
         <InspectorSidebar
-          collapsed={rightCollapsed}
-          onToggle={handleToggleRight}
+          collapsed={layout.rightCollapsed}
+          onToggle={layout.handleToggleRight}
         />
-      </div>
-    </div>
+      }
+    />
   );
 }

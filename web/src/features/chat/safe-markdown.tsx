@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createElement, Fragment } from "react";
 
 import { isSafeUrl } from "./chat-state.js";
+import styles from "./safe-markdown.module.css";
 
 /**
  * 最小安全 Markdown 渲染器。
@@ -82,7 +83,7 @@ function renderInline(source: string, keyPrefix: string): ReactNode[] {
       case "italic":
         return createElement("em", { key }, token.text);
       case "code":
-        return createElement("code", { key, style: { background: "var(--bg-tertiary)", padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" } }, token.text);
+        return createElement("code", { key, className: styles.inlineCode ?? "" }, token.text);
       case "link":
         if (!isSafeUrl(token.url)) {
           // 不安全链接降级为纯文本
@@ -90,7 +91,7 @@ function renderInline(source: string, keyPrefix: string): ReactNode[] {
         }
         return createElement(
           "a",
-          { key, href: token.url, target: "_blank", rel: "noopener noreferrer", style: { color: "var(--accent)" } },
+          { key, href: token.url, target: "_blank", rel: "noopener noreferrer", className: styles.link ?? "" },
           token.text,
         );
       default:
@@ -110,7 +111,7 @@ export function renderSafeMarkdown(source: string): ReactNode {
     if (paragraph.length > 0) {
       const text = paragraph.join(" ");
       blocks.push(
-        createElement("p", { key: `p-${blocks.length}`, style: { margin: "0 0 8px" } }, renderInline(text, `p-${blocks.length}`)),
+        createElement("p", { key: `p-${blocks.length}`, className: styles.paragraph ?? "" }, renderInline(text, `p-${blocks.length}`)),
       );
       paragraph = [];
     }
@@ -121,8 +122,8 @@ export function renderSafeMarkdown(source: string): ReactNode {
       blocks.push(
         createElement(
           ordered ? "ol" : "ul",
-          { key: `list-${blocks.length}`, style: { margin: "0 0 8px", paddingLeft: 20 } },
-          items.map((item, i) => createElement("li", { key: `li-${i}` }, renderInline(item, `li-${blocks.length}-${i}`))),
+          { key: `list-${blocks.length}`, className: styles.list ?? "" },
+          items.map((item, i) => createElement("li", { key: `li-${i}`, className: styles.listItem ?? "" }, renderInline(item, `li-${blocks.length}-${i}`))),
         ),
       );
       list = null;
@@ -133,7 +134,7 @@ export function renderSafeMarkdown(source: string): ReactNode {
       blocks.push(
         createElement(
           "pre",
-          { key: `pre-${blocks.length}`, style: { background: "var(--bg-tertiary)", padding: 8, borderRadius: 6, overflowX: "auto", fontSize: 12, margin: "0 0 8px" } },
+          { key: `pre-${blocks.length}`, className: styles.codeBlock ?? "" },
           createElement("code", null, codeBlock.lines.join("\n")),
         ),
       );
@@ -172,7 +173,7 @@ export function renderSafeMarkdown(source: string): ReactNode {
       flushList();
       const level = Math.min(headingMatch[1]!.length + 2, 6) as 3 | 4 | 5 | 6;
       blocks.push(
-        createElement(`h${level}`, { key: `h-${blocks.length}`, style: { margin: "8px 0 4px" } }, renderInline(headingMatch[2] ?? "", `h-${blocks.length}`)),
+        createElement(`h${level}`, { key: `h-${blocks.length}`, className: styles.heading ?? "" }, renderInline(headingMatch[2] ?? "", `h-${blocks.length}`)),
       );
       continue;
     }

@@ -13,6 +13,7 @@ Phase 4 已完成——独立设置中心（/settings）、全局默认偏好（
 自动滚动与恢复提示。
 Phase 5 已完成并通过最终验收（2026-07-25）——多 Agent 身份证系统（UUID 服务端生成）、会话可选绑定 Agent（含重启恢复）、Agent 管理设置页、亮/暗主题、聊天控制栏重构和工具卡片时间线稳定；质量门全部通过（服务端 31/209、Web 13/167），Playwright 17/17 全部通过。补充轮（5b）完成人设注入、历史卡片重建与显示开关、一体化输入框、Agent 跟随会话、主题修复与样式优化，验收全绿。
 Phase 6 已完成并通过最终验收（2026-07-25）——Token 用量全链路（事件携带 usage/context → SQLite v5 幂等落库 → 统计 API → 发送按钮左侧上下文圆环/本 turn 用量行/设置中心用量统计页，不计算金额）、对话时间线导航（轮次节点点击定位高亮、显隐偏好持久化、窄屏自动隐藏）、Web 会话命令系统（`/help` `/compact` `/new` `/abort` `/clear` 面板）、compact 服务端补齐（事件广播、懒重建、生成中 409）、开发流程文档 [docs/development.md](docs/development.md)；质量门全部通过（服务端 35 文件、Web 243 用例），Playwright 23/23 全部通过。
+Phase 7 已完成并通过最终验收（2026-07-25）——参考 openhanako 做前端 UI 与交互完整重构：设计令牌体系（`tokens.css` 结构令牌 + `animations.css` pa-* keyframes + `prefers-reduced-motion` 令牌兜底）、13 个 UI 原语库（`components/ui/`）、CSS Modules 全面迁移、聊天渲染/Composer/设置中心/布局壳统一采用原语与令牌、AppShell 抽出与 WorkspaceApp 瘦身 29%（677→482 行）、Modal 焦点陷阱、happy-dom + testing-library 测试基建；质量门全过，Web 278 用例、Playwright 23/23 无回归。
 
 ## 开始开发
 
@@ -97,6 +98,7 @@ cd web && npx playwright test
 - [Phase 4 计划](plans/phase-04.md)
 - [Phase 5 计划](plans/phase-05.md)
 - [Phase 6 计划](plans/phase-06.md)
+- [Phase 7 计划](plans/phase-07.md)
 - [Agent 协作指南](AGENTS.md)
 
 ## 参考项目

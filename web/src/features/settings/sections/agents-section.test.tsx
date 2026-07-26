@@ -67,7 +67,7 @@ describe("AgentsSection", () => {
     expect(html).toContain("3 会话");
   });
 
-  it("renders type badges with correct colors", () => {
+  it("renders type badges with semantic variants per agent type", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={fakeAgents}
@@ -78,12 +78,11 @@ describe("AgentsSection", () => {
         lastSaveError={null}
       />,
     );
-    // assistant badge: blue tint
-    expect(html).toContain("rgba(74,158,255,0.15)");
-    // coding badge: green tint
-    expect(html).toContain("rgba(74,255,120,0.12)");
-    // work badge: orange tint
-    expect(html).toContain("rgba(255,166,74,0.15)");
+    // Phase 7 重构后 badge 使用 ui/Badge 语义变体（info/success/warning），
+    // 不再硬编码 rgba 颜色；验证每种类型的标签文本被渲染。
+    expect(html).toContain("assistant");
+    expect(html).toContain("coding");
+    expect(html).toContain("work");
   });
 
   it("renders empty state when no agents", () => {

@@ -2,7 +2,9 @@ import { useState } from "react";
 import type { SessionView, AgentView } from "../lib/types.js";
 import { AgentSelector } from "../features/chat/AgentSelector.js";
 import { Modal } from "./Modal.js";
+import { IconButton, Button } from "./ui/index.js";
 import { Plus, Archive, ArchiveRestore, Search, FolderOpen, Bot } from "lucide-react";
+import styles from "./SessionSidebar.module.css";
 
 interface SessionSidebarProps {
   readonly sessions: SessionView[];
@@ -17,6 +19,21 @@ interface SessionSidebarProps {
   readonly activeAgentId?: string | null;
   readonly onSelectAgent?: (id: string | null) => void;
 }
+
+const agentSectionClass = styles.agentSection ?? "";
+const searchBarClass = styles.searchBar ?? "";
+const searchIconClass = styles.searchIcon ?? "";
+const searchInputClass = styles.searchInput ?? "";
+const sessionRowClass = styles.sessionRow ?? "";
+const sessionTitleClass = styles.sessionTitle ?? "";
+const archiveBtnClass = styles.archiveBtn ?? "";
+const archivedToggleClass = styles.archivedToggle ?? "";
+const archivedGroupClass = styles.archivedGroup ?? "";
+const archivedItemClass = styles.archivedItem ?? "";
+const emptyHintClass = styles.emptyHint ?? "";
+const emptyIconClass = styles.emptyIcon ?? "";
+const createFormClass = styles.createForm ?? "";
+const formInputClass = styles.formInput ?? "";
 
 export function SessionSidebar({
   sessions,
@@ -66,24 +83,21 @@ export function SessionSidebar({
     setShowCreateModal(true);
   };
 
+  const asideClass = `app-sidebar-left${collapsed ? " collapsed" : ""}`;
+
   return (
-    <aside className={`app-sidebar-left${collapsed ? " collapsed" : ""}`} role="complementary" aria-label="会话列表">
+    <aside className={asideClass} role="complementary" aria-label="会话列表">
       <div className="sidebar-header">
         <span className="sidebar-title">会话</span>
-        <button
-          className="icon-button"
+        <IconButton
+          icon={<Plus size={14} aria-hidden="true" />}
+          label="新建会话"
           onClick={openCreateModal}
-          type="button"
-          aria-label="新建会话"
-          title="新建会话"
-        >
-          <Plus size={14} aria-hidden="true" />
-        </button>
+        />
       </div>
 
-      {/* Agent 选择器 */}
       {agents && agents.length > 0 && onSelectAgent && (
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-color)" }}>
+        <div className={agentSectionClass}>
           <AgentSelector
             agents={agents}
             activeAgentId={activeAgentId ?? null}
@@ -92,16 +106,15 @@ export function SessionSidebar({
         </div>
       )}
 
-      {/* Create session modal */}
       <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="新建会话">
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className={createFormClass}>
           <input
             type="text"
             placeholder="会话标题"
             aria-label="会话标题"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            style={{ padding: "6px 10px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 6, color: "var(--text-primary)", fontSize: 13, outline: "none" }}
+            className={formInputClass}
           />
           <input
             type="text"
@@ -109,37 +122,36 @@ export function SessionSidebar({
             aria-label="工作目录"
             value={newCwd}
             onChange={(e) => setNewCwd(e.target.value)}
-            style={{ padding: "6px 10px", background: "var(--bg-primary)", border: "1px solid var(--border-color)", borderRadius: 6, color: "var(--text-primary)", fontSize: 13, outline: "none" }}
+            className={formInputClass}
           />
-          <button
-            className="icon-button primary"
+          <Button
+            variant="primary"
             onClick={handleCreate}
             disabled={!newTitle.trim() || !newCwd.trim()}
-            type="button"
           >
             创建
-          </button>
+          </Button>
         </div>
       </Modal>
 
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", gap: 6 }}>
-        <Search size={12} aria-hidden="true" style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+      <div className={searchBarClass}>
+        <Search size={12} aria-hidden="true" className={searchIconClass} />
         <input
           type="text"
           placeholder="搜索会话"
           aria-label="搜索会话"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ flex: 1, background: "none", border: "none", color: "var(--text-primary)", fontSize: 12, outline: "none" }}
+          className={searchInputClass}
         />
       </div>
 
       <div className="sidebar-content">
         {filtered(active).length === 0 ? (
           <div className="empty-state">
-            <FolderOpen size={24} strokeWidth={1.5} aria-hidden="true" style={{ opacity: 0.4 }} />
+            <FolderOpen size={24} strokeWidth={1.5} aria-hidden="true" className={emptyIconClass} />
             <div>{search ? "无匹配会话" : "暂无会话"}</div>
-            {!search && <div style={{ fontSize: "12px" }}>点击 + 创建新会话</div>}
+            {!search && <div className={emptyHintClass}>点击 + 创建新会话</div>}
           </div>
         ) : (
           filtered(active).map((session) => (
@@ -151,11 +163,10 @@ export function SessionSidebar({
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === "Enter") onSelect(session.id); }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                <div className="sidebar-item-title" style={{ flex: 1, minWidth: 0 }}>{session.title}</div>
+              <div className={sessionRowClass}>
+                <div className={`sidebar-item-title ${sessionTitleClass}`.trim()}>{session.title}</div>
                 <button
-                  className="icon-button"
-                  style={{ padding: 2, border: "none", flexShrink: 0 }}
+                  className={`icon-button ${archiveBtnClass}`.trim()}
                   onClick={(e) => { e.stopPropagation(); onArchive(session.id); }}
                   type="button"
                   aria-label={`归档会话 ${session.title}`}
@@ -178,30 +189,28 @@ export function SessionSidebar({
         )}
 
         {archived.length > 0 && (
-          <div style={{ marginTop: 12 }}>
+          <div className={archivedGroupClass}>
             <button
               type="button"
               onClick={() => setShowArchived(!showArchived)}
               aria-expanded={showArchived}
-              style={{ background: "none", border: "none", color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", padding: "4px 12px", width: "100%", textAlign: "left" }}
+              className={archivedToggleClass}
             >
               {showArchived ? "▾" : "▸"} 已归档（{archived.length}）
             </button>
             {showArchived && filtered(archived).map((session) => (
               <div
                 key={session.id}
-                className="sidebar-item"
-                style={{ opacity: 0.7 }}
+                className={`sidebar-item ${archivedItemClass}`.trim()}
                 role="button"
                 tabIndex={0}
                 onClick={() => onSelect(session.id)}
                 onKeyDown={(e) => { if (e.key === "Enter") onSelect(session.id); }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-                  <div className="sidebar-item-title" style={{ flex: 1, minWidth: 0 }}>{session.title}</div>
+                <div className={sessionRowClass}>
+                  <div className={`sidebar-item-title ${sessionTitleClass}`.trim()}>{session.title}</div>
                   <button
-                    className="icon-button"
-                    style={{ padding: 2, border: "none", flexShrink: 0 }}
+                    className={`icon-button ${archiveBtnClass}`.trim()}
                     onClick={(e) => { e.stopPropagation(); onUnarchive(session.id); }}
                     type="button"
                     aria-label={`重开会话 ${session.title}`}

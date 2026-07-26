@@ -1,0 +1,63 @@
+.wrapper {
+  position: relative;
+  display: inline-flex;
+  outline: none;
+}
+
+.tip {
+  position: absolute;
+  z-index: var(--z-dropdown);
+  padding: var(--space-4) var(--space-8);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-hint);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.open .tip {
+  opacity: 1;
+}
+
+/* Sides */
+.top .tip {
+  bottom: 100%;
+  left: 50%;
+  transform: translate(-50%, calc(-1 * var(--space-4)));
+}
+.top.open .tip {
+  transform: translate(-50%, calc(-1 * var(--space-2)));
+}
+
+.bottom .tip {
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, var(--space-4));
+}
+.bottom.open .tip {
+  transform: translate(-50%, var(--space-2));
+}
+
+.left .tip {
+  right: 100%;
+  top: 50%;
+  transform: translate(calc(-1 * var(--space-4)), -50%);
+}
+.left.open .tip {
+  transform: translate(calc(-1 * var(--space-2)), -50%);
+}
+
+.right .tip {
+  left: 100%;
+  top: 50%;
+  transform: translate(var(--space-4), -50%);
+}
+.right.open .tip {
+  transform: translate(var(--space-2), -50%);
+}

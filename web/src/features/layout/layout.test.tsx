@@ -132,29 +132,25 @@ const COLOR_TOKEN_NAMES = [
   "--warning",
 ];
 
-describe("layout.css :root should not define color tokens", () => {
-  it("contains no color token definitions in :root block", () => {
+describe("layout.css should not define tokens (moved to styles/tokens.css)", () => {
+  it("contains no :root block with custom properties", () => {
     const layoutCssPath = resolve(import.meta.dirname ?? __dirname, "../../app/layout.css");
     const css = readFileSync(layoutCssPath, "utf-8");
 
-    // Extract the :root block content (everything between :root { and the closing })
+    // 结构令牌已迁移到 src/styles/tokens.css；layout.css 不应再定义任何 :root 令牌
     const rootMatch = css.match(/:root\s*\{([^}]*)\}/s);
-    expect(rootMatch).not.toBeNull();
-    const rootBlock = rootMatch![1] ?? "";
+    const rootBlock = rootMatch?.[1] ?? "";
 
-    for (const token of COLOR_TOKEN_NAMES) {
-      // Each line starting with the token name followed by : should not exist in :root
+    for (const token of [...COLOR_TOKEN_NAMES, "--sidebar-width", "--inspector-width", "--transition-duration"]) {
       if (rootBlock.includes(token)) {
-        // Extract the specific line for a better error message
         const lines = rootBlock.split("\n");
         for (const line of lines) {
           if (line.includes(token)) {
-            expect.fail(`layout.css :root should not define ${token}. Found: "${line.trim()}". Color tokens must be defined exclusively in themes/dark.css and themes/light.css.`);
+            expect.fail(`layout.css should not define ${token}. Found: "${line.trim()}". Tokens live in src/styles/tokens.css (structure) or themes/*.css (color).`);
           }
         }
       }
     }
-    // If we got here, none of the tokens were found — pass silently
     expect(true).toBe(true);
   });
 });

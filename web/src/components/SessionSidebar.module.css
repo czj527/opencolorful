@@ -1,0 +1,140 @@
+/* SessionSidebar —— 左侧会话列表栏。
+ * 根元素 .app-sidebar-left 以 :global 暴露（Playwright e2e 与 layout.css 引用）。
+ * 共享结构类 .sidebar-header / .sidebar-title / .sidebar-content / .sidebar-item*
+ * 保留在 app/layout.css（InspectorSidebar 共用）。
+ * 颜色 / 尺寸 / 时长一律引用 tokens.css 令牌。
+ */
+
+:global(.app-sidebar-left) {
+  width: min(var(--left-sidebar-width), 100vw);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  opacity: 1;
+  transition:
+    width var(--duration-normal) var(--ease-out),
+    opacity var(--duration-normal) var(--ease-out);
+}
+
+:global(.app-sidebar-left.collapsed) {
+  width: 0;
+  border-right: none;
+  overflow: hidden;
+  margin-left: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 窄屏抽屉：绝对定位 + 阴影 */
+@media (max-width: 768px) {
+  :global(.app-sidebar-left) {
+    position: absolute;
+    left: 0;
+    top: var(--statusbar-height);
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+  }
+
+  :global(.app-sidebar-left.collapsed) {
+    box-shadow: none;
+  }
+}
+
+/* Agent 选择器区 */
+.agentSection {
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* 搜索栏 */
+.searchBar {
+  padding: var(--space-8) var(--space-12);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.searchIcon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: var(--fs-caption);
+  outline: none;
+}
+
+/* 会话项内部布局 */
+.sessionRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sessionTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.archiveBtn {
+  padding: 2px;
+  border: none;
+  flex-shrink: 0;
+}
+
+.archivedToggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  padding: var(--space-4) var(--space-12);
+  width: 100%;
+  text-align: left;
+}
+
+.archivedGroup {
+  margin-top: var(--space-12);
+}
+
+.archivedItem {
+  opacity: 0.7;
+}
+
+.emptyHint {
+  font-size: var(--fs-caption);
+}
+
+.emptyIcon {
+  opacity: 0.4;
+}
+
+/* 新建会话表单 */
+.createForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.formInput {
+  padding: var(--space-6) var(--space-10);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+  outline: none;
+}
+
+.formInput:focus {
+  border-color: var(--accent);
+}

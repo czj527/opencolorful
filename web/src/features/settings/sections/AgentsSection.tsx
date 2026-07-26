@@ -1,5 +1,8 @@
 import { useState } from "react";
 import type { AgentProfile, AgentView } from "../../../lib/types.js";
+import { Badge, Button, Select, TextField } from "../../../components/ui/index.js";
+import { SettingsRow, SettingsSaveFeedback } from "../widgets/index.js";
+import styles from "./AgentsSection.module.css";
 
 export interface AgentsSectionProps {
   readonly agents: readonly AgentView[];
@@ -10,32 +13,23 @@ export interface AgentsSectionProps {
   readonly lastSaveError: string | null;
 }
 
-const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
-  assistant: { bg: "rgba(74,158,255,0.15)", fg: "var(--accent)" },
-  coding: { bg: "rgba(74,255,120,0.12)", fg: "var(--success)" },
-  work: { bg: "rgba(255,166,74,0.15)", fg: "var(--warning)" },
+const TYPE_BADGE_VARIANT: Record<string, "info" | "success" | "warning" | "default"> = {
+  assistant: "info",
+  coding: "success",
+  work: "warning",
+};
+
+const TYPE_LABEL: Record<string, string> = {
+  assistant: "assistant",
+  coding: "coding",
+  work: "work",
 };
 
 const REPLY_STYLE_OPTIONS = ["concise", "detailed", "conversational", "formal"] as const;
 
 function AgentTypeBadge({ type }: { readonly type: string }) {
-  const colors = TYPE_COLORS[type] ?? { bg: "var(--bg-tertiary)", fg: "var(--text-secondary)" };
-  return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 600,
-        padding: "2px 8px",
-        borderRadius: 10,
-        background: colors.bg,
-        color: colors.fg,
-        textTransform: "uppercase",
-        letterSpacing: "0.3px",
-      }}
-    >
-      {type}
-    </span>
-  );
+  const variant = TYPE_BADGE_VARIANT[type] ?? "default";
+  return <Badge variant={variant}>{TYPE_LABEL[type] ?? type}</Badge>;
 }
 
 export function AgentsSection(props: AgentsSectionProps) {
@@ -47,16 +41,17 @@ export function AgentsSection(props: AgentsSectionProps) {
   const [editPersonality, setEditPersonality] = useState("");
   const [editReplyStyle, setEditReplyStyle] = useState("concise");
   const [saveMsg, setSaveMsg] = useState("");
+  const [createMsg, setCreateMsg] = useState("");
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    setSaveMsg("");
+    setCreateMsg("");
     try {
       await props.onCreate(newType, newName.trim());
       setNewName("");
       setShowCreateForm(false);
     } catch (err) {
-      setSaveMsg(err instanceof Error ? err.message : "创建失败");
+      setCreateMsg(err instanceof Error ? err.message : "创建失败");
     }
   };
 
@@ -66,6 +61,14 @@ export function AgentsSection(props: AgentsSectionProps) {
     setEditPersonality(agent.profile?.personality.join(", ") ?? "");
     setEditReplyStyle(agent.profile?.replyStyle ?? "concise");
     setSaveMsg("");
+  };
+
+  const toggleExpand = (agent: AgentView) => {
+    if (expandedId === agent.identity.id) {
+      setExpandedId(null);
+    } else {
+      openEdit(agent);
+    }
   };
 
   const handleSaveProfile = async (id: string) => {
@@ -88,178 +91,154 @@ export function AgentsSection(props: AgentsSectionProps) {
   };
 
   return (
-    <section className="settings-section" data-testid="settings-section-agents">
-      <h2>Agent 管理</h2>
-      <p className="settings-desc">管理 Agent 身份、个性与回复风格。</p>
-
+    <>
       {props.agents.length === 0 && !showCreateForm && (
-        <div style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 16 }}>
-          暂无 Agent，点击下方按钮创建第一个。
-        </div>
+        <p className={styles.emptyHint}>暂无 Agent，点击下方按钮创建第一个。</p>
       )}
 
-      <ul className="provider-list">
-        {props.agents.map((agent) => (
-          <li
-            key={agent.identity.id}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              padding: "10px 14px",
-              background: "var(--bg-tertiary)",
-              borderRadius: 8,
-              border: "1px solid var(--border-color)",
-            }}
-          >
-            {/* Card header */}
-            <div
-              style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
-              onClick={() => expandedId === agent.identity.id ? setExpandedId(null) : openEdit(agent)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  expandedId === agent.identity.id ? setExpandedId(null) : openEdit(agent);
-                }
-              }}
-            >
-              <AgentTypeBadge type={agent.identity.type} />
-              <span style={{ fontWeight: 600, fontSize: 14, color: "var(--text-primary)" }}>
-                {agent.identity.name}
-              </span>
-              <span style={{ fontSize: 12, color: "var(--text-secondary)", marginLeft: "auto" }}>
-                {agent.sessionCount} 会话
-              </span>
-              <button
-                type="button"
-                className="settings-btn"
-                style={{ padding: "3px 10px", fontSize: 12 }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void props.onArchive(agent.identity.id);
+      <ul className={styles.list}>
+        {props.agents.map((agent) => {
+          const expanded = expandedId === agent.identity.id;
+          return (
+            <li key={agent.identity.id} className={styles.card}>
+              <div
+                className={styles.cardHeader}
+                onClick={() => toggleExpand(agent)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleExpand(agent);
+                  }
                 }}
-                title="归档 Agent"
-                aria-label={`归档 ${agent.identity.name}`}
               >
-                归档
-              </button>
-            </div>
-
-            {/* Expanded profile editor */}
-            {expandedId === agent.identity.id && (
-              <div className="settings-form">
-                <label>
-                  Persona（人设描述）
-                  <textarea
-                    value={editPersona}
-                    onChange={(e) => setEditPersona(e.target.value)}
-                    rows={4}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      marginTop: 4,
-                      padding: "7px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-color)",
-                      background: "var(--bg-tertiary)",
-                      color: "var(--text-primary)",
-                      fontSize: 13,
-                      outline: "none",
-                      resize: "vertical",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                </label>
-
-                <label>
-                  Personality 标签（逗号分隔）
-                  <input
-                    type="text"
-                    value={editPersonality}
-                    onChange={(e) => setEditPersonality(e.target.value)}
-                    placeholder="例如: helpful, curious, precise"
-                  />
-                </label>
-
-                <label>
-                  回复风格
-                  <select
-                    value={editReplyStyle}
-                    onChange={(e) => setEditReplyStyle(e.target.value)}
-                  >
-                    {REPLY_STYLE_OPTIONS.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                </label>
-
-                {saveMsg === "saved" && <div className="save-ok">已保存</div>}
-                {saveMsg && saveMsg !== "saved" && <div className="save-error">{saveMsg}</div>}
-
-                <button
-                  className="settings-btn primary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleSaveProfile(agent.identity.id);
-                  }}
-                  disabled={props.saving}
-                  type="button"
+                <AgentTypeBadge type={agent.identity.type} />
+                <span className={styles.agentName}>{agent.identity.name}</span>
+                <span className={styles.sessionCount}>{agent.sessionCount} 会话</span>
+                <span
+                  className={styles.archiveWrap}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  {props.saving ? "保存中..." : "保存 Profile"}
-                </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void props.onArchive(agent.identity.id)}
+                    title="归档 Agent"
+                    aria-label={`归档 ${agent.identity.name}`}
+                  >
+                    归档
+                  </Button>
+                </span>
               </div>
-            )}
-          </li>
-        ))}
+
+              {expanded && (
+                <div className={styles.editor}>
+                  <SettingsRow
+                    label="Persona（人设描述）"
+                    htmlFor={`agent-${agent.identity.id}-persona`}
+                  >
+                    <TextField
+                      id={`agent-${agent.identity.id}-persona`}
+                      value={editPersona}
+                      onChange={setEditPersona}
+                      multiline
+                      rows={4}
+                    />
+                  </SettingsRow>
+
+                  <SettingsRow
+                    label="Personality 标签"
+                    htmlFor={`agent-${agent.identity.id}-personality`}
+                    hint="逗号分隔"
+                  >
+                    <TextField
+                      id={`agent-${agent.identity.id}-personality`}
+                      value={editPersonality}
+                      onChange={setEditPersonality}
+                      placeholder="例如: helpful, curious, precise"
+                    />
+                  </SettingsRow>
+
+                  <SettingsRow label="回复风格" htmlFor={`agent-${agent.identity.id}-reply`}>
+                    <Select
+                      id={`agent-${agent.identity.id}-reply`}
+                      value={editReplyStyle}
+                      onChange={setEditReplyStyle}
+                    >
+                      {REPLY_STYLE_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </Select>
+                  </SettingsRow>
+
+                  <SettingsSaveFeedback
+                    saved={saveMsg === "saved"}
+                    error={saveMsg !== "" && saveMsg !== "saved" ? saveMsg : null}
+                  />
+
+                  <div className={styles.editorActions}>
+                    <Button
+                      variant="primary"
+                      onClick={() => void handleSaveProfile(agent.identity.id)}
+                      disabled={props.saving}
+                      loading={props.saving}
+                    >
+                      {props.saving ? "保存中…" : "保存 Profile"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
-      <button
-        type="button"
-        className="settings-btn"
-        onClick={() => setShowCreateForm(!showCreateForm)}
-        style={{ marginBottom: 12 }}
-      >
-        {showCreateForm ? "取消" : "+ 新建 Agent"}
-      </button>
+      <div className={styles.toggleRow}>
+        <Button variant="ghost" size="sm" onClick={() => setShowCreateForm(!showCreateForm)}>
+          {showCreateForm ? "取消" : "+ 新建 Agent"}
+        </Button>
+      </div>
 
-      {props.lastSaveError && <div className="save-error" role="alert">{props.lastSaveError}</div>}
+      <SettingsSaveFeedback error={props.lastSaveError} />
 
       {showCreateForm && (
-        <div className="settings-form">
-          <label>
-            类型
-            <select value={newType} onChange={(e) => setNewType(e.target.value)}>
+        <div className={styles.editor}>
+          <SettingsRow label="类型" htmlFor="agent-new-type">
+            <Select id="agent-new-type" value={newType} onChange={setNewType}>
               <option value="assistant">assistant</option>
               <option value="coding">coding</option>
               <option value="work">work</option>
-            </select>
-          </label>
+            </Select>
+          </SettingsRow>
 
-          <label>
-            名称
-            <input
-              type="text"
+          <SettingsRow label="名称" htmlFor="agent-new-name">
+            <TextField
+              id="agent-new-name"
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              onChange={setNewName}
               placeholder="Agent 名称"
             />
-          </label>
+          </SettingsRow>
 
-          {saveMsg === "saved" && <div className="save-ok">已保存</div>}
-          {saveMsg && saveMsg !== "saved" && <div className="save-error">{saveMsg}</div>}
+          <SettingsSaveFeedback
+            error={createMsg !== "" ? createMsg : null}
+          />
 
-          <button
-            className="settings-btn primary"
-            onClick={handleCreate}
-            disabled={props.saving || !newName.trim()}
-            type="button"
-          >
-            {props.saving ? "创建中..." : "创建 Agent"}
-          </button>
+          <div className={styles.editorActions}>
+            <Button
+              variant="primary"
+              onClick={handleCreate}
+              disabled={props.saving || !newName.trim()}
+              loading={props.saving}
+            >
+              {props.saving ? "创建中…" : "创建 Agent"}
+            </Button>
+          </div>
         </div>
       )}
-    </section>
+    </>
   );
 }

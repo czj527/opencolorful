@@ -1,0 +1,57 @@
+/* InspectorSidebar —— 右侧详情面板（当前占位壳）。
+ * 根元素 .app-inspector 以 :global 暴露（Playwright e2e 与 layout.css 引用）。
+ * 共享结构类 .sidebar-header / .sidebar-title / .sidebar-content 保留在 app/layout.css。
+ */
+
+:global(.app-inspector) {
+  width: min(var(--right-sidebar-width), 100vw);
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  opacity: 1;
+  transition:
+    width var(--duration-normal) var(--ease-out),
+    opacity var(--duration-normal) var(--ease-out);
+}
+
+:global(.app-inspector.collapsed) {
+  width: 0;
+  border-left: none;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 窄屏抽屉：≤1024px 右栏转绝对定位抽屉 */
+@media (max-width: 1024px) {
+  :global(.app-inspector) {
+    position: absolute;
+    right: 0;
+    top: var(--statusbar-height);
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+  }
+
+  :global(.app-inspector.collapsed) {
+    box-shadow: none;
+  }
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.emptyWrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-24);
+}

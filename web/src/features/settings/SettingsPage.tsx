@@ -1,7 +1,13 @@
 import { useEffect, useReducer, useState } from "react";
 
 import { ApiClient } from "../../lib/api-client.js";
-import type { AgentView, ModelSummary, PreferencesDocument, ProviderView, SupervisorStatusResponse } from "../../lib/types.js";
+import type {
+  AgentView,
+  ModelSummary,
+  PreferencesDocument,
+  ProviderView,
+  SupervisorStatusResponse,
+} from "../../lib/types.js";
 import type { ProviderFormData } from "../providers/provider-form.js";
 import {
   SETTINGS_SECTIONS,
@@ -19,13 +25,26 @@ import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { UnavailableSection } from "./sections/UnavailableSection.js";
 import { AgentsSection } from "./sections/AgentsSection.js";
 import { UsageSection } from "./sections/UsageSection.js";
+import { SettingsSection } from "./widgets/index.js";
 import type { AgentProfile } from "../../lib/types.js";
-import "./settings.css";
+import styles from "./SettingsPage.module.css";
 
 export interface SettingsPageProps {
   readonly api: ApiClient;
   readonly onBack: () => void;
 }
+
+/** 各 section 的标题与描述，由 SettingsPage 统一通过 SettingsSection 呈现。 */
+const SECTION_META: Record<SettingsSectionId, { title: string; description: string }> = {
+  models: { title: "模型与 Provider", description: "管理已配置的模型 Provider 与凭据。" },
+  defaults: { title: "默认对话", description: "新建 Session 时的默认行为。已有 Session 的显式设置不受影响。" },
+  layout: { title: "界面与布局", description: "调整侧栏宽度、焦点模式、动态效果与显示偏好。" },
+  agents: { title: "Agent 管理", description: "管理 Agent 身份、个性与回复风格。" },
+  logs: { title: "日志与诊断", description: "Supervisor 和 Agent Server 运行日志。" },
+  usage: { title: "用量统计", description: "查看 Token 消耗与缓存命中情况，支持按时间范围筛选。" },
+  runtime: { title: "运行时与关于", description: "当前进程状态与版本信息。" },
+  future: { title: "Profile / 记忆 / 多 Agent / 插件", description: "后续阶段规划的能力，当前尚未开放。" },
+};
 
 export function SettingsPage(props: SettingsPageProps) {
   const [nav, dispatch] = useReducer(
@@ -49,7 +68,9 @@ export function SettingsPage(props: SettingsPageProps) {
       try {
         const status = await props.api.getSupervisorStatus();
         if (!cancelled) setSupervisorStatus(status);
-      } catch { /* Supervisor 不可达——日志与 Runtime section 各自处理 */ }
+      } catch {
+        /* Supervisor 不可达——日志与 Runtime section 各自处理 */
+      }
 
       // Preferences 可能因 Agent 停止而 502，失败不阻塞整个页面
       try {
@@ -65,16 +86,25 @@ export function SettingsPage(props: SettingsPageProps) {
           props.api.listProviders().catch(() => [] as ProviderView[]),
           props.api.listModels().catch(() => [] as ModelSummary[]),
         ]);
-        if (!cancelled) { setProviders(provs); setModels(mods); }
-      } catch { /* 忽略 */ }
+        if (!cancelled) {
+          setProviders(provs);
+          setModels(mods);
+        }
+      } catch {
+        /* 忽略 */
+      }
 
       // Agent 列表异步加载，失败不阻塞其他 section
       try {
         const agentList = await props.api.listAgents();
         if (!cancelled) setAgents(agentList);
-      } catch { /* Agent 列表加载失败，不影响其他功能 */ }
+      } catch {
+        /* Agent 列表加载失败，不影响其他功能 */
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [props.api]);
 
   const handleSavePreferences = async (defaults: PreferencesDocument["defaults"]) => {
@@ -128,10 +158,22 @@ export function SettingsPage(props: SettingsPageProps) {
     try {
       await props.api.updateProvider(
         {
-          providerId: data.providerId, name: data.name, protocol: data.protocol,
+          providerId: data.providerId,
+          name: data.name,
+          protocol: data.protocol,
           baseUrl: data.baseUrl,
-          models: [{ modelId: data.modelId, name: data.modelName || data.modelId,
-            capabilities: { reasoning: data.reasoning, input: ["text"], contextWindow: data.contextWindow, maxTokens: data.maxTokens } }],
+          models: [
+            {
+              modelId: data.modelId,
+              name: data.modelName || data.modelId,
+              capabilities: {
+                reasoning: data.reasoning,
+                input: ["text"],
+                contextWindow: data.contextWindow,
+                maxTokens: data.maxTokens,
+              },
+            },
+          ],
         },
         data.apiKey || undefined,
       );
@@ -150,7 +192,9 @@ export function SettingsPage(props: SettingsPageProps) {
     try {
       const list = await props.api.listAgents();
       setAgents(list);
-    } catch { /* 忽略 */ }
+    } catch {
+      /* 忽略 */
+    }
   };
 
   const handleCreateAgent = async (type: string, name: string) => {
@@ -195,7 +239,12 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   };
 
-  const getSupervisorLogs = async (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => {
+  const getSupervisorLogs = async (query?: {
+    limit?: number;
+    level?: "all" | "info" | "warn" | "error";
+    query?: string;
+    since?: string | null;
+  }) => {
     return props.api.getSupervisorLogs(query);
   };
 
@@ -204,14 +253,19 @@ export function SettingsPage(props: SettingsPageProps) {
   };
 
   return (
-    <div className="settings-page" data-page="settings">
-      <header className="settings-header">
-        <button type="button" className="settings-back" onClick={props.onBack} data-testid="settings-back">
+    <div className={styles.page} data-page="settings">
+      <header className={styles.header}>
+        <button
+          type="button"
+          className={styles.back}
+          onClick={props.onBack}
+          data-testid="settings-back"
+        >
           ← 返回聊天
         </button>
-        <h1 className="settings-title">设置中心</h1>
+        <h1 className={styles.title}>设置中心</h1>
       </header>
-      <div className="settings-body">
+      <div className={styles.body}>
         <SettingsNav
           sections={SETTINGS_SECTIONS}
           activeSection={nav.activeSection}
@@ -223,7 +277,7 @@ export function SettingsPage(props: SettingsPageProps) {
           }}
           onSearch={(value) => dispatch({ type: "SET_SEARCH", search: value })}
         />
-        <main className="settings-content" data-testid="settings-content">
+        <main className={styles.content} data-testid="settings-content">
           {renderSection(nav.activeSection, {
             preferences,
             supervisorStatus,
@@ -259,7 +313,12 @@ interface SectionRenderProps {
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
   readonly onSaveTheme: (appearance: Partial<PreferencesDocument["appearance"]>) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
-  readonly onGetSupervisorLogs: (query?: { limit?: number; level?: "all" | "info" | "warn" | "error"; query?: string; since?: string | null }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
+  readonly onGetSupervisorLogs: (query?: {
+    limit?: number;
+    level?: "all" | "info" | "warn" | "error";
+    query?: string;
+    since?: string | null;
+  }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
   readonly onGetUsageSummary: (days: number) => Promise<import("../../lib/types.js").UsageSummaryResponse>;
   readonly onCreateAgent: (type: string, name: string) => Promise<void>;
   readonly onSaveAgentProfile: (id: string, profile: Partial<AgentProfile>) => Promise<void>;
@@ -270,59 +329,99 @@ interface SectionRenderProps {
 }
 
 function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
+  const meta = SECTION_META[active];
+
   // 独立于 Agent 的 section：即使 Agent 停止也可用
-  if (active === "logs") return <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />;
-  if (active === "usage") return <UsageSection getUsageSummary={props.onGetUsageSummary} />;
-  if (active === "runtime") return <RuntimeSection supervisorStatus={props.supervisorStatus} />;
-  if (active === "agents") return (
-    <AgentsSection
-      agents={props.agents}
-      onCreate={props.onCreateAgent}
-      onSaveProfile={props.onSaveAgentProfile}
-      onArchive={props.onArchiveAgent}
-      saving={props.saving}
-      lastSaveError={props.saveError}
-    />
-  );
-  if (active === "future") return <UnavailableSection />;
+  if (active === "logs") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-logs">
+        <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />
+      </SettingsSection>
+    );
+  }
+  if (active === "usage") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-usage">
+        <UsageSection getUsageSummary={props.onGetUsageSummary} />
+      </SettingsSection>
+    );
+  }
+  if (active === "runtime") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-runtime">
+        <RuntimeSection supervisorStatus={props.supervisorStatus} />
+      </SettingsSection>
+    );
+  }
+  if (active === "agents") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-agents">
+        <AgentsSection
+          agents={props.agents}
+          onCreate={props.onCreateAgent}
+          onSaveProfile={props.onSaveAgentProfile}
+          onArchive={props.onArchiveAgent}
+          saving={props.saving}
+          lastSaveError={props.saveError}
+        />
+      </SettingsSection>
+    );
+  }
+  if (active === "future") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-future">
+        <UnavailableSection />
+      </SettingsSection>
+    );
+  }
 
   // 以下 section 依赖 Agent/preferences
   if (props.loadError !== null) {
-    return <div className="settings-load-error" role="alert">{props.loadError}</div>;
+    return (
+      <div className={styles.loadError} role="alert">
+        {props.loadError}
+      </div>
+    );
   }
   if (props.preferences === null) {
-    return <div className="settings-loading">加载中…</div>;
+    return <div className={styles.loading}>加载中…</div>;
   }
 
   switch (active) {
     case "models":
       return (
-        <ProvidersSection
-          providers={props.providers}
-          onSaveProvider={props.onSaveProvider}
-          saving={props.saving}
-          lastSaveError={props.saveError}
-        />
+        <SettingsSection title={meta.title} description={meta.description} testId="settings-section-providers">
+          <ProvidersSection
+            providers={props.providers}
+            onSaveProvider={props.onSaveProvider}
+            saving={props.saving}
+            lastSaveError={props.saveError}
+          />
+        </SettingsSection>
       );
     case "defaults":
       return (
-        <DefaultsSection
-          preferences={props.preferences}
-          models={props.models}
-          onSave={props.onSavePreferences}
-          saving={props.saving}
-          lastSaveError={props.saveError}
-        />
+        <SettingsSection title={meta.title} description={meta.description} testId="settings-section-defaults">
+          <DefaultsSection
+            preferences={props.preferences}
+            models={props.models}
+            onSave={props.onSavePreferences}
+            saving={props.saving}
+            lastSaveError={props.saveError}
+          />
+        </SettingsSection>
       );
     case "layout":
       return (
-        <LayoutSection
-          preferences={props.preferences}
-          onSave={props.onSaveLayout}
-          onSaveTheme={props.onSaveTheme}
-          saving={props.saving}
-          lastSaveError={props.saveError}
-        />
+        <SettingsSection title={meta.title} description={meta.description} testId="settings-section-layout">
+          <LayoutSection
+            preferences={props.preferences}
+            onSave={props.onSaveLayout}
+            onSaveTheme={props.onSaveTheme}
+            saving={props.saving}
+            lastSaveError={props.saveError}
+          />
+        </SettingsSection>
       );
     default:
       return null;

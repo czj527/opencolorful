@@ -16,6 +16,7 @@ import { UiProjection } from "./UiProjection.jsx";
 import { renderSafeMarkdown } from "./safe-markdown.jsx";
 import { useChatScroll, type UseChatScrollResult } from "./use-chat-scroll.js";
 import { sameMessage } from "./timeline-turns.js";
+import styles from "./MessageList.module.css";
 
 interface MessageListProps {
   readonly messages: readonly ChatMessage[];
@@ -57,25 +58,23 @@ export const MessageBlock = memo(function MessageBlock({
   readonly turnUsage?: TokenUsage;
 }) {
   const anchorAttr = message.role === "user" ? { "data-anchor": `turn-${message.id}` } : {};
+  const blockClass = [
+    styles.block ?? "",
+    message.role === "user" ? (styles.blockUser ?? "") : (styles.blockAssistant ?? ""),
+  ].filter(Boolean).join(" ");
+
   return (
     <div
       {...anchorAttr}
-      style={{
-        padding: "8px 12px",
-        background: message.role === "user" ? "var(--bg-tertiary)" : "transparent",
-        borderRadius: 6,
-        maxWidth: "85%",
-        alignSelf: message.role === "user" ? "flex-end" : "flex-start",
-        wordBreak: "break-word",
-      }}
+      className={blockClass}
     >
-      <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>
+      <div className={styles.roleLabel ?? ""}>
         {message.role === "user" ? "你" : "助手"}
       </div>
       {message.role === "assistant" && !message.streaming
         ? renderSafeMarkdown(message.content)
-        : <span style={{ whiteSpace: "pre-wrap" }}>{message.content}</span>}
-      {message.streaming && <span className="streaming-cursor" aria-hidden="true">▍</span>}
+        : <span className={styles.streamingText ?? ""}>{message.content}</span>}
+      {message.streaming && <span className={`streaming-cursor ${styles.streamingCursor ?? ""}`} aria-hidden="true">▍</span>}
       {message.role === "assistant" && !message.streaming && turnUsage && (
         <div className="turn-usage-line" data-testid={`turn-usage-${message.id}`}>
           {formatTurnUsage(turnUsage)}
@@ -234,27 +233,18 @@ export function MessageList({
       if (!thinkingText) return null;
       const collapsed = collapsedThinkingBlocks.has(item.id);
       return (
-        <div
-          key={item.id}
-          style={{
-            padding: "6px 10px",
-            background: "var(--bg-tertiary)",
-            borderRadius: 6,
-            fontSize: 12,
-            color: "var(--text-secondary)",
-          }}
-        >
+        <div key={item.id} className={styles.thinkingBlock ?? ""}>
           <button
             type="button"
+            className={styles.thinkingToggle ?? ""}
             onClick={() => onToggleThinking(item.id)}
-            style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, padding: 0, fontSize: 12 }}
             aria-expanded={!collapsed}
           >
             <Brain size={12} aria-hidden="true" />
             思考过程 {collapsed ? "（点击展开）" : "（点击收起）"}
           </button>
           {!collapsed && (
-            <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{thinkingText}</div>
+            <div className={styles.thinkingContent ?? ""}>{thinkingText}</div>
           )}
         </div>
       );
@@ -282,9 +272,9 @@ export function MessageList({
   };
 
   return (
-    <div className="chat-messages" data-testid="message-list" ref={containerRef}>
+    <div className={`chat-messages ${styles.messages ?? ""}`} data-testid="message-list" ref={containerRef}>
       {recovering && (
-        <div style={{ padding: "4px 10px", fontSize: 12, color: "var(--warning)", textAlign: "center" }}>
+        <div className={styles.recovering ?? ""}>
           连接中断，正在恢复事件流…
         </div>
       )}
@@ -311,16 +301,10 @@ export function MessageList({
       {hasUnread && (
         <button
           type="button"
-          className="icon-button scroll-to-latest"
+          className={`icon-button scroll-to-latest ${styles.scrollToLatest ?? ""}`}
           onClick={scrollToLatest}
           aria-label="跳到最新消息"
           data-testid="scroll-to-latest"
-          style={{
-            position: "sticky",
-            bottom: 8,
-            alignSelf: "center",
-            zIndex: 5,
-          }}
         >
           <ArrowDown size={14} /> 跳到最新
         </button>

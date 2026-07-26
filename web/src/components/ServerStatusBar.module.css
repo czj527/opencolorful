@@ -1,0 +1,23 @@
+/* ServerStatusBar —— 顶部状态栏。
+ * 根元素 .app-statusbar 以 :global 暴露（Playwright e2e 与既有 layout.css 引用）。
+ * 共享工具类 .status-dot / .icon-button / .spinner-icon 保留在 app/layout.css。
+ */
+
+:global(.app-statusbar) {
+  height: var(--statusbar-height);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-12);
+  gap: var(--space-8);
+  flex-shrink: 0;
+}
+
+.meta {
+  color: var(--text-secondary);
+}
+
+.spacer {
+  flex: 1;
+}

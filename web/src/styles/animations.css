@@ -1,0 +1,43 @@
+/**
+ * 动画 keyframes 唯一真相来源，统一 pa-* 前缀。
+ * 组件用 var(--duration-*) 与 var(--ease-*) 引用时长/缓动，尊重 prefers-reduced-motion（由 tokens.css 兜底归零）。
+ */
+
+@keyframes pa-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pa-fade-in-up {
+  from { opacity: 0; transform: translateY(var(--space-4)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pa-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes pa-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pa-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes pa-anchor-flash {
+  0%, 100% { background-color: transparent; }
+  20%, 60% { background-color: var(--accent-light, rgba(94, 158, 255, 0.12)); }
+}
+
+@keyframes pa-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pa-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
