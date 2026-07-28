@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
 import type { PlatformEventEnvelope } from "../contracts/events.js";
 import {
   createPiAgentSession,
@@ -9,6 +10,9 @@ import {
   type PiFauxAgentOptions,
   type PiSessionHandle,
 } from "../pi-sdk/index.js";
+import { PathGuard } from "../sandbox/path-guard.js";
+import { buildPathGuardPolicy } from "../sandbox/policy.js";
+import { ToolPolicy } from "./tool-policy.js";
 import type { ModelService } from "./model-service.js";
 import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
@@ -39,6 +43,10 @@ export interface SessionRuntimeOptions {
   readonly noTools?: "all";
   readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   readonly systemPrompt?: string;
+  // 沙箱（Phase 9）
+  readonly agentSettings?: AgentSettingsV2;
+  readonly agentHomeDir?: string;
+  readonly platformHome?: string;
 }
 
 export interface PromptRun {
@@ -51,13 +59,19 @@ export class SessionRuntime {
   private mapper: PlatformEventMapper | undefined;
   private controlMapper: PlatformEventMapper | undefined;
   private readonly unsubscribe: () => void;
+  private readonly pathGuard: PathGuard | null;
+  private readonly toolPolicy: ToolPolicy;
 
   private constructor(
     readonly sessionId: string,
     private readonly agent: PiAgentSessionHandle,
     private readonly publish: (event: PlatformEventEnvelope) => void,
     private readonly replayStore: EventReplayStore | undefined,
+    pathGuard: PathGuard | null,
+    toolPolicy: ToolPolicy,
   ) {
+    this.pathGuard = pathGuard;
+    this.toolPolicy = toolPolicy;
     this.unsubscribe = agent.subscribe((event) => {
       const mapper = this.mapper ?? this.resolveControlMapper(event);
       if (!mapper) return;
@@ -84,6 +98,27 @@ export class SessionRuntime {
   }
 
   static async create(options: SessionRuntimeOptions): Promise<SessionRuntime> {
+    // ── 沙箱初始化 ──────────────────────────────────────────────
+    let pathGuard: PathGuard | null = null;
+    const toolPolicy = new ToolPolicy();
+
+    if (options.agentSettings && options.agentHomeDir && options.platformHome) {
+      try {
+        const policy = buildPathGuardPolicy({
+          agentSettings: options.agentSettings,
+          agentHomeDir: options.agentHomeDir,
+          platformHome: options.platformHome,
+        });
+        pathGuard = new PathGuard(policy);
+        toolPolicy.setPathGuard(pathGuard);
+      } catch {
+        // 策略构建失败时降级运行，不做沙箱检查
+        pathGuard = null;
+        toolPolicy.setPathGuard(null);
+      }
+    }
+
+    // ── Agent session 创建 ───────────────────────────────────────
     let agent: PiAgentSessionHandle;
 
     if (options.faux !== undefined) {
@@ -104,6 +139,7 @@ export class SessionRuntime {
           : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+        ...(pathGuard ? { toolPolicy } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -123,12 +159,13 @@ export class SessionRuntime {
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+        ...(pathGuard ? { toolPolicy } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");
     }
 
-    return new SessionRuntime(options.sessionId, agent, options.publish, options.replayStore);
+    return new SessionRuntime(options.sessionId, agent, options.publish, options.replayStore, pathGuard, toolPolicy);
   }
 
   prompt(text: string): PromptRun {
@@ -158,6 +195,11 @@ export class SessionRuntime {
 
   activeStream(): string | undefined {
     return this.executions.activeStream(this.sessionId);
+  }
+
+  /** 获取沙箱 ToolPolicy，用于文件路径检查（未配置沙箱时仍可用，默认放行） */
+  getToolPolicy(): ToolPolicy {
+    return this.toolPolicy;
   }
 
   async compact(): Promise<void> {

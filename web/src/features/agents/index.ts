@@ -14,7 +14,7 @@ export { AgentCreatePage } from "./AgentCreatePage.js";
 export type { AgentCreatePageProps } from "./AgentCreatePage.js";
 
 export { AgentForm } from "./AgentForm.js";
-export type { AgentFormProps, AgentFormDraft, AgentFormMode } from "./AgentForm.js";
+export type { AgentFormProps, AgentFormDraft, AgentSandboxDraft, AgentFormMode } from "./AgentForm.js";
 
 export { AgentEditPage } from "./AgentEditPage.js";
 export type { AgentEditPageProps } from "./AgentEditPage.js";

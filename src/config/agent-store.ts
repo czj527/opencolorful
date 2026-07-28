@@ -20,7 +20,9 @@ import {
   defaultAgentSettings,
   type AgentSettings,
   type AgentSettingsPatch,
+  type AgentSettingsV2,
 } from "../contracts/agent-settings.js";
+import { defaultSandboxCapabilities } from "../contracts/sandbox.js";
 
 export interface CreateAgentInput {
   readonly id: string;
@@ -122,9 +124,10 @@ export class AgentStore {
         input.defaultCwd !== null &&
         input.defaultCwd.trim() !== ""
       ) {
-        const settings: AgentSettings = {
-          version: 1,
+        const settings: AgentSettingsV2 = {
+          version: 2,
           defaultCwd: input.defaultCwd,
+          sandbox: defaultSandboxCapabilities(),
           updatedAt: now,
         };
         this.writeSettings(input.id, settings);
@@ -175,20 +178,28 @@ export class AgentStore {
     return next;
   }
 
-  getSettings(agentId: string): AgentSettings {
+  getSettings(agentId: string): AgentSettingsV2 {
     this.readIdentity(agentId);
     return this.readSettings(agentId) ?? defaultAgentSettings();
   }
 
-  saveSettings(agentId: string, patch: AgentSettingsPatch): AgentSettings {
+  saveSettings(agentId: string, patch: AgentSettingsPatch): AgentSettingsV2 {
     this.readIdentity(agentId);
     const current = this.readSettings(agentId);
     const base = current ?? defaultAgentSettings();
-    const next: AgentSettings = {
-      version: 1,
+    const next: AgentSettingsV2 = {
+      version: 2,
       defaultCwd: patch.defaultCwd !== undefined ? patch.defaultCwd : base.defaultCwd,
       updatedAt: new Date().toISOString(),
     };
+    // 合并 sandbox：patch 显式传入时优先，否则保留已有值或默认值
+    const mergedSandbox = this.mergeSandboxCapabilities(
+      patch.sandbox,
+      base.sandbox,
+    );
+    if (mergedSandbox !== undefined) {
+      next.sandbox = mergedSandbox;
+    }
     this.writeSettings(agentId, next);
     return next;
   }
@@ -306,19 +317,31 @@ export class AgentStore {
     this.atomicWrite(this.baseColorPath(agentId), baseColor);
   }
 
-  private readSettings(agentId: string): AgentSettings | null {
+  private readSettings(agentId: string): AgentSettingsV2 | null {
     const p = this.settingsPath(agentId);
     if (!fs.existsSync(p)) return null;
     try {
       const raw = this.readRawJson(p);
       if (!Value.Check(AgentSettingsSchema, raw)) return null;
-      return raw as AgentSettings;
+      const settings = raw as AgentSettings;
+      // v1 → v2 自动迁移：补 sandbox 默认值，升级 version，写回磁盘
+      if (settings.version === 1) {
+        const migrated: AgentSettingsV2 = {
+          version: 2,
+          defaultCwd: settings.defaultCwd,
+          sandbox: defaultSandboxCapabilities(),
+          updatedAt: settings.updatedAt,
+        };
+        this.writeSettings(agentId, migrated);
+        return migrated;
+      }
+      return settings as AgentSettingsV2;
     } catch {
       return null;
     }
   }
 
-  private writeSettings(agentId: string, settings: AgentSettings): void {
+  private writeSettings(agentId: string, settings: AgentSettingsV2): void {
     this.atomicWrite(this.settingsPath(agentId), settings);
   }
 
@@ -434,6 +457,22 @@ export class AgentStore {
       }
       throw error;
     }
+  }
+
+  private mergeSandboxCapabilities(
+    patch: AgentSettingsPatch["sandbox"],
+    base: AgentSettingsV2["sandbox"],
+  ): AgentSettingsV2["sandbox"] {
+    // patch 为 undefined → 保留已有值（不覆盖）
+    if (patch === undefined) return base;
+    // patch 为 null → 显式移除沙箱配置
+    if (patch === null) return undefined;
+    // patch 为对象 → 合并：patch 字段优先，缺失字段从 base 回退
+    return {
+      workspaceAccess: patch.workspaceAccess ?? base?.workspaceAccess ?? "rw",
+      extraReadPaths: patch.extraReadPaths ?? base?.extraReadPaths ?? [],
+      protectedPaths: patch.protectedPaths ?? base?.protectedPaths ?? [],
+    };
   }
 
   private countSessions(agentId: string): number {

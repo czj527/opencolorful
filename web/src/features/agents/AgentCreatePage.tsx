@@ -16,6 +16,10 @@ const INITIAL_DRAFT: AgentFormDraft = {
   replyStyle: "",
   innerSetting: "",
   defaultCwd: null,
+  sandbox: {
+    extraReadPaths: [],
+    protectedPaths: [],
+  },
   selectedTemplateKey: "blank",
   templateAdjusted: false,
 };

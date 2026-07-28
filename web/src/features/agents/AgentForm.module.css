@@ -99,3 +99,18 @@
   font-weight: 400;
   color: var(--text-secondary);
 }
+
+.sandboxLabel {
+  display: block;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--space-6);
+}
+
+.sandboxHint {
+  margin: var(--space-4) 0 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}

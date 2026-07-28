@@ -49,6 +49,8 @@ export function registerSessionRoutes(
       if (agentStore !== undefined) {
         try {
           agentStore.load(body.agentId);
+          // 读取 Agent 设置以触发 v1→v2 迁移，确保沙箱配置就绪
+          agentStore.getSettings(body.agentId);
         } catch {
           return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
         }
