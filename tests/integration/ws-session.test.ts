@@ -20,9 +20,9 @@ import { SessionService } from "../../src/runtime/session-service.js";
 const temporaryDirectories: string[] = [];
 
 function createWsContext() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-ws-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-ws-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const replayStore = new EventReplayStore();
   const promptService = new PromptService();
   const registry = new ClientRegistry();

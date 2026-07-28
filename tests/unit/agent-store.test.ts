@@ -11,7 +11,7 @@ import { defaultAgentSettings } from "../../src/contracts/agent-settings.js";
 let tempDirs: string[] = [];
 
 function makeTempAgentsDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-agentstore-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-agentstore-"));
   tempDirs.push(dir);
   return dir;
 }

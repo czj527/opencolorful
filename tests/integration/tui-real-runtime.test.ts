@@ -27,9 +27,9 @@ afterEach(() => {
 
 describe("TUI real runtime", () => {
   it("lists providers via TuiApiClient", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-tui-real-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-tui-real-"));
     temporaryDirectories.push(directory);
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
     const replayStore = new EventReplayStore();
     const promptService = new PromptService();
     const database = openMetadataDatabase(paths.database);

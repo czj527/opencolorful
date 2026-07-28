@@ -14,9 +14,9 @@ const temporaryDirectories: string[] = [];
 const API_KEY = "integration-secret-key";
 
 function createPaths() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-provider-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-provider-"));
   temporaryDirectories.push(directory);
-  return getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  return getRuntimePaths({ OPENCOLORFUL_HOME: directory });
 }
 
 function providerInput(overrides: Record<string, unknown> = {}) {
@@ -25,7 +25,7 @@ function providerInput(overrides: Record<string, unknown> = {}) {
     name: "Local OpenAI",
     protocol: "openai-completions",
     baseUrl: "http://127.0.0.1:11434/v1",
-    headers: { "X-Workspace": "person-agent" },
+    headers: { "X-Workspace": "opencolorful" },
     models: [
       {
         modelId: "local-model",

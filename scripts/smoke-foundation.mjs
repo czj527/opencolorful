@@ -12,7 +12,7 @@ const projectRoot = path.resolve(
 
 const env = {
   ...process.env,
-  PERSON_AGENT_HOME: path.join(projectRoot, ".person-agent", "smoke"),
+  OPENCOLORFUL_HOME: path.join(projectRoot, ".opencolorful", "smoke"),
 };
 
 let serverProcess;
@@ -38,8 +38,8 @@ async function healthCheck(url, maxRetries = 15, delayMs = 500) {
 }
 
 async function waitForStopped(maxRetries = 20, delayMs = 100) {
-  const statePath = path.join(env.PERSON_AGENT_HOME, "runtime", "server.json");
-  const lockPath = path.join(env.PERSON_AGENT_HOME, "runtime", "server.lock");
+  const statePath = path.join(env.OPENCOLORFUL_HOME, "runtime", "server.json");
+  const lockPath = path.join(env.OPENCOLORFUL_HOME, "runtime", "server.lock");
   for (let i = 0; i < maxRetries; i++) {
     const state = fs.existsSync(statePath)
       ? JSON.parse(fs.readFileSync(statePath, "utf8"))
@@ -51,7 +51,7 @@ async function waitForStopped(maxRetries = 20, delayMs = 100) {
 }
 
 async function main() {
-  console.log("=== person-Agent 基础烟雾测试 ===\n");
+  console.log("=== OpenColorful 基础烟雾测试 ===\n");
 
   const cliEntry = path.resolve(projectRoot, "src/cli/main.ts");
   const tsxArgs = ["--import", "tsx", cliEntry];
@@ -66,7 +66,7 @@ async function main() {
 
     // 2. 等待健康检查并就绪
     console.log("[2/3] 等待 Server 就绪...");
-    const port = process.env.PERSON_AGENT_PORT || "4310";
+    const port = process.env.OPENCOLORFUL_PORT || "4310";
     const health = await healthCheck(`http://127.0.0.1:${port}/api/health`);
     console.log(`  状态: ${health.status}, 版本: ${health.version}, PID: ${health.pid}`);
 

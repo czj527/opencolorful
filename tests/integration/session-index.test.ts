@@ -11,7 +11,7 @@ import { SessionIndex } from "../../src/storage/session-index.js";
 const temporaryDirectories: string[] = [];
 
 function createDatabasePath(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-storage-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-storage-"));
   temporaryDirectories.push(directory);
   return path.join(directory, "metadata.sqlite");
 }

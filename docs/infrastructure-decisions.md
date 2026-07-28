@@ -1,4 +1,4 @@
-# person-Agent 基础设施边界与开发决策
+# OpenColorful 基础设施边界与开发决策
 
 > 2026-07-27 | 回答开发前必须明确的 7 类问题：基础设施边界、subagent 特化、记忆系统选型、自我进化难度、日志时机、Electron 时机、开发流程规范
 > 配套文档：[positioning-and-roadmap.md](positioning-and-roadmap.md)（核心理念与路线）
@@ -60,7 +60,7 @@
 
 这完全符合"agent 形态由创建者定义"理念——子 agent 也是 agent，特化靠技能包而非硬编码。落地在 Phase 13。
 
-## 五、记忆系统选型与 person-Agent 自己的风格
+## 五、记忆系统选型与 OpenColorful 自己的风格
 
 ### 主流方案对比（含 openclaw / hermes / openhanako）
 
@@ -76,7 +76,7 @@
 
 业界 2025-2026 收敛于**三类记忆 taxonomy**：情景（episodic，事件带时序）/ 语义（semantic，事实知识）/ 程序（procedural，技能/怎么做）。**没有单一存储范式称王**——向量擅长模糊召回但对关系盲，图谱擅长关系/时序但需本体维护，生产级 agent 越来越用混合架构 + LLM 管理接口。
 
-### person-Agent 记忆系统：融合 + 自己的风格
+### OpenColorful 记忆系统：融合 + 自己的风格
 
 **选型**：自编辑（Letta）+ 巩固（openclaw dreaming）+ 时序事实（Zep）+ 全文检索（hermes FTS5），融合而非照搬。
 
@@ -84,7 +84,7 @@
 
 把记忆系统和 agent 的"一生/日常"结合，而非冷冰冰的 vector/graph 术语。agent 有白天（交互工作）、有案头（工作台）、有笺（待办）、有夜晚（梦境巩固）——完整的作息节奏。
 
-| person-Agent 命名 | 对应记忆类型 | 借鉴 | 说明 |
+| OpenColorful 命名 | 对应记忆类型 | 借鉴 | 说明 |
 |---|---|---|---|
 | **案头** | 工作记忆 + 工作区 | openhanako 书桌 | 当前处理的文件/笺，agent 与用户的异步协作空间 |
 | **笺** | 待办/提醒 | openhanako 笺 | 便签，agent 主动读取执行（异步触发） |
@@ -94,7 +94,7 @@
 | **手艺** | 程序记忆 procedural | hermes learning_graph | 技能/怎么做，可自创改进 |
 | **梦境** | 巩固机制 | openclaw dreaming | 睡眠时三阶段巩固（Light/REM/Deep）+ 六信号评分 + shadow trial |
 
-这个命名体系是 person-Agent 的风格——agent 的"一生"意象，而非工程术语。`案头`和`笺`本土化了 openhanako 的书桌概念，`识见`带有效期借鉴 Zep 时序，`梦境`借鉴 openclaw 巩固，`手艺`借鉴 hermes 技能进化。
+这个命名体系是 OpenColorful 的风格——agent 的"一生"意象，而非工程术语。`案头`和`笺`本土化了 openhanako 的书桌概念，`识见`带有效期借鉴 Zep 时序，`梦境`借鉴 openclaw 巩固，`手艺`借鉴 hermes 技能进化。
 
 ### 难度评估
 
@@ -121,7 +121,7 @@
 
 **难度总评**：记忆巩固 + 自编辑是"可工程化"的，中难度，建议做。技能自创是"研究级"，高难度，可做但需评估闭环。性格演变风险极高，建议**不做或做强约束**（人格 yuan 作为稳定锚点，只允许"识见/手艺"成长，不允许 yuan 本身漂移）。
 
-**person-Agent 立场**：agent 的"自我"（yuan 人格）是稳定锚点，成长发生在"识见"（知识增长）和"手艺"（技能增长）层面，人格不漂移。这既是工程务实，也符合"给 agent 完整一生"——一生是经历/认知/技能的成长，而非性格反复无常。
+**OpenColorful 立场**：agent 的"自我"（yuan 人格）是稳定锚点，成长发生在"识见"（知识增长）和"手艺"（技能增长）层面，人格不漂移。这既是工程务实，也符合"给 agent 完整一生"——一生是经历/认知/技能的成长，而非性格反复无常。
 
 ## 七、现在就给系统加全面日志合不合适？
 

@@ -14,11 +14,11 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-smoke-web-"));
+const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-smoke-web-"));
 
 const env = {
   ...process.env,
-  PERSON_AGENT_HOME: tempHome,
+  OPENCOLORFUL_HOME: tempHome,
 };
 
 let supervisorProcess;

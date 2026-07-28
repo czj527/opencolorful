@@ -1,14 +1,14 @@
 {
-  "name": "person-agent",
+  "name": "opencolorful",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "workspaces": [
     "web"
   ],
-  "description": "基于 PI SDK 的本地优先 Agent 平台",
+  "description": "OpenColorful — 承载 agent 完整一生的本地优先平台基础设施",
   "bin": {
-    "agent": "dist/cli/main.js"
+    "ocf": "dist/cli/main.js"
   },
   "engines": {
     "node": ">=22.19.0"

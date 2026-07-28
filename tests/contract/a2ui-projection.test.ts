@@ -47,7 +47,7 @@ describe("A2UI v0.9.1 projection", () => {
       version: "v0.9.1",
       createSurface: {
         surfaceId: "session-a2ui",
-        catalogId: "person-agent/v1",
+        catalogId: "opencolorful/v1",
       },
     });
     expect(result[1]).toMatchObject({
@@ -106,7 +106,7 @@ describe("A2UI v0.9.1 projection", () => {
 
   it("uses only components from the fixed local catalog", () => {
     const catalog = new A2uiCatalog();
-    expect(catalog.getCatalogId()).toBe("person-agent/v1");
+    expect(catalog.getCatalogId()).toBe("opencolorful/v1");
     expect(catalog.isAllowed("Column")).toBe(true);
     expect(catalog.isAllowed("UnknownWidget")).toBe(false);
   });

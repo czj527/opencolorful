@@ -115,9 +115,9 @@ export class ProcessController {
       stdio: ["ignore", logHandle, logHandle],
       env: {
         ...process.env,
-        PERSON_AGENT_HOME: this.paths.home,
-        PERSON_AGENT_PORT: String(this.agentServerPort),
-        PERSON_AGENT_DAEMON: "1",
+        OPENCOLORFUL_HOME: this.paths.home,
+        OPENCOLORFUL_PORT: String(this.agentServerPort),
+        OPENCOLORFUL_DAEMON: "1",
       },
     });
     child.unref();

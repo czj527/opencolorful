@@ -16,9 +16,9 @@ import { createServerApp } from "../../src/server/app.js";
 const temporaryDirectories: string[] = [];
 
 function createPaths() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-settings-routes-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-settings-routes-"));
   temporaryDirectories.push(directory);
-  return getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  return getRuntimePaths({ OPENCOLORFUL_HOME: directory });
 }
 
 function providerInput() {

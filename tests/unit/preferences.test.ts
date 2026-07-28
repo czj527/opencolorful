@@ -12,11 +12,11 @@ import {
 } from "../../src/contracts/preferences.js";
 
 function makeTempHome(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-prefs-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-prefs-"));
 }
 
 function tempPaths(home: string) {
-  return getRuntimePaths({ PERSON_AGENT_HOME: home });
+  return getRuntimePaths({ OPENCOLORFUL_HOME: home });
 }
 
 describe("preferences document normalization", () => {

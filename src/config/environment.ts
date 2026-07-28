@@ -18,7 +18,7 @@ function parsePort(value: string | undefined): number {
 
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error("PERSON_AGENT_PORT 必须是 1 到 65535 之间的整数");
+    throw new Error("OPENCOLORFUL_PORT 必须是 1 到 65535 之间的整数");
   }
   return port;
 }
@@ -29,15 +29,15 @@ function parseLogLevel(value: string | undefined): LogLevel {
   }
 
   if (!LOG_LEVELS.has(value as LogLevel)) {
-    throw new Error("PERSON_AGENT_LOG_LEVEL 必须是 debug、info、warn 或 error");
+    throw new Error("OPENCOLORFUL_LOG_LEVEL 必须是 debug、info、warn 或 error");
   }
   return value as LogLevel;
 }
 
 export function loadEnvironment(environment: NodeJS.ProcessEnv = process.env): RuntimeEnvironment {
   return {
-    host: environment.PERSON_AGENT_HOST?.trim() || DEFAULT_HOST,
-    port: parsePort(environment.PERSON_AGENT_PORT),
-    logLevel: parseLogLevel(environment.PERSON_AGENT_LOG_LEVEL),
+    host: environment.OPENCOLORFUL_HOST?.trim() || DEFAULT_HOST,
+    port: parsePort(environment.OPENCOLORFUL_PORT),
+    logLevel: parseLogLevel(environment.OPENCOLORFUL_LOG_LEVEL),
   };
 }

@@ -51,7 +51,7 @@ export class TuiApp {
       const health = await this.api.getHealth();
       this.state = { name: "main" };
       this.write(
-        `person-agent TUI — Server ${health.status} v${health.version}\n`,
+        `OpenColorful TUI — Server ${health.status} v${health.version}\n`,
       );
       this.write("输入 /help 查看命令\n\n");
       this.prompt();

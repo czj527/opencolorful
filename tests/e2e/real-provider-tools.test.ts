@@ -108,13 +108,13 @@ async function collectUntilIdle(response: Response): Promise<PlatformEventEnvelo
 
 describe("real provider and PI tools", () => {
   it("runs a read-only PI tool from the persisted session workspace", async () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-real-tool-"));
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-real-tool-"));
     temporaryDirectories.push(home);
     const workspace = path.join(home, "workspace");
     fs.mkdirSync(workspace);
     fs.writeFileSync(path.join(workspace, "target.txt"), "WORKSPACE_CONTENT\n", "utf8");
     const fixture = await startProviderFixture();
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: home });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: home });
     const server = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,

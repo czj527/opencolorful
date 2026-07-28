@@ -20,8 +20,8 @@ export interface RuntimePaths {
 }
 
 export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): RuntimePaths {
-  const override = environment.PERSON_AGENT_HOME?.trim();
-  const home = override ? path.resolve(override) : path.join(os.homedir(), ".person-agent");
+  const override = environment.OPENCOLORFUL_HOME?.trim();
+  const home = override ? path.resolve(override) : path.join(os.homedir(), ".opencolorful");
   const config = path.join(home, "config");
   const auth = path.join(home, "auth");
   const logs = path.join(home, "logs");

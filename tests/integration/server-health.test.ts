@@ -32,9 +32,9 @@ describe("server health", () => {
   });
 
   it("starts on an ephemeral loopback port and updates runtime state", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-server-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-server-"));
     temporaryDirectories.push(directory);
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
     const server = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,
@@ -60,9 +60,9 @@ describe("server health", () => {
   });
 
   it("releases runtime state and lock when production service construction fails", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-server-fail-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-server-fail-"));
     temporaryDirectories.push(directory);
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
     fs.mkdirSync(path.dirname(paths.providerSettings), { recursive: true });
     fs.writeFileSync(paths.providerSettings, "{not-json", "utf8");
 

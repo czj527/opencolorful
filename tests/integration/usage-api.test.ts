@@ -12,9 +12,9 @@ import { createServerApp } from "../../src/server/app.js";
 const temporaryDirectories: string[] = [];
 
 function createContext() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-usage-api-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-usage-api-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const usageStore = new UsageStore(database);
   const { app } = createServerApp({ usageStore });

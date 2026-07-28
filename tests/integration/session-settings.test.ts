@@ -17,9 +17,9 @@ import { parseSessionSettings } from "../../src/contracts/session-settings.js";
 const temporaryDirectories: string[] = [];
 
 function createContext() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-settings-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-settings-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const index = new SessionIndex(database);
   const service = new SessionService(paths, index);

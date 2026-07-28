@@ -19,7 +19,7 @@ const PLATFORM_EXTENSIONS = [
 
 const ALL_COMPONENTS = new Set<string>([...BASE_COMPONENTS, ...PLATFORM_EXTENSIONS]);
 
-const CATALOG_ID = "person-agent/v1" as const;
+const CATALOG_ID = "opencolorful/v1" as const;
 
 export class A2uiCatalog {
   isAllowed(type: string): boolean {

@@ -113,9 +113,9 @@ async function sendPromptAndCollect(
 
 describe("server restart recovery", () => {
   it("rebuilds production services and continues persisted history", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-e2e-"));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-e2e-"));
     temporaryDirectories.push(directory);
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
 
     const server1 = await startForegroundServer({
       host: "127.0.0.1",

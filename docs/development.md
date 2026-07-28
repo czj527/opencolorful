@@ -1,4 +1,4 @@
-# person-Agent 开发流程
+# OpenColorful 开发流程
 
 本文是开发流程的唯一权威文档。`AGENTS.md` 保留摘要与入口；架构硬约束见
 [architecture.md](architecture.md)，编码规范见 `AGENTS.md`。
@@ -74,7 +74,7 @@ T3（messages 路由）文件零重叠并行 → T4（Web 用量）→ T5/T6/T7 
 - 手工编辑用 apply_patch；不用 `git reset --hard`、`git checkout --` 等破坏性命令；
   不回退与当前任务无关的用户改动。
 - 默认测试不得请求真实 Provider 网络，不得依赖本机已有 API Key；
-  用 PI faux provider + 临时 `PERSON_AGENT_HOME`，测试结束关闭数据库/Runtime/订阅。
+  用 PI faux provider + 临时 `OPENCOLORFUL_HOME`，测试结束关闭数据库/Runtime/订阅。
 - 长时命令（全量 vitest）在管道中易被误判，应写结果文件后轮询读取。
 
 ## 五、质量门（验收时必须全部单独通过）
@@ -87,7 +87,17 @@ npm run test --workspace=web
 npm run web:build
 npx tsc -p tsconfig.build.json
 cd web; npx playwright test
+
+# ===== browser-use 实际交互验收（Phase 新增功能验证）=====
+# 启动服务后，使用 browser-use（control-browser skill）打开 Web 工作台
+# 按 Phase 验收标准逐项操作验证用户可感知的新功能，截图留存
+npm run web:build
+npm run cli -- supervisor start
+# → 浏览器打开 http://127.0.0.1:4311，执行功能验收，截图记录
+npm run cli -- supervisor stop
 ```
+
+> **browser-use 定位**：对用户可感知的新功能做真实浏览器交互验证，可作为 Playwright E2E 的补充或替代。Playwright 侧重回归防御，browser-use 侧重新功能交互验收。两者可根据 Phase 特性灵活侧重。
 
 ## 附录 A：Phase 计划模板
 
