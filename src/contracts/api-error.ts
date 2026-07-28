@@ -1,6 +1,7 @@
 export type ApiErrorCode =
   | "INVALID_INPUT"
   | "NOT_FOUND"
+  | "NOT_IMPLEMENTED"
   | "CONFLICT"
   | "UNAUTHORIZED"
   | "PROVIDER_ERROR"

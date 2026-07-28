@@ -14,6 +14,7 @@ import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
 import { AppShell } from "../components/AppShell.jsx";
 import { useLayoutState, NARROW_LEFT_QUERY, NARROW_RIGHT_QUERY } from "../features/layout/useLayoutState.js";
 import { StreamBuffer } from "../features/chat/stream-buffer.js";
+import { navigateToWorkspace } from "./page-router.js";
 import "./layout.css";
 
 // 同源部署：Supervisor 托管 Web 并代理 Agent API
@@ -22,9 +23,21 @@ const API_BASE = "";
 export interface WorkspaceAppProps {
   readonly onSettingsClick: () => void;
   readonly active: boolean;
+  /**
+   * NewSessionPage 创建会话成功后由 App 透传的 sessionId。
+   * WorkspaceApp 检测到非空值时（且自身 active）会将其设为 activeSession、
+   * 加载 chat state，并调用 onSessionCreatedConsumed 清空状态。
+   */
+  readonly createdSessionId?: string | null;
+  readonly onSessionCreatedConsumed?: () => void;
 }
 
-export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
+export function WorkspaceApp({
+  onSettingsClick,
+  active,
+  createdSessionId,
+  onSessionCreatedConsumed,
+}: WorkspaceAppProps) {
   const [state, dispatch] = useReducer(appReducer, undefined, () => ({
     ...initialAppState,
     // 窄屏默认收起侧栏，避免首屏抽屉互相覆盖
@@ -227,6 +240,18 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
       }
     } catch { /* 会话可能不存在 */ }
   }, [api, refreshSessionUsage]);
+
+  // NewSessionPage 创建会话后由 App 透传 sessionId：在此加载为 activeSession。
+  // 路由已由 App 切到 workspace（navigateToWorkspace）；此处只负责会话状态加载。
+  useEffect(() => {
+    if (!active || createdSessionId === null || createdSessionId === undefined) return;
+    const sessionId = createdSessionId;
+    void (async () => {
+      await handleSelectSession(sessionId);
+      navigateToWorkspace();
+      onSessionCreatedConsumed?.();
+    })();
+  }, [active, createdSessionId, handleSelectSession, onSessionCreatedConsumed]);
 
   const handleCreateSession = useCallback(async (title: string, cwd: string) => {
     try {
@@ -439,7 +464,6 @@ export function WorkspaceApp({ onSettingsClick, active }: WorkspaceAppProps) {
           activeSessionId={state.activeSessionId}
           collapsed={layout.leftCollapsed}
           onSelect={(id) => void handleSelectSession(id)}
-          onCreate={(title, cwd) => void handleCreateSession(title, cwd)}
           onArchive={(id) => void handleArchiveSession(id)}
           onUnarchive={(id) => void handleUnarchiveSession(id)}
           onToggle={layout.handleToggleLeft}

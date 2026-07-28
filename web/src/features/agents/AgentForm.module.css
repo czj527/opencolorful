@@ -1,0 +1,101 @@
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--space-32) var(--space-24);
+  padding-bottom: 80px;
+}
+
+.section {
+  margin-bottom: var(--space-32);
+  padding-bottom: var(--space-24);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.section:last-of-type {
+  border-bottom: none;
+}
+
+.sectionLabel {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-12);
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.field {
+  margin-bottom: var(--space-16);
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-16) var(--space-24);
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+  z-index: 10;
+}
+
+.barLeft {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.savedHint {
+  color: var(--success, #22c55e);
+  font-size: var(--fs-caption);
+}
+
+.error {
+  margin-bottom: var(--space-16);
+  padding: var(--space-10) var(--space-12);
+  background: var(--bg-danger, #fef2f2);
+  border: 1px solid var(--danger, #ef4444);
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  font-size: var(--fs-caption);
+}
+
+.overwriteBanner {
+  padding: var(--space-10) var(--space-12);
+  background: var(--bg-warning, #fef3c7);
+  border: 1px solid var(--warning, #f59e0b);
+  border-radius: var(--radius-card);
+  margin-top: var(--space-12);
+}
+
+.overwriteText {
+  font-size: var(--fs-caption);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-8) 0;
+}
+
+.overwriteActions {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.adjustedTag {
+  display: inline-flex;
+  padding: 0 var(--space-6);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-secondary);
+}

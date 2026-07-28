@@ -24,7 +24,7 @@ export function AgentSelector({ agents, activeAgentId, onSelect }: AgentSelector
         </option>
         {agents.map((a) => (
           <option key={a.identity.id} value={a.identity.id}>
-            {a.identity.name} [{a.identity.type}]
+            {a.identity.name}
           </option>
         ))}
       </select>

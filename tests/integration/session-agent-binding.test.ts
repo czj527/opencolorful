@@ -13,6 +13,13 @@ import { createServerApp } from "../../src/server/app.js";
 
 const temporaryDirectories: string[] = [];
 
+const blankBaseColor = {
+  persona: "",
+  personality: [] as readonly string[],
+  replyStyle: "",
+  innerSetting: "",
+};
+
 interface TestContext {
   paths: ReturnType<typeof getRuntimePaths>;
   database: ReturnType<typeof openMetadataDatabase>;
@@ -81,7 +88,7 @@ describe("Session-Agent binding", () => {
       const agentRes = await ctx.app.request("http://local/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "bind-me", type: "assistant", name: "绑定助手" }),
+        body: JSON.stringify({ id: "bind-me", name: "绑定助手", baseColor: blankBaseColor }),
       });
       expect(agentRes.status).toBe(201);
       const agentView = (await agentRes.json()) as { identity: { id: string } };
@@ -144,12 +151,12 @@ describe("Session-Agent binding", () => {
       await ctx.app.request("http://local/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "agent-x", type: "assistant", name: "X" }),
+        body: JSON.stringify({ id: "agent-x", name: "X", baseColor: blankBaseColor }),
       });
       await ctx.app.request("http://local/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "agent-y", type: "coding", name: "Y" }),
+        body: JSON.stringify({ id: "agent-y", name: "Y", baseColor: blankBaseColor }),
       });
 
       // 创建会话：一个无 Agent，一个绑定 agent-x，一个绑定 agent-y
@@ -195,7 +202,7 @@ describe("Session-Agent binding", () => {
       await ctx.app.request("http://local/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "recover-me", type: "assistant", name: "恢复测试" }),
+        body: JSON.stringify({ id: "recover-me", name: "恢复测试", baseColor: blankBaseColor }),
       });
 
       const createRes = await ctx.app.request("http://local/api/sessions", {
@@ -240,7 +247,7 @@ describe("Session-Agent binding", () => {
       await ctx.app.request("http://local/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: "list-me", type: "work", name: "列表恢复" }),
+        body: JSON.stringify({ id: "list-me", name: "列表恢复", baseColor: blankBaseColor }),
       });
 
       const createRes = await ctx.app.request("http://local/api/sessions", {

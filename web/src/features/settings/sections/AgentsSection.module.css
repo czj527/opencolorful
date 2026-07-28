@@ -15,55 +15,118 @@
 
 .card {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
+  align-items: center;
+  gap: var(--space-10);
   padding: var(--space-10) var(--space-16);
   background: var(--bg-tertiary);
   border-radius: var(--radius-card);
   border: 1px solid var(--border-color);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
-.cardHeader {
+.card:hover {
+  background: var(--bg-secondary);
+}
+
+.cardHighlight {
+  background: var(--bg-accent, #eff6ff);
+  border-color: var(--accent);
+}
+
+.cardMain {
   display: flex;
   align-items: center;
   gap: var(--space-10);
+  flex: 1;
+  min-width: 0;
   cursor: pointer;
 }
 
-.archiveWrap {
-  display: inline-flex;
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.agentName {
+.name {
   font-weight: 600;
   font-size: var(--fs-body);
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.sessionCount {
-  margin-left: auto;
+.meta {
   font-size: var(--fs-caption);
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.editor {
+.dot {
+  color: var(--text-tertiary, #9ca3af);
+}
+
+.actions {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.menuBtn {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-12);
-  padding: var(--space-16);
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.menuBtn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: var(--space-4);
+  min-width: 140px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-card);
-  margin-top: var(--space-4);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1));
+  z-index: 20;
+  padding: var(--space-4);
 }
 
-.editorActions {
-  display: flex;
-  gap: var(--space-8);
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-6) var(--space-10);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--fs-caption);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
 }
 
-.toggleRow {
+.menuItem:hover {
+  background: var(--bg-tertiary);
+}
+
+.toolbar {
   display: flex;
   gap: var(--space-8);
-  margin-bottom: var(--space-12);
+  margin-bottom: var(--space-16);
 }

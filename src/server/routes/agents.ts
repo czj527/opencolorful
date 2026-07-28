@@ -3,10 +3,23 @@ import crypto from "node:crypto";
 import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
+import { BASE_COLOR_TEMPLATES } from "../../contracts/base-color-templates.js";
 import type { AgentStore } from "../../config/agent-store.js";
 import type { SessionService } from "../../runtime/session-service.js";
 
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((p) => typeof p === "string");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
 
 export function registerAgentRoutes(
   app: Hono,
@@ -18,19 +31,27 @@ export function registerAgentRoutes(
       return context.json(agentStore.list());
     } catch (error) {
       return context.json(
-        createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "Agent 列表加载失败"),
+        createApiError(
+          "INTERNAL_ERROR",
+          error instanceof Error ? error.message : "Agent 列表加载失败",
+        ),
         500,
       );
     }
   });
 
+  // 模板路由必须在 :id 路由之前注册，避免 templates 被当成 agentId
+  app.get("/api/agents/templates", (context) => {
+    return context.json(BASE_COLOR_TEMPLATES);
+  });
+
   app.post("/api/agents", async (context) => {
     try {
-      const body = (await context.req.json()) as {
-        id?: unknown;
-        type?: unknown;
-        name?: unknown;
-      };
+      const rawBody = await context.req.json() as unknown;
+      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["id", "name", "baseColor", "defaultCwd"])) {
+        return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
+      }
+      const body = rawBody;
       // id 可选：提供时校验格式，未提供时服务端生成 UUID
       let agentId: string;
       if (body.id !== undefined) {
@@ -41,19 +62,65 @@ export function registerAgentRoutes(
       } else {
         agentId = crypto.randomUUID();
       }
-      if (body.type !== "assistant" && body.type !== "coding" && body.type !== "work") {
-        return context.json(createApiError("INVALID_INPUT", "Agent type 必须为 assistant/coding/work"), 400);
-      }
-      if (typeof body.name !== "string" || body.name.trim().length === 0) {
-        return context.json(createApiError("INVALID_INPUT", "Agent name 不能为空"), 400);
+      if (
+        typeof body.name !== "string" ||
+        body.name.trim().length === 0 ||
+        body.name.trim().length > 100
+      ) {
+        return context.json(
+          createApiError("INVALID_INPUT", "Agent name 长度必须为 1-100 个字符"),
+          400,
+        );
       }
 
-      const identity = agentStore.create({
+      // baseColor 必需（至少是空对象，空白底色合法）
+      if (
+        body.baseColor === undefined ||
+        body.baseColor === null ||
+        typeof body.baseColor !== "object" ||
+        Array.isArray(body.baseColor)
+      ) {
+        return context.json(createApiError("INVALID_INPUT", "baseColor 必须是对象"), 400);
+      }
+      const bc = body.baseColor as Record<string, unknown>;
+      if (!hasOnlyKeys(bc, ["persona", "personality", "replyStyle", "innerSetting"])) {
+        return context.json(createApiError("INVALID_INPUT", "baseColor 包含不支持的字段"), 400);
+      }
+      const baseColorInput = {
+        persona: typeof bc.persona === "string" ? bc.persona : "",
+        personality: isStringArray(bc.personality) ? bc.personality : [],
+        replyStyle: typeof bc.replyStyle === "string" ? bc.replyStyle : "",
+        innerSetting: typeof bc.innerSetting === "string" ? bc.innerSetting : "",
+      };
+
+      // defaultCwd 可选
+      let defaultCwd: string | null | undefined;
+      if (body.defaultCwd !== undefined) {
+        if (body.defaultCwd === null) {
+          defaultCwd = null;
+        } else if (typeof body.defaultCwd === "string") {
+          if (body.defaultCwd.includes("..")) {
+            return context.json(
+              createApiError("INVALID_INPUT", "defaultCwd 不允许包含 .. 路径"),
+              400,
+            );
+          }
+          defaultCwd = body.defaultCwd.trim() === "" ? null : body.defaultCwd;
+        } else {
+          return context.json(
+            createApiError("INVALID_INPUT", "defaultCwd 必须是字符串或 null"),
+            400,
+          );
+        }
+      }
+
+      agentStore.create({
         id: agentId,
-        type: body.type,
         name: body.name.trim(),
+        baseColor: baseColorInput,
+        ...(defaultCwd !== undefined ? { defaultCwd } : {}),
       });
-      return context.json(agentStore.load(identity.id), 201);
+      return context.json(agentStore.load(agentId), 201);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "创建失败";
       if (msg.includes("已存在")) {
@@ -71,24 +138,31 @@ export function registerAgentRoutes(
     }
   });
 
+  // identity 只能改 name（id/createdAt/version 不可变）
   app.put("/api/agents/:id", async (context) => {
     try {
-      const body = (await context.req.json()) as { type?: unknown; name?: unknown };
-      const patch: { type?: "assistant" | "coding" | "work"; name?: string } = {};
-
-      if (body.type !== undefined) {
-        if (body.type !== "assistant" && body.type !== "coding" && body.type !== "work") {
-          return context.json(createApiError("INVALID_INPUT", "type 不合法"), 400);
-        }
-        patch.type = body.type;
+      const rawBody = await context.req.json() as unknown;
+      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["name"])) {
+        return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
       }
+      const body = rawBody;
+      const patch: { name?: string } = {};
       if (body.name !== undefined) {
-        if (typeof body.name !== "string" || body.name.trim().length === 0) {
-          return context.json(createApiError("INVALID_INPUT", "name 不能为空"), 400);
+        if (
+          typeof body.name !== "string" ||
+          body.name.trim().length === 0 ||
+          body.name.trim().length > 100
+        ) {
+          return context.json(
+            createApiError("INVALID_INPUT", "name 长度必须为 1-100 个字符"),
+            400,
+          );
         }
         patch.name = body.name.trim();
       }
-
+      if (Object.keys(patch).length === 0) {
+        return context.json(createApiError("INVALID_INPUT", "没有可更新的字段"), 400);
+      }
       const identity = agentStore.updateIdentity(context.req.param("id"), patch);
       return context.json(agentStore.load(identity.id));
     } catch {
@@ -96,26 +170,29 @@ export function registerAgentRoutes(
     }
   });
 
-  app.get("/api/agents/:id/profile", (context) => {
+  app.get("/api/agents/:id/base-color", (context) => {
     try {
-      const profile = agentStore.getProfile(context.req.param("id"));
-      return context.json(profile ?? {});
+      return context.json(agentStore.getBaseColor(context.req.param("id")));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
     }
   });
 
-  app.put("/api/agents/:id/profile", async (context) => {
+  app.put("/api/agents/:id/base-color", async (context) => {
     try {
-      const body = (await context.req.json()) as {
-        persona?: unknown;
-        personality?: unknown;
-        replyStyle?: unknown;
-      };
+      const rawBody = await context.req.json() as unknown;
+      if (
+        !isRecord(rawBody) ||
+        !hasOnlyKeys(rawBody, ["persona", "personality", "replyStyle", "innerSetting"])
+      ) {
+        return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
+      }
+      const body = rawBody;
       const patch: {
         persona?: string;
         personality?: string[];
         replyStyle?: string;
+        innerSetting?: string;
       } = {};
 
       if (body.persona !== undefined) {
@@ -125,10 +202,13 @@ export function registerAgentRoutes(
         patch.persona = body.persona;
       }
       if (body.personality !== undefined) {
-        if (!Array.isArray(body.personality) || body.personality.some((p) => typeof p !== "string")) {
-          return context.json(createApiError("INVALID_INPUT", "personality 必须是字符串数组"), 400);
+        if (!isStringArray(body.personality)) {
+          return context.json(
+            createApiError("INVALID_INPUT", "personality 必须是字符串数组"),
+            400,
+          );
         }
-        patch.personality = body.personality as string[];
+        patch.personality = body.personality;
       }
       if (body.replyStyle !== undefined) {
         if (typeof body.replyStyle !== "string") {
@@ -136,8 +216,61 @@ export function registerAgentRoutes(
         }
         patch.replyStyle = body.replyStyle;
       }
+      if (body.innerSetting !== undefined) {
+        if (typeof body.innerSetting !== "string") {
+          return context.json(
+            createApiError("INVALID_INPUT", "innerSetting 必须是字符串"),
+            400,
+          );
+        }
+        patch.innerSetting = body.innerSetting;
+      }
 
-      agentStore.saveProfile(context.req.param("id"), patch);
+      agentStore.saveBaseColor(context.req.param("id"), patch);
+      return context.json(agentStore.load(context.req.param("id")));
+    } catch {
+      return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
+    }
+  });
+
+  app.get("/api/agents/:id/settings", (context) => {
+    try {
+      return context.json(agentStore.getSettings(context.req.param("id")));
+    } catch {
+      return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
+    }
+  });
+
+  app.put("/api/agents/:id/settings", async (context) => {
+    try {
+      const rawBody = await context.req.json() as unknown;
+      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["defaultCwd"])) {
+        return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
+      }
+      const body = rawBody;
+      const patch: { defaultCwd?: string | null } = {};
+      if (body.defaultCwd !== undefined) {
+        if (body.defaultCwd === null) {
+          patch.defaultCwd = null;
+        } else if (typeof body.defaultCwd === "string") {
+          if (body.defaultCwd.includes("..")) {
+            return context.json(
+              createApiError("INVALID_INPUT", "defaultCwd 不允许包含 .. 路径"),
+              400,
+            );
+          }
+          patch.defaultCwd = body.defaultCwd.trim() === "" ? null : body.defaultCwd;
+        } else {
+          return context.json(
+            createApiError("INVALID_INPUT", "defaultCwd 必须是字符串或 null"),
+            400,
+          );
+        }
+      }
+      if (Object.keys(patch).length === 0) {
+        return context.json(createApiError("INVALID_INPUT", "没有可更新的字段"), 400);
+      }
+      agentStore.saveSettings(context.req.param("id"), patch);
       return context.json(agentStore.load(context.req.param("id")));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);

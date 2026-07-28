@@ -165,11 +165,19 @@ async function selectFixtureModel(page: Page): Promise<void> {
   await select.selectOption(value);
 }
 
+/**
+ * 通过 API 创建 Session 并让 UI 选中。
+ * Phase 8 起 Session 创建从弹窗改为 /new 独立单页（首条消息发送即创建），
+ * 此 helper 绕过 UI 直接调 API 创建，与其他 E2E 文件保持一致。
+ */
 async function createSession(page: Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "新建会话" }).click();
-  await page.getByLabel("会话标题").fill(title);
-  await page.getByLabel("工作目录").fill(workspace);
-  await page.getByRole("button", { name: "创建" }).click();
+  const response = await page.request.post(`${baseUrl()}/api/sessions`, {
+    data: { title, cwd: workspace },
+  });
+  expect(response.ok()).toBe(true);
+  // 刷新侧栏会话列表，再点击 title 选中
+  await page.goto(baseUrl());
+  await page.getByText(title).first().click({ timeout: 10_000 });
   await expect(page.getByText(title).first()).toBeVisible({ timeout: 10_000 });
 }
 

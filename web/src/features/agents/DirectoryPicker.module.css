@@ -1,0 +1,44 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+}
+
+.pathRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-ui);
+}
+
+.pathLabel {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.pathValue {
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-caption);
+  word-break: break-all;
+  min-width: 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.manualInput {
+  flex: 1 1 240px;
+  min-width: 200px;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--fs-hint);
+  color: var(--danger);
+}

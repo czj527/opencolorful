@@ -1,0 +1,35 @@
+/* AgentAvatar —— 圆形装饰色徽章。
+ * 背景色与前景色由 decorColorCss 内联注入（动态值），其余结构引用设计令牌。
+ */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
+  vertical-align: middle;
+  /* 防止文字超出圆形 */
+  overflow: hidden;
+}
+
+.sm {
+  width: 1rem;
+  height: 1rem;
+  font-size: var(--fs-micro);
+}
+
+.md {
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: var(--fs-hint);
+}
+
+.lg {
+  width: 2rem;
+  height: 2rem;
+  font-size: var(--fs-caption);
+}

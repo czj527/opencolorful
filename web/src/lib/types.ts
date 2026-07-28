@@ -241,22 +241,59 @@ export interface UsageSummaryByModel extends TokenUsage {
 }
 
 // --- Agent ---
+// 对齐 src/contracts/agent-identity.ts（version 2，废弃旧 type 枚举）
 export interface AgentIdentity {
+  readonly version: 2;
   readonly id: string;
-  readonly type: "work" | "coding" | "assistant";
   readonly name: string;
   readonly createdAt: string;
 }
 
-export interface AgentProfile {
+// Agent 底色（人格配置）。对齐 src/contracts/agent-identity.ts BaseColorSchema
+export interface BaseColor {
+  readonly version: 1;
   readonly persona: string;
   readonly personality: readonly string[];
   readonly replyStyle: string;
+  readonly innerSetting: string;
   readonly updatedAt: string;
 }
 
+// Agent 运行设置。对齐 src/contracts/agent-settings.ts
+export interface AgentSettings {
+  readonly version: 1;
+  readonly defaultCwd: string | null;
+  readonly updatedAt: string;
+}
+
+// 装饰色调色板，基于 Agent ID 稳定生成，不持久化
+export type DecorColor = "blue" | "teal" | "coral" | "amber" | "purple" | "pink" | "green";
+
 export interface AgentView {
   readonly identity: AgentIdentity;
-  readonly profile: AgentProfile | null;
+  readonly baseColor: BaseColor;
+  readonly settings: AgentSettings;
   readonly sessionCount: number;
+  readonly decorColor: DecorColor;
+}
+
+// 底色模板。对齐 src/contracts/base-color-templates.ts
+export interface BaseColorTemplate {
+  readonly key: string;
+  readonly label: string;
+  readonly description: string;
+  readonly color: string;
+  readonly baseColor: {
+    readonly persona: string;
+    readonly personality: readonly string[];
+    readonly replyStyle: string;
+    readonly innerSetting: string;
+  };
+}
+
+// --- Directory ---
+// POST /api/directories/pick 响应。macOS/Linux 返回 501
+export interface PickDirectoryResult {
+  readonly path: string | null;
+  readonly cancelled: boolean;
 }

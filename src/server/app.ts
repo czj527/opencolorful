@@ -9,7 +9,9 @@ import type { SessionService } from "../runtime/session-service.js";
 import type { PromptService } from "../runtime/prompt-service.js";
 import type { PreferencesStore } from "../config/preferences-store.js";
 import type { AgentStore } from "../config/agent-store.js";
+import type { FolderPicker } from "../platform/folder-picker.js";
 import type { UsageStore } from "../storage/usage-store.js";
+import { registerDirectoryRoutes } from "./routes/directories.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerModelRoutes } from "./routes/models.js";
@@ -32,6 +34,7 @@ export interface ServerAppOptions {
   readonly replayStore?: EventReplayStore;
   readonly preferencesStore?: PreferencesStore;
   readonly agentStore?: AgentStore;
+  readonly folderPicker?: FolderPicker;
   readonly usageStore?: UsageStore;
   readonly wsRegistry?: ClientRegistry;
   readonly wsPromptService?: PromptService;
@@ -69,6 +72,9 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.agentStore !== undefined) {
     registerAgentRoutes(app, options.agentStore, options.sessionService);
+  }
+  if (options.folderPicker !== undefined) {
+    registerDirectoryRoutes(app, options.folderPicker);
   }
   if (options.usageStore !== undefined) {
     registerUsageRoutes(app, options.usageStore);

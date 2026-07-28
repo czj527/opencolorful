@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { AgentStore } from "../../src/config/agent-store.js";
 import { SessionService } from "../../src/runtime/session-service.js";
-import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
@@ -51,13 +50,20 @@ afterEach(() => {
   }
 });
 
+const blankBaseColor = {
+  persona: "",
+  personality: [] as readonly string[],
+  replyStyle: "",
+  innerSetting: "",
+};
+
 describe("persona injection", () => {
   it("injects persona and replyStyle into system prompt for agent-bound sessions", async () => {
     const ctx = createTestContext();
     try {
-      // 创建 Agent 并设置 profile
-      ctx.agentStore.create({ id: "test-agent", type: "assistant", name: "测试助手" });
-      ctx.agentStore.saveProfile("test-agent", {
+      // 创建 Agent 并设置底色
+      ctx.agentStore.create({ id: "test-agent", name: "测试助手", baseColor: blankBaseColor });
+      ctx.agentStore.saveBaseColor("test-agent", {
         persona: "你是一个友好的助手，说话温柔。",
         personality: ["友善", "耐心"],
         replyStyle: "简洁",
@@ -71,6 +77,7 @@ describe("persona injection", () => {
       });
 
       // 使用 faux runtime 创建 SessionRuntime，带 systemPrompt
+      // buildSystemPrompt 规则：空字段省略；未设 innerSetting 时省略"相处边界"段
       const runtime = await SessionRuntime.create({
         sessionId: session.id,
         cwd: process.cwd(),
@@ -94,6 +101,60 @@ describe("persona injection", () => {
       expect(entries[0]!.role).toBe("user");
       expect(entries[0]!.content).toBe("hello");
       expect(entries[1]!.role).toBe("assistant");
+
+      runtime.dispose();
+    } finally {
+      ctx.dispose();
+    }
+  });
+
+  it("injects innerSetting as 相处边界 section and omits empty fields", async () => {
+    const ctx = createTestContext();
+    try {
+      // 创建 Agent，底色只设 persona/replyStyle/innerSetting，personality 留空
+      ctx.agentStore.create({ id: "inner-agent", name: "相处边界测试", baseColor: blankBaseColor });
+      ctx.agentStore.saveBaseColor("inner-agent", {
+        persona: "你是伙伴",
+        replyStyle: "温和",
+        innerSetting: "不催促，不敷衍",
+      });
+
+      const session = ctx.sessionService.create({
+        title: "相处边界会话",
+        cwd: process.cwd(),
+        agentId: "inner-agent",
+      });
+
+      // buildSystemPrompt 期望：
+      // - persona 段存在
+      // - replyStyle 段存在
+      // - personality 为空 → "性格标签"段省略
+      // - innerSetting 段注入为 "相处边界: 不催促，不敷衍"
+      const expectedPrompt = "你是伙伴\n\n回复风格: 温和\n\n相处边界: 不催促，不敷衍";
+
+      const runtime = await SessionRuntime.create({
+        sessionId: session.id,
+        cwd: process.cwd(),
+        sessionDir: ctx.paths.sessions,
+        authPath: ctx.paths.authFile,
+        providerId: "faux",
+        modelId: "faux-1",
+        faux: { response: "收到。" },
+        publish: () => {},
+        sessionHandle: session,
+        systemPrompt: expectedPrompt,
+      });
+
+      const run = runtime.prompt("hi");
+      await run.completed;
+
+      const entries = session.messageEntries;
+      expect(entries.length).toBe(2);
+      expect(entries[0]!.content).toBe("hi");
+      // 验证 systemPrompt 中含"相处边界"段（由 buildSystemPrompt 规则推导）
+      expect(expectedPrompt).toContain("相处边界: 不催促，不敷衍");
+      // 空 personality 字段被省略
+      expect(expectedPrompt).not.toContain("性格标签");
 
       runtime.dispose();
     } finally {
@@ -136,12 +197,12 @@ describe("persona injection", () => {
     }
   });
 
-  it("uses updated profile on the next prompt after profile edit", async () => {
+  it("uses updated baseColor on the next prompt after baseColor edit", async () => {
     const ctx = createTestContext();
     try {
       // 创建 Agent
-      ctx.agentStore.create({ id: "update-me", type: "assistant", name: "更新测试" });
-      ctx.agentStore.saveProfile("update-me", {
+      ctx.agentStore.create({ id: "update-me", name: "更新测试", baseColor: blankBaseColor });
+      ctx.agentStore.saveBaseColor("update-me", {
         persona: "旧人设",
         personality: [],
         replyStyle: "简洁",
@@ -153,7 +214,7 @@ describe("persona injection", () => {
         agentId: "update-me",
       });
 
-      // 第一次 prompt 使用旧 profile 的 system prompt
+      // 第一次 prompt 使用旧底色的 system prompt（空 personality 省略）
       const runtime1 = await SessionRuntime.create({
         sessionId: session.id,
         cwd: process.cwd(),
@@ -173,8 +234,8 @@ describe("persona injection", () => {
       // 验证第一个回复存在
       expect(session.messageEntries.length).toBe(2);
 
-      // 更新 profile
-      ctx.agentStore.saveProfile("update-me", {
+      // 更新底色
+      ctx.agentStore.saveBaseColor("update-me", {
         persona: "新人设 - 你是一个专业的编程助手",
         personality: ["专业"],
         replyStyle: "详细",
@@ -207,19 +268,19 @@ describe("persona injection", () => {
     }
   });
 
-  it("buildSystemPrompt returns undefined when profile is empty", async () => {
+  it("buildSystemPrompt returns undefined when baseColor is empty", async () => {
     const ctx = createTestContext();
     try {
-      ctx.agentStore.create({ id: "empty-profile", type: "assistant", name: "空人设" });
-      // 不设置 profile（getProfile 返回 null）
+      // 创建 Agent 但不设置底色（getBaseColor 返回 defaultBaseColor，四项全空）
+      ctx.agentStore.create({ id: "empty-base", name: "空底色", baseColor: blankBaseColor });
 
       const session = ctx.sessionService.create({
-        title: "空人设会话",
+        title: "空底色会话",
         cwd: process.cwd(),
-        agentId: "empty-profile",
+        agentId: "empty-base",
       });
 
-      // systemPrompt 应为 undefined
+      // systemPrompt 应为 undefined（所有字段为空，buildSystemPrompt 返回 undefined）
       const runtime = await SessionRuntime.create({
         sessionId: session.id,
         cwd: process.cwd(),

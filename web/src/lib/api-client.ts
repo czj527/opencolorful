@@ -1,14 +1,16 @@
 import type {
   AbortResponse,
-  AgentIdentity,
-  AgentProfile,
   AgentServerDiscovery,
+  AgentSettings,
   AgentView,
   ApiError,
+  BaseColor,
+  BaseColorTemplate,
   HealthResponse,
   LogQuery,
   LogTail,
   ModelSummary,
+  PickDirectoryResult,
   PreferencesDocument,
   PromptResponse,
   ProviderView,
@@ -183,20 +185,50 @@ export class ApiClient {
     return this.request("GET", "/api/agents");
   }
 
-  async createAgent(type: string, name: string): Promise<AgentView> {
-    return this.request("POST", "/api/agents", { type, name });
+  async createAgent(
+    name: string,
+    baseColor: {
+      persona: string;
+      personality: string[];
+      replyStyle: string;
+      innerSetting: string;
+    },
+    defaultCwd?: string | null,
+  ): Promise<AgentView> {
+    return this.request("POST", "/api/agents", {
+      name,
+      baseColor,
+      ...(defaultCwd !== undefined ? { defaultCwd } : {}),
+    });
   }
 
   async getAgent(id: string): Promise<AgentView> {
     return this.request("GET", `/api/agents/${id}`);
   }
 
-  async updateAgent(id: string, identity: Partial<AgentIdentity>): Promise<AgentView> {
-    return this.request("PUT", `/api/agents/${id}`, identity);
+  // identity 只能改 name（id/createdAt/version 不可变）
+  async updateAgent(id: string, name: string): Promise<AgentView> {
+    return this.request("PUT", `/api/agents/${id}`, { name });
   }
 
-  async updateAgentProfile(id: string, profile: Partial<AgentProfile>): Promise<AgentView> {
-    return this.request("PUT", `/api/agents/${id}/profile`, profile);
+  async getAgentBaseColor(id: string): Promise<BaseColor> {
+    return this.request("GET", `/api/agents/${id}/base-color`);
+  }
+
+  async updateAgentBaseColor(id: string, baseColor: Partial<BaseColor>): Promise<AgentView> {
+    return this.request("PUT", `/api/agents/${id}/base-color`, baseColor);
+  }
+
+  async getAgentSettings(id: string): Promise<AgentSettings> {
+    return this.request("GET", `/api/agents/${id}/settings`);
+  }
+
+  async updateAgentSettings(id: string, settings: { defaultCwd: string | null }): Promise<AgentView> {
+    return this.request("PUT", `/api/agents/${id}/settings`, settings);
+  }
+
+  async getBaseColorTemplates(): Promise<BaseColorTemplate[]> {
+    return this.request("GET", "/api/agents/templates");
   }
 
   async archiveAgent(id: string): Promise<void> {
@@ -205,5 +237,11 @@ export class ApiClient {
 
   async getAgentSessions(id: string): Promise<SessionView[]> {
     return this.request("GET", `/api/agents/${id}/sessions`);
+  }
+
+  // Directories
+  // Windows 调原生 FolderBrowserDialog；macOS/Linux 返回 501，前端回退手工输入
+  async pickDirectory(): Promise<PickDirectoryResult> {
+    return this.request("POST", "/api/directories/pick");
   }
 }

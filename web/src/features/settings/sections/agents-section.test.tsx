@@ -1,147 +1,115 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-
 import { AgentsSection } from "./AgentsSection.js";
 import type { AgentView } from "../../../lib/types.js";
 
 const fakeAgents: AgentView[] = [
   {
-    identity: {
-      id: "agent-1",
-      type: "assistant",
-      name: "HelperBot",
-      createdAt: "2025-01-01T00:00:00Z",
-    },
-    profile: {
-      persona: "A helpful assistant",
-      personality: ["helpful", "polite"],
-      replyStyle: "conversational",
-      updatedAt: "2025-01-02T00:00:00Z",
-    },
+    identity: { version: 2, id: "agent-1", name: "HelperBot", createdAt: "2025-01-01T00:00:00Z" },
+    baseColor: { version: 1, persona: "A helper", personality: ["helpful"], replyStyle: "casual", innerSetting: "", updatedAt: "2025-01-01T00:00:00Z" },
+    settings: { version: 1, defaultCwd: null, updatedAt: "2025-01-01T00:00:00Z" },
     sessionCount: 5,
+    decorColor: "blue",
   },
   {
-    identity: {
-      id: "agent-2",
-      type: "coding",
-      name: "CodeBot",
-      createdAt: "2025-03-01T00:00:00Z",
-    },
-    profile: null,
+    identity: { version: 2, id: "agent-2", name: "CodeBot", createdAt: "2025-03-01T00:00:00Z" },
+    baseColor: { version: 1, persona: "A coder", personality: ["precise"], replyStyle: "concise", innerSetting: "", updatedAt: "2025-03-01T00:00:00Z" },
+    settings: { version: 1, defaultCwd: "D:\\projects\\demo", updatedAt: "2025-03-01T00:00:00Z" },
     sessionCount: 12,
-  },
-  {
-    identity: {
-      id: "agent-3",
-      type: "work",
-      name: "WorkMate",
-      createdAt: "2025-06-01T00:00:00Z",
-    },
-    profile: {
-      persona: "A professional work assistant",
-      personality: ["professional", "efficient"],
-      replyStyle: "formal",
-      updatedAt: "2025-06-02T00:00:00Z",
-    },
-    sessionCount: 3,
+    decorColor: "green",
   },
 ];
 
 describe("AgentsSection", () => {
-  it("renders agent list with names and session counts", () => {
+  it("renders agent names and session counts", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={fakeAgents}
-        onSaveProfile={async () => {}}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
         onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError={null}
       />,
     );
     expect(html).toContain("HelperBot");
     expect(html).toContain("CodeBot");
-    expect(html).toContain("WorkMate");
     expect(html).toContain("5 会话");
     expect(html).toContain("12 会话");
-    expect(html).toContain("3 会话");
   });
 
-  it("renders type badges with semantic variants per agent type", () => {
+  it("shows cwd summary when set", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={fakeAgents}
-        onSaveProfile={async () => {}}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
         onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError={null}
       />,
     );
-    // Phase 7 重构后 badge 使用 ui/Badge 语义变体（info/success/warning），
-    // 不再硬编码 rgba 颜色；验证每种类型的标签文本被渲染。
-    expect(html).toContain("assistant");
-    expect(html).toContain("coding");
-    expect(html).toContain("work");
+    expect(html).toContain("D:\\projects\\demo");
+  });
+
+  it("shows 未设置 when cwd is null", () => {
+    const html = renderToStaticMarkup(
+      <AgentsSection
+        agents={fakeAgents}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
+        onArchive={async () => {}}
+      />,
+    );
+    expect(html).toContain("未设置");
+  });
+
+  it("renders new agent button", () => {
+    const html = renderToStaticMarkup(
+      <AgentsSection
+        agents={fakeAgents}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
+        onArchive={async () => {}}
+      />,
+    );
+    expect(html).toContain("+ 新建 Agent");
   });
 
   it("renders empty state when no agents", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={[]}
-        onSaveProfile={async () => {}}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
         onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError={null}
       />,
     );
     expect(html).toContain("暂无 Agent");
   });
 
-  it("shows create form button", () => {
+  it("does not render create/edit forms (degraded to list-only)", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={fakeAgents}
-        onSaveProfile={async () => {}}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
         onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError={null}
       />,
     );
-    expect(html).toContain("+ 新建 Agent");
+    // No template picker, no inner editor fields
+    expect(html).not.toContain("BaseColorTemplatePicker");
+    expect(html).not.toContain("Persona（");
+    expect(html).not.toContain("保存底色");
   });
 
-  it("renders archive button for each agent", () => {
+  it("shows archive menu button for each agent", () => {
     const html = renderToStaticMarkup(
       <AgentsSection
         agents={fakeAgents}
-        onSaveProfile={async () => {}}
+        onNavigateNew={() => {}}
+        onNavigateEdit={() => {}}
         onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError={null}
       />,
     );
-    expect(html).toContain("归档");
-    // Three agents, each should have an archive button
-    const matches = html.match(/归档/g);
-    expect(matches).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("renders lastSaveError when provided", () => {
-    const html = renderToStaticMarkup(
-      <AgentsSection
-        agents={fakeAgents}
-        onSaveProfile={async () => {}}
-        onArchive={async () => {}}
-        onCreate={async () => {}}
-        saving={false}
-        lastSaveError="创建失败：名称已存在"
-      />,
-    );
-    expect(html).toContain("创建失败：名称已存在");
+    // Menu trigger button (⋮) rendered for each agent
+    expect(html).toContain("⋮");
+    expect(html).toContain('aria-label="更多操作"');
   });
 });

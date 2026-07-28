@@ -23,15 +23,17 @@ import { LayoutSection } from "./sections/LayoutSection.js";
 import { LogsSection } from "./sections/LogsSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { UnavailableSection } from "./sections/UnavailableSection.js";
+import { navigateToAgentNew, navigateToAgentEdit } from "../../app/page-router.js";
 import { AgentsSection } from "./sections/AgentsSection.js";
 import { UsageSection } from "./sections/UsageSection.js";
 import { SettingsSection } from "./widgets/index.js";
-import type { AgentProfile } from "../../lib/types.js";
 import styles from "./SettingsPage.module.css";
 
 export interface SettingsPageProps {
   readonly api: ApiClient;
   readonly onBack: () => void;
+  readonly highlightedAgentId?: string | null | undefined;
+  readonly onHighlightConsumed?: (() => void) | undefined;
 }
 
 /** 各 section 的标题与描述，由 SettingsPage 统一通过 SettingsSection 呈现。 */
@@ -197,34 +199,6 @@ export function SettingsPage(props: SettingsPageProps) {
     }
   };
 
-  const handleCreateAgent = async (type: string, name: string) => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await props.api.createAgent(type, name);
-      await refreshAgents();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Agent 创建失败");
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveAgentProfile = async (id: string, profile: Partial<AgentProfile>) => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await props.api.updateAgentProfile(id, profile);
-      await refreshAgents();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Profile 保存失败");
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleArchiveAgent = async (id: string) => {
     setSaving(true);
     setSaveError(null);
@@ -279,19 +253,20 @@ export function SettingsPage(props: SettingsPageProps) {
         />
         <main className={styles.content} data-testid="settings-content">
           {renderSection(nav.activeSection, {
+            api: props.api,
             preferences,
             supervisorStatus,
             providers,
             models,
             agents,
+            highlightedAgentId: props.highlightedAgentId,
+            onHighlightConsumed: props.onHighlightConsumed,
             onSavePreferences: handleSavePreferences,
             onSaveLayout: handleSaveLayout,
             onSaveTheme: handleSaveAppearance,
             onSaveProvider: handleSaveProvider,
             onGetSupervisorLogs: getSupervisorLogs,
             onGetUsageSummary: getUsageSummary,
-            onCreateAgent: handleCreateAgent,
-            onSaveAgentProfile: handleSaveAgentProfile,
             onArchiveAgent: handleArchiveAgent,
             saving,
             saveError,
@@ -304,11 +279,14 @@ export function SettingsPage(props: SettingsPageProps) {
 }
 
 interface SectionRenderProps {
+  readonly api: ApiClient;
   readonly preferences: PreferencesDocument | null;
   readonly supervisorStatus: SupervisorStatusResponse | null;
   readonly providers: readonly ProviderView[];
   readonly models: readonly ModelSummary[];
   readonly agents: readonly AgentView[];
+  readonly highlightedAgentId?: string | null | undefined;
+  readonly onHighlightConsumed?: (() => void) | undefined;
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
   readonly onSaveTheme: (appearance: Partial<PreferencesDocument["appearance"]>) => Promise<void>;
@@ -320,8 +298,6 @@ interface SectionRenderProps {
     since?: string | null;
   }) => Promise<{ logs: string; truncated: boolean; nextCursor: string | null }>;
   readonly onGetUsageSummary: (days: number) => Promise<import("../../lib/types.js").UsageSummaryResponse>;
-  readonly onCreateAgent: (type: string, name: string) => Promise<void>;
-  readonly onSaveAgentProfile: (id: string, profile: Partial<AgentProfile>) => Promise<void>;
   readonly onArchiveAgent: (id: string) => Promise<void>;
   readonly saving: boolean;
   readonly saveError: string | null;
@@ -358,11 +334,10 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
       <SettingsSection title={meta.title} description={meta.description} testId="settings-section-agents">
         <AgentsSection
           agents={props.agents}
-          onCreate={props.onCreateAgent}
-          onSaveProfile={props.onSaveAgentProfile}
+          highlightedAgentId={props.highlightedAgentId}
+          onNavigateNew={navigateToAgentNew}
+          onNavigateEdit={navigateToAgentEdit}
           onArchive={props.onArchiveAgent}
-          saving={props.saving}
-          lastSaveError={props.saveError}
         />
       </SettingsSection>
     );

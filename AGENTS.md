@@ -1,85 +1,73 @@
 # person-Agent Agent 协作指南
 
-本文是自动化开发 Agent 在本仓库工作的首要入口，适用于整个 `person-Agent/`
-目录。开始修改前必须同时阅读：
+本文是自动化开发 Agent 在本仓库工作的首要入口，适用于整个 `person-Agent/` 目录。开始修改前必须先读懂本项目定位与架构（见下方文档导航）。
 
-1. `README.md`；
-2. `docs/product.md`；
-3. `docs/architecture.md`；
-4. 当前阶段计划，例如 `plans/phase-02.md`；
-5. `git status --short` 和最近提交。
+## 核心理念与定位
 
-三个参考仓库 `<local-workspace>\pi`、`<local-workspace>\oh-my-pi`、
-`<local-workspace>\openhanako` 只能用于研究，不属于本仓库，不要把它们加入本仓库的
-Git 历史。
+**person-Agent = 承载 agent 完整一生的本地优先平台基础设施。**
+
+核心理念：**给每个 agent 完整的一生**。agent 不只是"有用的工具"——它有自我（人格、性格、记忆、想法）、有成长、有生活、有社交。它的职业形态（coding 工程师 / 设计师 / 文档撰写员 / 陪伴朋友）由创建者通过插件特化决定，**平台不预设 agent 是什么**。我们关注 agent 的"自我"，而非市面 agent 追求的"有用性"。
+
+三层架构：
+
+- **Agent 生命基础设施层**（核心，部分完成）：agent 的"自我"——身份与底色（✅ Phase 8）/ 记忆(dreaming) / 成长(curator) / 生活(案头+笺) / 社交(多 agent) / 运行时(✅ Phase 0-7)
+- **形态特化层**（待建，关键难点）：插件化的完整交互基础设施（coding IDE+终端+浏览器 / design 画布 / 文档编辑器 / 陪伴对话）。**注意：形态特化 ≠ 技能包**，是完整交互基础设施（专用 UI+工具链+工作区）
+- **生态流转层**（待建）：角色卡一生档案 / 人格模板市场 / 技能包市场 / Bridge 多平台
+
+完整定位与路线见 [docs/positioning-and-roadmap.md](docs/positioning-and-roadmap.md)；基础设施边界与选型见 [docs/infrastructure-decisions.md](docs/infrastructure-decisions.md)。
+
+## 文档导航
+
+| 文档 | 作用 | 何时读 |
+|---|---|---|
+| `docs/positioning-and-roadmap.md` | **核心理念与开发路线权威**（定位/三层架构/Phase 8-14/差异化） | 必读，理解项目是什么 |
+| `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/日志 Electron 时机/流程评估） | 必读，理解边界与选型 |
+| `docs/architecture.md` | 架构说明（Phase 0-3 平台层技术栈/模块边界/事件协议） | 改平台层时读 |
+| `docs/development.md` | 开发流程规范（角色/并行/质量门）——部分已被本文件简化 | 改流程前读 |
+| `docs/product.md` | 产品说明（旧定位，部分已过时，以 positioning-and-roadmap.md 为准） | 参考历史 |
+| `plans/phase-00~07.md` | 已完成阶段计划 | 了解历史 |
+| `plans/phase-08.md` | Phase 8 实施计划、范围校正与验收记录 | 接续 Agent 模型工作时读 |
+| `plans/phase-09.md` 起 | 后续阶段计划 | 进入新 Phase 时读 |
+
+## 参考仓库
+
+`<local-workspace>\references\` 下有 8 个参考仓库（`pi` / `oh-my-pi` / `openhanako` / `openclaw` / `hermes-agent` / `lobe-chat` / `codex` / `opencode`），**只用于研究，不属于本仓库，不要加入本仓库 Git 历史**。各项目定位与借鉴点见 positioning-and-roadmap.md 第六章。
 
 ## 当前开发状态
 
-- Phase 0 已完成（`phase-0-complete`）；
-- Phase 1 已完成（`phase-1-complete`）；
-- Phase 2 已完成（`phase-2-complete`），当前在 `main` 分支；
-- Phase 2 最终验收修复提交：`333fa0a`；
-- 生产 Server 自动装配全部 Service（数据库、Provider、Session、Prompt、Replay、WS）；
-- `SessionRuntime.create()` 支持 faux（测试）和真实模型（生产）两条路径；
-- 工具权限三级：`off` / `read-only` / `all`（需 cwd 确认）；
-- Provider 错误自动映射为稳定 `ApiError`，自动脱敏 URL 和凭据；
-- 真实 Provider + PI read 工具 + Server 重启 E2E 已完成；
-- Session 设置包含工具模式、工作目录、确认状态和思考级别；
-- Phase 3 已完成（`phase-3-complete`），当前在 `phase-3-supervisor-web` 分支；
-- Phase 4 已完成——设置中心、偏好持久化、可调侧栏、Focus 模式、日志诊断、流式优化；
-- Phase 5 已完成并通过最终验收（2026-07-25）：多 Agent 身份证（UUID 服务端生成）、会话可选绑定 Agent（含重启恢复）、Agent 管理设置页、亮/暗主题、控制栏下移、工具卡片时间线稳定；质量门与 Playwright 17/17 通过；5b 补充轮已完成——人设注入、历史卡片重建、显示开关、一体化输入框、Agent 跟随会话、主题修复（2026-07-25 验收全绿）；
-- Phase 6 已完成并通过最终验收（2026-07-25）：Token 用量全链路（事件 → SQLite v5 → 统计 API → 上下文圆环/用量行/用量统计页，不计金额）、对话时间线导航、Web 会话命令系统（`/help` `/compact` `/new` `/abort` `/clear`）、compact 服务端补齐（事件广播/懒重建/409 SESSION_BUSY）、开发流程文档 [docs/development.md](docs/development.md)；质量门与 Playwright 23/23 通过；
-- Phase 7 已完成并通过最终验收（2026-07-25）：前端 UI 与交互完整重构——设计令牌体系（`tokens.css`/`animations.css`）、13 个 UI 原语库（`components/ui/`）、CSS Modules 全面迁移、聊天/Composer/设置/布局统一采用原语与令牌、AppShell 抽出与 WorkspaceApp 瘦身 29%、Modal 焦点陷阱、happy-dom 测试基建；质量门与 Playwright 23/23 通过；
-- `.gitignore` 误伤 `src/runtime/` 的修复已完成：`5701bf6`；
-- P1-02 Session 生命周期已完成：`6eada4b`；
-- P1-03 Prompt、Abort 和事件归一化已完成：`c6635cc`；
-- P1-04 Replay Store 和 SSE 已完成：`a587d91`；
-- P1-05 WebSocket 订阅和控制已完成：`fd917e8`；
-- P1-06 TUI 协议客户端已完成：`56af238`；
-- P1-07 A2UI 投影 + P1-08 TokUI Web 投影已完成：`740340a`；
-- P1-09 重启恢复 E2E 和文档已完成：`9f6e5fc`；
-- Phase 1 验收缺口修复已完成：`2a71636`；
-- A2UI v0.9.1 官方 Envelope 对齐已完成：`5562743`；
-- Phase 3 Supervisor 与 Web UI 已完成；后续 Phase 尚未排期。
+- **Phase 0-7 已完成并通过验收（2026-07-25）**：平台层运行时底座——Server / Session / Provider / Supervisor / Web UI / Agent 身份证+人设注入 / Token 用量 / UI 重构。质量门全过，Playwright 23/23。
+- **Phase 8 已完成（2026-07-28）**：Agent 模型去枚举化（identity v2，无 `type`）、底色与运行设置分离、旧数据迁移、底色模板、Windows 工作目录选择、独立 Agent 创建/编辑页和新会话创建页。模板只用于初始化，不是 Agent 的持久化依赖。
+- **当前定位已重新明确（2026-07-27）**：从"全能私人助理平台"修正为"承载 agent 完整一生的平台基础设施"。
+- **下一阶段（Phase 9-10）**：沙箱机制 / 记忆系统(案头/笺/今日记/往事/识见/手艺/梦境)，穿插完善结构化日志框架。
+- Phase 8 已移除 `type: work|coding|assistant` 硬枚举；yuan 模板、capabilities、skills、记忆与插件仍属于后续阶段，不在本阶段提前固化。
 
-截至 Phase 2 最终验收，最近一次完整验证为 24 个测试文件、130 个测试用例通过。该数字只是
-交接快照；接手后必须重新运行验证，不得直接复述为当前结果。
+接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。
 
 ## 当前实现边界
 
-已经具备：
+已经具备（平台层）：
 
 - TypeScript ESM、Vitest、构建和 PI import 边界检查；
 - `~/.person-agent` 路径约定和 `PERSON_AGENT_HOME` 开发覆盖；
 - SQLite/WAL Session 元数据索引；
 - Provider、Base URL、协议、模型能力和 Header 的持久化配置；
-- API Key 通过 PI `ModelRuntime`/AuthStorage 写入 `auth/auth.json`，不会写入
-  `providers.json` 或 API 响应；
-- 环境变量只在没有持久化 Provider 时作为 PI 原生开发 fallback；
+- API Key 通过 PI `ModelRuntime`/AuthStorage 写入 `auth/auth.json`，不写入普通配置；
 - PI JSONL Session 的创建、打开、继续、列表和归档；
-- 真实 PI `AgentSession` + faux provider 的 Prompt、流式事件和 Abort 测试闭环；
-- 平台事件 Envelope、严格 sequence、陈旧 Abort 拒绝；
-- Provider、Models、Sessions、Messages、Abort 和 Events（SSE）路由模块；
-- EventReplayStore 有界缓存（1000 事件/stream、100 streams）、可恢复 SSE
-  （`streamId:sequence` Last-Event-ID）；
-- WebSocket 订阅/取消订阅、Abort/Compact/Resume 控制、ClientRegistry；
-- TUI 协议客户端（readline + fetch + ANSI），支持跨网络 chunk 的 SSE 解析和断线续传，
-  不 import PI SDK；
-- A2UI v0.9.1 官方 `createSurface`/`updateComponents` Envelope 投影
-  （Text/Card/ToolCall/Plan/Attachment/Status）和官方 Action Envelope 校验；
-- TokUI `@jboltai/tokui@0.1.8` Web 投影策略（组件白名单、禁止 raw HTML/脚本、
-  精确命名 Handler）；
-- 生产 Server Service 组合根（自动装配数据库 + 全部 Service）；
-- 生产组合根重启恢复 E2E 测试通过（18 测试文件、94 用例）。
+- 平台事件 Envelope、严格 sequence、Replay Store、SSE/WS；
+- TUI 协议客户端（不 import PI SDK）；
+- A2UI v0.9.1 + TokUI Web 投影（白名单安全）；
+- 生产 Server Service 组合根（自动装配）；
+- Supervisor 进程管理 + React Web 工作台；
+- 多 Agent 身份证 + 底色人设注入 + Token 用量全链路。
+- Phase 8 Agent 基础模型：`identity.json`、`base-color.json`、`settings.json`、底色模板 API、创建/编辑路由与新会话创建页。
 
-尚未具备：
+下一阶段核心目标（原"非目标"，现已转为核心）：
 
-- OAuth、沙盒和逐次工具审批；
-- 私人助理、Coding Agent Profile、记忆、多 Agent、插件和完整 Web UI 交互扩展；
-- Electron、LAN/远程访问和云端同步。
+- 沙箱机制（能力声明 + 执行边界 + 应用层 PathGuard）；
+- 记忆系统（案头/笺/今日记/往事/识见/手艺/梦境）；
+- 结构化日志框架 + 关键行为埋点。
 
-faux runtime 只用于确定性测试；生产组合根根据 Session 模型引用创建真实 PI
-`ModelRuntime` 和 `AgentSession`。
+暂不做（等自我层稳定）：Electron 桌面端、形态特化层（coding/design 专用交互基础设施）、技能自创（手艺高阶）、性格自我演变（风险极高，yuan 作稳定锚点不漂移）。
 
 ## 架构硬约束
 
@@ -113,7 +101,7 @@ faux runtime 只用于确定性测试；生产组合根根据 Session 模型引�
 - 所有跨进程数据先定义 Schema/平台类型，再由实现消费；
 - `PlatformEventEnvelope` 的 `protocolVersion` 当前固定为 `1`；
 - 同一 `streamId` 的 sequence 从 1 严格递增；
-- P1-04 起事件必须先写 Replay Store，再广播给 SSE/WS；
+- 事件必须先写 Replay Store，再广播给 SSE/WS；
 - SSE 与 WS 必须共享 Replay Store，不能各自生成 sequence；
 - UI 投影只能消费平台事件，不能反向修改 Runtime 事件。
 
@@ -127,23 +115,51 @@ faux runtime 只用于确定性测试；生产组合根根据 Session 模型引�
 
 ## 开发流程
 
-开发流程的权威文档是 [docs/development.md](docs/development.md)，核心约定摘要：
+开发流程权威是 [docs/development.md](docs/development.md)，本节是 2026-07-27 简化版。
 
-- **主 Agent** 负责需求澄清、计划、任务拆分、文件归属划定、子 Agent 协调、
-  diff 审查、独立运行质量门、验收、提交与计划回写；
-- **子 Agent** 负责并行探索（只读）与归属范围内的实现和针对性测试；
-- 子 Agent 报告**不作为验收证据**，主 Agent 必须独立复核 diff 并重跑验证；
-- 并行必须同时满足：无共享文件、无共享契约/迁移、无前后依赖；
-  有冲突时主 Agent 先实现共享 infra 再并行派发；
-- 关键边界先 RED：Provider/Auth、Session 恢复、事件序号/Replay、Abort 竞态、
-  WS 权限、A2UI/TokUI 安全、凭据脱敏、用量落库幂等、跨进程输入校验；
-- 质量红线（strict 三件套、验证逐条读退出码、Playwright 在 `web/` 执行、
-  SSE 白名单同步等）见 development.md 第四节，违反即返工；
-- 每任务独立提交并回写 `plans/phase-xx.md`；Phase 验收通过后才更新主文档、
-  打标签并请求合并 `main`；
-- 每次只实现当前 Phase 任务，不提前加入未排期能力。
+### 角色定位（保留）
 
-除非用户明确要求，不为普通任务引入额外 worktree、复杂流程文档或重复计划。
+- **主 Agent**：需求澄清、计划、任务拆分、文件归属划定、子 Agent 协调、diff 审查、独立运行质量门、验收、提交与计划回写；
+- **子 Agent**：并行探索（只读）与归属范围内的实现、针对性测试、更新文档；
+- **铁律**：子 Agent 报告**不作为验收证据**，主 Agent 必须独立复核 diff 并重跑质量门；子 Agent 不得扩大范围、自行 git 提交或宣称通过。
+
+### 任务生命周期（简化为 5 步，去掉 RED）
+
+1. **计划**：主 Agent 编写/更新 `plans/phase-xx.md`；
+2. **实现**：子 Agent 按归属实现 + 针对性测试（普通胶水代码不强制 TDD，但必须通过类型检查与相关测试）；
+3. **验证**：主 Agent 独立复核 diff + 重跑质量门；
+4. **提交**：每任务独立提交，提交信息用计划标题；
+5. **回写**：更新 `plans/phase-xx.md` 状态、验证证据、已知偏差。
+
+> 关键边界（Provider/Auth、Session 恢复、事件序号/Replay、Abort 竞态、凭据脱敏、用量幂等等）仍需充分测试覆盖，但**不强制先写失败测试（RED）**。质量由类型检查 + 集成测试 + 质量门保证。
+
+### 并行规则（保留）
+
+同时满足才允许并行：无共享文件、无共享契约/迁移、无前后依赖。有冲突时主 Agent 先实现共享 infra 再并行派发。
+
+### 质量门（验收时必须全部单独通过）
+
+```powershell
+node scripts/verify-pi-sdk-imports.mjs
+npx tsc --noEmit -p tsconfig.json
+npx vitest run
+npm run test --workspace=web
+npm run web:build
+npx tsc -p tsconfig.build.json
+cd web; npx playwright test
+```
+
+### 质量红线（违反即返工）
+
+- `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` 必须全过；
+- 相对 import 带 `.js` 后缀；跨进程输入用 TypeBox 或显式解析器校验；
+- 事件先写 Replay Store 再广播；同 streamId sequence 从 1 严格递增；
+- 验证命令逐条单独执行并读取退出码，**禁止 PowerShell 分号串联**关键验证；
+- Playwright 必须在 `web/` 目录执行；
+- 新增 SSE 事件类型必须同步 `web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES`；
+- 不记录/回传/落库任何 API Key、Authorization、Cookie；
+- 手工编辑用 apply_patch；不用 `git reset --hard`、`git checkout --` 等破坏性命令；
+- 默认测试不得请求真实 Provider 网络，用 PI faux provider + 临时 `PERSON_AGENT_HOME`。
 
 ## 编码规范
 

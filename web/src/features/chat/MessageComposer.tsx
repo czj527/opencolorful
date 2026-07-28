@@ -10,6 +10,10 @@ interface MessageComposerProps {
   readonly disabled: boolean;
   readonly running: boolean;
   readonly onSend: (content: string) => void;
+  /** 发送后是否立即清空输入；创建会话页在异步失败时需要保留草稿。 */
+  readonly clearOnSend?: boolean;
+  /** 是否显示模型、工具模式和思考级别配置。 */
+  readonly showConfigurationControls?: boolean;
   readonly onAbort: () => void;
   /** 会话命令执行回调（可选，缺省时命令面板不可用）；执行后输入框由组件自行清空 */
   readonly onExecuteCommand?: (name: CommandName) => void;
@@ -51,6 +55,8 @@ export function MessageComposer({
   disabled,
   running,
   onSend,
+  clearOnSend = true,
+  showConfigurationControls = true,
   onAbort,
   onExecuteCommand,
   models,
@@ -114,7 +120,7 @@ export function MessageComposer({
       return;
     }
     onSend(trimmed);
-    setValue("");
+    if (clearOnSend) setValue("");
   };
 
   const modelValue = selectedModel
@@ -195,49 +201,53 @@ export function MessageComposer({
 
       {/* 控件行：工具模式 | 思考级别 | 模型选择 | 圆环 | 发送 */}
       <div className="chat-composer-controls">
-        <Select
-          value={toolMode}
-          onChange={onToolModeChange}
-          disabled={disabled}
-          aria-label="工具模式"
-          className={controlSelectClass}
-        >
-          {TOOL_MODES.map((m) => (
-            <option key={m.value} value={m.value}>🔧 {m.label}</option>
-          ))}
-        </Select>
+        {showConfigurationControls && (
+          <>
+            <Select
+              value={toolMode}
+              onChange={onToolModeChange}
+              disabled={disabled}
+              aria-label="工具模式"
+              className={controlSelectClass}
+            >
+              {TOOL_MODES.map((m) => (
+                <option key={m.value} value={m.value}>🔧 {m.label}</option>
+              ))}
+            </Select>
 
-        <div className="composer-separator" />
+            <div className="composer-separator" />
 
-        <Select
-          value={thinkingLevel}
-          onChange={onThinkingLevelChange}
-          disabled={disabled}
-          aria-label="思考级别"
-          className={controlSelectClass}
-        >
-          {THINKING_LEVELS.map((l) => (
-            <option key={l} value={l}>🧠 {THINKING_LABELS[l]}</option>
-          ))}
-        </Select>
+            <Select
+              value={thinkingLevel}
+              onChange={onThinkingLevelChange}
+              disabled={disabled}
+              aria-label="思考级别"
+              className={controlSelectClass}
+            >
+              {THINKING_LEVELS.map((l) => (
+                <option key={l} value={l}>🧠 {THINKING_LABELS[l]}</option>
+              ))}
+            </Select>
 
-        <div className="composer-separator" />
+            <div className="composer-separator" />
 
-        <Select
-          value={modelValue}
-          onChange={(v) => {
-            const [providerId, modelId] = v.split(":");
-            if (providerId && modelId) onSelectModel(providerId, modelId);
-          }}
-          disabled={disabled}
-          aria-label="选择模型"
-          className={modelSelectClass}
-        >
-          <option value="">未选择模型</option>
-          {models.map((m) => (
-            <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.name}</option>
-          ))}
-        </Select>
+            <Select
+              value={modelValue}
+              onChange={(v) => {
+                const [providerId, modelId] = v.split(":");
+                if (providerId && modelId) onSelectModel(providerId, modelId);
+              }}
+              disabled={disabled}
+              aria-label="选择模型"
+              className={modelSelectClass}
+            >
+              <option value="">未选择模型</option>
+              {models.map((m) => (
+                <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.name}</option>
+              ))}
+            </Select>
+          </>
+        )}
 
         {usageTotals !== undefined && (
           <div className={styles.ringSlot ?? ""}>

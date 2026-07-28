@@ -1,0 +1,29 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  min-width: 320px;
+  max-width: 400px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--fs-h4);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.body {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-8);
+  justify-content: flex-end;
+  margin-top: var(--space-8);
+}

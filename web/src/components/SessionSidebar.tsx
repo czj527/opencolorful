@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { SessionView, AgentView } from "../lib/types.js";
 import { AgentSelector } from "../features/chat/AgentSelector.js";
-import { Modal } from "./Modal.js";
-import { IconButton, Button } from "./ui/index.js";
-import { Plus, Archive, ArchiveRestore, Search, FolderOpen, Bot } from "lucide-react";
+import { AgentAvatar } from "../features/agents/AgentAvatar.js";
+import { IconButton } from "./ui/index.js";
+import { navigateToNewSession } from "../app/page-router.js";
+import { Plus, Archive, ArchiveRestore, Search, FolderOpen } from "lucide-react";
 import styles from "./SessionSidebar.module.css";
 
 interface SessionSidebarProps {
@@ -11,7 +12,6 @@ interface SessionSidebarProps {
   readonly activeSessionId: string | null;
   readonly collapsed: boolean;
   readonly onSelect: (id: string) => void;
-  readonly onCreate: (title: string, cwd: string) => void;
   readonly onArchive: (id: string) => void;
   readonly onUnarchive: (id: string) => void;
   readonly onToggle: () => void;
@@ -32,15 +32,12 @@ const archivedGroupClass = styles.archivedGroup ?? "";
 const archivedItemClass = styles.archivedItem ?? "";
 const emptyHintClass = styles.emptyHint ?? "";
 const emptyIconClass = styles.emptyIcon ?? "";
-const createFormClass = styles.createForm ?? "";
-const formInputClass = styles.formInput ?? "";
 
 export function SessionSidebar({
   sessions,
   activeSessionId,
   collapsed,
   onSelect,
-  onCreate,
   onArchive,
   onUnarchive,
   onToggle,
@@ -48,9 +45,6 @@ export function SessionSidebar({
   activeAgentId,
   onSelectAgent,
 }: SessionSidebarProps) {
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newCwd, setNewCwd] = useState("");
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
 
@@ -67,22 +61,6 @@ export function SessionSidebar({
     return agent?.identity.name ?? null;
   };
 
-  const handleCreate = () => {
-    const title = newTitle.trim();
-    const cwd = newCwd.trim();
-    if (!title || !cwd) return;
-    onCreate(title, cwd);
-    setNewTitle("");
-    setNewCwd("");
-    setShowCreateModal(false);
-  };
-
-  const openCreateModal = () => {
-    setNewTitle("");
-    setNewCwd("");
-    setShowCreateModal(true);
-  };
-
   const asideClass = `app-sidebar-left${collapsed ? " collapsed" : ""}`;
 
   return (
@@ -92,7 +70,7 @@ export function SessionSidebar({
         <IconButton
           icon={<Plus size={14} aria-hidden="true" />}
           label="新建会话"
-          onClick={openCreateModal}
+          onClick={() => navigateToNewSession()}
         />
       </div>
 
@@ -105,34 +83,6 @@ export function SessionSidebar({
           />
         </div>
       )}
-
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="新建会话">
-        <div className={createFormClass}>
-          <input
-            type="text"
-            placeholder="会话标题"
-            aria-label="会话标题"
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            className={formInputClass}
-          />
-          <input
-            type="text"
-            placeholder="工作目录（如 D:\\projects\\demo）"
-            aria-label="工作目录"
-            value={newCwd}
-            onChange={(e) => setNewCwd(e.target.value)}
-            className={formInputClass}
-          />
-          <Button
-            variant="primary"
-            onClick={handleCreate}
-            disabled={!newTitle.trim() || !newCwd.trim()}
-          >
-            创建
-          </Button>
-        </div>
-      </Modal>
 
       <div className={searchBarClass}>
         <Search size={12} aria-hidden="true" className={searchIconClass} />
@@ -176,12 +126,18 @@ export function SessionSidebar({
                 </button>
               </div>
               <div className="sidebar-item-meta">
-                {resolveAgentName(session.agentId) !== null && (
-                  <span className="sidebar-agent-badge">
-                    <Bot size={10} aria-hidden="true" />
-                    {resolveAgentName(session.agentId)}
-                  </span>
-                )}
+                {(() => {
+                  const agentId = session.agentId;
+                  if (agentId === null) return null;
+                  const name = resolveAgentName(agentId);
+                  if (name === null) return null;
+                  return (
+                    <span className="sidebar-agent-badge">
+                      <AgentAvatar agentId={agentId} name={name} size="sm" />
+                      {name}
+                    </span>
+                  );
+                })()}
                 {session.messages.length} 条消息 · {session.toolMode}
               </div>
             </div>

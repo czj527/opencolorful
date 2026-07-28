@@ -4,6 +4,7 @@ import type { RuntimePaths } from "../config/paths.js";
 import { PreferencesStore } from "../config/preferences-store.js";
 import { ProviderStore } from "../config/provider-store.js";
 import { AgentStore } from "../config/agent-store.js";
+import { createFolderPicker } from "../platform/folder-picker.js";
 import { EventReplayStore } from "../runtime/event-replay-store.js";
 import { ModelService } from "../runtime/model-service.js";
 import { PromptService } from "../runtime/prompt-service.js";
@@ -151,7 +152,18 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     const sessionService = new SessionService(paths, sessionIndex);
     const preferencesStore = new PreferencesStore(paths.preferences);
     const agentStore = new AgentStore(paths.agents);
+    // 启动时迁移旧 Agent 数据（去 type、profile.json→base-color.json、补 innerSetting）
+    // 幂等、可恢复、单 agent 失败不阻塞其他
+    const migrationReport = agentStore.migrate();
+    if (migrationReport.failed > 0) {
+      for (const failure of migrationReport.failures) {
+        console.error(
+          `[agent-migrate] ${failure.agentId} @ ${failure.stage}: ${failure.error}`,
+        );
+      }
+    }
     const promptService = new PromptService();
+    const folderPicker = createFolderPicker();
     const replayStore = new EventReplayStore();
     const wsRegistry = new ClientRegistry();
     const usageStore = new UsageStore(database);
@@ -171,6 +183,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         sessionService,
         preferencesStore,
         agentStore,
+        folderPicker,
         promptService,
         replayStore,
         usageStore,

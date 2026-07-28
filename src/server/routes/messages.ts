@@ -35,17 +35,19 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
 
   function buildSystemPrompt(agentId: string): string | undefined {
     if (agentStore === undefined) return undefined;
-    const profile = agentStore.getProfile(agentId);
-    if (profile === null) return undefined;
+    const baseColor = agentStore.getBaseColor(agentId);
     const parts: string[] = [];
-    if (profile.persona) {
-      parts.push(profile.persona);
+    if (baseColor.persona) {
+      parts.push(baseColor.persona);
     }
-    if (profile.replyStyle) {
-      parts.push(`回复风格: ${profile.replyStyle}`);
+    if (baseColor.replyStyle) {
+      parts.push(`回复风格: ${baseColor.replyStyle}`);
     }
-    if (profile.personality.length > 0) {
-      parts.push(`性格标签: ${profile.personality.join("、")}`);
+    if (baseColor.personality.length > 0) {
+      parts.push(`性格标签: ${baseColor.personality.join("、")}`);
+    }
+    if (baseColor.innerSetting) {
+      parts.push(`相处边界: ${baseColor.innerSetting}`);
     }
     return parts.length > 0 ? parts.join("\n\n") : undefined;
   }

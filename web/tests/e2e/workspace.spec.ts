@@ -159,6 +159,24 @@ async function selectFixtureModel(page: Page): Promise<void> {
   await select.selectOption(value);
 }
 
+/**
+ * 通过 API 创建 Session 并让 UI 选中。
+ * Phase 8 起 Session 创建从弹窗改为 /new 独立单页（首条消息发送即创建），
+ * 现有 E2E 中"通过 Modal 填标题+工作目录+创建"的步骤已失效；
+ * 此 helper 绕过 UI 直接调 API 创建，用于其他测试的前置准备。
+ */
+async function createSessionViaApi(page: Page, title: string): Promise<{ id: string }> {
+  const response = await page.request.post(`${baseUrl()}/api/sessions`, {
+    data: { title, cwd: workspace },
+  });
+  expect(response.ok()).toBe(true);
+  const session = (await response.json()) as { id: string };
+  // 刷新侧栏会话列表，再点击 title 选中
+  await page.goto(baseUrl());
+  await page.getByText(title).first().click({ timeout: 10_000 });
+  return session;
+}
+
 async function ensureAgentServerViaApi(page: Page): Promise<void> {
   const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
   if (status.agentServer.status === "online") return;
@@ -208,13 +226,10 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     await ensureFixtureProvider(page);
 
-    // 通过页面创建 Session
-    await page.getByRole("button", { name: "新建会话" }).click();
-    await page.getByLabel("会话标题").fill("E2E 验收会话");
-    await page.getByLabel("工作目录").fill(workspace);
-    await page.getByRole("button", { name: "创建" }).click();
+    // 通过 API 创建 Session（Phase 8 起 UI 改为 /new 独立单页，不再有 Modal）
+    await createSessionViaApi(page, "E2E 验收会话");
 
-    // 会话出现在列表并自动选中（标题在侧栏和聊天区各出现一次，取第一个）
+    // 会话出现在列表并已选中
     await expect(page.getByText("E2E 验收会话").first()).toBeVisible({ timeout: 10_000 });
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
@@ -250,12 +265,9 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.goto(baseUrl());
     await ensureFixtureProvider(page);
 
-    // 创建新会话
+    // 创建新会话（API 直接创建；Phase 8 起 Modal 改为 /new 单页）
     const uniqueTitle = `Abort 测试 ${Date.now()}`;
-    await page.getByRole("button", { name: "新建会话" }).click();
-    await page.getByLabel("会话标题").fill(uniqueTitle);
-    await page.getByLabel("工作目录").fill(workspace);
-    await page.getByRole("button", { name: "创建" }).click();
+    await createSessionViaApi(page, uniqueTitle);
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
     // 等待模型选项加载完成再选择（模型列表异步拉取）
@@ -384,12 +396,9 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.goto(baseUrl());
     await ensureFixtureProvider(page);
 
-    // 新建会话
+    // 新建会话（API 直接创建；Phase 8 起 Modal 改为 /new 单页）
     const uniqueTitle = `Abort-SLOW-${Date.now()}`;
-    await page.getByRole("button", { name: "新建会话" }).click();
-    await page.getByLabel("会话标题").fill(uniqueTitle);
-    await page.getByLabel("工作目录").fill(workspace);
-    await page.getByRole("button", { name: "创建" }).click();
+    await createSessionViaApi(page, uniqueTitle);
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
     // 选模型
@@ -414,12 +423,10 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.goto(baseUrl());
     await ensureFixtureProvider(page);
 
-    // 通过 UI 创建会话并发送一条 Prompt（建立历史）
+    // 通过 API 创建会话并发送一条 Prompt（建立历史）
+    // Phase 8 起 Modal 改为 /new 单页，这里直接调 API 绕过 UI
     const uniqueTitle = `Restart-${Date.now()}`;
-    await page.getByRole("button", { name: "新建会话" }).click();
-    await page.getByLabel("会话标题").fill(uniqueTitle);
-    await page.getByLabel("工作目录").fill(workspace);
-    await page.getByRole("button", { name: "创建" }).click();
+    await createSessionViaApi(page, uniqueTitle);
     await expect(page.getByText(uniqueTitle).first()).toBeVisible({ timeout: 10_000 });
 
     await selectFixtureModel(page);
@@ -435,8 +442,8 @@ test.describe("web workspace 真实浏览器验收", () => {
 
     // 重新选中会话 — 历史消息应包含之前的内容
     await page.getByText(uniqueTitle).first().click();
-    // 等待 SSE 重连（事件流指示器变绿色）
-    await expect(page.getByLabel("事件流已连接")).toBeVisible({ timeout: 15_000 });
+    // 等待 SSE 重连
+    await expect(page.locator(".status-dot.online").first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("message-list")).toContainText("读取", { timeout: 20_000 });
 
     // 继续对话
@@ -551,11 +558,8 @@ test.describe("web workspace 真实浏览器验收", () => {
     await page.goto(baseUrl());
     await ensureFixtureProvider(page);
 
-    // 先创建会话建立状态
-    await page.getByRole("button", { name: "新建会话" }).click();
-    await page.getByLabel("会话标题").fill(`Settings-${Date.now()}`);
-    await page.getByLabel("工作目录").fill(workspace);
-    await page.getByRole("button", { name: "创建" }).click();
+    // 先创建会话建立状态（API 直接创建；Phase 8 起 Modal 改为 /new 单页）
+    await createSessionViaApi(page, `Settings-${Date.now()}`);
 
     // 进入设置中心（齿轮按钮在 ChatPane 标题栏）
     await page.getByLabel("设置中心").click();
