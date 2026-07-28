@@ -21,6 +21,7 @@ web/playwright-report/
 /data/
 /sessions/
 .person-agent/
+.opencolorful/
 .local/
 .tmp/
 .superpowers/

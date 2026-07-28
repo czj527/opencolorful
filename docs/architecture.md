@@ -27,7 +27,7 @@ Phase 0、1、2 已于 2026-07-22 完成。Phase 3 已完成：Supervisor 进程
 ## 初始目录结构
 
 ```text
-person-Agent/
+opencolorful/
 ├── src/
 │   ├── cli/               CLI 入口和 Server 生命周期命令
 │   ├── config/            数据目录、环境 fallback、配置读取

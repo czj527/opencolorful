@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>person-Agent TokUI Spike</title>
+<title>OpenColorful TokUI Spike</title>
 <link rel="stylesheet" href="https://unpkg.com/@jboltai/tokui@0.1.8/dist/tokui.css">
 <script src="https://unpkg.com/@jboltai/tokui@0.1.8/dist/tokui.umd.js"></script>
 </head>
 <body>
-<h1>person-Agent TokUI 投影验证</h1>
+<h1>OpenColorful TokUI 投影验证</h1>
 <p>此页面使用静态事件夹具演示 TokUI 渲染，不连接真实 Server。</p>
 <div id="output"></div>
 <script>
-// 模拟从 person-Agent Server 接收的平台事件
+// 模拟从 OpenColorful Server 接收的平台事件
 const testEvents = [
   { type: "tool.started", payload: { toolCallId: "t1", toolName: "search_files" } },
   { type: "tool.delta", payload: { toolCallId: "t1", delta: "正在搜索..." } },
