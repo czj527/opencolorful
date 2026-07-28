@@ -16,6 +16,8 @@ export const EVENT_TYPES = [
   "attachment.available",
   "session.compacting",
   "session.compacted",
+  "sandbox.denied",
+  "sandbox.preflight-denied",
   "error",
 ] as const;
 
