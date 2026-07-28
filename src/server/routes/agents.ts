@@ -4,6 +4,7 @@ import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
 import { BASE_COLOR_TEMPLATES } from "../../contracts/base-color-templates.js";
+import type { SandboxCapabilities } from "../../contracts/sandbox.js";
 import type { AgentStore } from "../../config/agent-store.js";
 import type { SessionService } from "../../runtime/session-service.js";
 
@@ -244,11 +245,18 @@ export function registerAgentRoutes(
   app.put("/api/agents/:id/settings", async (context) => {
     try {
       const rawBody = await context.req.json() as unknown;
-      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["defaultCwd"])) {
+      if (
+        !isRecord(rawBody) ||
+        !hasOnlyKeys(rawBody, ["defaultCwd", "extraReadPaths", "protectedPaths"])
+      ) {
         return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
       }
       const body = rawBody;
-      const patch: { defaultCwd?: string | null } = {};
+      const patch: {
+        defaultCwd?: string | null;
+        sandbox?: SandboxCapabilities;
+      } = {};
+
       if (body.defaultCwd !== undefined) {
         if (body.defaultCwd === null) {
           patch.defaultCwd = null;
@@ -267,6 +275,50 @@ export function registerAgentRoutes(
           );
         }
       }
+
+      // sandbox extraReadPaths
+      if (body.extraReadPaths !== undefined) {
+        if (!isStringArray(body.extraReadPaths)) {
+          return context.json(
+            createApiError("INVALID_INPUT", "extraReadPaths 必须是字符串数组"),
+            400,
+          );
+        }
+        // 拒绝包含 .. 的路径
+        if (body.extraReadPaths.some((p: string) => p.includes(".."))) {
+          return context.json(
+            createApiError("INVALID_INPUT", "extraReadPaths 不允许包含 .. 路径"),
+            400,
+          );
+        }
+        patch.sandbox = {
+          workspaceAccess: "rw",
+          extraReadPaths: body.extraReadPaths as string[],
+          protectedPaths: patch.sandbox?.protectedPaths ?? [],
+        };
+      }
+
+      // sandbox protectedPaths
+      if (body.protectedPaths !== undefined) {
+        if (!isStringArray(body.protectedPaths)) {
+          return context.json(
+            createApiError("INVALID_INPUT", "protectedPaths 必须是字符串数组"),
+            400,
+          );
+        }
+        if (body.protectedPaths.some((p: string) => p.includes(".."))) {
+          return context.json(
+            createApiError("INVALID_INPUT", "protectedPaths 不允许包含 .. 路径"),
+            400,
+          );
+        }
+        patch.sandbox = {
+          workspaceAccess: "rw",
+          extraReadPaths: patch.sandbox?.extraReadPaths ?? [],
+          protectedPaths: body.protectedPaths as string[],
+        };
+      }
+
       if (Object.keys(patch).length === 0) {
         return context.json(createApiError("INVALID_INPUT", "没有可更新的字段"), 400);
       }

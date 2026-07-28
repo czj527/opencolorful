@@ -12,6 +12,11 @@ import styles from "./AgentForm.module.css";
 
 export type AgentFormMode = "create" | "edit";
 
+export interface AgentSandboxDraft {
+  extraReadPaths: string[];
+  protectedPaths: string[];
+}
+
 export interface AgentFormDraft {
   name: string;
   persona: string;
@@ -19,6 +24,7 @@ export interface AgentFormDraft {
   replyStyle: string;
   innerSetting: string;
   defaultCwd: string | null;
+  sandbox?: AgentSandboxDraft;
   selectedTemplateKey: string;
   templateAdjusted: boolean;
 }
@@ -40,7 +46,9 @@ export function AgentForm(props: AgentFormProps) {
   const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
   const [pendingTemplate, setPendingTemplate] = useState<{ baseColor: BaseColorDraft; key: string } | null>(null);
   const [nameError, setNameError] = useState(false);
-  const tagInputRef = useRef<TagInputHandle>(null);
+  const personalityTagRef = useRef<TagInputHandle>(null);
+  const extraReadPathsTagRef = useRef<TagInputHandle>(null);
+  const protectedPathsTagRef = useRef<TagInputHandle>(null);
 
   const handleTemplateSelect = (baseColor: BaseColorDraft, key: string) => {
     if (props.draft.templateAdjusted) {
@@ -90,7 +98,9 @@ export function AgentForm(props: AgentFormProps) {
   };
 
   const handleSubmit = () => {
-    tagInputRef.current?.commitPendingInput();
+    personalityTagRef.current?.commitPendingInput();
+    extraReadPathsTagRef.current?.commitPendingInput();
+    protectedPathsTagRef.current?.commitPendingInput();
     if (!props.draft.name.trim()) {
       setNameError(true);
       return;
@@ -173,7 +183,7 @@ export function AgentForm(props: AgentFormProps) {
         <div className={styles.sectionLabel}>性格特质</div>
         <div className={styles.field}>
           <TagInput
-            ref={tagInputRef}
+            ref={personalityTagRef}
             tags={props.draft.personality}
             onChange={(tags) => handleFieldChange({ personality: tags })}
             placeholder="输入后按回车添加"
@@ -219,6 +229,51 @@ export function AgentForm(props: AgentFormProps) {
           onChange={(path) => handleFieldChange({ defaultCwd: path })}
           disabled={props.submitting}
         />
+      </section>
+
+      {/* Section 8: 沙箱配置 */}
+      <section className={styles.section}>
+        <div className={styles.sectionLabel}>沙箱配置</div>
+        <div className={styles.field}>
+          <label className={styles.sandboxLabel}>额外可读路径</label>
+          <TagInput
+            ref={extraReadPathsTagRef}
+            tags={props.draft.sandbox?.extraReadPaths ?? []}
+            onChange={(paths) =>
+              handleFieldChange({
+                sandbox: {
+                  extraReadPaths: paths,
+                  protectedPaths: props.draft.sandbox?.protectedPaths ?? [],
+                },
+              })
+            }
+            placeholder="输入后按回车添加，例如：/mnt/shared"
+            disabled={props.submitting}
+          />
+          <p className={styles.sandboxHint}>
+            Agent 可以访问这些路径下的文件（仅限读取权限）
+          </p>
+        </div>
+        <div className={styles.field}>
+          <label className={styles.sandboxLabel}>受保护路径</label>
+          <TagInput
+            ref={protectedPathsTagRef}
+            tags={props.draft.sandbox?.protectedPaths ?? []}
+            onChange={(paths) =>
+              handleFieldChange({
+                sandbox: {
+                  extraReadPaths: props.draft.sandbox?.extraReadPaths ?? [],
+                  protectedPaths: paths,
+                },
+              })
+            }
+            placeholder="输入后按回车添加，例如：.env"
+            disabled={props.submitting}
+          />
+          <p className={styles.sandboxHint}>
+            Agent 无法访问工作区内这些路径下的文件（黑名单保护）
+          </p>
+        </div>
       </section>
 
       {/* Error display */}

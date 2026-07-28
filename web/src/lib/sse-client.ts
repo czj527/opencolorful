@@ -18,6 +18,8 @@ const KNOWN_EVENT_TYPES = [
   "plan.updated",
   "attachment.available",
   "error",
+  "sandbox.denied",
+  "sandbox.preflight-denied",
 ] as const;
 
 export interface SseResetPayload {

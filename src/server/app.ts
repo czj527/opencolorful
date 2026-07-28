@@ -19,6 +19,7 @@ import { registerProviderRoutes } from "./routes/providers.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerAgentRoutes } from "./routes/agents.js";
+import { registerSandboxRoutes } from "./routes/sandbox.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
@@ -72,6 +73,9 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.agentStore !== undefined) {
     registerAgentRoutes(app, options.agentStore, options.sessionService);
+  }
+  if (options.agentStore !== undefined && options.paths !== undefined) {
+    registerSandboxRoutes(app, options.agentStore, options.paths);
   }
   if (options.folderPicker !== undefined) {
     registerDirectoryRoutes(app, options.folderPicker);

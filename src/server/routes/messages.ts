@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import * as path from "node:path";
 
 import type { RuntimePaths } from "../../config/paths.js";
 import type { AgentStore } from "../../config/agent-store.js";
@@ -73,6 +74,20 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
       const runtimeCwd = view.workspaceCwd || process.cwd();
 
+      // 构建沙箱上下文：当 session 绑定 Agent 且 paths/agentStore 可用时
+      let agentSettings: import("../../contracts/agent-settings.js").AgentSettingsV2 | undefined;
+      let agentHomeDir: string | undefined;
+      let platformHome: string | undefined;
+      if (view.agentId && agentStore && paths) {
+        try {
+          agentSettings = agentStore.getSettings(view.agentId);
+          agentHomeDir = path.join(paths.agents, view.agentId);
+          platformHome = paths.home;
+        } catch {
+          // 读取 Agent 设置失败时降级运行，不启用沙箱
+        }
+      }
+
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;
       if (selectedModel && modelService && selectedModel.providerId !== "faux") {
@@ -90,6 +105,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
+          ...(agentSettings ? { agentSettings } : {}),
+          ...(agentHomeDir ? { agentHomeDir } : {}),
+          ...(platformHome ? { platformHome } : {}),
         });
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
@@ -109,6 +127,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
+          ...(agentSettings ? { agentSettings } : {}),
+          ...(agentHomeDir ? { agentHomeDir } : {}),
+          ...(platformHome ? { platformHome } : {}),
         });
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);

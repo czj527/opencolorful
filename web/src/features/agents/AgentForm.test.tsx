@@ -12,6 +12,7 @@ const createDraft = {
   replyStyle: "",
   innerSetting: "",
   defaultCwd: null,
+  sandbox: { extraReadPaths: [], protectedPaths: [] },
   selectedTemplateKey: "",
   templateAdjusted: false,
 };
@@ -23,6 +24,7 @@ const editDraft = {
   replyStyle: "conversational",
   innerSetting: "Be supportive.",
   defaultCwd: null,
+  sandbox: { extraReadPaths: [], protectedPaths: [] },
   selectedTemplateKey: "",
   templateAdjusted: false,
 };
@@ -49,6 +51,7 @@ describe("AgentForm", () => {
     expect(html).toContain("回复风格");
     expect(html).toContain("内在设定");
     expect(html).toContain("默认工作目录");
+    expect(html).toContain("沙箱配置");
     expect(html).toContain("创建 Agent");
   });
 

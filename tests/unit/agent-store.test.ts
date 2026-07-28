@@ -56,7 +56,7 @@ describe("AgentStore", () => {
     expect(view.baseColor.innerSetting).toBe("");
     expect(view.baseColor.updatedAt).toBeTruthy();
     // 新契约：AgentView 含 settings 与 decorColor
-    expect(view.settings.version).toBe(1);
+    expect(view.settings.version).toBe(2);
     expect(view.settings.defaultCwd).toBeNull();
     expect(view.settings.updatedAt).toBeTruthy();
     expect(DECOR_COLORS).toContain(view.decorColor);
@@ -75,7 +75,7 @@ describe("AgentStore", () => {
 
     const view = store.load("cwd-agent");
     expect(view.settings.defaultCwd).toBe("/tmp/work");
-    expect(view.settings.version).toBe(1);
+    expect(view.settings.version).toBe(2);
   });
 
   it("rejects invalid agent id", () => {
@@ -164,7 +164,7 @@ describe("AgentStore", () => {
 
     const settings = store.saveSettings("set-me", { defaultCwd: "/home/user" });
     expect(settings.defaultCwd).toBe("/home/user");
-    expect(settings.version).toBe(1);
+    expect(settings.version).toBe(2);
 
     const reloaded = store.load("set-me");
     expect(reloaded.settings.defaultCwd).toBe("/home/user");
