@@ -20,9 +20,9 @@ function createRuntime(options: {
   tokensPerSecond?: number;
   replayStore?: EventReplayStore;
 }) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-sse-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-sse-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const events: PlatformEventEnvelope[] = [];
   return SessionRuntime.create({
     sessionId: "session-sse",
@@ -382,7 +382,7 @@ describe("SSE event replay", () => {
   it("returns 404 for SSE on non-existent session when sessionService is provided", async () => {
     const replayStore = new EventReplayStore();
     const promptService = new PromptService();
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: os.tmpdir() });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: os.tmpdir() });
     const db = openMetadataDatabase(paths.database);
     const idx = new SessionIndex(db);
     const { SessionService: Svc } = await import("../../src/runtime/session-service.js");

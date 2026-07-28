@@ -23,9 +23,9 @@ interface TestContext {
 }
 
 function createTestContext(): TestContext {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-persona-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-persona-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const index = new SessionIndex(database);
   const sessionService = new SessionService(paths, index);

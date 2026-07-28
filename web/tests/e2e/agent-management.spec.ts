@@ -56,11 +56,11 @@ async function startProviderFixture(): Promise<number> {
 }
 
 test.beforeAll(async () => {
-  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-e2e-am-"));
+  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-e2e-am-"));
   workspace = path.join(tempHome, "workspace");
   fs.mkdirSync(workspace);
 
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: tempHome });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: tempHome });
   supervisorPort = await freePort();
   agentPort = await freePort();
   fixturePort = await startProviderFixture();

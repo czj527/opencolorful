@@ -1,4 +1,4 @@
-# person-Agent 架构说明
+# OpenColorful 架构说明
 
 ## 架构状态
 
@@ -63,7 +63,7 @@ Web UI 已作为 `web/` npm workspace 管理，Server 与 Web 分别构建、测
 默认数据目录：
 
 ```text
-~/.person-agent/
+~/.opencolorful/
 ├── config/
 │   ├── providers.json
 │   └── preferences.json
@@ -79,7 +79,7 @@ Web UI 已作为 `web/` npm workspace 管理，Server 与 Web 分别构建、测
 └── cache/
 ```
 
-开发环境可以通过 `PERSON_AGENT_HOME` 指向隔离目录。生产配置不得依赖该变量
+开发环境可以通过 `OPENCOLORFUL_HOME` 指向隔离目录。生产配置不得依赖该变量
 才能正常使用。
 
 Phase 0 已实现 `server.json` 的原子更新和 `server.lock` 单实例保护。后台进程在

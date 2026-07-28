@@ -13,9 +13,9 @@ import { createServerApp } from "../../src/server/app.js";
 const temporaryDirectories: string[] = [];
 
 function createRuntime(options: { response: string; tokensPerSecond?: number }) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-prompt-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-prompt-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const events: PlatformEventEnvelope[] = [];
   return SessionRuntime.create({
     sessionId: "session-prompt",

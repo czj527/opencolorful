@@ -1,10 +1,10 @@
-# person-Agent Agent 协作指南
+# OpenColorful Agent 协作指南
 
 本文是自动化开发 Agent 在本仓库工作的首要入口，适用于整个 `person-Agent/` 目录。开始修改前必须先读懂本项目定位与架构（见下方文档导航）。
 
 ## 核心理念与定位
 
-**person-Agent = 承载 agent 完整一生的本地优先平台基础设施。**
+**OpenColorful = 承载 agent 完整一生的本地优先平台基础设施。**
 
 核心理念：**给每个 agent 完整的一生**。agent 不只是"有用的工具"——它有自我（人格、性格、记忆、想法）、有成长、有生活、有社交。它的职业形态（coding 工程师 / 设计师 / 文档撰写员 / 陪伴朋友）由创建者通过插件特化决定，**平台不预设 agent 是什么**。我们关注 agent 的"自我"，而非市面 agent 追求的"有用性"。
 
@@ -48,7 +48,7 @@
 已经具备（平台层）：
 
 - TypeScript ESM、Vitest、构建和 PI import 边界检查；
-- `~/.person-agent` 路径约定和 `PERSON_AGENT_HOME` 开发覆盖；
+- `~/.opencolorful` 路径约定和 `OPENCOLORFUL_HOME` 开发覆盖；
 - SQLite/WAL Session 元数据索引；
 - Provider、Base URL、协议、模型能力和 Header 的持久化配置；
 - API Key 通过 PI `ModelRuntime`/AuthStorage 写入 `auth/auth.json`，不写入普通配置；
@@ -149,6 +149,15 @@ npx tsc -p tsconfig.build.json
 cd web; npx playwright test
 ```
 
+**browser-use 实际交互验收**（每个 Phase 完成后，主 Agent 执行）：
+1. `npm run web:build && npm run cli -- supervisor start`
+2. 使用 browser-use（`control-browser` skill）打开 `http://127.0.0.1:4311`
+3. 按 Phase 验收标准逐项操作验证用户可感知的新功能
+4. 截图留存关键验收证据
+5. `npm run cli -- supervisor stop`
+
+> browser-use 侧重新功能交互验收，可作为 Playwright E2E 的补充或替代。详见 `docs/development.md`。
+
 ### 质量红线（违反即返工）
 
 - `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` 必须全过；
@@ -159,7 +168,7 @@ cd web; npx playwright test
 - 新增 SSE 事件类型必须同步 `web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES`；
 - 不记录/回传/落库任何 API Key、Authorization、Cookie；
 - 手工编辑用 apply_patch；不用 `git reset --hard`、`git checkout --` 等破坏性命令；
-- 默认测试不得请求真实 Provider 网络，用 PI faux provider + 临时 `PERSON_AGENT_HOME`。
+- 默认测试不得请求真实 Provider 网络，用 PI faux provider + 临时 `OPENCOLORFUL_HOME`。
 
 ## 编码规范
 
@@ -197,7 +206,7 @@ npx vitest run tests/integration/prompt-events.test.ts tests/integration/abort.t
 需要真实运行数据时使用隔离目录：
 
 ```powershell
-$env:PERSON_AGENT_HOME = "$PWD\.person-agent"
+$env:OPENCOLORFUL_HOME = "$PWD\.opencolorful"
 npm run cli -- server start --foreground
 ```
 
@@ -210,4 +219,4 @@ git ls-files | Select-String -Pattern '\.env|\.sqlite|sessions|\.log'
 ```
 
 默认测试不得请求真实 Provider 网络，不得依赖开发者本机已有 API Key。使用 PI faux
-provider 和临时 `PERSON_AGENT_HOME`，并在测试结束后关闭数据库、Runtime 和订阅。
+provider 和临时 `OPENCOLORFUL_HOME`，并在测试结束后关闭数据库、Runtime 和订阅。

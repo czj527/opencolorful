@@ -10,9 +10,9 @@ import { filterLogLines, type LogQuery, type LogTail } from "../../src/superviso
 const temporaryDirectories: string[] = [];
 
 function makeTempPaths(): RuntimePaths {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-logfilter-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-logfilter-"));
   temporaryDirectories.push(home);
-  return getRuntimePaths({ PERSON_AGENT_HOME: home });
+  return getRuntimePaths({ OPENCOLORFUL_HOME: home });
 }
 
 afterEach(() => {

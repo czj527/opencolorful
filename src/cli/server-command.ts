@@ -47,7 +47,7 @@ async function runForeground(
   paths: ReturnType<typeof getRuntimePaths>,
 ): Promise<void> {
   const server = await startForegroundServer({ host, port, paths, version: PLATFORM_VERSION });
-  console.log(`person-agent server online: http://${host}:${server.port}`);
+  console.log(`opencolorful server online: http://${host}:${server.port}`);
   await new Promise<void>((resolve) => {
     const shutdown = () => {
       void server.stop().finally(resolve);
@@ -60,7 +60,7 @@ async function runForeground(
 function startDetachedProcess(paths: ReturnType<typeof getRuntimePaths>): void {
   const current = readRuntimeState(paths);
   if (current !== undefined && current.status === "online" && isProcessRunning(current.pid)) {
-    console.log(`person-agent server already online: PID ${current.pid}, port ${current.port}`);
+    console.log(`opencolorful server already online: PID ${current.pid}, port ${current.port}`);
     return;
   }
 
@@ -74,11 +74,11 @@ function startDetachedProcess(paths: ReturnType<typeof getRuntimePaths>): void {
     detached: true,
     windowsHide: true,
     stdio: ["ignore", logHandle, logHandle],
-    env: { ...process.env, PERSON_AGENT_DAEMON: "1" },
+    env: { ...process.env, OPENCOLORFUL_DAEMON: "1" },
   });
   child.unref();
   fs.closeSync(logHandle);
-  console.log(`person-agent server starting: PID ${child.pid ?? "unknown"}`);
+  console.log(`opencolorful server starting: PID ${child.pid ?? "unknown"}`);
 }
 
 async function stopServer(paths: ReturnType<typeof getRuntimePaths>): Promise<void> {
@@ -86,7 +86,7 @@ async function stopServer(paths: ReturnType<typeof getRuntimePaths>): Promise<vo
   if (state === undefined || !isProcessRunning(state.pid)) {
     markServerStopped(paths);
     releaseServerLock(paths);
-    console.log("person-agent server stopped");
+    console.log("opencolorful server stopped");
     return;
   }
 
@@ -95,7 +95,7 @@ async function stopServer(paths: ReturnType<typeof getRuntimePaths>): Promise<vo
   } catch (error) {
     if (isProcessRunning(state.pid)) throw error;
   }
-  console.log(`person-agent server stopping: PID ${state.pid}`);
+  console.log(`opencolorful server stopping: PID ${state.pid}`);
 
   const deadline = Date.now() + 5_000;
   while (isProcessRunning(state.pid) && Date.now() < deadline) {
@@ -107,7 +107,7 @@ async function stopServer(paths: ReturnType<typeof getRuntimePaths>): Promise<vo
 
   markServerStopped(paths);
   releaseServerLock(paths);
-  console.log("person-agent server stopped");
+  console.log("opencolorful server stopped");
 }
 
 function reportStatus(paths: ReturnType<typeof getRuntimePaths>): void {
@@ -115,11 +115,11 @@ function reportStatus(paths: ReturnType<typeof getRuntimePaths>): void {
   if (state === undefined || !isProcessRunning(state.pid)) {
     markServerStopped(paths);
     releaseServerLock(paths);
-    console.log("person-agent server stopped");
+    console.log("opencolorful server stopped");
     return;
   }
   console.log(
-    `person-agent server ${state.status}: PID ${state.pid}, http://${state.host}:${state.port}`,
+    `opencolorful server ${state.status}: PID ${state.pid}, http://${state.host}:${state.port}`,
   );
 }
 

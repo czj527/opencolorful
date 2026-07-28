@@ -35,10 +35,10 @@ afterEach(async () => {
   }
 });
 
-function makeTempHome(prefix = "person-agent-supervisor-"): { home: string; paths: ReturnType<typeof getRuntimePaths> } {
+function makeTempHome(prefix = "opencolorful-supervisor-"): { home: string; paths: ReturnType<typeof getRuntimePaths> } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   temporaryDirectories.push(home);
-  return { home, paths: getRuntimePaths({ PERSON_AGENT_HOME: home }) };
+  return { home, paths: getRuntimePaths({ OPENCOLORFUL_HOME: home }) };
 }
 
 const CLI_ENTRY = path.resolve(import.meta.dirname, "../../src/cli/main.ts");
@@ -305,9 +305,9 @@ describe("supervisor", () => {
 
   it("serves web static assets when webDistDir is provided", async () => {
     const { paths } = makeTempHome();
-    const webDist = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-webdist-"));
+    const webDist = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-webdist-"));
     temporaryDirectories.push(webDist);
-    fs.writeFileSync(path.join(webDist, "index.html"), "<html><body>person-agent web</body></html>", "utf8");
+    fs.writeFileSync(path.join(webDist, "index.html"), "<html><body>opencolorful web</body></html>", "utf8");
     fs.mkdirSync(path.join(webDist, "assets"), { recursive: true });
     fs.writeFileSync(path.join(webDist, "assets", "app.js"), "console.log('app')", "utf8");
 
@@ -323,12 +323,12 @@ describe("supervisor", () => {
     const indexResponse = await app.request("http://127.0.0.1/");
     expect(indexResponse.status).toBe(200);
     const html = await indexResponse.text();
-    expect(html).toContain("person-agent web");
+    expect(html).toContain("opencolorful web");
 
     // SPA fallback：非 API 路径也返回 index.html
     const spaResponse = await app.request("http://127.0.0.1/sessions/abc");
     expect(spaResponse.status).toBe(200);
-    expect(await spaResponse.text()).toContain("person-agent web");
+    expect(await spaResponse.text()).toContain("opencolorful web");
   });
 
   it("proxies agent API requests through supervisor and returns 502 when agent is down", async () => {

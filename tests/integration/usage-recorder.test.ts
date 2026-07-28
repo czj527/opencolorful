@@ -14,9 +14,9 @@ import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 const temporaryDirectories: string[] = [];
 
 function createContext() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-usage-recorder-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-usage-recorder-"));
   temporaryDirectories.push(directory);
-  const paths = getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const usageStore = new UsageStore(database);
   const replayStore = new EventReplayStore();

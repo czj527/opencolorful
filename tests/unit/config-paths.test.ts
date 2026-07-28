@@ -11,25 +11,25 @@ describe("runtime paths", () => {
   it("uses the home directory by default", () => {
     const paths = getRuntimePaths({});
 
-    expect(paths.home).toBe(path.join(os.homedir(), ".person-agent"));
+    expect(paths.home).toBe(path.join(os.homedir(), ".opencolorful"));
     expect(paths.config).toBe(path.join(paths.home, "config"));
     expect(paths.auth).toBe(path.join(paths.home, "auth"));
     expect(paths.sessions).toBe(path.join(paths.home, "sessions"));
     expect(paths.database).toBe(path.join(paths.home, "metadata.sqlite"));
   });
 
-  it("uses a non-empty PERSON_AGENT_HOME override", () => {
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: "D:\\person-agent-test" });
+  it("uses a non-empty OPENCOLORFUL_HOME override", () => {
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: "D:\\opencolorful-test" });
 
-    expect(paths.home).toBe(path.resolve("D:\\person-agent-test"));
+    expect(paths.home).toBe(path.resolve("D:\\opencolorful-test"));
     expect(paths.serverState).toBe(path.join(paths.home, "runtime", "server.json"));
     expect(paths.providerSettings).toBe(path.join(paths.home, "config", "providers.json"));
   });
 
   it("ignores blank home overrides", () => {
-    const paths = getRuntimePaths({ PERSON_AGENT_HOME: "   " });
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: "   " });
 
-    expect(paths.home).toBe(path.join(os.homedir(), ".person-agent"));
+    expect(paths.home).toBe(path.join(os.homedir(), ".opencolorful"));
   });
 });
 
@@ -37,15 +37,15 @@ describe("environment fallback", () => {
   it("parses host, port, and log level without provider credentials", () => {
     expect(
       loadEnvironment({
-        PERSON_AGENT_HOST: "0.0.0.0",
-        PERSON_AGENT_PORT: "4312",
-        PERSON_AGENT_LOG_LEVEL: "debug",
+        OPENCOLORFUL_HOST: "0.0.0.0",
+        OPENCOLORFUL_PORT: "4312",
+        OPENCOLORFUL_LOG_LEVEL: "debug",
       }),
     ).toMatchObject({ host: "0.0.0.0", port: 4312, logLevel: "debug" });
   });
 
   it("rejects invalid ports", () => {
-    expect(() => loadEnvironment({ PERSON_AGENT_PORT: "70000" })).toThrow("PERSON_AGENT_PORT");
+    expect(() => loadEnvironment({ OPENCOLORFUL_PORT: "70000" })).toThrow("OPENCOLORFUL_PORT");
   });
 });
 

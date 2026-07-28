@@ -61,7 +61,7 @@ describe("PI SDK adapter", () => {
   });
 
   it("extracts thinking and toolCall blocks from assistant messages", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-history-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-history-"));
     temporaryDirectories.push(dir);
 
     // 构造一条带有 thinking + toolCall 的 assistant 消息 JSONL
@@ -166,7 +166,7 @@ describe("PI SDK adapter", () => {
   });
 
   it("maps tool error status correctly", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-history-err-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-history-err-"));
     temporaryDirectories.push(dir);
 
     const sessionFile = path.join(dir, "session.jsonl");
@@ -212,7 +212,7 @@ describe("PI SDK adapter", () => {
   });
 
   it("messageEntries are stable sorted by entry order", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-history-order-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-history-order-"));
     temporaryDirectories.push(dir);
 
     const sessionFile = path.join(dir, "session.jsonl");
@@ -256,7 +256,7 @@ describe("PI SDK import boundary", () => {
     const script = path.resolve("scripts/verify-pi-sdk-imports.mjs");
     expect(spawnSync(process.execPath, [script], { encoding: "utf8" }).status).toBe(0);
 
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-imports-"));
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-imports-"));
     temporaryDirectories.push(fixture);
     fs.mkdirSync(path.join(fixture, "src", "runtime"), { recursive: true });
     fs.writeFileSync(

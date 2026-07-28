@@ -1,21 +1,21 @@
-# person-Agent 项目重新定位与开发路线
+# OpenColorful 项目重新定位与开发路线
 
-> 2026-07-28 | 基于 person-Agent 现状（Phase 0-8 已验收）与 openhanako(HanaAgent) 深度调研
-> 本文回答两个问题：**person-Agent 到底是什么？后续往哪走？**
+> 2026-07-28 | 基于 OpenColorful 现状（Phase 0-8 已验收）与 openhanako(HanaAgent) 深度调研
+> 本文回答两个问题：**OpenColorful 到底是什么？后续往哪走？**
 
 ## 一、核心理念与定位
 
 ### 核心理念：给每个 agent 完整的一生
 
-person-Agent 不是某个"助理"的实现，而是一套**承载 agent 完整一生的平台基础设施**。
+OpenColorful（开放多彩）不是某个"助理"的实现，而是一套**承载 agent 完整一生的平台基础设施**。
 
 一个 agent 不只是"有用的工具"——它有**自我**（人格、性格、记忆、想法）、有**成长**（从经验学习、自我进化）、有**生活**（书桌、定时任务、主动行为）、有**社交**（与其他 agent 协作、成为朋友）。它的"职业形态"由创建者决定：可以是开发工程师、设计师、文档撰写员、陪伴你的朋友——**平台不预设 agent 是什么，只提供让 agent 成为其想成为的一切的基础设施**。
 
-市面上很多 agent（包括 openhanako）标"助理"标签，更多是因为市场需要 agent "有用"。但 person-Agent 更关注 agent 的**自我**——性格、记忆、想法。有用性是 agent 自我之上、由创建者通过插件特化的产物，而非平台预设。
+市面上很多 agent（包括 openhanako）标"助理"标签，更多是因为市场需要 agent "有用"。但 OpenColorful 更关注 agent 的**自我**——性格、记忆、想法。有用性是 agent 自我之上、由创建者通过插件特化的产物，而非平台预设。
 
 ### 一句话定位
 
-**person-Agent = 承载 agent 完整一生的本地优先平台基础设施**：平台提供 agent 的"自我"层（人格 / 记忆 / 成长 / 生活 / 社交），agent 的"职业形态"通过**插件特化的交互基础设施**实现（coding 专用 IDE+终端+浏览器、design 专用画布、文档专用编辑器、陪伴专用对话），由创建者定义而非平台预设。
+**OpenColorful = 承载 agent 完整一生的本地优先平台基础设施**：平台提供 agent 的"自我"层（人格 / 记忆 / 成长 / 生活 / 社交），agent 的"职业形态"通过**插件特化的交互基础设施**实现（coding 专用 IDE+终端+浏览器、design 专用画布、文档专用编辑器、陪伴专用对话），由创建者定义而非平台预设。
 
 ### 与旧定位的根本区别
 
@@ -31,7 +31,7 @@ person-Agent 不是某个"助理"的实现，而是一套**承载 agent 完整�
 
 ## 二、三层架构目标
 
-person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 agent 的"职业形态"，第三层是 agent 的"一生流转"**。运行时底座已完成，Phase 8 开始建设生命基础设施层：
+OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 agent 的"职业形态"，第三层是 agent 的"一生流转"**。运行时底座已完成，Phase 8 开始建设生命基础设施层：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -58,16 +58,16 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 ### 关键洞察：形态特化是完整交互基础设施，不是技能包
 
-这是 person-Agent 架构的**核心难点**，也是和 openhanako（通用聊天 + 技能包）的根本差异：
+这是 OpenColorful 架构的**核心难点**，也是和 openhanako（通用聊天 + 技能包）的根本差异：
 
 - 一个真正可用的 **coding agent** 不只需要"coding 人格"，还需要**终端、浏览器、组件选择器、diff 视图**等专门交互基础设施——通用聊天页面承载不了。codex / trae 都有专门的 coding 交互页面。
 - 同理，**design agent** 需要画布与素材面板，**文档 agent** 需要专用编辑器，**陪伴朋友**需要富情感对话界面。
 - 所以"形态特化"不是简单的技能包（prompt + tools），而是**完整的交互基础设施**（专用 UI + 工具链 + 工作区），必须通过插件机制提供。
 - **平台职责**：提供"可插拔工作区界面"的注册机制，让插件能替换/扩展整个工作区（不只是侧栏 widget），并配套专用工具链与沙箱策略。具体形态（coding IDE、design 画布）作为插件案例实现，不进 core。
 
-## 三、能力差距矩阵（person-Agent vs openhanako）
+## 三、能力差距矩阵（OpenColorful vs openhanako）
 
-| 能力域 | person-Agent 现状 | openhanako | 差距等级 |
+| 能力域 | OpenColorful 现状 | openhanako | 差距等级 |
 |---|---|---|---|
 | 平台层（Server/Session/Provider/Supervisor/UI） | ✅ Phase 0-8 | ✅ server/ + desktop/ | 持平（你更严谨） |
 | Agent 身份 | ✅ identity + base-color + settings + 人设注入 | ✅ config.yaml + yuan 引用 | yuan 模板/可分享人格层仍待建 |
@@ -83,7 +83,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 | 定时任务 | ❌ 无 | ✅ cron + 心跳巡检 | 完全缺失 |
 | 角色卡导入导出 | ❌ 无 | ✅ zip（人格+头像+记忆+skills） | 完全缺失 |
 
-> 综合评分：person-Agent 平台层扎实，但助理产品层和扩展生态层几乎空白。这正是"定位不清晰"的客观映照——底座有了，上面两层没动。
+> 综合评分：OpenColorful 平台层扎实，但助理产品层和扩展生态层几乎空白。这正是"定位不清晰"的客观映照——底座有了，上面两层没动。
 
 ## 四、核心架构决策
 
@@ -93,7 +93,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 2. **Agent 即文件夹**
    Phase 8 先建立稳定、可迁移的三文件目录；后续能力在明确行为后再扩展，不创建空骨架：
    ```
-   ~/.person-agent/agents/<id>/
+   ~/.opencolorful/agents/<id>/
    ├── identity.json     ← 最小稳定身份（version/id/name/createdAt）
    ├── base-color.json   ← 底色（persona/personality/replyStyle/innerSetting）
    ├── settings.json     ← 可变运行设置（当前为 defaultCwd）
@@ -168,7 +168,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 ## 六、横向参考项目启示
 
-| 项目 | 定位路线 | 对 person-Agent 启示 |
+| 项目 | 定位路线 | 对 OpenColorful 启示 |
 |---|---|---|
 | **openhanako** | 全能助理，可组合不分类 | **主参考**，可组合模型（yuan/skills/plugin/bridge）直接借鉴 |
 | oh-my-pi | coding 专精，task subagent 派生其他 | 单场景专精路线的对照（你不走这条） |
@@ -180,7 +180,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 ## 七、全方位差异化设计（相对 openhanako）
 
-基于 openclaw / hermes-agent / lobehub 的深度调研，person-Agent 不做 openhanako 的复制，而是**集四家之长 + 保留自身工程化优势**，形成六大差异化方向。核心理念：**openhanako 是"一个有灵魂的助理"，person-Agent 要做"一支有灵魂的 AI 团队"——既有人格温度，又有自我进化、团队运营和工程严谨**。
+基于 openclaw / hermes-agent / lobehub 的深度调研，OpenColorful 不做 openhanako 的复制，而是**集四家之长 + 保留自身工程化优势**，形成六大差异化方向。核心理念：**openhanako 是"一个有灵魂的助理"，OpenColorful 要做"一支有灵魂的 AI 团队"——既有人格温度，又有自我进化、团队运营和工程严谨**。
 
 ### 方向 1：记忆系统——dreaming 巩固 + 自我改进闭环
 
@@ -189,7 +189,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 openclaw dreaming**：三阶段巩固（Light 排序暂存 → REM 反思主题 → Deep 评分提升写入 MEMORY.md），六信号加权评分（Relevance 0.30 / Frequency 0.24 / Query diversity 0.15 / Recency 0.15 / Consolidation 0.10 / Conceptual richness 0.06），shadow trial 提升前 QA 验证（有害即拒），Dream Diary 人机分离，全流程可解释可审查（provenance + `memory promote-explain` CLI）
 - **借鉴 hermes curator + learning_graph**：Agent 自我策展记忆，复杂任务后**自主创建技能**、使用中**改进技能**、learning_mutations 让技能变异进化——Agent 真正"成长"
 - **借鉴 hermes FTS5 + Honcho**：跨会话全文检索（FTS5）+ LLM 摘要召回，Honcho 辩证式深度用户建模
-- **vs openhanako**：openhanako 仅 today/week/longterm 分层 + facts.db + ticker，是"被动存储"；person-Agent 是"主动巩固 + 质量保证 + 自我进化"
+- **vs openhanako**：openhanako 仅 today/week/longterm 分层 + facts.db + ticker，是"被动存储"；OpenColorful 是"主动巩固 + 质量保证 + 自我进化"
 - **落地**：Phase 10
 
 ### 方向 2：多 Agent 协作——ACP 协议 + 图运行时
@@ -199,7 +199,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 openclaw ACP 协议**：标准化子 agent 通信协议（openclaw 和 hermes 都采纳），而非 ad-hoc channel 调用
 - **借鉴 lobehub AgentGraphRuntime**：图式多 Agent 编排（DAG），比 openhanako 扁平 channel 更结构化、可调度
 - **借鉴 openclaw 架构原则**：明确拒绝 nested planner（manager-of-managers 嵌套树），坚持扁平协作
-- **借鉴 openclaw harness 机制**：coding 场景 **harness 外部 agent**（codex/copilot）而非自造——集成优于重造，person-Agent 的 coding skill bundle 可 harness 现成 coding agent
+- **借鉴 openclaw harness 机制**：coding 场景 **harness 外部 agent**（codex/copilot）而非自造——集成优于重造，OpenColorful 的 coding skill bundle 可 harness 现成 coding agent
 - **vs openhanako**：openhanako 是 channel + subagent，无协议规范、无图编排、coding 全自造
 - **落地**：Phase 13
 
@@ -232,7 +232,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 lobehub Agent as Unit of Work**：Agent 是工作单元，有任务管理（AgentTaskManager）、调度、汇报——不只是聊天对象，是会干活、会汇报的成员
 - **保留 openhanako 人格温度**：每个 Agent 有 yuan 人格，团队不是冷冰冰的 worker 池，而是有"性格"的成员
 - **借鉴 lobehub Evolve 愿景**：人机共进化
-- **vs openhanako**：openhanako 是"一个有灵魂的助理"；person-Agent 是"一支有灵魂的 AI 团队"——既有个体人格，又有团队运营
+- **vs openhanako**：openhanako 是"一个有灵魂的助理"；OpenColorful 是"一支有灵魂的 AI 团队"——既有个体人格，又有团队运营
 - **落地**：定位层面，贯穿 Phase 8-14；Phase 13/14 落地团队编排与任务管理
 
 ### 方向 6：工程化优势（保留并强化）
@@ -241,12 +241,12 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 openclaw doctor 迁移**：配置演进时 `doctor --fix` 检测旧格式、解释、备份、重写——把配置兼容性工程化（openhanako 无此机制）
 - **借鉴 openclaw tool-call-repair**：工具调用失败自动修复（独特能力，提升 Agent 鲁棒性）
 - **借鉴 hermes agentskills.io 标准**：技能包兼容开放标准，不闭门造技能格式
-- **场景预设更明确**：openhanako 偏通用；person-Agent 提供开箱即用的 coding/work/design 三个 skill bundle 预设，降低配置门槛
+- **场景预设更明确**：openhanako 偏通用；OpenColorful 提供开箱即用的 coding/work/design 三个 skill bundle 预设，降低配置门槛
 - **部署形态更轻**：不强制 Electron，Web/TUI 多端，纯 Node + Hono
 
 ## 八、四参考项目能力对比矩阵
 
-| 能力维度 | openhanako | openclaw | hermes-agent | lobehub | person-Agent 目标 |
+| 能力维度 | openhanako | openclaw | hermes-agent | lobehub | OpenColorful 目标 |
 |---|---|---|---|---|---|
 | 记忆巩固 | ◐ 分层+ticker | ● dreaming三阶段+评分+shadow trial | ● curator+learning_graph+FTS5 | ◐ | ● dreaming+curator 融合 |
 | 多Agent协作 | ◐ channel+subagent | ● ACP协议+拒绝nested | ◐ subagent+RPC | ● GraphRuntime | ● ACP+GraphRuntime |
@@ -259,7 +259,7 @@ person-Agent 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 | 工程严谨 | ◐ 混合JS/TS | ● TS+doctor | ◐ Python | ● Next.js | ● TS strict+契约+适配层 |
 | 标准兼容 | ◐ SKILLS | ● MCP双向+ACP | ● agentskills.io | ◐ | ● ACP+agentskills.io+MCP |
 
-> 图例：● 强/原生 ◐ 有/部分 ○ 无。person-Agent 目标列是"集大成 + 保留工程优势"。
+> 图例：● 强/原生 ◐ 有/部分 ○ 无。OpenColorful 目标列是"集大成 + 保留工程优势"。
 
 ## 九、差异化落地映射（Phase 对应）
 

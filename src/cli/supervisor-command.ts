@@ -14,7 +14,7 @@ export async function runSupervisorCommand(args: readonly string[]): Promise<voi
       supervisorPort: port,
       agentServerPort: agentPort,
     });
-    console.log(`person-agent supervisor online: http://127.0.0.1:${supervisor.port}`);
+    console.log(`opencolorful supervisor online: http://127.0.0.1:${supervisor.port}`);
     console.log(`agent server port: ${supervisor.agentServerPort}`);
     await new Promise<void>((resolve) => {
       const shutdown = () => {

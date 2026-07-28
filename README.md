@@ -1,4 +1,4 @@
-# person-Agent
+# OpenColorful
 
 承载 agent 完整一生的本地优先平台基础设施——平台提供 agent 的"自我"（人格/记忆/成长/生活/社交），agent 的职业形态由创建者通过插件特化决定，**不预设 agent 是什么**。核心理念与路线详见 [定位与路线](docs/positioning-and-roadmap.md)。
 
@@ -23,7 +23,7 @@ npm install
 npm run check
 
 # 可选：把开发数据隔离在项目内（该目录已被 Git 忽略）
-$env:PERSON_AGENT_HOME = "$PWD\.person-agent"
+$env:OPENCOLORFUL_HOME = "$PWD\.opencolorful"
 
 npm run cli -- server start
 npm run cli -- server status

@@ -18,9 +18,9 @@ const temporaryDirectories: string[] = [];
 function createContext(existingPaths?: ReturnType<typeof getRuntimePaths>) {
   const directory = existingPaths
     ? undefined
-    : fs.mkdtempSync(path.join(os.tmpdir(), "person-agent-session-"));
+    : fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-session-"));
   if (directory) temporaryDirectories.push(directory);
-  const paths = existingPaths ?? getRuntimePaths({ PERSON_AGENT_HOME: directory });
+  const paths = existingPaths ?? getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const index = new SessionIndex(database);
   const service = new SessionService(paths, index);

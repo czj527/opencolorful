@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const SUPERVISOR_PORT = process.env.PERSON_AGENT_SUPERVISOR_PORT ?? "4311";
-const AGENT_PORT = process.env.PERSON_AGENT_PORT ?? "4310";
+const SUPERVISOR_PORT = process.env.OPENCOLORFUL_SUPERVISOR_PORT ?? "4311";
+const AGENT_PORT = process.env.OPENCOLORFUL_PORT ?? "4310";
 
 export default defineConfig({
   plugins: [react()],
