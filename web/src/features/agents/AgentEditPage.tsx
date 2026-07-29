@@ -18,7 +18,7 @@ function extractAgentId(): string {
 
 function baseColorFromAgent(agent: {
   baseColor: { persona: string; personality: readonly string[]; replyStyle: string; innerSetting: string };
-  settings: { defaultCwd: string | null; sandbox?: { extraReadPaths?: string[]; protectedPaths?: string[] } };
+  settings: { defaultCwd: string | null; sandbox?: { extraReadPaths?: readonly string[]; protectedPaths?: readonly string[] } };
 }): Omit<AgentFormDraft, "name" | "selectedTemplateKey" | "templateAdjusted"> {
   return {
     persona: agent.baseColor.persona,
@@ -28,8 +28,8 @@ function baseColorFromAgent(agent: {
     defaultCwd: agent.settings.defaultCwd,
     sandbox: agent.settings.sandbox
       ? {
-          extraReadPaths: agent.settings.sandbox.extraReadPaths ?? [],
-          protectedPaths: agent.settings.sandbox.protectedPaths ?? [],
+          extraReadPaths: [...(agent.settings.sandbox.extraReadPaths ?? [])],
+          protectedPaths: [...(agent.settings.sandbox.protectedPaths ?? [])],
         }
       : { extraReadPaths: [], protectedPaths: [] },
   };

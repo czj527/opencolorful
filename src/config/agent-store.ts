@@ -29,6 +29,10 @@ export interface CreateAgentInput {
   readonly name: string;
   readonly baseColor: BaseColorInput;
   readonly defaultCwd?: string | null;
+  readonly sandbox?: {
+    readonly extraReadPaths?: string[];
+    readonly protectedPaths?: string[];
+  };
 }
 
 export interface MigrationReport {
@@ -119,19 +123,29 @@ export class AgentStore {
     try {
       this.writeIdentity(input.id, identity);
       this.writeBaseColor(input.id, baseColor);
-      if (
-        input.defaultCwd !== undefined &&
+
+      // 构建 settings：sandbox 使用传入值或默认值
+      const sandbox = input.sandbox
+        ? {
+            workspaceAccess: "rw" as const,
+            extraReadPaths: input.sandbox.extraReadPaths ?? [],
+            protectedPaths: input.sandbox.protectedPaths ?? [],
+          }
+        : defaultSandboxCapabilities();
+
+      const defaultCwd = input.defaultCwd !== undefined &&
         input.defaultCwd !== null &&
         input.defaultCwd.trim() !== ""
-      ) {
-        const settings: AgentSettingsV2 = {
-          version: 2,
-          defaultCwd: input.defaultCwd,
-          sandbox: defaultSandboxCapabilities(),
-          updatedAt: now,
-        };
-        this.writeSettings(input.id, settings);
-      }
+        ? input.defaultCwd
+        : null;
+
+      const settings: AgentSettingsV2 = {
+        version: 2,
+        defaultCwd,
+        sandbox,
+        updatedAt: now,
+      };
+      this.writeSettings(input.id, settings);
     } catch (error) {
       // 回滚：删除整个 agent 目录，不留半成品
       try {

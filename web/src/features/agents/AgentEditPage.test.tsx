@@ -21,7 +21,7 @@ const fakeAgent: AgentView = {
     updatedAt: "2025-01-01T00:00:00Z",
   },
   settings: {
-    version: 1,
+    version: 2,
     defaultCwd: null,
     updatedAt: "2025-01-01T00:00:00Z",
   },

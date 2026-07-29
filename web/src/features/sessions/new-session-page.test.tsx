@@ -62,7 +62,7 @@ const fakeAgents: AgentView[] = [
       updatedAt: "2025-01-02T00:00:00Z",
     },
     settings: {
-      version: 1,
+      version: 2,
       defaultCwd: null,
       updatedAt: "2025-01-02T00:00:00Z",
     },
@@ -85,7 +85,7 @@ const fakeAgents: AgentView[] = [
       updatedAt: "2025-03-02T00:00:00Z",
     },
     settings: {
-      version: 1,
+      version: 2,
       defaultCwd: "D:\\projects\\demo",
       updatedAt: "2025-03-02T00:00:00Z",
     },

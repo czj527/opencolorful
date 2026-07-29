@@ -1,9 +1,11 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   createExtensionRuntime,
+  discoverAndLoadExtensions,
   type AgentSessionEvent,
   ModelRuntime,
   type ResourceLoader,
@@ -14,6 +16,7 @@ import {
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
 import type { FileOperation } from "../contracts/sandbox.js";
 import type { ToolPolicy } from "../runtime/tool-policy.js";
+import { setSandboxToolPolicy } from "./sandbox-extension.js";
 import type {
   PiAgentEvent,
   PiAgentSessionHandle,
@@ -22,6 +25,22 @@ import type {
   PiSessionUsageStats,
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
+
+// 沙箱扩展路径：指向 src/sandbox/sandbox-extension.ts
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SANDBOX_EXTENSION_PATH = path.resolve(__dirname, "sandbox-extension.ts");
+
+/** 预加载的沙箱扩展（惰性加载，缓存结果） */
+let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
+
+async function ensureSandboxExtensionLoaded(): Promise<void> {
+  if (sandboxExtensionsLoaded) return;
+  sandboxExtensionsLoaded = await discoverAndLoadExtensions(
+    [SANDBOX_EXTENSION_PATH],
+    path.resolve(__dirname, "..", ".."),
+  );
+}
 
 function messageText(message: unknown): string {
   const content = (message as { content?: unknown }).content;
@@ -173,9 +192,21 @@ function mapRemainingEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
   return undefined;
 }
 
-function minimalResourceLoader(systemPrompt?: string): ResourceLoader {
+function minimalResourceLoader(
+  systemPrompt?: string,
+  useSandbox?: boolean,
+): ResourceLoader {
   return {
-    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getExtensions: () => {
+      if (useSandbox && sandboxExtensionsLoaded) {
+        return {
+          extensions: sandboxExtensionsLoaded.extensions,
+          errors: sandboxExtensionsLoaded.errors,
+          runtime: sandboxExtensionsLoaded.runtime ?? createExtensionRuntime(),
+        };
+      }
+      return { extensions: [], errors: [], runtime: createExtensionRuntime() };
+    },
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
@@ -241,6 +272,16 @@ export async function createPiFauxAgentSession(
     : SessionManager.create(options.cwd, options.sessionDir, {
         id: options.sessionId,
       });
+  const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
+
+  // 设置沙箱工具策略（供 sandbox-extension 全局读取）+ 预加载扩展
+  if (toolPolicy) {
+    setSandboxToolPolicy(toolPolicy);
+    await ensureSandboxExtensionLoaded();
+  } else {
+    setSandboxToolPolicy(null);
+  }
+
   const { session } = await createAgentSession({
     cwd: options.cwd,
     agentDir: path.dirname(options.authPath),
@@ -248,7 +289,10 @@ export async function createPiFauxAgentSession(
     model,
     settingsManager,
     sessionManager,
-    resourceLoader: minimalResourceLoader(options.systemPrompt),
+    resourceLoader: minimalResourceLoader(
+      options.systemPrompt,
+      !!toolPolicy,
+    ),
     noTools: "all",
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
@@ -257,8 +301,6 @@ export async function createPiFauxAgentSession(
     const usage = session.getContextUsage();
     return usage ? toContextUsage(usage) : undefined;
   });
-
-  const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
 
   return {
     sessionId: session.sessionId,
@@ -314,6 +356,15 @@ export async function createPiAgentSession(
 
   const sessionManager = getSessionManager(options.sessionHandle);
 
+  const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
+
+  if (toolPolicy) {
+    setSandboxToolPolicy(toolPolicy);
+    await ensureSandboxExtensionLoaded();
+  } else {
+    setSandboxToolPolicy(null);
+  }
+
   const createOptions: Parameters<typeof createAgentSession>[0] = {
     cwd: options.cwd,
     agentDir: path.dirname(options.authPath),
@@ -321,7 +372,10 @@ export async function createPiAgentSession(
     model,
     settingsManager,
     sessionManager,
-    resourceLoader: minimalResourceLoader(options.systemPrompt),
+    resourceLoader: minimalResourceLoader(
+      options.systemPrompt,
+      !!toolPolicy,
+    ),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };
 
@@ -337,8 +391,6 @@ export async function createPiAgentSession(
     const usage = session.getContextUsage();
     return usage ? toContextUsage(usage) : undefined;
   });
-
-  const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
 
   return {
     sessionId: session.sessionId,

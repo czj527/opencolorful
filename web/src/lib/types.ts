@@ -259,10 +259,15 @@ export interface BaseColor {
   readonly updatedAt: string;
 }
 
-// Agent 运行设置。对齐 src/contracts/agent-settings.ts
+// Agent 运行设置。对齐 src/contracts/agent-settings.ts v2
 export interface AgentSettings {
-  readonly version: 1;
+  readonly version: 2;
   readonly defaultCwd: string | null;
+  readonly sandbox?: {
+    readonly workspaceAccess: "rw";
+    readonly extraReadPaths: readonly string[];
+    readonly protectedPaths: readonly string[];
+  };
   readonly updatedAt: string;
 }
 

@@ -43,7 +43,9 @@ export function AgentCreatePage(props: AgentCreatePageProps) {
     || draft.personality.length > 0
     || draft.replyStyle.length > 0
     || draft.innerSetting.length > 0
-    || draft.defaultCwd !== null;
+    || draft.defaultCwd !== null
+    || (draft.sandbox?.extraReadPaths?.length ?? 0) > 0
+    || (draft.sandbox?.protectedPaths?.length ?? 0) > 0;
 
   // beforeunload protection
   useEffect(() => {

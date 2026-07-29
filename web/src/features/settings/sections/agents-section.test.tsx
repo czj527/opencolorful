@@ -7,14 +7,14 @@ const fakeAgents: AgentView[] = [
   {
     identity: { version: 2, id: "agent-1", name: "HelperBot", createdAt: "2025-01-01T00:00:00Z" },
     baseColor: { version: 1, persona: "A helper", personality: ["helpful"], replyStyle: "casual", innerSetting: "", updatedAt: "2025-01-01T00:00:00Z" },
-    settings: { version: 1, defaultCwd: null, updatedAt: "2025-01-01T00:00:00Z" },
+    settings: { version: 2, defaultCwd: null, updatedAt: "2025-01-01T00:00:00Z" },
     sessionCount: 5,
     decorColor: "blue",
   },
   {
     identity: { version: 2, id: "agent-2", name: "CodeBot", createdAt: "2025-03-01T00:00:00Z" },
     baseColor: { version: 1, persona: "A coder", personality: ["precise"], replyStyle: "concise", innerSetting: "", updatedAt: "2025-03-01T00:00:00Z" },
-    settings: { version: 1, defaultCwd: "D:\\projects\\demo", updatedAt: "2025-03-01T00:00:00Z" },
+    settings: { version: 2, defaultCwd: "D:\\projects\\demo", updatedAt: "2025-03-01T00:00:00Z" },
     sessionCount: 12,
     decorColor: "green",
   },

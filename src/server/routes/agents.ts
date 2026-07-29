@@ -311,7 +311,6 @@ export function registerAgentRoutes(
             400,
           );
         }
-        // 拒绝包含 .. 的路径
         if (body.extraReadPaths.some((p: string) => p.includes(".."))) {
           return context.json(
             createApiError("INVALID_INPUT", "extraReadPaths 不允许包含 .. 路径"),
@@ -321,7 +320,7 @@ export function registerAgentRoutes(
         patch.sandbox = {
           workspaceAccess: "rw" as const,
           extraReadPaths: body.extraReadPaths as string[],
-          protectedPaths: existingSandbox?.protectedPaths ?? [],
+          protectedPaths: patch.sandbox?.protectedPaths ?? existingSandbox?.protectedPaths ?? [],
         };
       }
 
@@ -341,7 +340,7 @@ export function registerAgentRoutes(
         }
         patch.sandbox = {
           workspaceAccess: "rw" as const,
-          extraReadPaths: existingSandbox?.extraReadPaths ?? [],
+          extraReadPaths: patch.sandbox?.extraReadPaths ?? existingSandbox?.extraReadPaths ?? [],
           protectedPaths: body.protectedPaths as string[],
         };
       }
