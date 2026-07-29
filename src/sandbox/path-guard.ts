@@ -145,12 +145,12 @@ export class PathGuard {
    *   canonicalPath === path.resolve(rule.path) 即命中
    */
   private matchesRule(canonicalPath: string, rule: PathRule): boolean {
-    const rulePath = path.resolve(rule.path);
+    // 规则路径也 canonicalize（防止 symlink/Junction 绕过）
+    const rulePath = this.resolveCanonical(path.resolve(rule.path));
     const sep = path.sep;
 
     if (rule.path.endsWith("/") || rule.path.endsWith("\\")) {
       // 目录前缀匹配
-      // 去掉末尾分隔符进行比较
       const normalizedRulePath = rulePath.endsWith(sep)
         ? rulePath.slice(0, -1)
         : rulePath;
@@ -158,6 +158,12 @@ export class PathGuard {
         canonicalPath === normalizedRulePath ||
         canonicalPath.startsWith(normalizedRulePath + sep)
       );
+    }
+
+    // basename 匹配：rule.path 形如 "**.env" 表示匹配任意目录下名为 .env 的文件
+    if (rule.path.startsWith("**.")) {
+      const basename = rule.path.slice(2); // "**.env" → ".env"
+      return path.basename(canonicalPath) === basename;
     }
 
     // 精确匹配

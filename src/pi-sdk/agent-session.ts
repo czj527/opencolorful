@@ -51,10 +51,22 @@ async function ensureSandboxExtensionLoaded(): Promise<void> {
       "Run 'npm run build' to compile sandbox-extension.",
     );
   }
-  sandboxExtensionsLoaded = await discoverAndLoadExtensions(
+  const result = await discoverAndLoadExtensions(
     [SANDBOX_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
   );
+  // 验证加载结果：任何错误或扩展数量不符 → fail-closed
+  if (result.errors.length > 0) {
+    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
+    throw new Error(`Sandbox extension failed to load: ${msg}`);
+  }
+  if (result.extensions.length !== 1) {
+    throw new Error(
+      `Sandbox extension count mismatch: expected 1, got ${result.extensions.length}. ` +
+      "Sandbox tools will not be wrapped.",
+    );
+  }
+  sandboxExtensionsLoaded = result;
 }
 
 function messageText(message: unknown): string {

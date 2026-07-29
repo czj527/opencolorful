@@ -73,15 +73,11 @@ export function buildPathGuardPolicy(params: {
     });
   }
 
-  // .env 文件（任何路径下）：精确匹配文件名组件
-  // 不基于 cwd resolve——改为在 PathGuard 中匹配路径后缀 ".env"
-  // 这里添加一条以 sep+.env 结尾的规则供目录匹配使用
-  // 注意：PathGuard.matchesRule 的精确匹配模式支持此用法
-  // 作为兜底：base-color.json 所在的 Agent 数据目录也阻止 .env
+  // .env 文件（任意目录下）——basename 匹配模式
   rules.push({
-    path: path.join(platformHome, "config") + sep,
-    level: "READ_ONLY",
-    reason: "Platform configuration directory",
+    path: "**.env",
+    level: "BLOCKED",
+    reason: "Environment files (.env) are blocked",
   });
 
   // ── 2. Agent protectedPaths → BLOCKED（始终合并默认保护） ──────────
@@ -132,6 +128,13 @@ export function buildPathGuardPolicy(params: {
     path: path.resolve(agentHomeDir) + sep,
     level: "READ_WRITE",
     reason: "Agent home directory",
+  });
+
+  // ── 5b. Platform config 目录 → READ_ONLY ─────────────────────────
+  rules.push({
+    path: path.join(platformHome, "config") + sep,
+    level: "READ_ONLY",
+    reason: "Platform configuration directory",
   });
 
   // ── 6. 兜底 → BLOCKED（未匹配一律拒绝，fail-closed）─────────────────
