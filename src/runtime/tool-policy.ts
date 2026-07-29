@@ -5,6 +5,7 @@ import type { FileOperation, PathCheckResult } from "../contracts/sandbox.js";
 import type { ToolMode } from "../contracts/session-settings.js";
 import { READ_ONLY_TOOLS, ALL_TOOLS } from "../contracts/session-settings.js";
 import type { PathGuard } from "../sandbox/path-guard.js";
+import { checkBashPreflight } from "../sandbox/preflight.js";
 
 /**
  * ToolPolicy -- 工具策略与沙箱守卫。
@@ -140,13 +141,15 @@ export class ToolPolicy {
    * 当前 preflight 模块尚未实现，命令默认放行。
    * 待 ../sandbox/preflight 就绪后接入 checkBashPreflight()。
    */
-  checkBashCommand(_command: string): { allowed: boolean; reason: string } {
+  checkBashCommand(command: string): { allowed: boolean; reason: string } {
     if (!this.pathGuard) {
       return { allowed: true, reason: "No sandbox configured" };
     }
-    // TODO: 接入 checkBashPreflight() from ../sandbox/preflight.js
-    // 当前沙箱仅对文件路径做检查，bash 命令内容暂不拦截
-    return { allowed: true, reason: "Bash preflight not yet available" };
+    const result = checkBashPreflight(command);
+    if (!result.allowed) {
+      return { allowed: false, reason: `Dangerous command pattern detected: ${result.pattern}` };
+    }
+    return { allowed: true, reason: "OK" };
   }
 
   // ── 私有辅助 ──────────────────────────────────────────────────────

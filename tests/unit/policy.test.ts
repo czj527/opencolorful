@@ -63,9 +63,9 @@ describe("buildPathGuardPolicy", () => {
     expect(roRules[0]!.path).toContain("docs");
     expect(roRules[1]!.path).toContain("data");
 
-    // allowExternalReads 应为 true（有 extraReadPaths）
-    expect(policy.allowExternalReads).toBe(true);
-    expect(policy.defaultLevel).toBe("READ_ONLY");
+    // allowExternalReads 固定为 false（fail-closed，不因 extraReadPaths 开放全局）
+    expect(policy.allowExternalReads).toBe(false);
+    expect(policy.defaultLevel).toBe("BLOCKED");
   });
 
   // ── 4. 有 protectedPaths 的 Agent → 包含 BLOCKED 规则 ────────────
@@ -148,12 +148,13 @@ describe("buildPathGuardPolicy", () => {
 
     const paths = policy.rules.map((r) => r.path);
 
-    // ~/.ssh
-    expect(paths.some((p) => p.endsWith(".ssh"))).toBe(true);
+    // ~/.ssh（现在以路径分隔符结尾，用 includes 匹配）
+    const sep = path.sep;
+    expect(paths.some((p) => p.includes(`${sep}.ssh`))).toBe(true);
     // ~/.aws
-    expect(paths.some((p) => p.endsWith(".aws"))).toBe(true);
+    expect(paths.some((p) => p.includes(`${sep}.aws`))).toBe(true);
     // platform auth/ 目录
-    expect(paths.some((p) => p.includes("auth") && p.endsWith(path.sep))).toBe(true);
+    expect(paths.some((p) => p.includes("auth") && p.endsWith(sep))).toBe(true);
 
     // BLOCKED 级别的规则数至少包含绝对清单（.ssh + .aws + auth/ + .env = 4）
     // 再加上默认 protectedPaths 的项
@@ -186,16 +187,19 @@ describe("buildPathGuardPolicy", () => {
     });
     const policy = buildPathGuardPolicy({ agentSettings: agent, agentHomeDir, platformHome });
 
-    // 前几条应为 BLOCKED（绝对清单 + protectedPaths）
-    const firstFiveLevels = policy.rules.slice(0, 5).map((r) => r.level);
-    expect(firstFiveLevels.every((l) => l === "BLOCKED")).toBe(true);
-
-    // BLOCKED 之后应为 READ_ONLY（extraReadPaths）
+    // 前几条应为 BLOCKED（绝对清单 + protectedPaths），然后 READ_ONLY，最后 FULL/RW
     const levels = policy.rules.map((r) => r.level);
-    const blockedEndIdx = levels.lastIndexOf("BLOCKED");
-    const afterBlocked = levels.slice(blockedEndIdx + 1);
-    // 第一条 non-BLOCKED 应为 READ_ONLY（extraReadPaths）或 FULL（defaultCwd）
-    const firstNonBlocked = afterBlocked[0];
-    expect(["READ_ONLY", "FULL"]).toContain(firstNonBlocked);
+    // 第一条应为 BLOCKED
+    expect(levels[0]).toBe("BLOCKED");
+    // READ_ONLY 前面的规则应全部是 BLOCKED
+    const firstReadOnlyIdx = levels.indexOf("READ_ONLY");
+    if (firstReadOnlyIdx > 0) {
+      expect(levels.slice(0, firstReadOnlyIdx).every((l) => l === "BLOCKED")).toBe(true);
+    }
+    // FULL/RW 应在 READ_ONLY 之后
+    const firstFullIdx = levels.indexOf("FULL");
+    if (firstFullIdx > 0 && firstReadOnlyIdx > 0) {
+      expect(firstFullIdx).toBeGreaterThan(firstReadOnlyIdx);
+    }
   });
 });

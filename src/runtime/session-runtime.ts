@@ -47,6 +47,8 @@ export interface SessionRuntimeOptions {
   readonly agentSettings?: AgentSettingsV2;
   readonly agentHomeDir?: string;
   readonly platformHome?: string;
+  /** Session 的实际工作目录（优先于 agent.defaultCwd） */
+  readonly workspaceCwd?: string | null;
 }
 
 export interface PromptRun {
@@ -108,6 +110,7 @@ export class SessionRuntime {
           agentSettings: options.agentSettings,
           agentHomeDir: options.agentHomeDir,
           platformHome: options.platformHome,
+          ...(options.workspaceCwd !== undefined ? { workspaceCwd: options.workspaceCwd } : {}),
         });
         pathGuard = new PathGuard(policy);
         toolPolicy.setPathGuard(pathGuard);

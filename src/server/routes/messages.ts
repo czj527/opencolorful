@@ -108,6 +108,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentSettings ? { agentSettings } : {}),
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
+          workspaceCwd: view.workspaceCwd,
         });
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
@@ -130,6 +131,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentSettings ? { agentSettings } : {}),
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
+          workspaceCwd: view.workspaceCwd,
         });
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);

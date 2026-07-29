@@ -54,13 +54,10 @@ export class PathGuard {
     }
 
     // 兜底级别
-    const effectiveDefault = this.effectiveDefaultLevel(operation);
-    const level = matchedLevel ?? effectiveDefault;
+    const level = matchedLevel ?? this.policy.defaultLevel;
     const reason = matchedLevel !== null
       ? matchedReason
-      : effectiveDefault === "BLOCKED"
-        ? "Access denied by default policy"
-        : "Default access level";
+      : "Access denied by default policy (no matching rule)";
 
     // 比对所需级别
     const required = OPERATION_REQUIREMENTS[operation];
@@ -167,20 +164,5 @@ export class PathGuard {
     return canonicalPath === rulePath;
   }
 
-  /**
-   * 计算未匹配到规则时的兜底级别。
-   *
-   * read 操作 + policy.allowExternalReads === true → 兜底升级为 READ_ONLY
-   * 否则 → 使用 policy.defaultLevel
-   */
-  private effectiveDefaultLevel(operation: FileOperation): AccessLevel {
-    if (operation === "read" && this.policy.allowExternalReads) {
-      // 当允许外部读取时，read 操作兜底不低于 READ_ONLY
-      const defaultLevel = this.policy.defaultLevel;
-      if (ACCESS_HIERARCHY[defaultLevel] < ACCESS_HIERARCHY.READ_ONLY) {
-        return "READ_ONLY";
-      }
-    }
-    return this.policy.defaultLevel;
-  }
 }
+

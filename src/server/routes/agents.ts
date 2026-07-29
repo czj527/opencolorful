@@ -49,7 +49,7 @@ export function registerAgentRoutes(
   app.post("/api/agents", async (context) => {
     try {
       const rawBody = await context.req.json() as unknown;
-      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["id", "name", "baseColor", "defaultCwd"])) {
+      if (!isRecord(rawBody) || !hasOnlyKeys(rawBody, ["id", "name", "baseColor", "defaultCwd", "sandbox"])) {
         return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
       }
       const body = rawBody;
@@ -115,11 +115,31 @@ export function registerAgentRoutes(
         }
       }
 
+      // sandbox 可选
+      let sandbox: { extraReadPaths?: string[]; protectedPaths?: string[] } | undefined;
+      if (body.sandbox !== undefined) {
+        const sb = body.sandbox as Record<string, unknown>;
+        sandbox = {};
+        if (sb.extraReadPaths !== undefined) {
+          if (!isStringArray(sb.extraReadPaths)) {
+            return context.json(createApiError("INVALID_INPUT", "sandbox.extraReadPaths 必须是字符串数组"), 400);
+          }
+          sandbox.extraReadPaths = sb.extraReadPaths as string[];
+        }
+        if (sb.protectedPaths !== undefined) {
+          if (!isStringArray(sb.protectedPaths)) {
+            return context.json(createApiError("INVALID_INPUT", "sandbox.protectedPaths 必须是字符串数组"), 400);
+          }
+          sandbox.protectedPaths = sb.protectedPaths as string[];
+        }
+      }
+
       agentStore.create({
         id: agentId,
         name: body.name.trim(),
         baseColor: baseColorInput,
         ...(defaultCwd !== undefined ? { defaultCwd } : {}),
+        ...(sandbox ? { sandbox } : {}),
       });
       return context.json(agentStore.load(agentId), 201);
     } catch (error) {
@@ -257,6 +277,13 @@ export function registerAgentRoutes(
         sandbox?: SandboxCapabilities;
       } = {};
 
+      // 读取现有 sandbox 避免更新一个字段时清空另一个
+      let existingSandbox: SandboxCapabilities | undefined;
+      try {
+        const s = agentStore.getSettings(context.req.param("id"));
+        existingSandbox = s.sandbox;
+      } catch { /* 读取失败使用空默认 */ }
+
       if (body.defaultCwd !== undefined) {
         if (body.defaultCwd === null) {
           patch.defaultCwd = null;
@@ -292,9 +319,9 @@ export function registerAgentRoutes(
           );
         }
         patch.sandbox = {
-          workspaceAccess: "rw",
+          workspaceAccess: "rw" as const,
           extraReadPaths: body.extraReadPaths as string[],
-          protectedPaths: patch.sandbox?.protectedPaths ?? [],
+          protectedPaths: existingSandbox?.protectedPaths ?? [],
         };
       }
 
@@ -313,8 +340,8 @@ export function registerAgentRoutes(
           );
         }
         patch.sandbox = {
-          workspaceAccess: "rw",
-          extraReadPaths: patch.sandbox?.extraReadPaths ?? [],
+          workspaceAccess: "rw" as const,
+          extraReadPaths: existingSandbox?.extraReadPaths ?? [],
           protectedPaths: body.protectedPaths as string[],
         };
       }

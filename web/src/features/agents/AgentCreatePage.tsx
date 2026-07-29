@@ -96,6 +96,10 @@ export function AgentCreatePage(props: AgentCreatePageProps) {
           innerSetting: current.innerSetting,
         },
         current.defaultCwd,
+        current.sandbox ? {
+          extraReadPaths: current.sandbox.extraReadPaths ?? [],
+          protectedPaths: current.sandbox.protectedPaths ?? [],
+        } : undefined,
       );
       discardingRef.current = true;
       leaveAgentFormForSettings(`agents&highlight=${agent.identity.id}`);

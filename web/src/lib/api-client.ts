@@ -194,11 +194,13 @@ export class ApiClient {
       innerSetting: string;
     },
     defaultCwd?: string | null,
+    sandbox?: { extraReadPaths?: string[]; protectedPaths?: string[] },
   ): Promise<AgentView> {
     return this.request("POST", "/api/agents", {
       name,
       baseColor,
       ...(defaultCwd !== undefined ? { defaultCwd } : {}),
+      ...(sandbox ? { sandbox } : {}),
     });
   }
 
@@ -223,7 +225,11 @@ export class ApiClient {
     return this.request("GET", `/api/agents/${id}/settings`);
   }
 
-  async updateAgentSettings(id: string, settings: { defaultCwd: string | null }): Promise<AgentView> {
+  async updateAgentSettings(id: string, settings: {
+    defaultCwd?: string | null;
+    extraReadPaths?: string[];
+    protectedPaths?: string[];
+  }): Promise<AgentView> {
     return this.request("PUT", `/api/agents/${id}/settings`, settings);
   }
 

@@ -204,21 +204,21 @@ describe("PathGuard", () => {
     expect(result.level).toBe("BLOCKED");
   });
 
-  // ── 11. allowExternalReads 影响 read 兜底 ─────────────────────────
-  it("upgrades default from BLOCKED to READ_ONLY for reads when allowExternalReads is true", () => {
+  // ── 11. 外部读取默认拒绝（fail-closed） ───────────────────────────
+  it("denies read for paths outside any rule (fail-closed by default)", () => {
     const policy = makeTestPolicy({
       defaultLevel: "BLOCKED",
-      allowExternalReads: true,
+      allowExternalReads: false,
     });
     const guard = new PathGuard(policy);
     const outsidePath = path.join(os.tmpdir(), "outside-read.txt");
 
-    // read 操作：兜底应为 READ_ONLY
+    // read 操作：兜底为 BLOCKED，拒绝
     const readResult = guard.check("read", outsidePath);
-    expect(readResult.allowed).toBe(true);
-    expect(readResult.level).toBe("READ_ONLY");
+    expect(readResult.allowed).toBe(false);
+    expect(readResult.level).toBe("BLOCKED");
 
-    // write 操作：allowExternalReads 不影响，兜底仍为 BLOCKED
+    // write 操作：同样拒绝
     const writeResult = guard.check("write", outsidePath);
     expect(writeResult.allowed).toBe(false);
     expect(writeResult.level).toBe("BLOCKED");

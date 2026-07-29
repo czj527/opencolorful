@@ -18,7 +18,7 @@ function extractAgentId(): string {
 
 function baseColorFromAgent(agent: {
   baseColor: { persona: string; personality: readonly string[]; replyStyle: string; innerSetting: string };
-  settings: { defaultCwd: string | null };
+  settings: { defaultCwd: string | null; sandbox?: { extraReadPaths?: string[]; protectedPaths?: string[] } };
 }): Omit<AgentFormDraft, "name" | "selectedTemplateKey" | "templateAdjusted"> {
   return {
     persona: agent.baseColor.persona,
@@ -26,6 +26,12 @@ function baseColorFromAgent(agent: {
     replyStyle: agent.baseColor.replyStyle,
     innerSetting: agent.baseColor.innerSetting,
     defaultCwd: agent.settings.defaultCwd,
+    sandbox: agent.settings.sandbox
+      ? {
+          extraReadPaths: agent.settings.sandbox.extraReadPaths ?? [],
+          protectedPaths: agent.settings.sandbox.protectedPaths ?? [],
+        }
+      : { extraReadPaths: [], protectedPaths: [] },
   };
 }
 
@@ -82,6 +88,8 @@ export function AgentEditPage(props: AgentEditPageProps) {
     || draft.replyStyle !== original.replyStyle
     || draft.innerSetting !== original.innerSetting
     || draft.defaultCwd !== original.defaultCwd
+    || JSON.stringify(draft.sandbox?.extraReadPaths) !== JSON.stringify(original.sandbox?.extraReadPaths)
+    || JSON.stringify(draft.sandbox?.protectedPaths) !== JSON.stringify(original.sandbox?.protectedPaths)
   );
 
   // beforeunload
@@ -157,12 +165,21 @@ export function AgentEditPage(props: AgentEditPageProps) {
       }
     }
 
-    // Update settings if cwd changed
-    if (current.defaultCwd !== original.defaultCwd) {
+    // Update settings if cwd or sandbox changed
+    const cwdChanged = current.defaultCwd !== original.defaultCwd;
+    const sandboxChanged =
+      JSON.stringify(current.sandbox?.extraReadPaths) !== JSON.stringify(original.sandbox?.extraReadPaths)
+      || JSON.stringify(current.sandbox?.protectedPaths) !== JSON.stringify(original.sandbox?.protectedPaths);
+    if (cwdChanged || sandboxChanged) {
       try {
-        await props.api.updateAgentSettings(agentId, { defaultCwd: current.defaultCwd });
+        await props.api.updateAgentSettings(agentId, {
+          ...(cwdChanged ? { defaultCwd: current.defaultCwd } : {}),
+          ...(sandboxChanged && current.sandbox
+            ? { extraReadPaths: current.sandbox.extraReadPaths, protectedPaths: current.sandbox.protectedPaths }
+            : {}),
+        });
       } catch (err) {
-        errors.push("工作目录: " + (err instanceof Error ? err.message : "保存失败"));
+        errors.push("设置: " + (err instanceof Error ? err.message : "保存失败"));
       }
     }
 
