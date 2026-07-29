@@ -105,20 +105,14 @@ export class SessionRuntime {
     const toolPolicy = new ToolPolicy();
 
     if (options.agentSettings && options.agentHomeDir && options.platformHome) {
-      try {
-        const policy = buildPathGuardPolicy({
-          agentSettings: options.agentSettings,
-          agentHomeDir: options.agentHomeDir,
-          platformHome: options.platformHome,
-          ...(options.workspaceCwd !== undefined ? { workspaceCwd: options.workspaceCwd } : {}),
-        });
-        pathGuard = new PathGuard(policy);
-        toolPolicy.setPathGuard(pathGuard);
-      } catch {
-        // 策略构建失败时降级运行，不做沙箱检查
-        pathGuard = null;
-        toolPolicy.setPathGuard(null);
-      }
+      const policy = buildPathGuardPolicy({
+        agentSettings: options.agentSettings,
+        agentHomeDir: options.agentHomeDir,
+        platformHome: options.platformHome,
+        ...(options.workspaceCwd !== undefined ? { workspaceCwd: options.workspaceCwd } : {}),
+      });
+      pathGuard = new PathGuard(policy);
+      toolPolicy.setPathGuard(pathGuard);
     }
 
     // ── Agent session 创建 ───────────────────────────────────────

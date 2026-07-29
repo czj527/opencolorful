@@ -84,12 +84,19 @@ export function buildPathGuardPolicy(params: {
     reason: "Platform configuration directory",
   });
 
-  // ── 2. Agent protectedPaths → BLOCKED ────────────────────────────
+  // ── 2. Agent protectedPaths → BLOCKED（始终合并默认保护） ──────────
   // 以 workspaceCwd 为基准解析相对路径，加目录后缀保证子树匹配
   const baseForProtected = workspaceCwd
     ? path.resolve(workspaceCwd)
     : process.cwd();
-  for (const p of sandbox.protectedPaths) {
+  // 强制保护规则不可被用户配置覆盖
+  const allProtectedPaths = [
+    ...new Set([
+      ...defaultSandboxCapabilities().protectedPaths,
+      ...sandbox.protectedPaths,
+    ]),
+  ];
+  for (const p of allProtectedPaths) {
     const absPath = path.resolve(baseForProtected, p);
     // 目录或文件：都以目录后缀标记以覆盖子文件
     rules.push({

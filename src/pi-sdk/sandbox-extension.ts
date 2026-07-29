@@ -1,9 +1,16 @@
 /**
- * 沙箱工具包装扩展（per-Session 闭包模式，通过 AsyncLocalStorage 隔离）。
+ * 沙箱工具包装扩展（per-Session 隔离，通过 AsyncLocalStorage）。
  *
- * 本模块导出一个默认 PI SDK 扩展，在工具执行时从异步上下文读取当前
- * Session 的 ToolPolicy，彻底消除进程级全局变量导致的跨 Session 权限串线。
+ * 每个工具在执行前：
+ * 1. 从 AsyncLocalStorage 读取当前 Session 的 cwd + ToolPolicy
+ * 2. 将工具 path 参数基于 sessionCwd 解析为绝对路径
+ * 3. 用同一个绝对路径做 PathGuard 检查和原始工具执行
+ *
+ * 沙箱模式下所有 guard 均 fail-closed：缺上下文、缺策略时直接抛错。
  */
+
+import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -15,14 +22,9 @@ import {
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
-import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { ToolPolicy } from "../runtime/tool-policy.js";
 
-/**
- * 每 Session 的沙箱上下文。
- * 在 Prompt 前由 agent-session.ts 写入，工具 execute 时读取。
- */
 export interface SandboxContext {
   readonly toolPolicy: ToolPolicy;
   readonly sessionCwd: string;
@@ -36,131 +38,155 @@ export function runWithSandboxContext<T>(ctx: SandboxContext, fn: () => T): T {
   return storage.run(ctx, fn);
 }
 
-/** 获取当前异步上下文中的沙箱上下文 */
-function getContext(): SandboxContext | undefined {
-  return storage.getStore();
+/** 获取当前上下文。沙箱模式下必须存在（fail-closed）。 */
+function requireContext(): SandboxContext {
+  const ctx = storage.getStore();
+  if (!ctx) {
+    throw new Error("Sandbox: session context missing — tool execution blocked");
+  }
+  return ctx;
 }
 
-/** 检查文件路径的沙箱权限。空路径默认用 sessionCwd。 */
-function guardFile(operation: "read" | "write", targetPath: unknown): void {
-  const ctx = getContext();
-  if (!ctx) return;
-  const resolvedPath = typeof targetPath === "string" && targetPath.length > 0
-    ? targetPath
-    : ctx.sessionCwd;
-  ctx.toolPolicy.assertFilePath(operation, resolvedPath);
-}
-
-/** 检查 bash 命令。sandbox 模式下允许 preflight 检查但不阻止路径逃逸。 */
-function guardBash(command: unknown): void {
-  const ctx = getContext();
-  if (!ctx) return;
-  if (!ctx.allowBash) {
-    throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
+/**
+ * 解析工具 path 参数为绝对路径（基于 sessionCwd）。
+ * 空/null/undefined → sessionCwd。
+ */
+function resolvePath(raw: unknown, ctx: SandboxContext): string {
+  if (typeof raw === "string" && raw.length > 0) {
+    return path.resolve(ctx.sessionCwd, raw);
   }
-  if (typeof command === "string" && command.length > 0) {
-    const result = ctx.toolPolicy.checkBashCommand(command);
-    if (!result.allowed) {
-      throw new Error(`Sandbox blocked bash command: ${result.reason}`);
-    }
-  }
+  return ctx.sessionCwd;
 }
 
 /**
  * PI SDK 扩展入口。进程级加载一次，工具执行时从 AsyncLocalStorage 读取
- * per-Session 上下文。
+ * per-Session 上下文。所有原始工具统一基于 sessionCwd 创建（而非 process.cwd）。
  */
 export default function (pi: ExtensionAPI): void {
-  const cwd = process.cwd();
+  // 所有原始工具基于 sessionCwd 创建——但这里拿不到 sessionCwd。
+  // 因此改为在 execute 内部动态解析路径并传递给原始工具。
+  // 原始工具的 cwd 参数影响默认路径，我们用 sessionCwd 解析后显式传参即可。
+
+  const fallbackCwd = process.cwd();
 
   // ── read ──
-  const origRead = createReadTool(cwd);
+  const origRead = createReadTool(fallbackCwd);
   pi.registerTool({
     name: "read",
     label: "read",
     description: origRead.description,
     parameters: origRead.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("read", (params as Record<string, unknown>).file_path ?? (params as Record<string, unknown>).path);
-      return origRead.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("read", absPath);
+      return origRead.execute(toolCallId, { ...p, path: absPath }, signal, onUpdate);
     },
   });
 
-  // ── bash（sandbox 模式默认禁用，待 OS 沙箱就绪） ──
-  const origBash = createBashTool(cwd);
+  // ── bash（sandbox 模式禁用，待 OS 沙箱就绪） ──
+  const origBash = createBashTool(fallbackCwd);
   pi.registerTool({
     name: "bash",
     label: "bash",
     description: origBash.description,
     parameters: origBash.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardBash((params as Record<string, unknown>).command);
+      const ctx = requireContext();
+      if (!ctx.allowBash) {
+        throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
+      }
+      const p = params as Record<string, unknown>;
+      if (typeof p.command === "string") {
+        const result = ctx.toolPolicy.checkBashCommand(p.command);
+        if (!result.allowed) {
+          throw new Error(`Sandbox blocked bash command: ${result.reason}`);
+        }
+      }
       return origBash.execute(toolCallId, params, signal, onUpdate);
     },
   });
 
   // ── write ──
-  const origWrite = createWriteTool(cwd);
+  const origWrite = createWriteTool(fallbackCwd);
   pi.registerTool({
     name: "write",
     label: "write",
     description: origWrite.description,
     parameters: origWrite.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("write", (params as Record<string, unknown>).file_path ?? (params as Record<string, unknown>).path);
-      return origWrite.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("write", absPath);
+      return origWrite.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
     },
   });
 
   // ── edit ──
-  const origEdit = createEditTool(cwd);
+  const origEdit = createEditTool(fallbackCwd);
   pi.registerTool({
     name: "edit",
     label: "edit",
     description: origEdit.description,
     parameters: origEdit.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("write", (params as Record<string, unknown>).file_path ?? (params as Record<string, unknown>).path);
-      return origEdit.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("write", absPath);
+      return origEdit.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
     },
   });
 
-  // ── grep（空 path 默认 sessionCwd） ──
-  const origGrep = createGrepTool(cwd);
+  // ── grep ──
+  const origGrep = createGrepTool(fallbackCwd);
   pi.registerTool({
     name: "grep",
     label: "grep",
     description: origGrep.description,
     parameters: origGrep.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("read", (params as Record<string, unknown>).path);
-      return origGrep.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("read", absPath);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return origGrep.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
     },
   });
 
-  // ── find（空 path 默认 sessionCwd） ──
-  const origFind = createFindTool(cwd);
+  // ── find ──
+  const origFind = createFindTool(fallbackCwd);
   pi.registerTool({
     name: "find",
     label: "find",
     description: origFind.description,
     parameters: origFind.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("read", (params as Record<string, unknown>).path);
-      return origFind.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("read", absPath);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return origFind.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
     },
   });
 
-  // ── ls（空 path 默认 sessionCwd） ──
-  const origLs = createLsTool(cwd);
+  // ── ls ──
+  const origLs = createLsTool(fallbackCwd);
   pi.registerTool({
     name: "ls",
     label: "ls",
     description: origLs.description,
     parameters: origLs.parameters,
     async execute(toolCallId, params, signal, onUpdate) {
-      guardFile("read", (params as Record<string, unknown>).path);
-      return origLs.execute(toolCallId, params, signal, onUpdate);
+      const ctx = requireContext();
+      const p = params as Record<string, unknown>;
+      const absPath = resolvePath(p.path, ctx);
+      ctx.toolPolicy.assertFilePath("read", absPath);
+      return origLs.execute(toolCallId, { ...p, path: absPath }, signal, onUpdate);
     },
   });
 }

@@ -46,8 +46,10 @@ let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions
 async function ensureSandboxExtensionLoaded(): Promise<void> {
   if (sandboxExtensionsLoaded) return;
   if (!fs.existsSync(SANDBOX_EXTENSION_PATH)) {
-    sandboxExtensionsLoaded = { extensions: [], errors: [], runtime: createExtensionRuntime() };
-    return;
+    throw new Error(
+      `Sandbox extension not found at ${SANDBOX_EXTENSION_PATH}. ` +
+      "Run 'npm run build' to compile sandbox-extension.",
+    );
   }
   sandboxExtensionsLoaded = await discoverAndLoadExtensions(
     [SANDBOX_EXTENSION_PATH],

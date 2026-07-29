@@ -82,7 +82,7 @@ describe("buildPathGuardPolicy", () => {
     const blockedRules = policy.rules.filter(
       (r) => r.level === "BLOCKED" && r.reason.includes("Protected path"),
     );
-    expect(blockedRules.length).toBe(2);
+    expect(blockedRules.length).toBe(3); // 合并默认保护规则后共 3 条
   });
 
   // ── 5. 多个 protectedPaths → 每个一条规则 ─────────────────────────
