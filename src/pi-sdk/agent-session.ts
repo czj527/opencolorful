@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,7 +17,10 @@ import {
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
 import type { FileOperation } from "../contracts/sandbox.js";
 import type { ToolPolicy } from "../runtime/tool-policy.js";
-import { setSandboxToolPolicy } from "./sandbox-extension.js";
+import type {
+  SandboxContext,
+} from "./sandbox-extension.js";
+import { runWithSandboxContext } from "./sandbox-extension.js";
 import type {
   PiAgentEvent,
   PiAgentSessionHandle,
@@ -26,16 +30,25 @@ import type {
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
 
-// 沙箱扩展路径：指向 src/sandbox/sandbox-extension.ts
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const SANDBOX_EXTENSION_PATH = path.resolve(__dirname, "sandbox-extension.ts");
 
-/** 预加载的沙箱扩展（惰性加载，缓存结果） */
+// 沙箱扩展文件路径：开发环境 .ts，生产构建 .js
+const SANDBOX_EXTENSION_JS = path.resolve(__dirname, "sandbox-extension.js");
+const SANDBOX_EXTENSION_TS = path.resolve(__dirname, "sandbox-extension.ts");
+const SANDBOX_EXTENSION_PATH = fs.existsSync(SANDBOX_EXTENSION_JS)
+  ? SANDBOX_EXTENSION_JS
+  : SANDBOX_EXTENSION_TS;
+
+/** 预加载的沙箱扩展（进程级加载一次，工具执行时通过 AsyncLocalStorage 读取 per-Session 上下文） */
 let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
 async function ensureSandboxExtensionLoaded(): Promise<void> {
   if (sandboxExtensionsLoaded) return;
+  if (!fs.existsSync(SANDBOX_EXTENSION_PATH)) {
+    sandboxExtensionsLoaded = { extensions: [], errors: [], runtime: createExtensionRuntime() };
+    return;
+  }
   sandboxExtensionsLoaded = await discoverAndLoadExtensions(
     [SANDBOX_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
@@ -101,7 +114,6 @@ function toContextUsage(raw: {
 function createSessionEventMapper(
   getContextUsage: () => ContextUsage | undefined,
 ): (event: AgentSessionEvent) => PiAgentEvent | undefined {
-  // 同一 turn 内可能有多条 assistant 消息（工具调用链），usage 需要累计到 turn_end 一并发出
   let turnUsage: TokenUsage | undefined;
 
   return (event: AgentSessionEvent): PiAgentEvent | undefined => {
@@ -219,7 +231,7 @@ function minimalResourceLoader(
 }
 
 export async function createPiFauxAgentSession(
-  options: PiFauxAgentOptions & { toolPolicy?: ToolPolicy },
+  options: PiFauxAgentOptions & { toolPolicy?: ToolPolicy; sandboxContext?: SandboxContext },
 ): Promise<PiAgentSessionHandle> {
   const faux = fauxProvider({
     provider: options.providerId,
@@ -272,15 +284,15 @@ export async function createPiFauxAgentSession(
     : SessionManager.create(options.cwd, options.sessionDir, {
         id: options.sessionId,
       });
+
   const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
 
-  // 设置沙箱工具策略（供 sandbox-extension 全局读取）+ 预加载扩展
+  // 预加载沙箱扩展 + 设定 per-Session AsyncLocalStorage 上下文
   if (toolPolicy) {
-    setSandboxToolPolicy(toolPolicy);
     await ensureSandboxExtensionLoaded();
-  } else {
-    setSandboxToolPolicy(null);
   }
+
+  const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
 
   const { session } = await createAgentSession({
     cwd: options.cwd,
@@ -302,6 +314,11 @@ export async function createPiFauxAgentSession(
     return usage ? toContextUsage(usage) : undefined;
   });
 
+  // 包装 prompt() 以注入 sandbox AsyncLocalStorage 上下文
+  const sandboxCtx: SandboxContext | undefined = toolPolicy
+    ? { toolPolicy, sessionCwd, allowBash: false }
+    : undefined;
+
   return {
     sessionId: session.sessionId,
     subscribe(listener) {
@@ -311,6 +328,9 @@ export async function createPiFauxAgentSession(
       });
     },
     prompt(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.prompt(text));
+      }
       return session.prompt(text);
     },
     abort() {
@@ -325,8 +345,6 @@ export async function createPiFauxAgentSession(
     dispose() {
       session.dispose();
     },
-    // ── 沙箱守卫（PI SDK 兜底层） ──────────────────────────
-    /** 检查文件操作是否被沙箱允许。无沙箱时默认放行。 */
     checkFilePath(operation: FileOperation, targetPath: string): { allowed: boolean; reason: string } {
       if (!toolPolicy) {
         return { allowed: true, reason: "No sandbox configured" };
@@ -334,7 +352,6 @@ export async function createPiFauxAgentSession(
       const result = toolPolicy.checkFilePath(operation, targetPath);
       return { allowed: result.allowed, reason: result.reason };
     },
-    /** 获取关联的 ToolPolicy 实例（可能为 undefined） */
     get toolPolicy(): ToolPolicy | undefined {
       return toolPolicy;
     },
@@ -342,7 +359,7 @@ export async function createPiFauxAgentSession(
 }
 
 export async function createPiAgentSession(
-  options: PiAgentSessionOptions & { toolPolicy?: ToolPolicy },
+  options: PiAgentSessionOptions & { toolPolicy?: ToolPolicy; sandboxContext?: SandboxContext },
 ): Promise<PiAgentSessionHandle> {
   const resolved = options.modelRuntime.resolveModel(options.providerId, options.modelId);
   const modelRuntime = resolved.runtime as ModelRuntime;
@@ -359,11 +376,10 @@ export async function createPiAgentSession(
   const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
 
   if (toolPolicy) {
-    setSandboxToolPolicy(toolPolicy);
     await ensureSandboxExtensionLoaded();
-  } else {
-    setSandboxToolPolicy(null);
   }
+
+  const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
 
   const createOptions: Parameters<typeof createAgentSession>[0] = {
     cwd: options.cwd,
@@ -392,6 +408,10 @@ export async function createPiAgentSession(
     return usage ? toContextUsage(usage) : undefined;
   });
 
+  const sandboxCtx: SandboxContext | undefined = toolPolicy
+    ? { toolPolicy, sessionCwd, allowBash: false }
+    : undefined;
+
   return {
     sessionId: session.sessionId,
     subscribe(listener) {
@@ -401,6 +421,9 @@ export async function createPiAgentSession(
       });
     },
     prompt(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.prompt(text));
+      }
       return session.prompt(text);
     },
     abort() {
@@ -415,8 +438,6 @@ export async function createPiAgentSession(
     dispose() {
       session.dispose();
     },
-    // ── 沙箱守卫（PI SDK 兜底层） ──────────────────────────
-    /** 检查文件操作是否被沙箱允许。无沙箱时默认放行。 */
     checkFilePath(operation: FileOperation, targetPath: string): { allowed: boolean; reason: string } {
       if (!toolPolicy) {
         return { allowed: true, reason: "No sandbox configured" };
@@ -424,7 +445,6 @@ export async function createPiAgentSession(
       const result = toolPolicy.checkFilePath(operation, targetPath);
       return { allowed: result.allowed, reason: result.reason };
     },
-    /** 获取关联的 ToolPolicy 实例（可能为 undefined） */
     get toolPolicy(): ToolPolicy | undefined {
       return toolPolicy;
     },

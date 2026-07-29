@@ -1,11 +1,8 @@
 /**
- * 沙箱工具包装扩展。
+ * 沙箱工具包装扩展（per-Session 闭包模式，通过 AsyncLocalStorage 隔离）。
  *
- * PI SDK 加载本扩展时，会调用 default export 并传入 ExtensionAPI。
- * 我们对 read / bash / write / edit / grep / find / ls 七个内置工具
- * 逐一用同名 registerTool 覆盖，在执行前插入 PathGuard 检查。
- *
- * 由于扩展是进程级加载一次，当前会话的 ToolPolicy 通过全局变量传递。
+ * 本模块导出一个默认 PI SDK 扩展，在工具执行时从异步上下文读取当前
+ * Session 的 ToolPolicy，彻底消除进程级全局变量导致的跨 Session 权限串线。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -18,33 +15,61 @@ import {
   createReadTool,
   createWriteTool,
 } from "@earendil-works/pi-coding-agent";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { ToolPolicy } from "../runtime/tool-policy.js";
 
-/** 当前活跃的 ToolPolicy 实例。在每次 Prompt 前由调用方设置。 */
-let currentToolPolicy: ToolPolicy | null = null;
-
-export function setSandboxToolPolicy(policy: ToolPolicy | null): void {
-  currentToolPolicy = policy;
+/**
+ * 每 Session 的沙箱上下文。
+ * 在 Prompt 前由 agent-session.ts 写入，工具 execute 时读取。
+ */
+export interface SandboxContext {
+  readonly toolPolicy: ToolPolicy;
+  readonly sessionCwd: string;
+  readonly allowBash: boolean;
 }
 
-/** 检查文件路径的沙箱权限，拒绝时抛出友好错误。 */
+const storage = new AsyncLocalStorage<SandboxContext>();
+
+/** 在异步上下文中运行回调，注入沙箱上下文 */
+export function runWithSandboxContext<T>(ctx: SandboxContext, fn: () => T): T {
+  return storage.run(ctx, fn);
+}
+
+/** 获取当前异步上下文中的沙箱上下文 */
+function getContext(): SandboxContext | undefined {
+  return storage.getStore();
+}
+
+/** 检查文件路径的沙箱权限。空路径默认用 sessionCwd。 */
 function guardFile(operation: "read" | "write", targetPath: unknown): void {
-  if (!currentToolPolicy) return;
-  if (typeof targetPath !== "string" || targetPath.length === 0) return;
-  currentToolPolicy.assertFilePath(operation, targetPath);
+  const ctx = getContext();
+  if (!ctx) return;
+  const resolvedPath = typeof targetPath === "string" && targetPath.length > 0
+    ? targetPath
+    : ctx.sessionCwd;
+  ctx.toolPolicy.assertFilePath(operation, resolvedPath);
 }
 
-/** 检查 bash 命令的 preflight 权限。 */
+/** 检查 bash 命令。sandbox 模式下允许 preflight 检查但不阻止路径逃逸。 */
 function guardBash(command: unknown): void {
-  if (!currentToolPolicy) return;
-  if (typeof command !== "string" || command.length === 0) return;
-  const result = currentToolPolicy.checkBashCommand(command);
-  if (!result.allowed) {
-    throw new Error(`Sandbox blocked bash command: ${result.reason}`);
+  const ctx = getContext();
+  if (!ctx) return;
+  if (!ctx.allowBash) {
+    throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
+  }
+  if (typeof command === "string" && command.length > 0) {
+    const result = ctx.toolPolicy.checkBashCommand(command);
+    if (!result.allowed) {
+      throw new Error(`Sandbox blocked bash command: ${result.reason}`);
+    }
   }
 }
 
+/**
+ * PI SDK 扩展入口。进程级加载一次，工具执行时从 AsyncLocalStorage 读取
+ * per-Session 上下文。
+ */
 export default function (pi: ExtensionAPI): void {
   const cwd = process.cwd();
 
@@ -61,7 +86,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── bash ──
+  // ── bash（sandbox 模式默认禁用，待 OS 沙箱就绪） ──
   const origBash = createBashTool(cwd);
   pi.registerTool({
     name: "bash",
@@ -100,7 +125,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── grep ──
+  // ── grep（空 path 默认 sessionCwd） ──
   const origGrep = createGrepTool(cwd);
   pi.registerTool({
     name: "grep",
@@ -113,7 +138,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── find ──
+  // ── find（空 path 默认 sessionCwd） ──
   const origFind = createFindTool(cwd);
   pi.registerTool({
     name: "find",
@@ -126,7 +151,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  // ── ls ──
+  // ── ls（空 path 默认 sessionCwd） ──
   const origLs = createLsTool(cwd);
   pi.registerTool({
     name: "ls",

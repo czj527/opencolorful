@@ -124,14 +124,18 @@ export class AgentStore {
       this.writeIdentity(input.id, identity);
       this.writeBaseColor(input.id, baseColor);
 
-      // 构建 settings：sandbox 使用传入值或默认值
+      // 构建 settings：sandbox 使用传入值并始终与默认保护规则合并
+      const defaultCaps = defaultSandboxCapabilities();
       const sandbox = input.sandbox
         ? {
             workspaceAccess: "rw" as const,
             extraReadPaths: input.sandbox.extraReadPaths ?? [],
-            protectedPaths: input.sandbox.protectedPaths ?? [],
+            protectedPaths: [
+              ...defaultCaps.protectedPaths,
+              ...(input.sandbox.protectedPaths ?? []),
+            ],
           }
-        : defaultSandboxCapabilities();
+        : defaultCaps;
 
       const defaultCwd = input.defaultCwd !== undefined &&
         input.defaultCwd !== null &&
