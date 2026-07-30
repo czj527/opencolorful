@@ -14,15 +14,16 @@ import {
  *
  * 策略规则按优先级从高到低排列：
  *
- *  1. 绝对 BLOCKED 清单            — 系统敏感路径
- *  2. Agent sandbox.protectedPaths  — 用户指定的受保护路径
+ *  1. 绝对 BLOCKED 清单            — 系统敏感路径 + **.env
+ *  2. Agent sandbox.protectedPaths  — 用户指定的受保护路径（含强制默认）
  *  3. Agent sandbox.extraReadPaths  — 用户显式授权的可读路径
- *  4. Agent 工作目录（workspaceCwd）  — FULL
- *  5. Agent 自身数据目录            — READ_WRITE
- *  6. Platform config 目录           — READ_ONLY
+ *  4. Agent 自身数据目录            — READ_WRITE（优先于工作区 FULL）
+ *  5. Platform config 目录           — READ_ONLY（优先于工作区 FULL）
+ *  6. Session 工作目录（workspaceCwd）— FULL
  *  7. 兜底                          — BLOCKED（未匹配一律拒绝）
  *
  * 注意：
+ * - 平台保护规则（4-5）在工作区 FULL 之前，防止用户选 home 目录时被遮蔽
  * - extraReadPaths 只对显式列出的路径授权，不会开放所有外部读取
  * - 所有 BLOCKED 目录规则均以路径分隔符结尾，确保覆盖子文件
  * - 策略构建需传入 Session 的实际工作区（workspaceCwd），而非 agent.defaultCwd

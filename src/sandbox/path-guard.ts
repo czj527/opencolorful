@@ -146,8 +146,15 @@ export class PathGuard {
    */
   private matchesRule(canonicalPath: string, rule: PathRule): boolean {
     // 规则路径也 canonicalize（防止 symlink/Junction 绕过）
-    const rulePath = this.resolveCanonical(path.resolve(rule.path));
+    let rulePath = this.resolveCanonical(path.resolve(rule.path));
     const sep = path.sep;
+
+    // Windows 大小写不敏感文件系统：统一归一化后比较所有分支
+    let cmpPath = canonicalPath;
+    if (process.platform === "win32") {
+      cmpPath = canonicalPath.toLowerCase();
+      rulePath = rulePath.toLowerCase();
+    }
 
     if (rule.path.endsWith("/") || rule.path.endsWith("\\")) {
       // 目录前缀匹配
@@ -155,24 +162,23 @@ export class PathGuard {
         ? rulePath.slice(0, -1)
         : rulePath;
       return (
-        canonicalPath === normalizedRulePath ||
-        canonicalPath.startsWith(normalizedRulePath + sep)
+        cmpPath === normalizedRulePath ||
+        cmpPath.startsWith(normalizedRulePath + sep)
       );
     }
 
     // basename 匹配：rule.path 形如 "**.env" 表示匹配任意目录下指定名称的文件
-    // Windows 大小写不敏感：规范化比较
     if (rule.path.startsWith("**.")) {
       const basename = rule.path.slice(2);
-      const targetBasename = path.basename(canonicalPath);
+      const targetBasename = path.basename(cmpPath);
       if (process.platform === "win32") {
-        return targetBasename.toLowerCase() === basename.toLowerCase();
+        return targetBasename === basename.toLowerCase();
       }
       return targetBasename === basename;
     }
 
     // 精确匹配
-    return canonicalPath === rulePath;
+    return cmpPath === rulePath;
   }
 
 }
