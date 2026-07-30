@@ -113,7 +113,21 @@ export function buildPathGuardPolicy(params: {
     });
   }
 
-  // ── 4. Session 工作目录 → FULL ─────────────────────────────────────
+  // ── 4. Agent 数据目录 → READ_WRITE（优先于工作区 FULL）───────────
+  rules.push({
+    path: path.resolve(agentHomeDir) + sep,
+    level: "READ_WRITE",
+    reason: "Agent home directory",
+  });
+
+  // ── 5. Platform config 目录 → READ_ONLY（优先于工作区 FULL）──────
+  rules.push({
+    path: path.join(platformHome, "config") + sep,
+    level: "READ_ONLY",
+    reason: "Platform configuration directory",
+  });
+
+  // ── 6. Session 工作目录 → FULL ─────────────────────────────────────
   const cwd = workspaceCwd ?? agentSettings.defaultCwd;
   if (cwd !== null && cwd !== undefined) {
     rules.push({
@@ -123,21 +137,7 @@ export function buildPathGuardPolicy(params: {
     });
   }
 
-  // ── 5. Agent 数据目录 → READ_WRITE ───────────────────────────────
-  rules.push({
-    path: path.resolve(agentHomeDir) + sep,
-    level: "READ_WRITE",
-    reason: "Agent home directory",
-  });
-
-  // ── 5b. Platform config 目录 → READ_ONLY ─────────────────────────
-  rules.push({
-    path: path.join(platformHome, "config") + sep,
-    level: "READ_ONLY",
-    reason: "Platform configuration directory",
-  });
-
-  // ── 6. 兜底 → BLOCKED（未匹配一律拒绝，fail-closed）─────────────────
+  // ── 7. 兜底 → BLOCKED（未匹配一律拒绝，fail-closed）─────────────────
   // 不再有 allowExternalReads 全局标志——外部读取必须经由显式的 extraReadPaths 授权
 
   return {

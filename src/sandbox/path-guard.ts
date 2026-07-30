@@ -160,10 +160,15 @@ export class PathGuard {
       );
     }
 
-    // basename 匹配：rule.path 形如 "**.env" 表示匹配任意目录下名为 .env 的文件
+    // basename 匹配：rule.path 形如 "**.env" 表示匹配任意目录下指定名称的文件
+    // Windows 大小写不敏感：规范化比较
     if (rule.path.startsWith("**.")) {
-      const basename = rule.path.slice(2); // "**.env" → ".env"
-      return path.basename(canonicalPath) === basename;
+      const basename = rule.path.slice(2);
+      const targetBasename = path.basename(canonicalPath);
+      if (process.platform === "win32") {
+        return targetBasename.toLowerCase() === basename.toLowerCase();
+      }
+      return targetBasename === basename;
     }
 
     // 精确匹配
