@@ -131,8 +131,10 @@ export class AgentStore {
             workspaceAccess: "rw" as const,
             extraReadPaths: input.sandbox.extraReadPaths ?? [],
             protectedPaths: [
-              ...defaultCaps.protectedPaths,
-              ...(input.sandbox.protectedPaths ?? []),
+              ...new Set([
+                ...defaultCaps.protectedPaths,
+                ...(input.sandbox.protectedPaths ?? []),
+              ]),
             ],
           }
         : defaultCaps;

@@ -51,6 +51,9 @@ async function startProviderFixture(): Promise<number> {
     request.on("end", async () => {
       fixtureCalls += 1;
       const isToolFollowUp = body.includes('"role":"tool"') || body.includes("tool_call_id");
+      const sandboxProbe = body.includes("BLOCKED_SANDBOX");
+      const toolCallId = sandboxProbe ? "call-read-blocked" : "call-read";
+      const requestedPath = sandboxProbe ? ".env" : "target.txt";
       // SLOW 标记：每个 chunk 间延迟 500ms，方便 Abort 测试点击中断按钮
       const slow = body.includes("SLOW");
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -60,9 +63,9 @@ async function startProviderFixture(): Promise<number> {
         response.write(streamChunk({
           tool_calls: [{
             index: 0,
-            id: "call-read",
+            id: toolCallId,
             type: "function",
-            function: { name: "read", arguments: '{"path":"target.txt"}' },
+            function: { name: "read", arguments: JSON.stringify({ path: requestedPath }) },
           }],
         }));
         response.write(streamChunk({}, "tool_calls"));
@@ -258,6 +261,51 @@ test.describe("web workspace 真实浏览器验收", () => {
     expect(finalAnswerIndex).toBeGreaterThan(toolIndex);
 
     expect(fixtureCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test("沙箱拒绝在工具卡展示可读原因且不泄露绝对路径", async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.goto(baseUrl());
+    await ensureFixtureProvider(page);
+
+    const agentResponse = await page.request.post(`${baseUrl()}/api/agents`, {
+      data: {
+        name: `Sandbox E2E ${Date.now()}`,
+        baseColor: {
+          persona: "",
+          personality: [],
+          replyStyle: "",
+          innerSetting: "",
+        },
+        sandbox: { protectedPaths: [".env"] },
+      },
+    });
+    expect(agentResponse.ok()).toBe(true);
+    const agent = (await agentResponse.json()) as { identity: { id: string } };
+
+    const title = `Sandbox 拒绝 ${Date.now()}`;
+    const sessionResponse = await page.request.post(`${baseUrl()}/api/sessions`, {
+      data: {
+        title,
+        cwd: workspace,
+        agentId: agent.identity.id,
+        toolMode: "read-only",
+        workspaceCwd: workspace,
+        workspaceConfirmed: true,
+      },
+    });
+    expect(sessionResponse.ok()).toBe(true);
+
+    await page.goto(baseUrl());
+    await page.getByText(title).first().click({ timeout: 10_000 });
+    await selectFixtureModel(page);
+    await page.getByLabel("消息输入").fill("BLOCKED_SANDBOX 读取 .env");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    const toolCard = page.getByTestId("tool-call-call-read-blocked");
+    await expect(toolCard).toContainText("失败", { timeout: 30_000 });
+    await expect(toolCard).toContainText("Sandbox denied read operation", { timeout: 30_000 });
+    expect(await toolCard.textContent()).not.toContain(tempHome);
   });
 
   test("普通 Prompt 完成后发送按钮恢复", async ({ page }) => {

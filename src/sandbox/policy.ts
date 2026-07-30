@@ -65,6 +65,13 @@ export function buildPathGuardPolicy(params: {
     reason: "Platform auth directory is blocked",
   });
 
+  // platform logs/ 目录（含不可被 Agent 篡改的安全审计日志）
+  rules.push({
+    path: path.join(platformHome, "logs") + sep,
+    level: "BLOCKED",
+    reason: "Platform logs directory is blocked",
+  });
+
   // /etc/shadow（仅 Linux，精确匹配）
   if (process.platform === "linux") {
     rules.push({

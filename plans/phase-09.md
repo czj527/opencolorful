@@ -1,6 +1,6 @@
 # Phase 9：沙箱系统 — 应用层 PathGuard + 能力声明
 
-**状态：规划中** | 分支：`phase-9-sandbox`
+**状态：已验收（2026-07-30）** | 分支：`main`
 **基线：** `main`（Phase 8.5 验收点，`cb2bb84`）
 **参考：** openhanako PathGuard 四级模型 + 工具 wrapper；openclaw SandboxFsBridge + 三层策略分离；hermes-agent BaseEnvironment 接口抽象；各项目调研汇总见 `plans/phase-09-research.md`（待整理）
 
@@ -493,51 +493,59 @@ cd web; npx playwright test
 
 ## 十、验收标准
 
-- [ ] PathGuard 四级模型正确实现，所有路径检查通过单元测试
-- [ ] 策略引擎从 Agent settings 正确推导 PathGuardPolicy
-- [ ] bash preflight 拦截 `sudo`、`chmod 777`、`rm -rf /` 等危险命令
-- [ ] write/edit/bash 工具在 wrapper 层被 PathGuard 拦截（越权操作返回精确拒绝原因）
-- [ ] PI SDK 适配层兜底守卫生效（新增未注册工具不会被绕过）
-- [ ] `auth.json`、`.env`、`~/.ssh` 等敏感路径在任何条件下都不可被 Agent 读取
-- [ ] Agent 创建/编辑页可配置 `extraReadPaths` 和 `protectedPaths`
-- [ ] Agent settings 从 v1 自动迁移到 v2（无 sandbox 字段 → 使用安全默认值）
-- [ ] 安全拒绝事件写入 `security-audit.jsonl`，格式正确、含脱敏
-- [ ] 全部质量门通过（tsc strict + vitest + web:test + web:build + browser-use）
-- [ ] browser-use 验收通过（沙箱配置 UI 可用、Agent 越权操作收到可读的拒绝消息）
-- [ ] `ALL_TOOLS` 中的工具全量受 PathGuard 约束，无遗漏
+- [x] PathGuard 四级模型正确实现，所有路径检查通过单元测试
+- [x] 策略引擎从 Agent settings 正确推导 PathGuardPolicy
+- [x] bash preflight 拦截 `sudo`、`chmod 777`、`rm -rf /` 等危险命令
+- [x] write/edit 在 wrapper 层经 PathGuard 拦截；bash 在 OS 沙箱就绪前 fail-closed 禁用
+- [x] PI SDK 扩展加载、上下文缺失和工具包装均 fail-closed
+- [x] `auth.json`、`.env`、`~/.ssh`、平台日志等敏感路径不可被 Agent 读取
+- [x] Agent 创建/编辑页可配置 `extraReadPaths` 和 `protectedPaths`
+- [x] Agent settings 从 v1 自动迁移到 v2（无 sandbox 字段 → 使用安全默认值）
+- [x] 生产拒绝事件写入 `security-audit.jsonl`，包含 eventId/sessionId 并经过脱敏
+- [x] 全部质量门通过（PI 边界、tsc、server/web tests、build、Playwright、browser-use）
+- [x] browser-use 验收通过；真实浏览器回归验证 Agent 越权操作展示可读拒绝且不泄露绝对路径
+- [x] `ALL_TOOLS` 中的 7 个内置工具均受统一沙箱扩展约束
 
 ---
 
 ## 实施记录
 
-（实施中回填）
-
 ### 提交记录
 
 | 提交 Hash | Task | 说明 |
 |-----------|------|------|
-| | | |
+| `c2ccbde` | 合同与设置 | 四级访问模型、PathGuard 合同、AgentSettings v2 |
+| `a5c9190` / `4f90f31` | Phase 9 主实现 | PathGuard、策略、后端、路由、Web 配置与审计原型 |
+| `950816c`..`795996e` | 安全复审修复 | 工具统一守卫、Session 隔离、fail-closed、Windows 路径语义 |
+| 待提交工作区 | 最终闭环 | 生产审计、跨加载器 Session 上下文、扩展/浏览器回归、保护路径去重 |
 
-### 质量门结果
+### 质量门结果（2026-07-30）
 
 | 验证项 | 结果 |
 |--------|------|
-| verify-pi-sdk-imports | |
-| tsc --noEmit | |
-| vitest run | |
-| web:test | |
-| web:build | |
-| tsc build | |
-| playwright | |
-| browser-use | |
+| verify-pi-sdk-imports | 通过 |
+| tsc --noEmit | 通过 |
+| vitest run | 通过，44 files / 390 tests |
+| web:test | 通过，28 files / 326 tests |
+| web:build | 通过 |
+| tsc build | 通过 |
+| playwright | 通过，41/41（单 worker 全量） |
+| browser-use | 通过：创建/编辑沙箱配置可用，默认保护路径去重后持久化正确 |
 
 ### 阻断与修复
 
-（如有）
+- `SandboxService.logDenied()` / `logPreflightDenied()` 原先只有测试调用方：现由 `SessionRuntime → ToolPolicy` 生产链路自动调用。
+- sandbox 模式 bash 直接抛错但未审计：现记录 `sandbox.preflight-denied`，pattern 为 `bash-disabled`。
+- 审计目录可能被 home 工作区的 `FULL` 规则覆盖：平台 `logs/` 现固定为 `BLOCKED`。
+- sandbox-extension 缺少自动化边界覆盖：已补扩展加载、数量错误、缺上下文、全工具包装、空路径、并发隔离和 bash 禁用测试。
+- Windows 大小写修复无回归测试：已覆盖 basename、目录前缀和精确匹配。
+- PI 通过 `jiti` 加载扩展，与应用侧 ESM import 形成不同模块实例，导致生产工具执行读不到 Session 上下文：现以进程级共享注册表按 PI `sessionId` 精确关联策略，AsyncLocalStorage 仅作直接调用后备，并在 Runtime dispose 时安全注销。
+- Agent 创建时默认 `protectedPaths` 与用户输入直接拼接会产生重复项：现稳定去重，并补 AgentStore 回归测试与 browser-use 持久化验收。
+- 新增真实浏览器沙箱回归：绑定 Agent 后读取 `.env`，工具卡必须显示可读拒绝原因，且不得泄露平台绝对路径。
 
 ### 最终结论
 
-（待填写）
+Phase 9 应用层沙箱与安全链路已完成并验收。文件工具统一受 PathGuard 约束，Session 策略隔离、生产审计、fail-closed、Windows 路径语义及真实浏览器拒绝反馈均有自动化覆盖。OS 级进程隔离仍按原范围留待后续阶段。
 
 ---
 

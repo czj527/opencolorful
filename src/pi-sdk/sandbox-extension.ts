@@ -1,8 +1,9 @@
 /**
- * 沙箱工具包装扩展（per-Session 隔离，通过 AsyncLocalStorage）。
+ * 沙箱工具包装扩展（per-Session 隔离）。
  *
  * 每个工具在执行前：
- * 1. 从 AsyncLocalStorage 读取当前 Session 的 cwd + ToolPolicy
+ * 1. 从 PI ExtensionContext 的 sessionId 查找 cwd + ToolPolicy
+ *    （直接调用扩展时回退到 AsyncLocalStorage）
  * 2. 将工具 path 参数基于 sessionCwd 解析为绝对路径
  * 3. 用同一个绝对路径做 PathGuard 检查和原始工具执行
  *
@@ -12,7 +13,10 @@
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   createBashTool,
   createEditTool,
@@ -31,15 +35,59 @@ export interface SandboxContext {
   readonly allowBash: boolean;
 }
 
-const storage = new AsyncLocalStorage<SandboxContext>();
+interface SandboxContextState {
+  readonly storage: AsyncLocalStorage<SandboxContext>;
+  readonly sessionContexts: Map<string, SandboxContext>;
+}
 
-/** 在异步上下文中运行回调，注入沙箱上下文 */
+// 扩展由 jiti 加载，而 AgentSession 由 ESM 加载；两者可能是同一文件的不同
+// 模块实例。通过全局 Symbol 共享状态，确保注册与工具执行看到同一张表。
+const STATE_KEY = Symbol.for("opencolorful.sandbox-context-state");
+const globalState = globalThis as typeof globalThis & Record<symbol, unknown>;
+let state = globalState[STATE_KEY] as SandboxContextState | undefined;
+if (!state) {
+  state = {
+    storage: new AsyncLocalStorage<SandboxContext>(),
+    sessionContexts: new Map<string, SandboxContext>(),
+  };
+  globalState[STATE_KEY] = state;
+}
+
+const storage = state.storage;
+const sessionContexts = state.sessionContexts;
+
+/** 在直接调用/测试的异步上下文中注入沙箱上下文。 */
 export function runWithSandboxContext<T>(ctx: SandboxContext, fn: () => T): T {
   return storage.run(ctx, fn);
 }
 
-/** 获取当前上下文。沙箱模式下必须存在（fail-closed）。 */
-function requireContext(): SandboxContext {
+/**
+ * 将生产 Session 与其沙箱策略绑定。清理函数只删除同一份上下文，
+ * 避免旧 Runtime dispose 时误删已重建的新 Runtime。
+ */
+export function registerSandboxContext(
+  sessionId: string,
+  ctx: SandboxContext,
+): () => void {
+  sessionContexts.set(sessionId, ctx);
+  return () => {
+    if (sessionContexts.get(sessionId) === ctx) {
+      sessionContexts.delete(sessionId);
+    }
+  };
+}
+
+/** 获取当前上下文。生产执行按 sessionId 精确匹配并 fail-closed。 */
+function requireContext(executionContext?: ExtensionContext): SandboxContext {
+  if (executionContext) {
+    const sessionId = executionContext.sessionManager.getSessionId();
+    const registered = sessionContexts.get(sessionId);
+    if (!registered) {
+      throw new Error("Sandbox: session context missing — tool execution blocked");
+    }
+    return registered;
+  }
+
   const ctx = storage.getStore();
   if (!ctx) {
     throw new Error("Sandbox: session context missing — tool execution blocked");
@@ -59,8 +107,8 @@ function resolvePath(raw: unknown, ctx: SandboxContext): string {
 }
 
 /**
- * PI SDK 扩展入口。进程级加载一次，工具执行时从 AsyncLocalStorage 读取
- * per-Session 上下文。所有原始工具统一基于 sessionCwd 创建（而非 process.cwd）。
+ * PI SDK 扩展入口。进程级加载一次，工具执行时按 ExtensionContext 中的
+ * sessionId 读取 per-Session 上下文。所有路径均以 sessionCwd 解析。
  */
 export default function (pi: ExtensionAPI): void {
   // 所有原始工具基于 sessionCwd 创建——但这里拿不到 sessionCwd。
@@ -76,8 +124,8 @@ export default function (pi: ExtensionAPI): void {
     label: "read",
     description: origRead.description,
     parameters: origRead.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("read", absPath);
@@ -92,9 +140,12 @@ export default function (pi: ExtensionAPI): void {
     label: "bash",
     description: origBash.description,
     parameters: origBash.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       if (!ctx.allowBash) {
+        const p = params as Record<string, unknown>;
+        const command = typeof p.command === "string" ? p.command : "";
+        ctx.toolPolicy.recordBashDenied(command, "bash-disabled");
         throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
       }
       const p = params as Record<string, unknown>;
@@ -115,8 +166,8 @@ export default function (pi: ExtensionAPI): void {
     label: "write",
     description: origWrite.description,
     parameters: origWrite.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("write", absPath);
@@ -131,8 +182,8 @@ export default function (pi: ExtensionAPI): void {
     label: "edit",
     description: origEdit.description,
     parameters: origEdit.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("write", absPath);
@@ -147,8 +198,8 @@ export default function (pi: ExtensionAPI): void {
     label: "grep",
     description: origGrep.description,
     parameters: origGrep.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("read", absPath);
@@ -164,8 +215,8 @@ export default function (pi: ExtensionAPI): void {
     label: "find",
     description: origFind.description,
     parameters: origFind.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("read", absPath);
@@ -181,8 +232,8 @@ export default function (pi: ExtensionAPI): void {
     label: "ls",
     description: origLs.description,
     parameters: origLs.parameters,
-    async execute(toolCallId, params, signal, onUpdate) {
-      const ctx = requireContext();
+    async execute(toolCallId, params, signal, onUpdate, executionContext) {
+      const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
       ctx.toolPolicy.assertFilePath("read", absPath);

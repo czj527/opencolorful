@@ -6,6 +6,7 @@ import type { ToolMode } from "../contracts/session-settings.js";
 import { READ_ONLY_TOOLS, ALL_TOOLS } from "../contracts/session-settings.js";
 import type { PathGuard } from "../sandbox/path-guard.js";
 import { checkBashPreflight } from "../sandbox/preflight.js";
+import type { SandboxService } from "../sandbox/sandbox-service.js";
 
 /**
  * ToolPolicy -- 工具策略与沙箱守卫。
@@ -19,12 +20,20 @@ import { checkBashPreflight } from "../sandbox/preflight.js";
  */
 export class ToolPolicy {
   private pathGuard: PathGuard | null = null;
+  private sandboxService: SandboxService | null = null;
 
   // ── PathGuard 注入 ───────────────────────────────────────────────
 
   /** 注入或移除 PathGuard。传 null 可清除沙箱（降级模式）。 */
   setPathGuard(guard: PathGuard | null): void {
     this.pathGuard = guard;
+    this.sandboxService = null;
+  }
+
+  /** 注入完整沙箱服务，使路径检查与安全审计使用同一策略实例。 */
+  setSandboxService(service: SandboxService | null): void {
+    this.sandboxService = service;
+    this.pathGuard = service?.getPathGuard() ?? null;
   }
 
   /** 是否已配置沙箱 */
@@ -97,7 +106,11 @@ export class ToolPolicy {
         reason: "No sandbox configured",
       };
     }
-    return this.pathGuard.check(operation, targetPath);
+    const result = this.pathGuard.check(operation, targetPath);
+    if (!result.allowed) {
+      this.sandboxService?.recordDenied(operation, targetPath, result);
+    }
+    return result;
   }
 
   /**
@@ -130,7 +143,15 @@ export class ToolPolicy {
         reason: "No sandbox configured",
       };
     }
-    return this.pathGuard.checkAll(operation, paths);
+    const result = this.pathGuard.checkAll(operation, paths);
+    if (!result.allowed) {
+      this.sandboxService?.recordDenied(
+        operation,
+        result.canonicalPath,
+        result,
+      );
+    }
+    return result;
   }
 
   // ── Bash 命令预检 ─────────────────────────────────────────────────
@@ -138,8 +159,7 @@ export class ToolPolicy {
   /**
    * 检查 Bash 命令是否通过预检。
    *
-   * 当前 preflight 模块尚未实现，命令默认放行。
-   * 待 ../sandbox/preflight 就绪后接入 checkBashPreflight()。
+   * 命中危险模式时拒绝，并写入安全审计日志。
    */
   checkBashCommand(command: string): { allowed: boolean; reason: string } {
     if (!this.pathGuard) {
@@ -147,9 +167,15 @@ export class ToolPolicy {
     }
     const result = checkBashPreflight(command);
     if (!result.allowed) {
+      this.recordBashDenied(command, result.pattern);
       return { allowed: false, reason: `Dangerous command pattern detected: ${result.pattern}` };
     }
     return { allowed: true, reason: "OK" };
+  }
+
+  /** 记录扩展层产生的 bash 拒绝（例如 OS 沙箱未就绪时禁用 bash）。 */
+  recordBashDenied(command: string, pattern: string): void {
+    this.sandboxService?.recordPreflightDenied(command, pattern);
   }
 
   // ── 私有辅助 ──────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentStore } from "../../src/config/agent-store.js";
 import { DECOR_COLORS, defaultBaseColor } from "../../src/contracts/agent-identity.js";
 import { defaultAgentSettings } from "../../src/contracts/agent-settings.js";
+import { defaultSandboxCapabilities } from "../../src/contracts/sandbox.js";
 
 let tempDirs: string[] = [];
 
@@ -76,6 +77,32 @@ describe("AgentStore", () => {
     const view = store.load("cwd-agent");
     expect(view.settings.defaultCwd).toBe("/tmp/work");
     expect(view.settings.version).toBe(2);
+  });
+
+  it("deduplicates default and user-supplied protected paths on creation", () => {
+    const dir = makeTempAgentsDir();
+    const store = new AgentStore(dir);
+    const defaults = defaultSandboxCapabilities().protectedPaths;
+
+    store.create({
+      id: "sandbox-agent",
+      name: "沙箱助手",
+      baseColor: blankBaseColor,
+      sandbox: {
+        protectedPaths: ["secrets/", "custom-private/", ".env"],
+      },
+    });
+
+    const settings = store.load("sandbox-agent").settings;
+    expect(settings.version).toBe(2);
+    if (settings.version !== 2) throw new Error("Expected migrated AgentSettings v2");
+    const protectedPaths = settings.sandbox?.protectedPaths;
+    expect(protectedPaths).toEqual([
+      ...defaults,
+      "custom-private/",
+    ]);
+    expect(protectedPaths?.filter((item) => item === "secrets/")).toHaveLength(1);
+    expect(protectedPaths?.filter((item) => item === ".env")).toHaveLength(1);
   });
 
   it("rejects invalid agent id", () => {

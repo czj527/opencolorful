@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildPathGuardPolicy } from "../../src/sandbox/policy.js";
+import { PathGuard } from "../../src/sandbox/path-guard.js";
 import type { AgentSettingsV2 } from "../../src/contracts/agent-settings.js";
 import { defaultAgentSettings } from "../../src/contracts/agent-settings.js";
 
@@ -155,11 +156,13 @@ describe("buildPathGuardPolicy", () => {
     expect(paths.some((p) => p.includes(`${sep}.aws`))).toBe(true);
     // platform auth/ 目录
     expect(paths.some((p) => p.includes("auth") && p.endsWith(sep))).toBe(true);
+    // platform logs/ 目录
+    expect(paths.some((p) => p.includes("logs") && p.endsWith(sep))).toBe(true);
 
-    // BLOCKED 级别的规则数至少包含绝对清单（.ssh + .aws + auth/ + .env = 4）
+    // BLOCKED 级别的规则数至少包含绝对清单（.ssh + .aws + auth/ + logs/ + .env = 5）
     // 再加上默认 protectedPaths 的项
     const blockedRules = policy.rules.filter((r) => r.level === "BLOCKED");
-    expect(blockedRules.length).toBeGreaterThanOrEqual(4);
+    expect(blockedRules.length).toBeGreaterThanOrEqual(5);
   });
 
   // ── 9. Platform config 目录规则存在 ───────────────────────────────
@@ -201,5 +204,45 @@ describe("buildPathGuardPolicy", () => {
     if (firstFullIdx > 0 && firstReadOnlyIdx > 0) {
       expect(firstFullIdx).toBeGreaterThan(firstReadOnlyIdx);
     }
+  });
+
+  it("keeps platform restrictions ahead of a home-directory workspace", () => {
+    const workspace = os.homedir();
+    const agent = makeAgent({ defaultCwd: workspace });
+    const policy = buildPathGuardPolicy({
+      agentSettings: agent,
+      agentHomeDir,
+      platformHome,
+      workspaceCwd: workspace,
+    });
+    const guard = new PathGuard(policy);
+
+    const configWrite = guard.check(
+      "write",
+      path.join(platformHome, "config", "settings.json"),
+    );
+    expect(configWrite.allowed).toBe(false);
+    expect(configWrite.level).toBe("READ_ONLY");
+
+    const agentDelete = guard.check(
+      "delete",
+      path.join(agentHomeDir, "base-color.json"),
+    );
+    expect(agentDelete.allowed).toBe(false);
+    expect(agentDelete.level).toBe("READ_WRITE");
+
+    const auditRead = guard.check(
+      "read",
+      path.join(platformHome, "logs", "security-audit.jsonl"),
+    );
+    expect(auditRead.allowed).toBe(false);
+    expect(auditRead.level).toBe("BLOCKED");
+
+    const ordinaryDelete = guard.check(
+      "delete",
+      path.join(workspace, "ordinary-workspace-file.txt"),
+    );
+    expect(ordinaryDelete.allowed).toBe(true);
+    expect(ordinaryDelete.level).toBe("FULL");
   });
 });

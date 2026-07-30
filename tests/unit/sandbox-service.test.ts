@@ -78,6 +78,7 @@ describe("SandboxService", () => {
       agentHomeDir,
       platformHome,
       auditLogPath: auditPath,
+      sessionId: "session-3",
     });
 
     const payload: SandboxDeniedPayload = {
@@ -98,6 +99,8 @@ describe("SandboxService", () => {
     const entry = JSON.parse(content);
     expect(entry.type).toBe("sandbox.denied");
     expect(entry.agentId).toBe("agent-3");
+    expect(entry.sessionId).toBe("session-3");
+    expect(entry.eventId).toMatch(/^[0-9a-f-]{36}$/);
     expect(entry.operation).toBe("write");
     expect(entry.path).toBeDefined();
     expect(entry.level).toBe("READ_ONLY");
@@ -140,15 +143,12 @@ describe("SandboxService", () => {
     expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 
-  // ── 5. 写入失败不崩溃（用不存在的目录路径）──────────────────────────
+  // ── 5. 写入失败不崩溃（父路径是文件）──────────────────────────────
   it("logDenied() does not throw when write fails", () => {
     const agent = makeAgent();
-    // 使用一个不存在目录中的路径，迫使 appendFileSync 失败
-    const invalidPath = path.join(
-      os.tmpdir(),
-      `ocf-nonexistent-${Date.now()}`,
-      "should-fail.jsonl",
-    );
+    const blockingFile = tempAuditPath();
+    fs.writeFileSync(blockingFile, "not-a-directory");
+    const invalidPath = path.join(blockingFile, "should-fail.jsonl");
 
     const svc = SandboxService.create({
       agentSettings: agent,
@@ -167,8 +167,11 @@ describe("SandboxService", () => {
       agentId: "agent-5",
     };
 
-    // 不应抛出异常
-    expect(() => svc.logDenied(payload)).not.toThrow();
+    try {
+      expect(() => svc.logDenied(payload)).not.toThrow();
+    } finally {
+      fs.rmSync(blockingFile, { force: true });
+    }
   });
 
   // ── 6. 多条日志正确追加（不覆盖）────────────────────────────────────

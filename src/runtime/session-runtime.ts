@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import path from "node:path";
 
 import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
 import type { PlatformEventEnvelope } from "../contracts/events.js";
@@ -10,8 +11,7 @@ import {
   type PiFauxAgentOptions,
   type PiSessionHandle,
 } from "../pi-sdk/index.js";
-import { PathGuard } from "../sandbox/path-guard.js";
-import { buildPathGuardPolicy } from "../sandbox/policy.js";
+import { SandboxService } from "../sandbox/sandbox-service.js";
 import { ToolPolicy } from "./tool-policy.js";
 import type { ModelService } from "./model-service.js";
 import { EventReplayStore } from "./event-replay-store.js";
@@ -61,7 +61,6 @@ export class SessionRuntime {
   private mapper: PlatformEventMapper | undefined;
   private controlMapper: PlatformEventMapper | undefined;
   private readonly unsubscribe: () => void;
-  private readonly pathGuard: PathGuard | null;
   private readonly toolPolicy: ToolPolicy;
 
   private constructor(
@@ -69,10 +68,8 @@ export class SessionRuntime {
     private readonly agent: PiAgentSessionHandle,
     private readonly publish: (event: PlatformEventEnvelope) => void,
     private readonly replayStore: EventReplayStore | undefined,
-    pathGuard: PathGuard | null,
     toolPolicy: ToolPolicy,
   ) {
-    this.pathGuard = pathGuard;
     this.toolPolicy = toolPolicy;
     this.unsubscribe = agent.subscribe((event) => {
       const mapper = this.mapper ?? this.resolveControlMapper(event);
@@ -101,18 +98,24 @@ export class SessionRuntime {
 
   static async create(options: SessionRuntimeOptions): Promise<SessionRuntime> {
     // ── 沙箱初始化 ──────────────────────────────────────────────
-    let pathGuard: PathGuard | null = null;
+    let sandboxService: SandboxService | null = null;
     const toolPolicy = new ToolPolicy();
 
     if (options.agentSettings && options.agentHomeDir && options.platformHome) {
-      const policy = buildPathGuardPolicy({
+      sandboxService = SandboxService.create({
         agentSettings: options.agentSettings,
+        agentId: path.basename(options.agentHomeDir),
         agentHomeDir: options.agentHomeDir,
         platformHome: options.platformHome,
+        auditLogPath: path.join(
+          options.platformHome,
+          "logs",
+          "security-audit.jsonl",
+        ),
+        sessionId: options.sessionId,
         ...(options.workspaceCwd !== undefined ? { workspaceCwd: options.workspaceCwd } : {}),
       });
-      pathGuard = new PathGuard(policy);
-      toolPolicy.setPathGuard(pathGuard);
+      toolPolicy.setSandboxService(sandboxService);
     }
 
     // ── Agent session 创建 ───────────────────────────────────────
@@ -136,7 +139,7 @@ export class SessionRuntime {
           : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-        ...(pathGuard ? { toolPolicy } : {}),
+        ...(sandboxService ? { toolPolicy } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -156,13 +159,19 @@ export class SessionRuntime {
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-        ...(pathGuard ? { toolPolicy } : {}),
+        ...(sandboxService ? { toolPolicy } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");
     }
 
-    return new SessionRuntime(options.sessionId, agent, options.publish, options.replayStore, pathGuard, toolPolicy);
+    return new SessionRuntime(
+      options.sessionId,
+      agent,
+      options.publish,
+      options.replayStore,
+      toolPolicy,
+    );
   }
 
   prompt(text: string): PromptRun {

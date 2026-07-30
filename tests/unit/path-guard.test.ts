@@ -271,4 +271,82 @@ describe("PathGuard", () => {
       process.chdir(originalCwd);
     }
   });
+
+  it.runIf(process.platform === "win32")(
+    "matches a non-existent directory-prefix rule case-insensitively on Windows",
+    () => {
+      const protectedDir = path.join(workspaceDir, "CaseProtected");
+      const guard = new PathGuard({
+        rules: [
+          {
+            path: protectedDir + path.sep,
+            level: "BLOCKED",
+            reason: "case-protected",
+          },
+          {
+            path: workspaceDir + path.sep,
+            level: "FULL",
+            reason: "workspace",
+          },
+        ],
+        defaultLevel: "BLOCKED",
+        allowExternalReads: false,
+      });
+
+      const result = guard.check(
+        "write",
+        path.join(workspaceDir, "caseprotected", "token.txt"),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.level).toBe("BLOCKED");
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "matches exact rules case-insensitively on Windows",
+    () => {
+      const exactPath = path.join(workspaceDir, "Exact.Secret");
+      const guard = new PathGuard({
+        rules: [
+          { path: exactPath, level: "BLOCKED", reason: "exact-protected" },
+          {
+            path: workspaceDir + path.sep,
+            level: "FULL",
+            reason: "workspace",
+          },
+        ],
+        defaultLevel: "BLOCKED",
+        allowExternalReads: false,
+      });
+
+      const result = guard.check(
+        "read",
+        path.join(workspaceDir, "exact.secret"),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.level).toBe("BLOCKED");
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "matches basename rules case-insensitively on Windows",
+    () => {
+      const guard = new PathGuard({
+        rules: [
+          { path: "**.env", level: "BLOCKED", reason: "env-protected" },
+          {
+            path: workspaceDir + path.sep,
+            level: "FULL",
+            reason: "workspace",
+          },
+        ],
+        defaultLevel: "BLOCKED",
+        allowExternalReads: false,
+      });
+
+      const result = guard.check("read", path.join(workspaceDir, ".ENV"));
+      expect(result.allowed).toBe(false);
+      expect(result.level).toBe("BLOCKED");
+    },
+  );
 });

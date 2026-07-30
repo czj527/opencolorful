@@ -11,6 +11,8 @@ import { checkBashPreflight } from "../../src/sandbox/preflight.js";
 import { SandboxService } from "../../src/sandbox/sandbox-service.js";
 import { type AgentSettingsV2 } from "../../src/contracts/agent-settings.js";
 import { defaultSandboxCapabilities } from "../../src/contracts/sandbox.js";
+import { SessionRuntime } from "../../src/runtime/session-runtime.js";
+import { ToolPolicy } from "../../src/runtime/tool-policy.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -287,35 +289,84 @@ describe("Sandbox file-tool interception", () => {
     const service = SandboxService.create({
       agentSettings: testAgentSettings({ defaultCwd: workspace }),
       agentId: "test-agent",
-      agentHomeDir: paths.agents + "/test-agent",
+      agentHomeDir: path.join(paths.agents, "test-agent"),
       platformHome: paths.home,
       auditLogPath,
+      workspaceCwd: workspace,
+      sessionId: "audit-session",
+    });
+    const toolPolicy = new ToolPolicy();
+    toolPolicy.setSandboxService(service);
+
+    expect(service.getPathGuard()).toBeInstanceOf(PathGuard);
+    expect(
+      toolPolicy.checkFilePath("write", path.join(workspace, "test.txt")).allowed,
+    ).toBe(true);
+
+    expect(() =>
+      toolPolicy.assertFilePath(
+        "write",
+        path.join(os.homedir(), ".ssh", "id_rsa"),
+      ),
+    ).toThrow("Sandbox denied write operation");
+    expect(toolPolicy.checkBashCommand("sudo whoami").allowed).toBe(false);
+    toolPolicy.recordBashDenied("echo blocked", "bash-disabled");
+
+    const entries = fs
+      .readFileSync(auditLogPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries.map((entry) => entry.type)).toEqual([
+      "sandbox.denied",
+      "sandbox.preflight-denied",
+      "sandbox.preflight-denied",
+    ]);
+    expect(entries.every((entry) => entry.agentId === "test-agent")).toBe(true);
+    expect(entries.every((entry) => entry.sessionId === "audit-session")).toBe(true);
+    expect(entries.every((entry) => typeof entry.eventId === "string")).toBe(true);
+  });
+
+  it("SessionRuntime wires production sandbox denials to the audit log", async () => {
+    const opencolorfulHome = tempHome();
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: opencolorfulHome });
+    const workspace = tempHome();
+    const agentId = "runtime-audit-agent";
+    const agentHomeDir = path.join(paths.agents, agentId);
+    fs.mkdirSync(paths.sessions, { recursive: true });
+    fs.mkdirSync(paths.auth, { recursive: true });
+
+    const runtime = await SessionRuntime.create({
+      sessionId: "runtime-audit-session",
+      cwd: workspace,
+      sessionDir: paths.sessions,
+      authPath: paths.authFile,
+      providerId: "faux",
+      modelId: "faux-1",
+      faux: { response: "ok" },
+      publish: () => {},
+      agentSettings: testAgentSettings({ defaultCwd: workspace }),
+      agentHomeDir,
+      platformHome: paths.home,
+      workspaceCwd: workspace,
     });
 
-    const guard = service.getPathGuard();
-    expect(guard).toBeInstanceOf(PathGuard);
+    try {
+      expect(() =>
+        runtime
+          .getToolPolicy()
+          .assertFilePath("read", path.join(paths.auth, "auth.json")),
+      ).toThrow("Sandbox denied read operation");
 
-    // Verify the guard works
-    const result = guard.check("write", workspace + "/test.txt");
-    expect(result.allowed).toBe(true);
-
-    // Ensure logs directory exists
-    fs.mkdirSync(paths.logs, { recursive: true });
-
-    // Log a denied event
-    service.logDenied({
-      operation: "write",
-      path: os.homedir() + "/.ssh/id_rsa",
-      level: "BLOCKED",
-      required: "READ_WRITE",
-      reason: "SSH keys directory is blocked",
-      agentId: "test-agent",
-    });
-
-    // Audit log should have been created
-    expect(fs.existsSync(auditLogPath)).toBe(true);
-    const logContent = fs.readFileSync(auditLogPath, "utf8");
-    expect(logContent).toContain("sandbox.denied");
-    expect(logContent).toContain("test-agent");
+      const auditLogPath = path.join(paths.logs, "security-audit.jsonl");
+      const entry = JSON.parse(
+        fs.readFileSync(auditLogPath, "utf8").trim(),
+      ) as Record<string, unknown>;
+      expect(entry.type).toBe("sandbox.denied");
+      expect(entry.agentId).toBe(agentId);
+      expect(entry.sessionId).toBe("runtime-audit-session");
+    } finally {
+      runtime.dispose();
+    }
   });
 });

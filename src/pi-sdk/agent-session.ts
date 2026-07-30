@@ -17,10 +17,11 @@ import {
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
 import type { FileOperation } from "../contracts/sandbox.js";
 import type { ToolPolicy } from "../runtime/tool-policy.js";
-import type {
-  SandboxContext,
+import type { SandboxContext } from "./sandbox-extension.js";
+import {
+  registerSandboxContext,
+  runWithSandboxContext,
 } from "./sandbox-extension.js";
-import { runWithSandboxContext } from "./sandbox-extension.js";
 import type {
   PiAgentEvent,
   PiAgentSessionHandle,
@@ -43,6 +44,30 @@ const SANDBOX_EXTENSION_PATH = fs.existsSync(SANDBOX_EXTENSION_JS)
 /** 预加载的沙箱扩展（进程级加载一次，工具执行时通过 AsyncLocalStorage 读取 per-Session 上下文） */
 let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
+export interface SandboxExtensionLoadResult {
+  readonly errors: readonly {
+    readonly path: string;
+    readonly error: unknown;
+  }[];
+  readonly extensions: readonly unknown[];
+}
+
+/** 验证沙箱扩展加载结果。任何错误或数量不符都必须 fail-closed。 */
+export function validateSandboxExtensionLoadResult(
+  result: SandboxExtensionLoadResult,
+): void {
+  if (result.errors.length > 0) {
+    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
+    throw new Error(`Sandbox extension failed to load: ${msg}`);
+  }
+  if (result.extensions.length !== 1) {
+    throw new Error(
+      `Sandbox extension count mismatch: expected 1, got ${result.extensions.length}. ` +
+      "Sandbox tools will not be wrapped.",
+    );
+  }
+}
+
 async function ensureSandboxExtensionLoaded(): Promise<void> {
   if (sandboxExtensionsLoaded) return;
   if (!fs.existsSync(SANDBOX_EXTENSION_PATH)) {
@@ -55,17 +80,7 @@ async function ensureSandboxExtensionLoaded(): Promise<void> {
     [SANDBOX_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
   );
-  // 验证加载结果：任何错误或扩展数量不符 → fail-closed
-  if (result.errors.length > 0) {
-    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
-    throw new Error(`Sandbox extension failed to load: ${msg}`);
-  }
-  if (result.extensions.length !== 1) {
-    throw new Error(
-      `Sandbox extension count mismatch: expected 1, got ${result.extensions.length}. ` +
-      "Sandbox tools will not be wrapped.",
-    );
-  }
+  validateSandboxExtensionLoadResult(result);
   sandboxExtensionsLoaded = result;
 }
 
@@ -307,8 +322,11 @@ export async function createPiFauxAgentSession(
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
+  const sandboxCtx: SandboxContext | undefined = toolPolicy
+    ? { toolPolicy, sessionCwd, allowBash: false }
+    : undefined;
 
-  const { session } = await createAgentSession({
+  const createSession = () => createAgentSession({
     cwd: options.cwd,
     agentDir: path.dirname(options.authPath),
     modelRuntime,
@@ -322,16 +340,17 @@ export async function createPiFauxAgentSession(
     noTools: "all",
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
+  const { session } = sandboxCtx
+    ? await runWithSandboxContext(sandboxCtx, createSession)
+    : await createSession();
+  const unregisterSandbox = sandboxCtx
+    ? registerSandboxContext(session.sessionId, sandboxCtx)
+    : undefined;
 
   const mapEvent = createSessionEventMapper(() => {
     const usage = session.getContextUsage();
     return usage ? toContextUsage(usage) : undefined;
   });
-
-  // 包装 prompt() 以注入 sandbox AsyncLocalStorage 上下文
-  const sandboxCtx: SandboxContext | undefined = toolPolicy
-    ? { toolPolicy, sessionCwd, allowBash: false }
-    : undefined;
 
   return {
     sessionId: session.sessionId,
@@ -357,6 +376,7 @@ export async function createPiFauxAgentSession(
       return readUsageStats(session);
     },
     dispose() {
+      unregisterSandbox?.();
       session.dispose();
     },
     checkFilePath(operation: FileOperation, targetPath: string): { allowed: boolean; reason: string } {
@@ -394,6 +414,9 @@ export async function createPiAgentSession(
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
+  const sandboxCtx: SandboxContext | undefined = toolPolicy
+    ? { toolPolicy, sessionCwd, allowBash: false }
+    : undefined;
 
   const createOptions: Parameters<typeof createAgentSession>[0] = {
     cwd: options.cwd,
@@ -415,16 +438,18 @@ export async function createPiAgentSession(
     createOptions.tools = [...options.tools];
   }
 
-  const { session } = await createAgentSession(createOptions);
+  const createSession = () => createAgentSession(createOptions);
+  const { session } = sandboxCtx
+    ? await runWithSandboxContext(sandboxCtx, createSession)
+    : await createSession();
+  const unregisterSandbox = sandboxCtx
+    ? registerSandboxContext(session.sessionId, sandboxCtx)
+    : undefined;
 
   const mapEvent = createSessionEventMapper(() => {
     const usage = session.getContextUsage();
     return usage ? toContextUsage(usage) : undefined;
   });
-
-  const sandboxCtx: SandboxContext | undefined = toolPolicy
-    ? { toolPolicy, sessionCwd, allowBash: false }
-    : undefined;
 
   return {
     sessionId: session.sessionId,
@@ -450,6 +475,7 @@ export async function createPiAgentSession(
       return readUsageStats(session);
     },
     dispose() {
+      unregisterSandbox?.();
       session.dispose();
     },
     checkFilePath(operation: FileOperation, targetPath: string): { allowed: boolean; reason: string } {
