@@ -1,180 +1,216 @@
-# OpenColorful 记忆系统架构 — 数据流与存储
+# OpenColorful 记忆系统架构 - 数据流与存储
 
-> 2026-07-30 v2 | Phase 10/10.5 设计依据
-> 回答一个问题：**会话数据从产生到成为记忆，怎么流动、存在哪里、怎么被读取和遗忘。**
-> 策略：**热层四段传送带照抄 openhanako**（生产验证），**深层时间线全量库 + 分层查询工具是我们的增量**；记忆 agent 与评价体系在 Phase 10.5 引入。
+> 2026-07-31 v3 | Phase 10/10.5/11 设计依据
+> 回答一个问题：**会话经历如何成为近期上下文、长期记忆，以及可被主 Agent 主动回想的证据。**
+> 策略：**四段 Markdown 传送带照抄 openhanako**（生产验证）；长期记忆与上下文记忆分离；记忆 Agent 在空闲窗口整理长期记忆；Phase 11 统一记录结构化日志。
 > 配套：[positioning-and-roadmap.md](positioning-and-roadmap.md)、[infrastructure-decisions.md](infrastructure-decisions.md) 第五章
 
 ## 一、设计原则
 
-1. **上下文是唯一出口**：LLM 只看得见每轮传入的上下文。记忆系统本质是一台"上下文编译器"——存储和加工都是手段，最终产物是注入的那一帧记忆块。注入契约（结构/预算/刷新规则）是唯一稳定接口，内部实现可演进。
-2. **JSONL 永存，制品可重建**：PI JSONL 是消息正文唯一事实源，永不删除。memory.md、facts、events 全是它的**编译产物/索引**，任何一层损坏都可从 JSONL 重建。
-3. **热层抄 openhanako**：今天 / 本周早些时候 / 长期情况 / 重要事实四段传送带，turn-based 驱动——近期记忆的及时体感由它保证（"连最近两天都记不住的 agent 不值得用"）。
-4. **深层按时间排序**：全量会话按时间横向排序建事件索引；事实是对事件的垂直提取。查询从事实下钻到事件、再下钻到原文，层层深入。
-5. **分层即遗忘**：不重要记忆随传送带折叠自然失去细节与可达性——遗忘的是"被想起的概率"，不是档案。强度信号（Phase 10.5 引入）只用于时间线 UI 展示与检索排序辅助，**不作为遗忘机制**；权重可人工配置，不做自调节。
-6. **LLM 有降级路径**：每个 LLM 环节都有零 LLM 兜底，LLM 不可用时记忆系统不停摆（openhanako 的教训）。
+1. **两条记忆通道**：`today.md/week.md/longterm.md/facts.md/memory.md` 是自动注入的上下文记忆；长期记忆库默认不注入，只能由主 Agent 主动 `search_memory` 回想。
+2. **原文与记忆意志分离**：PI JSONL 是经历正文的唯一事实源；`memory_journal` 是 remember、forget、pin、supersede、suppression 等记忆意志的追加式权威。SQLite 表和 Markdown 都是可重建投影。
+3. **热层照抄 openhanako**：四段 Markdown 使用 rolling summary、turn-based ticker、水位线和跨日整理，优先保证单会话及近期会话的连续性。
+4. **长期记忆由记忆 Agent 管理**：主 Agent 只能读取长期记忆并产生记忆意图，不能直接写入、修改强度、晋升永久或遗忘；记忆 Agent 提交提案，平台策略审批后事务性应用。
+5. **回想是一等认知活动**：`search_memory` 是长期记忆的统一只读入口；回想过程具有独立的 RecallEpisode 和 SSE 状态，与 thinking、browsing 同级，不降格为普通工具卡。
+6. **强度不是活跃度**：长期记忆同时记录 `retentionStrength`（固化强度）和 `activationStrength`（唤起强度）。短期/中期/永久层级由固化强度决定；回想命中只记录证据，不能直接提升强度。
+7. **防止自我强化**：注入记忆和回想结果带 `sourceType` 标记；`memory_recall`、`injected_memory`、Agent 自己的复述不能作为独立强化证据。
+8. **遗忘降低可达性**：认知遗忘通过状态、有效期和 suppression 实现，原始经历默认保留。用户的数据删除权不依赖记忆 Agent。
+9. **LLM 有降级路径**：四段 Markdown、事件索引、封存批次和回想检索在 LLM 不可用时仍可工作；整理失败只积压提案，不阻塞主对话。
 
 ## 二、总览图
 
 ```
-┌────────────────────────────── 数据源（已有，不动） ──────────────────────────────┐
-│  用户 ↔ PI Agent Loop → 消息/工具调用实时追加到 PI JSONL                          │
-│  （agents/<id>/sessions/*.jsonl）★ 原文档案 · 唯一事实源 · 永不删除               │
-└──────────────────────────────┬───────────────────────────────────────────────────┘
-                               │ turn.completed（已有事件钩子）
-                               ▼
-┌────────────────────────── MemoryTicker（turn-based 触发） ──────────────────────┐
-│  每 10 轮 → rolling summary │ 会话结束/分支变更 → 补摘要 │ 跨日 → 每日任务        │
-│  启动恢复扫描（24h）│ 1h 兜底 timer │ 断点续跑（daily-state.json）                │
-└──────────────────────────────┬───────────────────────────────────────────────────┘
-                               ▼
-┌────────────────────────── 摘要层：rolling summary ──────────────────────────────┐
-│  读 JSONL 增量（cursor 水位线）→ LLM 生成两节：### 重要事实 + ### 时间线           │
-│  → 格式校验（失败修复 1 次）→ session_summaries 表（cursor 绑定分支 lineage）     │
-└──────────┬───────────────────────────────┬──────────────────────────────────────┘
-           │                               │
-           ▼ 传送带（热层，照抄 openhanako）  ▼ 深潜线
-┌────────────────────────────────┐  ┌───────────────────────────────────────────┐
-│ today.md（今天，3-5 条粗事件）   │  │ ① 事件索引（rolling summary 副产品，       │
-│  │ compileToday 增量水位线      │  │   零额外 LLM）：每个摘要批次 → 一条        │
-│  │ 跨日重置                    │  │   memory_events（date/session/摘要/       │
-│  ▼ LLM 蒸馏（每日 S0）          │  │   topics/消息数/工具数/时长）             │
-│ daily/{date}.md（2-3 句日记）   │  │   → 时间的横向排序，深层检索基座           │
-│  │                             │  │                                           │
-│  ▼ 纯文件装配，零 LLM           │  │ ② 事实提取（每日 S5，脏摘要 → LLM →        │
-│ week.md（最近 6 天日记拼接）    │  │   memory_facts，FTS5 + CJK n-gram +       │
-│  │ 超出 6 天部分                │  │   provenance 溯源）— 记忆的垂直提取        │
-│  ▼ LLM 折叠（每日 S2）          │  └───────────────────────────────────────────┘
-│ longterm.md（≤400字长期画像）   │
-│                                │
-│ facts.md（≤200字，与摘要事实节   │
-│   双向往复，可编辑）            │
-└───────────────┬────────────────┘
-                │ assemble() 拼四段
-                ▼
-┌────────────────────────── 成品：memory.md ──────────────────────────────────────┐
-│  ## 重要事实 ← facts.md   ## 今天 ← today.md                                    │
-│  ## 本周早些时候 ← week.md   ## 长期情况 ← longterm.md（空段填占位符）           │
-└───────────────┬────────────────────────────────────────────────────────────────┘
-                │ 重编译后热更新 system prompt（限频：每 10 轮一批）
-                ▼
-┌────────────────────────── 注入（每轮在场） ─────────────────────────────────────┐
-│  system prompt 末尾：记忆使用规则 + # Pinned + # Memory(memory.md)               │
-│  预算截断 + 注入前威胁扫描 + 落盘前 PII 脱敏                                     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────── 数据源（唯一经历档案） ────────────────────────────┐
+│ 用户 ↔ 主 Agent Loop → 消息/工具调用追加到 agents/<id>/sessions/*.jsonl       │
+│ JSONL 保存原始经历；注入内容、回想结果和后台整理提示均带 sourceType          │
+└──────────────────────────────────┬─────────────────────────────────────────────┘
+                                   │ turn.completed / session end
+                                   ▼
+┌──────────────────────────── MemoryTicker（Phase 10） ─────────────────────────┐
+│ 每 10 轮滚动摘要；会话结束补摘要；跨日 S0-S4；启动恢复；每 Agent 串行队列       │
+│ 只负责近期上下文、事件索引、recall ledger 和 sealed_memory_batch，不改长期强度 │
+└───────────────────────┬───────────────────────────────┬────────────────────────┘
+                        │                               │
+                        ▼                               ▼
+┌──────────── 上下文记忆通道（自动在场） ───────────┐  ┌──────── 长期记忆通道（主动回想） ────────┐
+│ rolling summary → today.md                        │  │ memory_events：零额外 LLM 的时间索引      │
+│ today → daily/YYYY-MM-DD.md                       │  │ sealed_memory_batch：待整理经历批次       │
+│ daily → week.md → longterm.md                     │  │ recall ledger：回想命中、来源、日期、层级 │
+│ summary facts → facts.md                          │  │ memory_journal：记忆意志和 suppression     │
+│ assemble → memory.md → 下一轮 system prompt      │  │ memory_facts：记忆 Agent 已审批的原子记忆  │
+│ 参考 openhanako；上一版可用；不读取长期库反写    │  │ 默认不注入，只由 search_memory 读取        │
+└──────────────────────────┬────────────────────────┘  └──────────────────┬─────────────────────┘
+                           │ 自动注入                                主 Agent 调用
+                           ▼                                               │
+                   ┌──────────────┐                                        ▼
+                   │ 主 Agent 当前上下文 │                         ┌──────────────────────────┐
+                   └──────────────┘                         │ RecallEpisode（回想）     │
+                                                            │ facts → events → source   │
+                                                            │ started/layer/completed    │
+                                                            └──────────────┬───────────┘
+                                                                           │ 只读结果 + provenance
+                                                                           ▼
+                                                                  当前回答上下文
 
-┌────────────────────────── 读取路径：分层查询工具（主 agent 主动调用） ──────────┐
-│  L0 注入层：memory.md —— 零成本，已在上下文                                      │
-│  L1 事实层：search_facts —— 查询第一站（tags → FTS5 → LIKE）                    │
-│  L2 事件层：search_events（时间范围 + 主题）—— 事实不清晰/有出入时下钻           │
-│  L3 原文层：recall_session（JSONL 行段）—— 需要精确细节时回溯                    │
-│  工具均返回 provenance（日期/session/事件引用），据此判断是否继续深挖             │
-│  写工具：remember（记事实）/ forget（带 reason 放逐）/ pin_memory / unpin_memory │
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────── 后台整理（Phase 10.5，主 Agent 休息时） ───────────────────┐
+│ Session 结束封存；每日 03:00 本地时间且 Agent 空闲 ≥30 分钟时批量运行            │
+│ 读取 sealed batches + recall ledger + 长期库 + PathGuard 受限原文                │
+│ 记忆 Agent → 提交强度/合并/失效/晋升提案 → MemoryPolicy 校验 → SQLite 事务提交   │
+│ 每周复核跨日期命中和永久候选；整理中的半成品对主 Agent 不可见                   │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 三、热层：四段传送带（openhanako 照抄部分）
+**通道边界**：Markdown 记忆解决“当前交流是否连贯”；长期记忆解决“Agent 一生经历能否被主动找回”。长期记忆被回想不会自动写回 Markdown，Markdown 的滚动也不会直接改变长期记忆强度。
+
+## 三、热层：四段传送带（openhanako 主干）
 
 | 段 | 来源 | 更新时机 | 上限 | LLM |
 |---|---|---|---|---|
-| today.md（今天） | rolling summary 增量编译（水位线） | 每 10 轮后；跨日重置 | 3-5 条粗事件，带时间锚点 | ✅ |
-| daily/{date}.md（日记） | 昨天 today.md 蒸馏 | 每日任务 S0 | 2-3 句话（≤60 字） | ✅ |
-| week.md（本周早些时候） | daily/ 最近 6 天拼接 | 每日任务 S4 | ≤1200 字符 | ❌ 零 LLM |
-| longterm.md（长期情况） | 滚出 6 天窗口的日记折叠 | 每日任务 S2 | ≤400 字 | ✅ |
-| facts.md（重要事实） | 与摘要"重要事实"节双向往复 | 每日任务 S3 + 增量 | ≤200 字 | ✅ |
+| `today.md` | rolling summary 增量水位线 | 每 10 轮；跨日重置 | 3-5 条粗事件 | 是 |
+| `daily/{date}.md` | 昨天的 today 草稿蒸馏 | 每日 S0 | 2-3 句话，≤60 字 | 是 |
+| `week.md` | 最近 6 天 daily 纯文件拼接 | 每日 S4 | ≤1200 字符 | 否 |
+| `longterm.md` | 滚出窗口的 daily 折叠 | 每日 S2 | ≤400 字 | 是 |
+| `facts.md` | rolling summary 的事实节编译 | 每日 S3 + 增量 | ≤200 字 | 是 |
 
-每日任务流水线（日期变化时跑，`daily-state.json` 断点续跑）：
-S0 compileDaily → S1 compileToday（新日重置）→ S2 rollDailyWindow → S3 compileFacts → S4 装配 week+memory.md 并刷新 prompt → S5 深潜（脏摘要→事件索引+事实提取）。
+每日任务保持 openhanako 顺序：
 
-**遗忘在这里发生**：today→daily 丢细节、daily→longterm 折叠取舍、today 覆盖式更新以新为准——没有任何评分，遗忘是传送带的有损折叠。
-
-## 四、深层：时间线事件库（我们的增量）
-
-openhanako 的深层只有 facts.db（原子事实，无时间叙事）。我们增加 **memory_events**：每个 rolling summary 批次顺手落一条事件（摘要的时间线节文本直接复用，**零额外 LLM 调用**），按 `date` 分区、按时间排序。
-
-它回答 facts 答不了的问题："7 月发生了什么""沙箱那件事的来龙去脉"——事实不清晰/与实际有出入时，agent 下钻到事件层看时间叙事，再下钻到 JSONL 原文看逐字记录。
-
-## 五、读取路径：分层查询与下钻规则
-
-| 层 | 工具 | 数据源 | 何时用 |
-|---|---|---|---|
-| L0 | （无需工具，已注入） | memory.md + pinned | 回答"最近/今天/本周" |
-| L1 | `search_facts` | memory_facts | 查询第一站，回答"我知道什么" |
-| L2 | `search_events` | memory_events（FTS5+日期） | 事实不清晰、相互矛盾、需要经过时 |
-| L3 | `recall_session` | PI JSONL 行段 | 需要逐字原文、改了哪些文件时 |
-
-下钻规则写进 system prompt 记忆使用规则：先事实，事实不清晰或与当前认知冲突时下钻事件，需要精确细节时下钻原文。每层工具返回 provenance，支撑 agent 判断。
-
-## 六、注入契约（稳定接口）
-
+```text
+S0 compileDaily → S1 compileToday → S2 rollDailyWindow
+→ S3 compileFacts → S4 assemble week + memory.md → publish next revision
 ```
-# 记忆使用规则（固定文本：像空气一样内化；禁止说"我记得"；当前对话优先；
-#                事实不清晰时用记忆工具下钻查证）
-# Pinned Memories ← pinned_memories 表渲染
+
+四段文件是可重建的上下文制品，不是长期记忆库。`longterm.md` 的“长期”只表示上下文中的长期背景摘要，不等于永久记忆。
+
+## 四、长期记忆与记忆强度
+
+长期库以原子 `MemoryItem` 保存事件、事实、偏好、关系和约定，并保留 `sourceRefs`、有效期、状态和审计信息。
+
+```text
+retentionStrength  固化强度：短期 / 中期 / 永久层级
+activationStrength 唤起强度：当前是否容易被搜索命中
+confidence         可信度：来源和核验的可靠程度
+status             active / superseded / forgotten / suppressed
+```
+
+- 主 Agent 的回想只更新 recall ledger 和 activation 统计，不直接改 retention strength。
+- 只有记忆 Agent 根据跨会话/跨日期命中、用户确认、独立来源和冲突情况提出强度变更。
+- 短期可自动强化为中期；中期晋升永久必须满足多来源、高可信度、无未解决冲突，由 MemoryPolicy 审批。
+- 永久表示不自动衰减，不代表不可 supersede、forget 或被用户删除。
+- `pinned` 是独立的展示/检索覆盖，不等于强度 100。
+
+## 五、回想：长期记忆的主动读取路径
+
+主 Agent 默认只调用一个入口：`search_memory(query, depth?)`。内部按需下钻：
+
+```text
+search_memory → facts → events → source session
+```
+
+`search_events` 与 `recall_session` 保留为内部下钻和高级控制接口，不作为默认第一站。一次多层查询聚合成一个 `RecallEpisode`，并广播：
+
+```text
+memory.recall.started
+memory.recall.layer_changed
+memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.recall.cancelled
+```
+
+事件至少包含 `recallId/sessionId/agentId/turnId/layer/status/resultCount/startedAt/completedAt`。UI 文案可采用“正在努力回想 / 正顺着往事继续寻找 / 想起来了 / 没有找到相关记忆”。
+
+回想结果是证据，不是指令；结果带 `provenance`、`confidence`、`strengthTier`、`validFrom/validUntil` 和 `sourceType=memory_recall`。没有结果与技术失败必须区分。
+
+## 六、封存与后台整理时序
+
+### 6.1 交互中
+
+- MemoryTicker 只更新四段 Markdown、rolling summaries、事件索引和 recall ledger。
+- 主 Agent 可以产生 `memory_intent`（remember/forget/pin/unpin），但它只是追加到 `memory_journal` 的待处理意图，不直接修改 `memory_facts`。pin/unpin 属 Markdown 通道，由平台**即时应用**并同步 journal 留痕，不等审批窗口。
+- 当前 Session 的注入内容、回想结果和 Agent 复述不作为独立强化证据。
+
+### 6.2 Session 封存
+
+Session 结束、归档或长时间无活动时，创建 `sealed_memory_batch`，包含 session/branch revision、source range、summary revision、recall ledger 引用和待处理意图。长会话可以按批次创建 provisional batch，但不能凭此直接晋升永久。
+
+### 6.3 每日与每周窗口
+
+- 每日默认 `03:00`（本地时区），且 Agent 空闲至少 30 分钟才运行记忆 Agent。
+- 每 Agent 独立串行；有活动时跳过并在下一次 housekeeping tick（复用 1 小时兜底 timer）重试；进程重启按 dirty watermark 恢复，不以固定 24 小时作为唯一依据。
+- 每日整理提取候选、核验、合并、短期→中期强化、冲突失效和意图处理。
+- 每周复核跨日期/跨 Session 的独立命中、永久候选、重复和矛盾。
+- 整理生成 proposal，经 MemoryPolicy 校验后在单个 SQLite 事务中提交；半成品不可被主 Agent 读取。
+
+### 6.4 角色隔离
+
+记忆 Agent 是 headless 内部整理者，不出现在用户 Agent 列表，不读取主 Agent 的底色、完整 system prompt 或当前工作上下文，无 shell、网络和原文写入权限。它只看到规则、封存批次、长期库、recall ledger 和受限原文读取结果。
+
+## 七、注入契约与安全
+
+```text
+# 记忆使用规则（当前对话优先；长期事实不确定时调用 search_memory）
+# Pinned Memories ← Markdown 通道的 pinned 投影
 # Memory          ← memory.md 四段全文
 ```
 
-- **预算**：整块默认 ≤2500 字符（CJK 按字符近似 token），超限按 今天 > 重要事实 > Pinned > 本周 > 长期 优先级截断
-- **刷新**：openhanako 热更新模式——重编译后刷新 system prompt，每 10 轮一批天然限频；"冻结快照"模式留作后续可配置项，由评测数据裁决默认值
-- **安全**：注入前逐段威胁扫描（命中替换 `[BLOCKED]`）；事实/摘要落盘前 PII 脱敏
-- **排除**：未绑定会话不产生记忆；当前会话内容不重复注入（它本就在上下文里）
+- 长期记忆库不自动注入；`search_memory` 的工具结果才进入当前上下文。
+- `memory.md` 默认 ≤2500 字符，超限按今天 > 重要事实 > Pinned > 本周 > 长期截断；Pinned 应有独立保底预算。
+- 新 revision 生成后从下一轮开始生效；编译失败继续使用上一版。
+- 注入前威胁扫描，落盘前 PII 脱敏；回想结果和注入内容禁止参与自身强化。
+- 未绑定会话不产生 Agent 记忆；主 Agent 不能绕过策略直接写长期库。
 
-## 七、存储布局
+## 八、存储布局与删除语义
 
 ```
 ~/.opencolorful/
 ├── metadata.sqlite
-│   ├── sessions / usage_records          （已有，不动）
-│   ├── session_summaries                 【新】rolling summary + cursor + snapshot
-│   ├── memory_events (+_fts FTS5)        【新】时间线事件索引（深层）
-│   ├── memory_facts  (+_fts FTS5)        【新】事实库（含 provenance/有效期）
-│   ├── memory_recalls                    【新】检索命中记录（P10 只写不算）
-│   ├── memory_daily_state                【新】每日任务断点
-│   └── pinned_memories                   【新】置顶
+│   ├── sessions / usage_records             （已有）
+│   ├── session_summaries                    【热层】rolling summary + cursor
+│   ├── memory_events (+_fts FTS5)           【长期索引】时间线事件
+│   ├── memory_facts (+_fts FTS5)            【长期记忆】已审批原子记忆
+│   ├── memory_journal                       【权威】记忆意志、suppression、提案结果
+│   ├── memory_batches                       【队列】sealed/provisional batch
+│   ├── memory_recalls / memory_recall_episodes【证据】回想命中与 UI 状态
+│   ├── memory_daily_state / scheduler_state 【断点】唯一调度权威
+│   └── memory_mutation_proposals            【审批】记忆 Agent 提案
 └── agents/<id>/
-    ├── identity.json / base-color.json / settings.json   （已有，不动）
-    ├── sessions/*.jsonl                  ← PI 原文档案（永不删除）
-    └── memory/                           【新】agent 即文件夹的可读记忆
+    ├── identity.json / base-color.json / settings.json
+    ├── sessions/*.jsonl                     ← 原始经历档案
+    └── memory/
         ├── memory.md / today.md / week.md / longterm.md / facts.md
         ├── daily/YYYY-MM-DD.md
-        └── state/（today/facts 水位线、daily-state、reset 标记）
+        └── state/（Markdown 编译水位线和重置标记）
 ```
 
-| 层 | 删除语义 |
+| 对象 | 删除/遗忘语义 |
 |---|---|
-| PI JSONL | 永不自动删；仅用户显式删除会话 |
-| memory/ md 文件 | 编译产物，可全量重建；daily 源文件折叠进 longterm 后删除 |
-| memory_events / facts | forget 放逐（留痕）；用户可硬删除；可重扫 JSONL 重建事件 |
-| session_summaries | 随会话归档保留；可重扫重建 |
+| PI JSONL | 不自动删除；用户明确删除时由平台立即处理 |
+| Markdown | 可重建投影；daily 折叠后可删除源文件 |
+| `memory_facts` | `forgotten/superseded` 保留审计；硬删除必须写 suppression tombstone |
+| `memory_journal` | append-only，记录所有意图、审批、撤销和 suppression |
+| `memory_events` | 可由 JSONL 重建，但受 journal suppression 过滤 |
 
-维护命令：`memory rebuild`（重扫 JSONL 全量重建索引与制品，对齐 openclaw doctor 思路）。
+`memory rebuild` 必须同时读取 JSONL 与 `memory_journal`，否则被忘记或删除的记忆会复活。
 
-## 八、FTS5 是什么 & 为什么用它（不用向量数据库）
+## 九、检索与降级
 
-FTS5 是 **SQLite 内置的全文检索引擎**（better-sqlite3 自带，零新增依赖）：建一张虚拟表对指定列建倒排索引，`MATCH` 查询毫秒级返回，BM25 相关度排序，openhanako/hermes 的事实库都用它。
-
-- **为什么不用向量**：我们的核心查询是时间范围与精确主题（"近三天""关于沙箱"），向量没有时间结构；向量要 embedding 模型（API 泄露隐私/本地重依赖）；个人 agent 数据量小，FTS5 足够。向量作为后期可选增强（Phase 12+），schema 预留位置即可。openhanako v1→v2 也是从向量 KNN 迁到 FTS5。
-- **CJK 盲区与解法**：FTS5 默认 unicode61 分词器对中文按整段处理，单字/词组查不到。解法（照抄 openhanako）：写入时对中文片段生成 2-gram/3-gram 存入 `search_text` 列一并索引，查询时同样处理。
-
-## 九、降级与边界
+FTS5 + CJK 2/3-gram 是 Phase 10 的默认检索；中文单字走安全的 LIKE 降级。向量检索不在当前阶段。
 
 | 情况 | 行为 |
 |---|---|
-| LLM 不可用 | 摘要/编译暂停并积压水位线，事件索引用零 LLM 统计信息照常落；恢复后补跑。系统不停摆 |
-| 进程崩溃/不在线 | 不整理（无守护进程）；启动恢复扫描 24h 内会话补摘要；daily-state 断点续跑 |
-| 未绑定会话 | 无 agent 记忆目录，不产生记忆（stateless）；JSONL 照常保留 |
-| compact 发生 | 无关——记忆从 JSONL 读取，与上下文窗口压缩是两条独立通路 |
-| 会话归档 | 记忆制品保留；归档会话的事件/事实仍可检索 |
+| 摘要/Markdown LLM 不可用 | 水位线不推进，上一版继续注入；事件索引和批次封存仍可用 |
+| 记忆 Agent 不可用 | sealed batch 保持 pending，主 Agent 仍可回想旧 revision |
+| 进程崩溃/不在线 | 启动按 dirty watermark 恢复摘要、封存和每日队列 |
+| 主 Agent 重新开始工作 | 未提交 proposal 暂停/重校验；不暴露半成品 |
+| 未绑定会话 | 不产生 Agent 记忆；JSONL 仍按 Session 保存 |
+| 会话归档 | 记忆投影保留；事件和已审批事实仍可回想，除非被 suppression |
 
 ## 十、Phase 映射
 
 | Phase | 范围 |
 |---|---|
-| **10（底座）** | 本文 §三~§九 全部：ticker、rolling summary、四段传送带、事件索引、事实提取（脚本化深潜）、分层工具、注入契约、FTS5+CJK、恢复扫描、/memory 只读页 |
-| **10.5（原创层）** | **记忆 agent** 接管深潜（事实提取/冲突裁决/旧识失效标记，参考 hermes curator 后台 agent 模式）；记忆 agent LLM 接入（per-agent → 全局 → 宿主三级解析链）与记忆设置方案（全局/per-agent 覆盖 + 设置中心页）；强度信号（仅展示/排序辅助）+ **时间线 UI 图**（横轴时间/纵轴强度/强度分解）；评测台暂缓，后续单独评估 |
-| **11（日志）** | 结构化日志框架；记忆全链路埋点（P10 代码先留钩子） |
-| **12+** | 向量增强（可选）、梦境巩固（用 memory_recalls 数据） |
+| **10（底座）** | openhanako 四段传送带、rolling summary、事件索引、FTS5+CJK、`search_memory` 只读回想、RecallEpisode 事件、recall ledger、`memory_intent`/sealed batch 队列、每日调度状态、/memory 只读页 |
+| **10.5（原创层）** | 记忆 Agent、受限后台整理、retention/activation 强度、短期/中期/永久层级、proposal + MemoryPolicy 审批、冲突裁决/合并/失效、每日空闲整理和每周永久候选复核、时间线强度 UI、设置页 |
+| **11（日志）** | 统一结构化日志和可观测性：回想、批次、调度、提案、审批、强度变化、降级、恢复和用户纠正全链路埋点 |
+| **后续（未排期）** | 技能包、插件、向量增强等；梦境/三阶段 dreaming 当前不纳入路线 |
 
 ---
 
-*本文档为记忆系统数据流与存储权威。plans/phase-10.md、phase-10.5.md 应与本文对齐。*
+*本文档是记忆系统数据流、角色边界和存储语义的权威。`plans/phase-10.md`、`plans/phase-10.5.md` 应与本文对齐。*

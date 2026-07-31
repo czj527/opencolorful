@@ -98,6 +98,7 @@ cd web && npx playwright test
 
 **参考：**
 - [架构说明](docs/architecture.md) — 平台层技术栈/模块边界/事件协议
+- [记忆系统架构](docs/memory-architecture.md) — 记忆数据流/两通道/存储语义权威（Phase 10/10.5 依据）
 - [开发流程](docs/development.md) — 角色/并行/质量门
 - [产品说明](docs/product.md) — 旧定位（以 positioning-and-roadmap.md 为准）
 - [基础设施设计](docs/superpowers/specs/2026-07-21-agent-platform-foundation-design.md)

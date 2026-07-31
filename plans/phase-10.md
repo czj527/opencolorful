@@ -1,89 +1,92 @@
-# Phase 10：记忆系统底座 — openhanako 传送带 + 时间线深库 + 分层查询
+# Phase 10：记忆系统底座 - openhanako 传送带、主动回想与封存队列
 
 **状态：规划中** | 分支：`phase-10-memory`
-**基线：** `main`（Phase 9 验收点之后；**动手前先提交工作区未提交的沙箱改动**）
-**架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)（数据流/存储/注入契约以该文为准，本文是其实施计划）
-**实现参考：** `<local-workspace>\references\openhanako\lib\memory\`（逐模块对应见 §4.10）
+**基线：** `main`（Phase 9 验收点之后）
+**架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
+**实现参考：** `<local-workspace>\references\openhanako\lib\memory\`（借机制，不抄代码）
 
 ---
 
 ## 一、目标
 
-让绑定 Agent 的会话首次拥有跨会话记忆：**今天/本周/长期/重要事实四段热记忆自动编译并注入上下文；全量会话按时间建事件索引；事实库可检索；agent 可用分层工具从事实下钻到事件、原文。**
+Phase 10 只建立可靠的记忆底座和两条通道的边界：
 
-### 用户可感知的变化
+1. 以 openhanako 为主干实现 `today.md`、`week.md`、`longterm.md`、`facts.md`、`memory.md` 四段上下文记忆，增量编译并自动注入下一轮 system prompt。
+2. 建立按 Session/branch revision 的 rolling summary、事件索引、FTS5+CJK 检索和 `search_memory` 只读回想入口。
+3. 记录 recall ledger、RecallEpisode、`memory_journal`（追加式记忆意志）和 `sealed_memory_batch`，为 Phase 10.5 的记忆 Agent 提供输入，但不在对话路径修改长期记忆强度。
+4. 进程重启、LLM 不可用、Session 归档和未绑定会话都拥有明确的降级行为。
 
-- 绑定 Agent 新开对话时，"记得"最近几天/本周做的事（memory.md 注入）
-- Agent 能主动搜索"我们之前关于 X 讨论过什么"并下钻到具体会话原文
-- 用户可以 pin 重要事项；Agent 可用 remember/forget 自主管理记忆
-- `/memory` 页面只读查看 Agent 的四段记忆、事实列表、事件时间线并搜索
-- 跨天后记忆自动整理（日记蒸馏、折叠归档），进程重启不断档
+### 用户可感知变化
 
-### 明确不做（Phase 10.5 及以后）
+- 绑定 Agent 的新会话能自动看到最近的 today/week/longterm/facts 记忆。
+- Agent 在被问到过去的决定、偏好或项目时，可以调用 `search_memory` 主动回想，并显示“正在回想”状态。
+- `/memory` 页面可以只读查看四段记忆、事件时间线和已审批事实。
+- Session 结束后会封存长期整理批次，但不会阻塞会话关闭。
 
-- ❌ 记忆 agent（专职加工 agent，10.5 接管深潜）
-- ❌ 强度/权重评分、记忆强度图 UI（10.5 由评测数据裁决）
-- ❌ 评测台（10.5）、向量检索（12+）、梦境巩固（12+）
-- ❌ 多 Agent 共享/跨界记忆（默认严格 per-agent 隔离）
+### 明确不做
 
----
-
-## 二、范围与现有基础
-
-### 2.1 可复用基础
-
-| 能力 | 位置 | 复用方式 |
-|---|---|---|
-| turn 边界事件 | `src/runtime/event-mapper.ts:30`（turn.completed） | ticker 触发钩子 |
-| PI JSONL 会话与分支 | `src/pi-sdk/agent-session.ts` | 增量读取 + cursor（leafId/lineage） |
-| SQLite 迁移模式 | `src/storage/migrations.ts`（当前 v5） | 新增 v6 |
-| Agent 三文件目录 | `src/config/agent-store.ts:287`（agentDir） | 新增 `memory/` 子目录 |
-| system prompt 注入点 | `src/server/routes/messages.ts:37`（buildSystemPrompt） | 追加记忆块 |
-| LLM 调用 | `src/runtime/model-service.ts` | 摘要/编译用会话同 Provider 或配置 utility 模型 |
-| 原子写/归一化降级 | `src/config/preferences-store.ts` 模式 | state 文件与 memory.md 写入 |
-| 工具注册与权限 | `src/pi-sdk/agent-session.ts` 工具白名单 + `src/runtime/tool-policy.ts` | 记忆工具注册；recall_session 走 PathGuard 只读 |
-
-### 2.2 缺口
-
-无任何记忆基础设施（无摘要、无编译、无事实库、无记忆工具、无注入）。
+- 记忆 Agent 的事实提取、强度变更、合并、冲突裁决、永久晋升和认知遗忘（Phase 10.5）。
+- retention/activation 强度计算、短期/中期/永久晋升和强度图 UI（Phase 10.5）。
+- 主 Agent 直接写入或修改长期记忆；`remember/forget/pin` 只形成待处理 `memory_journal` intent。
+- 向量检索、梦境/三阶段 dreaming、技能系统和多 Agent 共享记忆。
 
 ---
 
-## 三、数据模型（SQLite 迁移 v6 + agent memory 目录）
+## 二、通道边界
 
-### 3.1 `metadata.sqlite` 新增表（migration v6）
+```text
+PI JSONL（唯一原始经历）
+  ├─→ 上下文记忆通道：rolling summary → today/week/longterm/facts.md → memory.md
+  │                                           → 自动注入下一轮
+  └─→ 长期记忆输入通道：事件索引 + recall ledger + sealed_memory_batch
+                                              → Phase 10.5 记忆 Agent
+```
+
+Markdown 是可重建的上下文制品；`memory_facts` 是长期记忆表，但 Phase 10 只提供 schema 和只读检索，不由主 Agent 直接写入。长期记忆被回想不会自动写回 Markdown，Markdown 的滚动也不会直接改变长期记忆强度。
+
+> **预期行为说明**：Phase 10 没有任何角色向 `memory_facts` 写入（事实提取从 Phase 10.5 的记忆 Agent 开始）——facts 表在 Phase 10 为空属预期，`search_memory` 的 facts 层返回空**不是 bug**；md 通道的 `facts.md` 由 compileFacts 正常维护，不受影响。
+
+---
+
+## 三、数据模型（SQLite migration v6）
+
+以下表属于 Phase 10 底座；长期记忆的实际内容和强度由 Phase 10.5 审批后写入。
 
 ```sql
--- 会话滚动摘要（每 session 一份，openhanako summaries/*.json 的表化）
 CREATE TABLE session_summaries (
-  session_id    TEXT PRIMARY KEY,
-  agent_id      TEXT,                       -- NULL = 未绑定（不产生记忆，仅留底）
-  summary       TEXT NOT NULL DEFAULT '',   -- 两节格式：### 重要事实 + ### 时间线
+  session_id TEXT PRIMARY KEY,
+  agent_id TEXT,
+  summary TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
-  cursor_json   TEXT NOT NULL DEFAULT '{}', -- {coveredLeafId, lineageHash} 分支保护
-  snapshot      TEXT NOT NULL DEFAULT '',   -- 上次深潜时快照（summary≠snapshot ⇒ 脏）
-  snapshot_cursor_json TEXT NOT NULL DEFAULT '{}',
-  source_start  TEXT, source_end TEXT,      -- 覆盖时间范围
-  created_at    TEXT NOT NULL, updated_at TEXT NOT NULL
+  cursor_json TEXT NOT NULL DEFAULT '{}',
+  branch_revision TEXT NOT NULL DEFAULT '',
+  source_start_entry TEXT,
+  source_end_entry TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_summaries_agent ON session_summaries(agent_id);
 
--- 时间线事件索引（深层，rolling summary 副产品，零额外 LLM）
 CREATE TABLE memory_events (
-  id            TEXT PRIMARY KEY,           -- UUID
-  agent_id      TEXT NOT NULL,
-  session_id    TEXT NOT NULL,
-  date          TEXT NOT NULL,              -- YYYY-MM-DD 分区键
-  started_at    TEXT NOT NULL, ended_at TEXT NOT NULL,
-  summary       TEXT NOT NULL DEFAULT '',   -- 复用摘要"时间线"节文本
-  topics        TEXT NOT NULL DEFAULT '[]', -- JSON，规则提取（工具名+关键词）
-  search_text   TEXT NOT NULL DEFAULT '',   -- CJK 2/3-gram
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  branch_revision TEXT NOT NULL DEFAULT '',
+  source_start_entry TEXT,
+  source_end_entry TEXT,
+  date TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  topics TEXT NOT NULL DEFAULT '[]',
+  search_text TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
-  tool_calls    INTEGER NOT NULL DEFAULT 0,
-  duration_sec  INTEGER NOT NULL DEFAULT 0,
-  status        TEXT NOT NULL DEFAULT 'active'  -- active | forgotten
-    CHECK (status IN ('active','forgotten')),
-  created_at    TEXT NOT NULL
+  tool_calls INTEGER NOT NULL DEFAULT 0,
+  duration_sec INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active','forgotten','suppressed')),
+  created_at TEXT NOT NULL,
+  UNIQUE (session_id, branch_revision, source_start_entry, source_end_entry)
 );
 CREATE INDEX idx_events_agent_date ON memory_events(agent_id, date);
 CREATE INDEX idx_events_session ON memory_events(session_id);
@@ -92,24 +95,29 @@ CREATE VIRTUAL TABLE memory_events_fts USING fts5(
   summary, topics, search_text,
   content=memory_events, content_rowid=rowid, tokenize='unicode61'
 );
--- 触发器：insert/delete/update 三向同步（照 openhanako fact-store.ts:140-151 模式）
+-- insert/delete/update 三向触发器与 openhanako fact-store 同模式。
 
--- 事实库（openhanako facts.db 移植 + provenance/有效期）
 CREATE TABLE memory_facts (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id      TEXT NOT NULL,
-  fact          TEXT NOT NULL,
-  search_text   TEXT NOT NULL DEFAULT '',
-  tags          TEXT NOT NULL DEFAULT '[]',
-  fact_time     TEXT,                       -- 事实涉及的时间 YYYY-MM-DDTHH:MM
-  source        TEXT NOT NULL DEFAULT 'extracted'
-    CHECK (source IN ('extracted','remember','compiled')),
-  source_refs   TEXT NOT NULL DEFAULT '[]', -- JSON: [{sessionId, eventId}] 溯源
-  valid_until   TEXT,                       -- NULL=有效；旧识失效不删
-  status        TEXT NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active','forgotten','superseded')),
-  session_id    TEXT,
-  created_at    TEXT NOT NULL, updated_at TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL,
+  fact TEXT NOT NULL,
+  search_text TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  fact_time TEXT,
+  source TEXT NOT NULL DEFAULT 'agent_approved'
+    CHECK (source IN ('agent_proposed','agent_approved','user_intent')),
+  source_refs TEXT NOT NULL DEFAULT '[]',
+  retention_strength INTEGER NOT NULL DEFAULT 0
+    CHECK (retention_strength BETWEEN 0 AND 100),
+  activation_strength INTEGER NOT NULL DEFAULT 0
+    CHECK (activation_strength BETWEEN 0 AND 100),
+  confidence REAL NOT NULL DEFAULT 0
+    CHECK (confidence BETWEEN 0 AND 1),
+  valid_until TEXT,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active','forgotten','superseded','suppressed')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 CREATE INDEX idx_facts_agent ON memory_facts(agent_id);
 CREATE INDEX idx_facts_time ON memory_facts(fact_time);
@@ -117,218 +125,213 @@ CREATE INDEX idx_facts_time ON memory_facts(fact_time);
 CREATE VIRTUAL TABLE memory_facts_fts USING fts5(
   fact, search_text, content=memory_facts, content_rowid=id, tokenize='unicode61'
 );
--- 同模式三触发器
+-- insert/delete/update 三向触发器。
 
--- 检索命中记录（Phase 10 只写不读，为 10.5 评测/梦境备数据）
 CREATE TABLE memory_recalls (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id    TEXT NOT NULL,
-  target_type TEXT NOT NULL CHECK (target_type IN ('fact','event')),
-  target_id   TEXT NOT NULL,
-  query_hash  TEXT NOT NULL,
-  layer       TEXT NOT NULL,                -- L1 | L2
-  created_at  TEXT NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_id TEXT,
+  recall_id TEXT NOT NULL,
+  target_type TEXT NOT NULL CHECK (target_type IN ('fact','event','session')),
+  target_id TEXT NOT NULL,
+  query_hash TEXT NOT NULL,
+  layer TEXT NOT NULL CHECK (layer IN ('facts','events','source')),
+  source_type TEXT NOT NULL DEFAULT 'memory_recall',
+  created_at TEXT NOT NULL
 );
 CREATE INDEX idx_recalls_agent ON memory_recalls(agent_id, created_at);
 
--- 每日任务断点
+CREATE TABLE memory_recall_episodes (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('started','layer_changed','completed','empty','failed','cancelled')),
+  result_count INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE TABLE memory_journal (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  actor TEXT NOT NULL CHECK (actor IN ('user','main_agent','memory_agent','system')),
+  intent_type TEXT NOT NULL CHECK (intent_type IN ('remember','forget','pin','unpin','supersede','merge','suppress','restore')),
+  target_type TEXT NOT NULL CHECK (target_type IN ('fact','event','session','memory')),
+  target_id TEXT,
+  payload TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','approved','rejected','applied','revoked')),
+  created_at TEXT NOT NULL,
+  applied_at TEXT
+);
+CREATE INDEX idx_memory_journal_agent_status ON memory_journal(agent_id, status, created_at);
+
+CREATE TABLE memory_batches (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  revision_json TEXT NOT NULL DEFAULT '{}',
+  source_start_entry TEXT,
+  source_end_entry TEXT,
+  status TEXT NOT NULL DEFAULT 'sealed'
+    CHECK (status IN ('provisional','sealed','processing','applied','deferred','failed')),
+  priority INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_memory_batches_agent_status ON memory_batches(agent_id, status, created_at);
+
 CREATE TABLE memory_daily_state (
-  agent_id    TEXT NOT NULL,
-  date        TEXT NOT NULL,
-  step        TEXT NOT NULL,                -- S0..S5
-  done_at     TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  step TEXT NOT NULL,
+  done_at TEXT NOT NULL,
   PRIMARY KEY (agent_id, date, step)
 );
 
--- 置顶
 CREATE TABLE pinned_memories (
-  id          TEXT PRIMARY KEY,
-  agent_id    TEXT NOT NULL,
-  content     TEXT NOT NULL,
-  created_at  TEXT NOT NULL
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 CREATE INDEX idx_pinned_agent ON pinned_memories(agent_id);
 ```
 
-### 3.2 `agents/<id>/memory/` 目录（热层制品，可读可重建）
+`memory_journal` 是记忆意志和 suppression 的追加式权威。`memory rebuild` 必须同时读取 JSONL 和 journal，否则 forget/delete 后会复活。`memory_daily_state` 是每日 Markdown 编译断点的唯一权威，不再同时维护同语义的 `daily-state.json`。
 
+### Agent memory 目录
+
+```text
+agents/<id>/memory/
+├── memory.md                 # 四段拼接成品，自动注入
+├── today.md                  # 今天
+├── week.md                   # 最近 6 天 daily 拼接
+├── longterm.md               # 上下文中的长期背景摘要
+├── facts.md                  # 上下文中的重要事实摘要
+├── daily/YYYY-MM-DD.md       # 日记
+└── state/                    # 编译水位线、reset marker；不存长期事实权威
 ```
-memory/
-├── memory.md        # 四段成品（## 重要事实 / ## 今天 / ## 本周早些时候 / ## 长期情况）
-├── today.md         # 今天（3-5 条粗事件，时间锚点，跨日重置）
-├── daily/YYYY-MM-DD.md   # 日记（2-3 句，≤60字）
-├── week.md          # 本周早些时候（daily 最近 6 天拼接，≤1200 字符，零 LLM）
-├── longterm.md      # 长期情况（≤400 字，LLM 折叠）
-├── facts.md         # 重要事实（≤200 字，与摘要事实节双向往复）
-└── state/
-    ├── today-state.json        # compileToday 水位线
-    ├── facts-state.json        # compileFacts 水位线
-    └── reset.json              # 编译重置标记
-```
-
-### 3.3 契约类型（`src/contracts/memory.ts`，TypeBox）
-
-`RollingSummary`（facts/timeline 两节 + cursor）、`MemoryEvent`、`MemoryFact`、`MemoryLayer`（`"L0"|"L1"|"L2"|"L3"`）、`MemorySearchQuery`、`SearchFactsParams`、`SearchEventsParams`、`RecallSessionParams`、`RememberParams`、`ForgetParams`、`PinParams`、`MemoryConfig`（默认值见 §4.9）。所有跨进程输入走 TypeBox 校验。
 
 ---
 
-## 四、核心机制设计
+## 四、MemoryTicker 与时间安排
 
-### 4.1 MemoryTicker（`src/memory/memory-ticker.ts`）
-
-照 openhanako `memory-ticker.ts` 的触发模型，适配我们的事件钩子：
-
-| 触发 | 来源 | 动作 |
+| 触发 | 动作 | 是否修改长期强度 |
 |---|---|---|
-| 每 10 轮 | session-runtime turn 完成回调 | rolling summary → compileToday → assemble → 热刷新 |
-| 会话结束/归档 | session-service 生命周期 | 补 rolling summary（fire-and-forget） |
-| 跨日 | notifyTurn 内检测 + 1h 兜底 timer | 每日任务 S0-S5 |
-| 启动 | server 启动 | 恢复扫描 24h 内有更新的绑定会话，补摘要 |
-| 手动 | HTTP API `POST /api/agents/:id/memory/flush` | 立即执行一轮 |
+| 每 10 轮 | rolling summary → compileToday → assemble；下一轮使用新 revision | 否 |
+| Session 结束/归档 | 补 rolling summary，创建 `sealed_memory_batch`，fire-and-forget | 否 |
+| 分支变化 | 按 branch revision 重新生成摘要/事件索引，旧派生记录按 journal 过滤 | 否 |
+| 跨日 | S0-S4：daily、today、week、longterm、facts、assemble | 否 |
+| 启动 | 按 dirty watermark 恢复摘要、Markdown 和 pending batch | 否 |
+| 手动 flush | 封存或处理 pending batch，但不绕过 MemoryPolicy | 否 |
 
-约束：**per-agent 串行队列**（同 agent 记忆任务排队，防并发写）；异步不阻塞对话路径；LLM 失败按 §4.8 降级积压。
+约束：每 Agent 串行队列；异步任务不阻塞对话；LLM 失败使用上一版并积压水位线。Phase 10 不运行深度长期整理，不改变 `retention_strength`。
 
-### 4.2 Rolling Summary（`src/memory/rolling-summary.ts` + `summary-format.ts`）
+### 四段传送带
 
-- 格式契约（照 `rolling-summary-format.ts` 单一源头）：输出必须含 `### 重要事实` 与 `### 时间线` 两节；标题文本/校验/提取/修复 prompt 全部集中在 `summary-format.ts`
-- 流程：读 JSONL 增量（cursor 起）→ LLM 生成 → `validateSummaryFormat()` 校验 → 失败则 LLM 修复 1 次 → 落 `session_summaries`
-- **分支保护**：cursor 记录 `{coveredLeafId, lineageHash}`，分支回退/retry 后旧摘要不参与深潜（openhanako branch cursor 同款）
-- **PII**：落库前 `scrubPII()`（新 util，规则：API Key/令牌/邮箱/手机号模式）
-- 每会话保留一份，覆盖式更新（新摘要替代旧摘要，事实节双向往复见 §4.4）
+保持 openhanako 顺序：
 
-### 4.3 事件索引（`src/memory/event-indexer.ts`）
+```text
+S0 compileDaily → S1 compileToday → S2 rollDailyWindow
+→ S3 compileFacts → S4 assemble week + memory.md → publish next revision
+```
 
-rolling summary 落库后顺手生成：**摘要"时间线"节文本 → memory_events.summary**，统计字段（message_count/tool_calls/duration）从 JSONL 增量段统计，topics 用规则提取（工具名 + 高频关键词），search_text 走 §4.6。**零额外 LLM 调用**。同一批次重复生成时按 `(session_id, cursor)` 幂等替换。
+`week.md` 由 daily 文件纯文件拼接；四段 Markdown 的“实时”含义是新 revision 完成后从下一轮生效，不要求每轮完整重写全部文件。
 
-### 4.4 编译流水线（`src/memory/compile.ts` + `prompts/compile.ts`）
+---
 
-每日任务（`_doDaily()`，S0-S5，`memory_daily_state` 断点续跑）：
+## 五、rolling summary 与事件索引
 
-| 步骤 | 函数 | 内容 | 上限 |
-|---|---|---|---|
-| S0 | compileDaily | 昨天 today.md → LLM 蒸馏 → `daily/{date}.md` | 2-3 句 ≤60 字 |
-| S1 | compileToday | today.md 新日重置开局 | 3-5 条 |
-| S2 | rollDailyWindow | 滚出 6 日窗口的日记 → LLM 折叠进 longterm.md → 删源文件 | ≤400 字 |
-| S3 | compileFacts | 摘要事实节 ↔ facts.md 双向往复（增量水位线） | ≤200 字 |
-| S4 | assemble | 拼 memory.md（空段占位符）→ 触发热刷新 + `memory.updated` 事件 | — |
-| S5 | deepDive | 脏摘要（summary≠snapshot）→ 事件索引补齐 + LLM 事实提取 → memory_facts | — |
+- JSONL 增量读取必须保存 PI entry 身份、`branch_revision` 和 cursor；不要以行号作为稳定身份。
+- summary 格式必须包含 `### 重要事实` 与 `### 时间线`；失败时修复一次，仍失败则不推进 cursor。
+- 事件索引复用时间线节文本；统计字段和 topics 规则提取，不额外调用 LLM；LLM 不可用时仍可落 deterministic stub。
+- 同一 `(session_id, branch_revision, source_start_entry, source_end_entry)` 批次幂等。
+- 回想结果、注入结果和 Agent 复述必须带 `sourceType`，不能成为新的独立事实证据。
 
-对话中每 10 轮跑的是轻量版：rolling summary → compileToday → assemble（S5 深潜只在每日任务跑）。
+---
 
-### 4.5 检索（`src/memory/memory-search.ts`）
+## 六、主动回想工具与状态
 
-- **search_facts**：tags 精确匹配（json_each）优先 → 结果 <3 条 FTS5 兜底 → FTS 语法错误 LIKE 降级；默认排除 forgotten/superseded
-- **search_events**：`agent_id + status='active'` 过滤，日期范围 + FTS5；按 date 倒序；`include_dormant` 参数预留（P10 恒 false）
-- **recall_session**：经 PathGuard 只读校验后读 JSONL 指定行段；单次 ≤200 行 / ≤16K 字符；返回带行号
-- 命中即写 `memory_recalls`（异步，不阻塞返回）
+主 Agent 默认只使用一个工具：
 
-### 4.6 CJK 检索（`src/memory/cjk-ngram.ts`）
+```text
+search_memory(query, depth?: "quick" | "deep" | "source", timeRange?, limit?)
+```
 
-对中文/日文/韩文连续片段生成 2-gram + 3-gram，写入与查询两侧同规则处理（照 openhanako `fact-store.ts` search_text 方案）。单测覆盖：纯中文、中英混排、纯英文。
+内部路径：`facts → events → source session`。`search_events` 和 `recall_session` 是服务端内部实现，**不注册给主 Agent**（仅供 search_memory 内部下钻与后续记忆 Agent 使用）。每次多层调用聚合成一个 `RecallEpisode`，广播：
 
-### 4.7 注入契约（修改 `src/server/routes/messages.ts` buildSystemPrompt）
+```text
+memory.recall.started
+memory.recall.layer_changed
+memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.recall.cancelled
+```
 
-顺序：底色 → **记忆使用规则**（固定文本，含下钻指引）→ `# Pinned Memories` → `# Memory`（memory.md）。约束：
+“没有找到相关记忆”与“回想系统失败”是不同结果。UI 状态与联网搜索同级，显示“正在努力回想 / 正顺着往事继续寻找 / 想起来了”。回想只写 `memory_recalls`，不直接写 `memory_facts`，不改变 retention strength。
 
+---
+
+## 七、工具、API 与只读页面
+
+### 工具
+
+| 工具 | 权限 | 说明 |
+|---|---|---|
+| `search_memory` | 主 Agent 只读 | 长期记忆统一入口，返回 provenance/confidence/strengthTier |
+| `search_events` | 内部下钻 | 按日期和主题查事件 |
+| `recall_session` | PathGuard 只读 | 读取受限 JSONL entry 段 |
+| `remember` / `forget` / `pin_memory` | intent-only | 只追加 `memory_journal`，不改长期库 |
+
+> **pin 的落地**：pin/unpin 属 Markdown 通道（低风险），平台**即时应用**到 `pinned_memories` 表并同步追加 journal 留痕，不等审批窗口；remember/forget 的长期库变更才等 Phase 10.5 审批。
+
+### 注入（随 T6 落地）
+
+- 顺序：底色 → 记忆使用规则 → `# Pinned Memories`（独立保底预算）→ `# Memory`（memory.md 四段）
 - 整块 ≤2500 字符，超限按 今天 > 重要事实 > Pinned > 本周 > 长期 截断
-- 注入前 `scanForThreats()` 逐段扫描，命中替换 `[BLOCKED]`
-- 热刷新：assemble 后更新 system prompt（10 轮一批天然限频）
-- 仅绑定 Agent 且记忆开启时注入；未绑定会话不注入
+- 注入前逐段威胁扫描（命中替换 `[BLOCKED]`）；摘要/事实落盘前 PII 脱敏
+- 热更新：assemble 后新 revision 从下一轮生效
 
-### 4.8 LLM 降级
-
-| 环节失败 | 行为 |
-|---|---|
-| rolling summary LLM 失败 | 积压水位线不推进，下轮重试（≤3 次后跳过该批，记入健康状态） |
-| compileToday/compileDaily/facts 失败 | 断点停留该步骤，下次每日任务续跑；memory.md 保持上一版 |
-| 深潜提取失败 | snapshot 不推进，次日重试 |
-| 事件索引 | **零 LLM**，永远可用 |
-
-### 4.9 默认配置（`src/config/memory-config.ts`，常量进配置不进代码散点）
-
-`turnsPerSummary=10`、`weekWindowDays=6`、`limits{today:5条, daily:60字, week:1200字符, longterm:400字, facts:200字}`、`injectBudgetChars=2500`、`recoveryWindowHours=24`、`recallSessionMaxLines=200`。
-
-### 4.10 与 openhanako 模块对应表（实现时对照阅读）
-
-| 我们的文件 | openhanako 参考 |
-|---|---|
-| `src/memory/memory-ticker.ts` | `lib/memory/memory-ticker.ts` |
-| `src/memory/rolling-summary.ts` | `lib/memory/session-summary.ts` |
-| `src/memory/summary-format.ts` | `lib/memory/rolling-summary-format.ts` |
-| `src/memory/compile.ts` + `prompts/compile.ts` | `lib/memory/compile.ts` + `prompts/compile.ts` |
-| `src/memory/deep-dive.ts` | `lib/memory/deep-memory.ts` |
-| `src/memory/fact-store.ts` | `lib/memory/fact-store.ts` |
-| `src/memory/memory-search.ts` | `lib/memory/memory-search.ts` |
-| `src/memory/pinned-store.ts` | `lib/memory/pinned-memory-store.ts` |
-| `src/memory/cjk-ngram.ts` | `lib/memory/fact-store.ts` 内 search_text 逻辑 |
-
-> 注意：openhanako 是 JS+自家 harness，我们是 TS strict + PI 适配层——**抄机制不抄代码**，prompt 模板可移植后按我们的格式契约调整。
-
----
-
-## 五、记忆工具（agent 可调用，经 PI 适配层注册）
-
-| 工具 | 参数要点 | 说明 |
-|---|---|---|
-| `search_facts` | query?, tags?, date_from?, date_to?, limit=10 | 事实第一站 |
-| `search_events` | query?, date_from?, date_to?, limit=10 | 时间叙事下钻 |
-| `recall_session` | session_id, from_line?, to_line? | 原文回溯（只读，PathGuard 校验） |
-| `remember` | content, tags? | 记一条事实（source='remember'） |
-| `forget` | target('fact'/'event'), id, reason? | 放逐，留痕可审计 |
-| `pin_memory` / `unpin_memory` | content / id 或 keyword | 置顶管理 |
-
-返回统一带 provenance（date/session_id/event_id）与 `hint`（如"结果可能不完整，可用 search_events 按日期下钻"）。工具描述文本中写明分层使用顺序。
-
----
-
-## 六、HTTP API（`src/server/routes/memory.ts`）
+### HTTP API
 
 | Method | Path | 用途 |
 |---|---|---|
 | GET | `/api/agents/:id/memory/compiled` | memory.md 四段内容 |
-| GET | `/api/agents/:id/memory/facts?query=&tags=` | 事实列表/搜索 |
+| GET | `/api/agents/:id/memory/facts?query=&tags=` | 已审批事实只读列表/搜索 |
 | GET | `/api/agents/:id/memory/events?from=&to=&query=` | 事件时间线 |
-| GET | `/api/agents/:id/memory/pinned` / POST / DELETE `:pinId` | 置顶管理 |
-| POST | `/api/agents/:id/memory/flush` | 手动触发一轮整理 |
-| GET | `/api/agents/:id/memory/health` | 水位线/断点/积压状态 |
+| GET | `/api/agents/:id/memory/pinned` | Markdown 通道置顶只读查看 |
+| POST | `/api/agents/:id/memory/flush` | 手动封存/处理 pending batch（仍经策略审批） |
+| GET | `/api/agents/:id/memory/health` | 水位线、断点、pending batch 和回想状态 |
 
-新增 SSE 事件 `memory.updated`（assemble 后广播）→ 同步 `web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES`。
+新增 SSE：`memory.updated`、`memory.recall.*`。同步 `web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES`。
 
----
+### `/memory` 只读页
 
-## 七、Web 只读页 `/memory`（`web/src/pages/MemoryPage.tsx`）
-
-- 四段记忆卡片展示（今天/本周/长期/重要事实）+ Pinned
-- 事实列表（标签/时间/来源会话链接）+ 搜索框
-- 事件时间线（按日分组，简列表，点击展开摘要）
-- 收到 `memory.updated` 自动刷新；从 Agent 设置页入口跳转
-- 复用 Phase 7 UI 原语与 tokens；不做编辑（编辑留 10.5+）
+- 四段记忆卡片（今天/本周/长期/重要事实）和 Markdown Pinned；
+- 已审批事实列表、事件时间线、来源 Session 链接和搜索；
+- RecallEpisode 状态和 pending batch 健康状态；
+- Phase 10 不做长期事实编辑和强度编辑，编辑留 Phase 10.5+。
 
 ---
 
-## 八、任务拆分（依赖与归属）
+## 八、任务拆分
 
-```
-T1 契约+迁移（主 Agent 串行先行）
-   src/contracts/memory.ts、migrations v6、cjk-ngram util + 单测
-   ├─→ T2 存储层（子 Agent A）：session-summaries/event/fact/pinned/recall/daily-state
-   │     六个 store + FTS 触发器 + 单测
-   ├─→ T3 摘要与事件索引（子 Agent B，依赖 T1/T2）：summary-format、
-   │     rolling-summary、event-indexer + 单测（faux provider）
-   │     ├─→ T4 编译流水线（子 Agent B）：compile.ts + prompts + memory 目录管理
-   │     │     + 断点续跑 + 单测
-   │     ├─→ T5 Ticker 与生命周期集成（主 Agent）：memory-ticker、
-   │     │     session-runtime 钩子、启动恢复扫描、降级逻辑 + 集成测试
-   │     ├─→ T6 工具与注入（子 Agent C，依赖 T2）：六个记忆工具注册、
-   │     │     buildSystemPrompt 注入、预算/威胁扫描 + 集成测试
-   │     └─→ T7 HTTP API（子 Agent C）：routes/memory.ts + SSE 事件 + 集成测试
-   └─→ T8 Web /memory 页（子 Agent D，依赖 T7 契约）：页面 + 单测
+```text
+T1 契约 + migration v6（主 Agent 串行）
+   memory.ts、RecallEpisode、memory_journal、memory_batches、CJK n-gram、schema 单测
+   ├─→ T2 存储层：summary/event/fact/recall/journal/batch/daily/pinned stores
+   ├─→ T3 rolling summary + event indexer（branch cursor、幂等、deterministic fallback；
+   │     **先写 PI 分支集成测试验证 entry/revision 语义，再冻结 cursor 契约**）
+   │     └─→ T4 openhanako 编译流水线（today/daily/week/longterm/facts/assemble）
+   ├─→ T5 MemoryTicker + Session 生命周期 + sealed batch + dirty recovery（主 Agent）
+   ├─→ T6 search_memory + RecallEpisode + intent-only 工具 + 注入（依赖 T2）
+   ├─→ T7 HTTP API + SSE（依赖 T6）
+   └─→ T8 `/memory` 只读页（依赖 T7）
 T9 质量门 + browser-use 验收（主 Agent）
 ```
 
-并行规则：T3/T4 与 T6 不共享文件可并行；T8 只依赖 API 契约。子 Agent 报告不作验收证据，主 Agent 独立复核 + 重跑质量门。
-
-**测试文件**：`tests/unit/{cjk-ngram,summary-format,compile,event-indexer}.test.ts`、`tests/integration/{memory-ticker,memory-tools,memory-api,memory-injection,memory-recovery}.test.ts`。全部 faux provider + 临时 `OPENCOLORFUL_HOME`，禁止真实网络。
+测试：`tests/unit/{cjk-ngram,summary-format,memory-journal}.test.ts`、`tests/integration/{memory-ticker,memory-recall,memory-recovery,memory-api,memory-injection}.test.ts`。全部 faux provider + 临时 `OPENCOLORFUL_HOME`，禁止真实网络。
 
 ---
 
@@ -342,25 +345,26 @@ npm run test --workspace=web
 npm run web:build
 npx tsc -p tsconfig.build.json
 cd web; npx playwright test
-# browser-use：/memory 页 + 绑定 Agent 对话后记忆注入 + 工具调用验收
+# browser-use：四段记忆注入、search_memory 回想状态、sealed batch 和 /memory 页
 ```
 
 ---
 
 ## 十、验收标准
 
-- [ ] v6 迁移幂等，FTS5 触发器同步正确
-- [ ] 绑定 Agent 会话满 10 轮自动生成 rolling summary，格式校验/修复生效
-- [ ] 事件索引零 LLM 生成，含 CJK search_text；同一批次幂等
-- [ ] 跨日触发每日任务 S0-S5，断点续跑可恢复；week 装配零 LLM
-- [ ] memory.md 四段正确拼合并注入 system prompt（含规则/Pinned），预算截断与威胁扫描生效
-- [ ] search_facts（tags→FTS→LIKE）/ search_events / recall_session 三层检索可用，provenance 完整；中文单字可检索
-- [ ] remember/forget/pin 生效且留痕；forget 后默认检索不可见
-- [ ] per-agent 隔离：Agent A 检索不到 Agent B 的事实/事件；未绑定会话无记忆产物
-- [ ] LLM 失败时按 §4.8 降级，系统不停摆；启动恢复扫描补摘要
-- [ ] `/memory` 页展示四段/事实/事件并可搜索；`memory.updated` 自动刷新
-- [ ] memory_recalls 有写入记录
-- [ ] 全部质量门通过；browser-use 验收通过
+- [ ] v6 migration 幂等；FTS5 触发器同步；`memory_journal` 和 suppression 参与 rebuild；
+- [ ] 绑定 Agent 每 10 轮生成 rolling summary，格式校验/修复和 branch cursor 生效；
+- [ ] 四段 Markdown 按 openhanako 传送带编译；新 revision 从下一轮生效；失败继续上一版；
+- [ ] 事件索引同一 source batch 幂等，LLM 不可用时 deterministic stub 仍可检索；
+- [ ] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
+- [ ] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
+- [ ] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
+- [ ] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
+- [ ] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
+- [ ] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；
+- [ ] 启动按 dirty watermark 恢复摘要、Markdown 和 pending batch；
+- [ ] `/memory` 只读页面展示四段/事实/事件/回想状态并自动刷新；
+- [ ] 全部质量门和 browser-use 验收通过。
 
 ---
 
@@ -368,11 +372,12 @@ cd web; npx playwright test
 
 | 风险 | 缓解 |
 |---|---|
-| LLM 成本（摘要+编译多点调用） | 增量水位线 + 每日任务合并 + 事件索引零 LLM；后续支持 utility 小模型 |
-| 抄错 openhanako 机制 | §4.10 对照表逐模块阅读；关键行为（水位线/断点/格式契约）先写测试 |
-| PI 分支 cursor 语义差异 | T3 先用集成测试摸清 PI leafId/lineage 行为再定 cursor 结构 |
-| 热刷新导致前缀缓存失效 | 10 轮一批限频；10.5 评测冻结 vs 热更新后定默认 |
-| 中文检索质量 | CJK n-gram + 单测覆盖混排场景 |
+| LLM 成本或不可用 | 增量水位线、上一版制品、deterministic event stub、pending batch 重试 |
+| Markdown 与长期库互相污染 | 明确两条通道；sourceType；长期库只读回想；不从 recall/injection 提取新事实 |
+| forget/rebuild 复活 | `memory_journal` append-only suppression；rebuild 同时读取 JSONL+journal |
+| PI 分支 cursor 差异 | entry ID + branch revision；先写分支集成测试 |
+| 回想状态丢失 | RecallEpisode + SSE replay + durable recall ledger |
+| 后台任务阻塞对话 | Session 封存和所有整理任务 fire-and-forget；per-agent 串行队列 |
 
 ---
 
