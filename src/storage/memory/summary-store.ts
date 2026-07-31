@@ -95,6 +95,19 @@ export class SessionSummaryStore {
     return row ? mapRow(row) : undefined;
   }
 
+  /**
+   * 获取某 session 最新的 summary row（按 updated_at DESC LIMIT 1）。
+   * 用于 rolling summary 的增量判定。
+   */
+  getLatestForSession(sessionId: string): SessionSummary | undefined {
+    const row = this.database
+      .prepare(
+        "SELECT * FROM session_summaries WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1",
+      )
+      .get(sessionId) as SummaryRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
   listByAgent(agentId: string): SessionSummary[] {
     const rows = this.database
       .prepare(
