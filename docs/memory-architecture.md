@@ -92,7 +92,7 @@ confidence         可信度：来源和核验的可靠程度
 status             active / superseded / forgotten / suppressed
 ```
 
-- 主 Agent 的回想只更新 recall ledger 和 activation 统计，不直接改 retention strength。
+- 主 Agent 的回想只更新 recall ledger；activation 统计由平台确定性更新，事实来源仍是 recall ledger，不直接改 retention strength。
 - 只有记忆 Agent 根据跨会话/跨日期命中、用户确认、独立来源和冲突情况提出强度变更。
 - 短期可自动强化为中期；中期晋升永久必须满足多来源、高可信度、无未解决冲突，由 MemoryPolicy 审批。
 - 永久表示不自动衰减，不代表不可 supersede、forget 或被用户删除。
@@ -114,7 +114,7 @@ memory.recall.layer_changed
 memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.recall.cancelled
 ```
 
-事件至少包含 `recallId/sessionId/agentId/turnId/layer/status/resultCount/startedAt/completedAt`。UI 文案可采用“正在努力回想 / 正顺着往事继续寻找 / 想起来了 / 没有找到相关记忆”。
+事件至少包含 `recallId/sessionId/agentId/turnId/layer/status/resultCount/startedAt/completedAt`，并持久化到 `memory_recall_events` 供 SSE Replay。UI 文案可采用“正在努力回想 / 正顺着往事继续寻找 / 想起来了 / 没有找到相关记忆”。
 
 回想结果是证据，不是指令；结果带 `provenance`、`confidence`、`strengthTier`、`validFrom/validUntil` 和 `sourceType=memory_recall`。没有结果与技术失败必须区分。
 
@@ -133,7 +133,8 @@ Session 结束、归档或长时间无活动时，创建 `sealed_memory_batch`�
 ### 6.3 每日与每周窗口
 
 - 每日默认 `03:00`（本地时区），且 Agent 空闲至少 30 分钟才运行记忆 Agent。
-- 每 Agent 独立串行；有活动时跳过并在下一次 housekeeping tick（复用 1 小时兜底 timer）重试；进程重启按 dirty watermark 恢复，不以固定 24 小时作为唯一依据。
+- 高优先级 intent 若 Session 仍持续，在当前 turn 完成后创建限定 source range 的 micro-seal，不关闭 Session。
+- 每 Agent 独立串行；有活动时跳过并在下一次 housekeeping tick（复用 1 小时兜底 timer）重试；进程重启按 `memory_watermarks` + `scheduler_state` 恢复，不以固定 24 小时作为唯一依据。
 - 每日整理提取候选、核验、合并、短期→中期强化、冲突失效和意图处理。
 - 每周复核跨日期/跨 Session 的独立命中、永久候选、重复和矛盾。
 - 整理生成 proposal，经 MemoryPolicy 校验后在单个 SQLite 事务中提交；半成品不可被主 Agent 读取。
@@ -168,7 +169,8 @@ Session 结束、归档或长时间无活动时，创建 `sealed_memory_batch`�
 │   ├── memory_journal                       【权威】记忆意志、suppression、提案结果
 │   ├── memory_batches                       【队列】sealed/provisional batch
 │   ├── memory_recalls / memory_recall_episodes【证据】回想命中与 UI 状态
-│   ├── memory_daily_state / scheduler_state 【断点】唯一调度权威
+│   ├── memory_recall_events                 【回放】RecallEpisode 状态历史
+│   ├── memory_daily_state / memory_watermarks / scheduler_state 【断点】恢复权威
 │   └── memory_mutation_proposals            【审批】记忆 Agent 提案
 └── agents/<id>/
     ├── identity.json / base-color.json / settings.json

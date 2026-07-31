@@ -54,18 +54,20 @@ Markdown 是可重建的上下文制品；`memory_facts` 是长期记忆表，�
 
 ```sql
 CREATE TABLE session_summaries (
-  session_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  branch_revision TEXT NOT NULL DEFAULT '',
   agent_id TEXT,
   summary TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
   cursor_json TEXT NOT NULL DEFAULT '{}',
-  branch_revision TEXT NOT NULL DEFAULT '',
   source_start_entry TEXT,
   source_end_entry TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (session_id, branch_revision)
 );
 CREATE INDEX idx_summaries_agent ON session_summaries(agent_id);
+CREATE INDEX idx_summaries_agent_branch ON session_summaries(agent_id, branch_revision);
 
 CREATE TABLE memory_events (
   id TEXT PRIMARY KEY,
@@ -191,6 +193,41 @@ CREATE TABLE memory_daily_state (
   PRIMARY KEY (agent_id, date, step)
 );
 
+CREATE TABLE memory_watermarks (
+  agent_id TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('summary','events','markdown','batch')),
+  branch_revision TEXT NOT NULL DEFAULT '',
+  cursor_json TEXT NOT NULL DEFAULT '{}',
+  dirty INTEGER NOT NULL DEFAULT 1 CHECK (dirty IN (0,1)),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (agent_id, scope, branch_revision)
+);
+
+CREATE TABLE scheduler_state (
+  agent_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'idle'
+    CHECK (status IN ('idle','running','deferred','failed')),
+  last_daily_date TEXT,
+  last_daily_completed_at TEXT,
+  last_weekly_completed_at TEXT,
+  next_retry_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE memory_recall_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  episode_id TEXT NOT NULL,
+  recall_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  turn_id TEXT,
+  layer TEXT CHECK (layer IN ('facts','events','source')),
+  status TEXT NOT NULL CHECK (status IN ('started','layer_changed','completed','empty','failed','cancelled')),
+  result_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_recall_events_episode ON memory_recall_events(episode_id, id);
+
 CREATE TABLE pinned_memories (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL,
@@ -200,7 +237,7 @@ CREATE TABLE pinned_memories (
 CREATE INDEX idx_pinned_agent ON pinned_memories(agent_id);
 ```
 
-`memory_journal` 是记忆意志和 suppression 的追加式权威。`memory rebuild` 必须同时读取 JSONL 和 journal，否则 forget/delete 后会复活。`memory_daily_state` 是每日 Markdown 编译断点的唯一权威，不再同时维护同语义的 `daily-state.json`。
+`memory_journal` 是记忆意志和 suppression 的追加式权威。`memory rebuild` 必须同时读取 JSONL 和 journal，否则 forget/delete 后会复活。`memory_daily_state` 记录每日阶段完成点；`memory_watermarks` 记录 summary/events/Markdown/batch 的 branch-aware cursor 与 dirty 状态；`scheduler_state` 记录运行、延期、失败和下次重试。三者共同构成恢复契约，不再同时维护同语义的 `daily-state.json`。
 
 ### Agent memory 目录
 
@@ -225,10 +262,10 @@ agents/<id>/memory/
 | Session 结束/归档 | 补 rolling summary，创建 `sealed_memory_batch`，fire-and-forget | 否 |
 | 分支变化 | 按 branch revision 重新生成摘要/事件索引，旧派生记录按 journal 过滤 | 否 |
 | 跨日 | S0-S4：daily、today、week、longterm、facts、assemble | 否 |
-| 启动 | 按 dirty watermark 恢复摘要、Markdown 和 pending batch | 否 |
-| 手动 flush | 封存或处理 pending batch，但不绕过 MemoryPolicy | 否 |
+| 启动 | 按 dirty watermark 恢复摘要、Markdown 和待处理 batch | 否 |
+| 手动 flush（Phase 10） | 只封存、重建 Markdown 和事件索引；不运行记忆 Agent、不应用长期事实 proposal | 否 |
 
-约束：每 Agent 串行队列；异步任务不阻塞对话；LLM 失败使用上一版并积压水位线。Phase 10 不运行深度长期整理，不改变 `retention_strength`。
+约束：每 Agent 串行队列；异步任务不阻塞对话；LLM 失败使用上一版并积压 dirty watermark。Phase 10 不运行深度长期整理，不改变 `retention_strength`。API/UI 中的“pending batch”是聚合称呼，具体持久化状态为 `provisional`、`sealed`、`processing`、`deferred` 或 `failed`；`applied` 表示已完成。
 
 ### 四段传送带
 
@@ -255,7 +292,7 @@ S0 compileDaily → S1 compileToday → S2 rollDailyWindow
 
 ## 六、主动回想工具与状态
 
-主 Agent 默认只使用一个工具：
+主 Agent 的长期记忆读取默认只有一个入口；记忆意图工具另行提供，但不授予长期库写权限：
 
 ```text
 search_memory(query, depth?: "quick" | "deep" | "source", timeRange?, limit?)
@@ -269,7 +306,7 @@ memory.recall.layer_changed
 memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.recall.cancelled
 ```
 
-“没有找到相关记忆”与“回想系统失败”是不同结果。UI 状态与联网搜索同级，显示“正在努力回想 / 正顺着往事继续寻找 / 想起来了”。回想只写 `memory_recalls`，不直接写 `memory_facts`，不改变 retention strength。
+“没有找到相关记忆”与“回想系统失败”是不同结果。UI 状态与联网搜索同级，显示“正在努力回想 / 正顺着往事继续寻找 / 想起来了”。回想写入 `memory_recalls` 和 `memory_recall_events`，不直接写 `memory_facts`，不改变 retention strength。
 
 ---
 
@@ -282,7 +319,8 @@ memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.re
 | `search_memory` | 主 Agent 只读 | 长期记忆统一入口，返回 provenance/confidence/strengthTier |
 | `search_events` | 内部下钻 | 按日期和主题查事件 |
 | `recall_session` | PathGuard 只读 | 读取受限 JSONL entry 段 |
-| `remember` / `forget` / `pin_memory` | intent-only | 只追加 `memory_journal`，不改长期库 |
+| `remember` / `forget` | intent-only | 只追加 `memory_journal`，不改长期库 |
+| `pin_memory` / `unpin_memory` | 低风险即时应用 | 更新 Markdown 通道的 `pinned_memories`，并追加 journal 留痕 |
 
 > **pin 的落地**：pin/unpin 属 Markdown 通道（低风险），平台**即时应用**到 `pinned_memories` 表并同步追加 journal 留痕，不等审批窗口；remember/forget 的长期库变更才等 Phase 10.5 审批。
 
@@ -301,7 +339,7 @@ memory.recall.completed | memory.recall.empty | memory.recall.failed | memory.re
 | GET | `/api/agents/:id/memory/facts?query=&tags=` | 已审批事实只读列表/搜索 |
 | GET | `/api/agents/:id/memory/events?from=&to=&query=` | 事件时间线 |
 | GET | `/api/agents/:id/memory/pinned` | Markdown 通道置顶只读查看 |
-| POST | `/api/agents/:id/memory/flush` | 手动封存/处理 pending batch（仍经策略审批） |
+| POST | `/api/agents/:id/memory/flush` | 手动封存、重建 Markdown/事件索引；Phase 10 不应用长期事实 proposal |
 | GET | `/api/agents/:id/memory/health` | 水位线、断点、pending batch 和回想状态 |
 
 新增 SSE：`memory.updated`、`memory.recall.*`。同步 `web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES`。
@@ -359,6 +397,7 @@ cd web; npx playwright test
 - [ ] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
 - [ ] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
 - [ ] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
+- [ ] 分支摘要按 `(session_id, branch_revision)` 隔离；watermark/scheduler_state 可在中断后恢复；RecallEpisode 的 SSE 状态可从 `memory_recall_events` Replay；
 - [ ] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
 - [ ] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
 - [ ] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；

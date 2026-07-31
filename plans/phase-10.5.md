@@ -82,7 +82,7 @@ Session 结束、归档或长时间无活动后，Phase 10 创建 `sealed_memory
 
 ### 3.4 高优先级 intent
 
-用户明确“请记住”“以后永远如此”“不要再记得这件事”时，主 Agent 只追加 `memory_journal` intent，并提高 batch priority。**当前 Session 结束后立即触发该 intent 的专项处理**（不等每日 03:00 窗口，仍经 MemoryPolicy 审批；记忆 Agent 不可用时保持 pending，下一窗口补处理）。隐私删除由平台立即执行，不等待记忆 Agent。
+用户明确“请记住”“以后永远如此”“不要再记得这件事”时，主 Agent 只追加 `memory_journal` intent，并提高 batch priority。**当前 Session 结束后立即触发该 intent 的专项处理**；如果 Session 仍持续，则在当前 turn 完成后创建不关闭 Session 的 micro-seal batch，限定到该 turn 的 source range。该专项处理不等每日 03:00 窗口，仍经 MemoryPolicy 审批；记忆 Agent 不可用时保持 pending，下一窗口补处理。隐私删除由平台立即执行，不等待记忆 Agent。
 
 ---
 
@@ -98,7 +98,7 @@ strengthTier       short | medium | permanent
 status             active | superseded | forgotten | suppressed
 ```
 
-**更新路径分离**：`activationStrength` 由平台在 recall 命中时确定性更新（独立日期封顶、随时间衰减，**不经 proposal**）；`retentionStrength` 只能经记忆 Agent 提案 + MemoryPolicy 审批。
+**更新路径分离**：`activationStrength` 由平台在 recall 命中时确定性更新（独立日期封顶、随时间衰减，**不经 proposal**）；`retentionStrength` 只能经记忆 Agent 提案 + MemoryPolicy 审批。`memory_facts.activation_strength` 只是可重建的物化投影，`memory_recalls` 是 activation 的事实来源；每次命中先写 recall ledger，再在同一事务内更新投影，rebuild 时可由 ledger 重新计算。
 
 ### 4.1 固化强度信号
 
@@ -265,8 +265,8 @@ T8 质量门 + browser-use 验收（主 Agent）
 - [ ] 记忆 Agent 只能读取封存批次和白名单来源，不能 shell/网络/写原文/直写长期表；
 - [ ] 每日 03:00 + 空闲 30 分钟 gate 正确；活动时延期，重启按 dirty watermark 恢复；每周复核独立运行；
 - [ ] recall ledger 的跨日期、跨 Session 聚合可用；回想本身不直接提升 retention strength；
-- [ ] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；retention 只能经提案 + MemoryPolicy 审批；
-- [ ] 高优先级用户 intent 在 Session 结束后立即专项处理（仍经审批，agent 不可用时 pending）；
+- [ ] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；`memory_recalls` 是事实来源，`memory_facts.activation_strength` 可由 ledger 重建；retention 只能经提案 + MemoryPolicy 审批；
+- [ ] 高优先级用户 intent 在 Session 结束后立即专项处理；长 Session 在 turn 完成后创建 bounded micro-seal（仍经审批，agent 不可用时 pending）；
 - [ ] 短期/中期/永久阈值和迟滞正确；永久不自动衰减；pin 不等于强度 100；
 - [ ] 中期→永久需要多来源、高可信度、无未解决冲突和 MemoryPolicy 审批；
 - [ ] 冲突裁决保留旧事实 `superseded` + `valid_until`，新事实带 provenance；
