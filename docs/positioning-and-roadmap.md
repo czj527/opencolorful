@@ -48,7 +48,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 │  Agent 生命基础设施层  (Phase 0-8 部分完成，核心)         │
 │  agent 的"自我"：                                         │
 │  · 身份与底色(identity/base-color/settings) ✅ Phase 8    │
-│  · 记忆与成长(dreaming巩固+curator自我进化)               │
+│  · 记忆与成长（四段上下文 + 主动回想 + 记忆 Agent 整理）      │
 │  · 生活与主动性(书桌+定时任务+心跳)                       │
 │  · 社交(多agent协作+channel)                              │
 │  · 运行时(Server/Session/Provider/Supervisor/UI) ✅       │
@@ -132,21 +132,21 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **验收**：coding 工具写入限制在工作目录；越权写入被拒并审计
 
 ### Phase 10：记忆系统
-- 分层 markdown（today.md / week.md / longterm.md / memory.md / facts.md）
-- facts.db（SQLite 事实库，复用现有 better-sqlite3）
-- summaries/（会话摘要，PI compact 基础上扩展）
-- memory-ticker（定期整理衰减，类似 openhanako）
-- 记忆搜索工具（注入 Agent 工具集）
-- **验收**：Agent 跨会话记住事实；记忆可搜索；衰减不丢失关键事实
+- openhanako 四段 Markdown 传送带（today.md / week.md / longterm.md / facts.md，汇编为 memory.md）；这些是自动注入的近期上下文制品，不等同于长期记忆库
+- facts.db / memory_events（SQLite 事实与事件索引，复用现有 better-sqlite3）
+- summaries/（会话摘要，PI compact 基础上扩展）与 sealed_memory_batch（后台整理输入）
+- MemoryTicker（按轮次、水位线和跨日阶段增量编译，不在本阶段调整长期记忆强度）
+- `search_memory` 主动回想工具（进入 Agent 工具集，并提供独立回想状态）
+- **验收**：Agent 跨会话可通过上下文和主动回想获得事实；四段制品可恢复、可检索；长期记忆不会因上下文滚动被静默改写
 
-### Phase 11：技能包系统 skills2set（场景特化载体）
-- 技能包格式定义（prompt 片段 + tools 声明 + resources）
-- 技能包加载 / 启用 / 分组 / 导出 zip
-- 预设三个 skill bundle：coding（读写bash+工作区）/ work（读写+自动化）/ design（媒体+生成）
-- install-skill 工具（社区安装 + 审核 gateway）
-- **验收**：同一 Agent 启用不同 skill bundle 表现不同能力；技能包可导出分享
+### Phase 11：结构化日志与可观测性
+- 统一结构化日志 Envelope、级别、脱敏与生命周期；
+- 记忆链路埋点：回想、sealed batch、调度、proposal、审批、强度变化、降级、恢复；
+- Session/Agent/工具/Provider/沙箱事件统一关联 ID；
+- 日志查询、健康状态和问题诊断接口；
+- **验收**：关键运行链路可追踪，日志不泄露 API Key、Authorization、Cookie 或完整敏感记忆
 
-### Phase 12：插件系统
+### Phase 12：插件系统（技能系统后移，具体阶段另行确定）
 - PluginContext + 两级权限 + capabilities 白名单
 - 11 类扩展点（先做工具/技能/命令/provider/路由 5 类，页面/widget/后台任务后续）
 - 插件配置 schema + 拖拽安装
@@ -182,15 +182,15 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 基于 openclaw / hermes-agent / lobehub 的深度调研，OpenColorful 不做 openhanako 的复制，而是**集四家之长 + 保留自身工程化优势**，形成六大差异化方向。核心理念：**openhanako 是"一个有灵魂的助理"，OpenColorful 要做"一支有灵魂的 AI 团队"——既有人格温度，又有自我进化、团队运营和工程严谨**。
 
-### 方向 1：记忆系统——dreaming 巩固 + 自我改进闭环
+### 方向 1：记忆系统——主动回想 + 后台整理闭环
 
-超越 openhanako 的"分层存储 + 简单 ticker"，做成**主动巩固 + 自我进化**的记忆：
+在 openhanako 稳定四段传送带之上，增加**主动回想 + 后台记忆 Agent 整理**：
 
-- **借鉴 openclaw dreaming**：三阶段巩固（Light 排序暂存 → REM 反思主题 → Deep 评分提升写入 MEMORY.md），六信号加权评分（Relevance 0.30 / Frequency 0.24 / Query diversity 0.15 / Recency 0.15 / Consolidation 0.10 / Conceptual richness 0.06），shadow trial 提升前 QA 验证（有害即拒），Dream Diary 人机分离，全流程可解释可审查（provenance + `memory promote-explain` CLI）
-- **借鉴 hermes curator + learning_graph**：Agent 自我策展记忆，复杂任务后**自主创建技能**、使用中**改进技能**、learning_mutations 让技能变异进化——Agent 真正"成长"
+- **借鉴 hermes curator 的后台整理**：Session 封存后，在每日空闲窗口运行受限记忆 Agent；每周复核跨会话证据；proposal 经平台策略审批后才改变长期记忆。
+- **保留长期记忆强度**：recall ledger 只提供证据，记忆 Agent 负责短期/中期/永久层级、冲突裁决、合并与认知遗忘；技能自创不在当前路线
 - **借鉴 hermes FTS5 + Honcho**：跨会话全文检索（FTS5）+ LLM 摘要召回，Honcho 辩证式深度用户建模
-- **vs openhanako**：openhanako 仅 today/week/longterm 分层 + facts.db + ticker，是"被动存储"；OpenColorful 是"主动巩固 + 质量保证 + 自我进化"
-- **落地**：Phase 10
+- **vs openhanako**：openhanako 仅 today/week/longterm 分层 + facts.db + ticker；OpenColorful 增加两条通道、主动 search_memory、RecallEpisode 和可审计的后台整理
+- **落地**：Phase 10（底座）/ Phase 10.5（记忆 Agent）/ Phase 11（日志）
 
 ### 方向 2：多 Agent 协作——ACP 协议 + 图运行时
 
@@ -218,7 +218,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 超越 openhanako 的"单一插件模型 + 11 类扩展点"：
 
 - **借鉴 openclaw 插件双风格**：bundle-style（**优先**，接口小、稳定、安全边界好，打包 skills/MCP/config）vs code-plugin（深度运行时扩展，hooks/providers/channels/tools）。能 bundle 就不 code
-- **借鉴 openclaw Memory 可替换插件槽**：记忆作为特殊插件槽，同一时间一个激活，可替换不同记忆方案（dreaming / 简单分层 / 向量召回）——记忆实现可演进不锁死
+- **借鉴 openclaw Memory 可替换插件槽**：后续将记忆作为特殊插件槽，同一时间一个激活，可替换不同记忆方案（例如简单分层或向量召回）；dreaming 仅作为未来可评估选项，不属于当前路线——记忆实现可演进不锁死
 - **借鉴 openclaw Core lean 哲学**：核心精简，能力外置为插件；"如果一个能力还不能做成插件，优先扩展插件 API 而非加 core 行为"
 - **借鉴 openclaw ClawHub + lobehub Skill Store**：独立插件/技能市场 + provenance + 安全审查 + 官方发布者机制
 - **vs openhanako**：openhanako 单一插件模型，memory 硬编码不可替换，无 bundle/code 区分
@@ -248,11 +248,11 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 | 能力维度 | openhanako | openclaw | hermes-agent | lobehub | OpenColorful 目标 |
 |---|---|---|---|---|---|
-| 记忆巩固 | ◐ 分层+ticker | ● dreaming三阶段+评分+shadow trial | ● curator+learning_graph+FTS5 | ◐ | ● dreaming+curator 融合 |
+| 记忆巩固 | ◐ 分层+ticker | ● 后台整理+强度提案 | ● curator+FTS5 | ◐ | ● 回想+记忆 Agent+可审计审批 |
 | 多Agent协作 | ◐ channel+subagent | ● ACP协议+拒绝nested | ◐ subagent+RPC | ● GraphRuntime | ● ACP+GraphRuntime |
 | 沙箱后端 | ◐ 双层固定 | ● 4后端+三层策略 | ● 6后端含serverless | ○ | ● 多后端可插拔+serverless |
 | 插件模型 | ● 11类(单一) | ● bundle/code二分+memory可替换 | ◐ | ● Market+SkillStore | ● bundle/code二分+市场 |
-| 自我进化 | ○ | ◐ dreaming | ● 闭环(技能自创+改进) | ● SelfIteration | ● curator+dreaming闭环 |
+| 自我进化 | ○ | ○ 暂不排期 | ● 闭环(技能自创+改进) | ● SelfIteration | ○ 技能系统后移 |
 | 团队运营 | ○ | ◐ | ○ | ● Operator+TaskManager | ● 团队运营+人格温度 |
 | 人格(yuan) | ● 模板+角色卡 | ○ | ◐ | ◐ | ● yuan模板(主参考) |
 | 多平台Bridge | ● 4平台 | ● 28+平台 | ● 5平台 | ○ | ● 选择性接入 |
@@ -265,7 +265,9 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 | 差异化方向 | 主要落地 Phase | 关键借鉴源 |
 |---|---|---|
-| 记忆 dreaming + 自我进化 | Phase 10 | openclaw dreaming + hermes curator/learning_graph/FTS5 |
+| 记忆底座 + 主动回想 | Phase 10 | openhanako ticker + Hermes curator 调度思想 + FTS5 |
+| 记忆 Agent 整理 + 强度 | Phase 10.5 | Hermes curator 后台 fork + provenance + policy approval |
+| 结构化日志 | Phase 11 | 统一 Envelope + 全链路可观测性 |
 | 多 Agent ACP + 图运行时 | Phase 13 | openclaw ACP + lobehub GraphRuntime |
 | 多后端沙箱 + serverless | Phase 9 | openclaw 4后端 + hermes Modal/Daytona |
 | 插件 bundle/code 二分 | Phase 12 | openclaw 插件双风格 + ClawHub |
@@ -276,7 +278,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 1. **Phase 8 已完成**：身份、底色、运行设置与会话创建地基已建立，详细验收见 `plans/phase-08.md`。
 2. **进入 Phase 9**：优先讨论和实现沙箱机制层（执行边界与 PathGuard），不把职业形态硬编码回 Agent 模型。
-3. **Phase 10-11 可部分并行**：记忆系统和技能包系统文件归属独立，但都建立在 Phase 8 Agent 模型之上。
+3. **Phase 10 → 10.5 → 11 顺序推进**：先稳定记忆通道，再引入记忆 Agent，最后用日志验证和诊断；技能系统后移，具体阶段另行确定。
 
 ---
 
