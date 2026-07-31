@@ -1,6 +1,6 @@
 # Phase 10：记忆系统底座 - openhanako 传送带、主动回想与封存队列
 
-**状态：规划中** | 分支：`phase-10-memory`
+**状态：进行中** | 分支：`phase-10-memory`
 **基线：** `main`（Phase 9 验收点之后）
 **架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
 **实现参考：** `<local-workspace>\references\openhanako\lib\memory\`（借机制，不抄代码）
@@ -423,3 +423,18 @@ cd web; npx playwright test
 ## 实施记录
 
 （实施中回填）
+
+### T1 契约 + migration v6（2026-07-31，主 Agent）
+
+- 提交：`d8c6bd0` feat(memory): T1 契约 + migration v6（记忆系统底座）
+- 前置：`b429f33` docs(memory): finalize Phase 10/10.5 review revisions（main）
+- 交付：
+  - `src/contracts/memory.ts`：RecallEpisode / memory_journal / memory_batches / 强度与状态枚举 / search_memory 与 remember/forget/pin/unpin 工具参数 TypeBox schema / MemoryUpdatedPayload、MemoryRecallPayload SSE 契约；`NON_EVIDENCE_SOURCE_TYPES` 防自我强化标记
+  - `src/contracts/events.ts` + `web/src/lib/sse-client.ts`：注册 `memory.updated` 与 `memory.recall.started/layer_changed/completed/empty/failed/cancelled` 事件族
+  - `src/storage/migrations.ts` v6：12 张记忆表 + `memory_events_fts`/`memory_facts_fts` 虚表 + 三向同步触发器（events 用 rowid、facts 用 id 作 content_rowid）
+  - `src/storage/memory/cjk-ngram.ts`：NFKC 归一、CJK 2/3-gram、FTS 查询构建、单字 LIKE 降级（`ESCAPE '\'` 通配符转义）
+  - `src/storage/database.ts`（连带修复）：迁移失败关闭句柄，消除 Windows 文件占用泄漏
+- 测试：`tests/integration/memory-schema.test.ts`（10）、`tests/unit/cjk-ngram.test.ts`（20）、`tests/unit/memory-contracts.test.ts`（19）
+- 验证证据：`npx tsc --noEmit` exit 0；`verify-pi-sdk-imports` exit 0；`npx vitest run` 47 文件 439 全过；`npm run test --workspace=web` 28 文件 326 全过
+- 测试中发现并修正：FTS OR 查询的 n-gram 部分重叠语义（更新同步断言改用完全不重叠词项）；openhanako base+gram 结构的去重语义（断言改为跨 run gram 去重）
+- 已知偏差：无
