@@ -354,6 +354,32 @@ export const UnpinMemoryArgsSchema = Type.Object({
 });
 export type UnpinMemoryArgs = Static<typeof UnpinMemoryArgsSchema>;
 
+// ─── memory.md 四段契约（assemble 输出 ⇄ 注入切分的对齐点） ────
+
+/**
+ * memory.md 四段标题（借 openhanako buildCompiledMemoryMarkdown 结构）。
+ * T4 assemble 写盘与 T6 注入切分都以此为准；四个标题始终保留，空段写占位符。
+ */
+export const MEMORY_MD_SECTION_TITLES = {
+  facts: "重要事实",
+  today: "今天",
+  week: "本周早些时候",
+  longterm: "长期情况",
+} as const;
+export type MemoryMdSectionKey = keyof typeof MEMORY_MD_SECTION_TITLES;
+
+/** 空段占位符（避免格式漂移） */
+export const MEMORY_MD_EMPTY_PLACEHOLDER = "（暂无）";
+
+/** 注入总预算（字符），超限按 今天 > 重要事实 > Pinned > 本周 > 长期 截断 */
+export const MEMORY_INJECTION_BUDGET_CHARS = 2500;
+
+/** Pinned Memories 独立保底预算（字符） */
+export const MEMORY_INJECTION_PINNED_BUDGET_CHARS = 400;
+
+/** 注入块中记忆使用规则标题（位于 Pinned 与 Memory 段之前） */
+export const MEMORY_USAGE_RULE_HEADING = "# 记忆使用规则";
+
 // ─── SSE 事件 payload 契约 ─────────────────────────────────────
 
 /** memory.updated：四段 Markdown 新 revision 发布（下一轮生效），/memory 页自动刷新 */
