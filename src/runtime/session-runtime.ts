@@ -49,6 +49,10 @@ export interface SessionRuntimeOptions {
   readonly platformHome?: string;
   /** Session 的实际工作目录（优先于 agent.defaultCwd） */
   readonly workspaceCwd?: string | null;
+  /** 额外启用的工具名称（如记忆工具），不受 tool_mode 影响 */
+  readonly extraTools?: readonly string[];
+  /** dispose 时的清理回调（如注销记忆工具上下文） */
+  readonly onDispose?: () => void;
 }
 
 export interface PromptRun {
@@ -69,6 +73,7 @@ export class SessionRuntime {
     private readonly publish: (event: PlatformEventEnvelope) => void,
     private readonly replayStore: EventReplayStore | undefined,
     toolPolicy: ToolPolicy,
+    private readonly onDispose?: () => void,
   ) {
     this.toolPolicy = toolPolicy;
     this.unsubscribe = agent.subscribe((event) => {
@@ -140,6 +145,7 @@ export class SessionRuntime {
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         ...(sandboxService ? { toolPolicy } : {}),
+        ...(options.extraTools ? { extraTools: options.extraTools } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -156,6 +162,7 @@ export class SessionRuntime {
         modelId: options.resolveModelId,
         sessionHandle: options.sessionHandle,
         ...(options.tools ? { tools: options.tools } : {}),
+        ...(options.extraTools ? { extraTools: options.extraTools } : {}),
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
@@ -171,6 +178,7 @@ export class SessionRuntime {
       options.publish,
       options.replayStore,
       toolPolicy,
+      options.onDispose,
     );
   }
 
@@ -216,7 +224,11 @@ export class SessionRuntime {
     const active = this.executions.activeStream(this.sessionId);
     if (active) this.executions.abort(this.sessionId, active);
     this.unsubscribe();
-    this.agent.dispose();
+    try {
+      this.onDispose?.();
+    } finally {
+      this.agent.dispose();
+    }
   }
 
   private emit(event: PlatformEventEnvelope): void {

@@ -40,6 +40,7 @@ export interface ServerAppOptions {
   readonly wsRegistry?: ClientRegistry;
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;
+  readonly database?: import("better-sqlite3").Database;
 }
 
 export interface ServerAppResult {
@@ -101,6 +102,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.paths !== undefined ? { paths: options.paths } : {}),
       ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
       ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
+      ...(options.database !== undefined ? { database: options.database } : {}),
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {

@@ -190,6 +190,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         wsRegistry,
         wsPromptService: promptService,
         wsReplayStore: replayStore,
+        database,
       },
       dispose() {
         if (disposed) return;
