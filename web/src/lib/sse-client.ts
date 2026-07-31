@@ -20,6 +20,13 @@ const KNOWN_EVENT_TYPES = [
   "error",
   "sandbox.denied",
   "sandbox.preflight-denied",
+  "memory.updated",
+  "memory.recall.started",
+  "memory.recall.layer_changed",
+  "memory.recall.completed",
+  "memory.recall.empty",
+  "memory.recall.failed",
+  "memory.recall.cancelled",
 ] as const;
 
 export interface SseResetPayload {
