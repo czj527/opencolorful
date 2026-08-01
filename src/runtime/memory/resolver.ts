@@ -181,10 +181,15 @@ export class MemoryAgentResolver {
         return { runId, agentId, status: "failed", applied: 0, rejected: outcome.rejected.length, batchIds, reason };
       }
 
-      // 运行完成（无论是否产出提案）→ 本轮读取的批次结算为 applied，
-      // 避免"无提案"批次永久 pending 每天重复消耗模型
-      for (const batchId of batchIds) {
-        try { this.deps.batchStore.markStatus(batchId, "applied"); } catch { /* ignore */ }
+      // 批次结算语义（计划 §六 + 复审 P1）：
+      // - processed_noop（completed 且无 rejected 提案）→ 本轮批次结算 applied，避免永久 pending 重复消耗模型；
+      // - rejected_retryable（存在被策略拒绝的提案：版本冲突/watermark/证据不足等）→ 批次保留 sealed，
+      //   模型可据拒绝原因重新计算，下次运行重试；
+      // - 失败/超预算（deferred/failed）→ 批次保留（上方已处理）。
+      if (outcome.rejected.length === 0) {
+        for (const batchId of batchIds) {
+          try { this.deps.batchStore.markStatus(batchId, "applied"); } catch { /* ignore */ }
+        }
       }
 
       if (outcome.applied.length > 0) {

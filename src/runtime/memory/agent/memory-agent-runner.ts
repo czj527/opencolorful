@@ -83,6 +83,14 @@ export class MemoryAgentRunner {
         }
         malformed = 0;
         if (reply.kind === "final") {
+          // final 回复自带 report（{summary, issues?}）→ 与 report_run 同样落盘（复审 P2）
+          if (reply.report !== undefined && typeof reply.report === "object" && !Array.isArray(reply.report)) {
+            const report = reply.report as { summary?: unknown; issues?: unknown };
+            agentReport = {
+              summary: typeof report.summary === "string" ? report.summary : "",
+              issues: Array.isArray(report.issues) ? report.issues.filter((x): x is string => typeof x === "string") : [],
+            };
+          }
           status = "completed";
           reason = "";
           break;

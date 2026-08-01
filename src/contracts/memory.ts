@@ -471,38 +471,38 @@ export const CreateFactProposalPayloadSchema = Type.Object({
   tags: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
   factTime: Type.Optional(Type.String()),
   validUntil: Type.Optional(Type.String()),
-});
+}, { additionalProperties: false });
 export type CreateFactProposalPayload = Static<typeof CreateFactProposalPayloadSchema>;
 
 export const StrengthChangeProposalPayloadSchema = Type.Object({
   retentionStrength: Type.Integer({ minimum: 0, maximum: 100 }),
-});
+}, { additionalProperties: false });
 export type StrengthChangeProposalPayload = Static<typeof StrengthChangeProposalPayloadSchema>;
 
 export const SupersedeProposalPayloadSchema = Type.Object({
   supersededFactId: Type.Union([Type.Integer({ minimum: 1 }), Type.String({ minLength: 1 })]),
   newFact: Type.String({ minLength: 1, maxLength: 500 }),
   reason: Type.String(),
-});
+}, { additionalProperties: false });
 export type SupersedeProposalPayload = Static<typeof SupersedeProposalPayloadSchema>;
 
 export const MergeProposalPayloadSchema = Type.Object({
   factIds: Type.Array(Type.Union([Type.Integer({ minimum: 1 }), Type.String({ minLength: 1 })]), { minItems: 2 }),
   mergedFact: Type.String({ minLength: 1, maxLength: 500 }),
-});
+}, { additionalProperties: false });
 export type MergeProposalPayload = Static<typeof MergeProposalPayloadSchema>;
 
 export const ForgetProposalPayloadSchema = Type.Object({
   targetType: Type.Union([Type.Literal("fact"), Type.Literal("event"), Type.Literal("session")]),
   targetId: Type.String({ minLength: 1 }),
   reason: Type.String(),
-});
+}, { additionalProperties: false });
 export type ForgetProposalPayload = Static<typeof ForgetProposalPayloadSchema>;
 
 export const LongtermProjectionProposalPayloadSchema = Type.Object({
   content: Type.String({ minLength: 1, maxLength: 1000 }),
   tags: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-});
+}, { additionalProperties: false });
 export type LongtermProjectionProposalPayload = Static<typeof LongtermProjectionProposalPayloadSchema>;
 
 // ─── 记忆 Agent 设置（全局默认 + per-Agent 覆盖） ────────────────

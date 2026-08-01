@@ -162,7 +162,7 @@ describe("MemoryAgentResolver", () => {
     expect(envelopes.some((e) => e.type === "memory.agent.failed")).toBe(true);
   });
 
-  it("全部提案被策略拒绝 → completed（策略拒绝属正常结果），批次按本轮读取结算为 applied", async () => {
+  it("全部提案被策略拒绝 → completed（正常结果），批次保留 sealed 供重算重试（计划 §六）", async () => {
     const { database, agentsDir } = createContext();
     let rejected = false;
     const { batchStore, resolver } = buildResolver(
@@ -183,8 +183,8 @@ describe("MemoryAgentResolver", () => {
     expect(outcome.status).toBe("completed");
     expect(outcome.rejected).toBe(1);
     expect(outcome.applied).toBe(0);
-    // 运行完成即结算（评审 P1-6：避免"无提案/全拒绝"批次永久 pending 每天重复消耗模型）
-    expect(batchStore.get("b4")?.status).toBe("applied");
+    // 可恢复拒绝（版本/watermark/证据不足）→ 批次保留，模型可据拒绝原因重新计算（复审 P1-3）
+    expect(batchStore.get("b4")?.status).toBe("sealed");
   });
 });
 

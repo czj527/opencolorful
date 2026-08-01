@@ -89,8 +89,8 @@ export class MemoryPolicy {
         return { approved: false, reason: `迟滞区间内不允许降档（须低于 ${settings.retentionThresholds.mediumDown}）` };
       }
       if (currentTier === "medium" && proposedTier === "permanent") {
-        // 会话/日期以回忆账本为准（确定性，不可由模型伪造引用字符串）
-        const ledgerHits = this.deps.recallStore.listByAgent(proposal.agentId)
+        // 会话/日期以回忆账本为准（确定性，不可由模型伪造引用字符串；全量账本不受 100 条默认限制）
+        const ledgerHits = this.deps.recallStore.listByAgent(proposal.agentId, { limit: 1_000_000 })
           .filter((entry) => entry.targetType === "fact" && entry.targetId === String(current.id));
         const sessions = new Set(ledgerHits.map((entry) => entry.sessionId));
         const dates = new Set(ledgerHits.map((entry) => entry.createdAt.slice(0, 10)));
@@ -118,6 +118,12 @@ export class MemoryPolicy {
     if (proposal.type === "forget") {
       if (!proposal.reason.trim()) return { approved: false, reason: "遗忘必须提供理由" };
       if (proposal.targetType === "fact" && (!current || current.status === "suppressed")) return { approved: false, reason: "目标事实不存在" };
+      // 跨 Agent 隔离：事件目标必须属于当前 Agent
+      if (proposal.targetType === "event") {
+        const targetEvent = this.deps.eventStore.getById(String(proposal.targetId));
+        if (!targetEvent) return { approved: false, reason: "目标事件不存在" };
+        if (targetEvent.agentId !== proposal.agentId) return { approved: false, reason: "目标事件不属于当前 Agent" };
+      }
       return this.checkWatermark(proposal, factId);
     }
     if (proposal.type === "restore") {
@@ -145,7 +151,7 @@ export class MemoryPolicy {
         const event = this.deps.eventStore.getById(id);
         if (!event || event.agentId !== proposal.agentId) return `证据引用不属于当前 Agent: ${ref}`;
       } else if (kind === "session") {
-        const known = this.deps.recallStore.listByAgent(proposal.agentId).some((entry) => entry.sessionId === id);
+        const known = this.deps.recallStore.listByAgent(proposal.agentId, { limit: 1_000_000 }).some((entry) => entry.sessionId === id);
         if (!known) return `会话证据无法验证（回忆账本中不存在）: ${ref}`;
       }
     }
@@ -153,18 +159,17 @@ export class MemoryPolicy {
   }
 
   /**
-   * 供应用层确定性计算新事实初始强度（无 ledger 时按证据/可信度/用户意图估算）。
-   * 仅当提案未显式给出 retentionStrength 时使用。
+   * 供应用层确定性计算新事实初始强度（评审 P0-2：不信任模型显式 retentionStrength，
+   * 完全由平台按证据/可信度/用户意图计算；payload schema 已禁止额外字段作为第一道闸）。
    */
   computeInitialRetention(proposal: MemoryMutationProposal): number {
     const settings = this.deps.settingsResolver(proposal.agentId);
-    const explicit = numberValue(proposal.payload.retentionStrength);
-    if (explicit !== undefined) return Math.max(0, Math.min(100, Math.round(explicit)));
     const userIntent = this.deps.journalStore.listPending(proposal.agentId).some((intent) =>
       intent.intentType === "remember" && intent.status === "pending" &&
       typeof intent.payload["fact"] === "string" &&
       intent.payload["fact"] === String(proposal.payload.fact ?? proposal.payload.content ?? "").trim());
-    const sessionRefs = proposal.evidenceRefs.filter((ref) => ref.startsWith("session:")).length;
+    // 会话证据去重（重复提交同一 session 不虚增 independentSessions）
+    const sessionRefs = new Set(proposal.evidenceRefs.filter((ref) => ref.startsWith("session:"))).size;
     const computed = computeRetention({
       current: 0,
       signals: { userIntent, independentSessions: sessionRefs, independentDates: 0, consistency: proposal.confidence, conflicts: 0, successUse: 0, ageDays: 0 },

@@ -1,6 +1,6 @@
 # Phase 10.5：记忆 Agent、强度巩固与后台整理
 
-**状态：规划中** | 分支：`phase-10.5-memory-agent`
+**状态：已完成（两轮评审修复后，待合并）** | 分支：`phase-10.5-memory-agent`
 **基线：** `main`（Phase 10 验收点）
 **架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
 **参考：** Hermes `agent/curator.py` 的空闲/间隔调度与受限后台 fork；openhanako 的深层记忆整理机制
@@ -260,22 +260,22 @@ T8 质量门 + browser-use 验收（主 Agent）
 
 ---
 
-## 十、验收标准
+## 十、验收标准（评审闭环后全部达成）
 
-- [ ] 记忆 Agent 只能读取封存批次和白名单来源，不能 shell/网络/写原文/直写长期表；
-- [ ] 每日 03:00 + 空闲 30 分钟 gate 正确；活动时延期，重启按 dirty watermark 恢复；每周复核独立运行；
-- [ ] recall ledger 的跨日期、跨 Session 聚合可用；回想本身不直接提升 retention strength；
-- [ ] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；`memory_recalls` 是事实来源，`memory_facts.activation_strength` 可由 ledger 重建；retention 只能经提案 + MemoryPolicy 审批；
-- [ ] 高优先级用户 intent 在 Session 结束后立即专项处理；长 Session 在 turn 完成后创建 bounded micro-seal（仍经审批，agent 不可用时 pending）；
-- [ ] 短期/中期/永久阈值和迟滞正确；永久不自动衰减；pin 不等于强度 100；
-- [ ] 中期→永久需要多来源、高可信度、无未解决冲突和 MemoryPolicy 审批；
-- [ ] 冲突裁决保留旧事实 `superseded` + `valid_until`，新事实带 provenance；
-- [ ] proposal 版本冲突会拒绝或重新计算；正式变更单事务提交；回滚只撤销当前 run；
-- [ ] 主 Agent 看不到哪些记忆被遗忘；search_memory 默认排除 forgotten/suppressed；
-- [ ] LLM/provider 不可用时 batch pending，不阻塞主 Agent；无未经审批的事实写入；
-- [ ] 运行报告完整、脱敏、可读取；后台状态不污染主 Agent 对话流；
-- [ ] 时间线分别展示 retention/activation 分解，检索仍以相关性为主；
-- [ ] 全部质量门和 browser-use 验收通过。
+- [x] 记忆 Agent 只能读取封存批次和白名单来源，不能 shell/网络/写原文/直写长期表（含跨 Agent 批次/会话/事件/事实隔离，两轮评审定向验证）；
+- [x] 每日 03:00 + 空闲 30 分钟 gate 正确；活动时延期，重启按 dirty watermark 恢复；每周复核独立运行（失败仅设 nextRetryAt，不推进完成日期）；
+- [x] recall ledger 的跨日期、跨 Session 聚合可用（全量账本，不受默认 100 条限制）；回想本身不直接提升 retention strength；
+- [x] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；`memory_recalls` 是事实来源，`memory_facts.activation_strength` 可由 ledger 重建；retention 只能经提案 + MemoryPolicy 审批；
+- [x] 高优先级用户 intent 在 Session 结束后立即专项处理；长 Session 在 turn 完成后创建 bounded micro-seal（仍经审批，agent 不可用时 pending；enabled=false 时全部拦截）；
+- [x] 短期/中期/永久阈值和迟滞正确（mediumDown 迟滞已接入 policy）；永久不自动衰减；pin 不等于强度 100；初始强度由平台确定性计算，模型不可直接指定；
+- [x] 中期→永久需要账本多会话/多日期、高可信度、无未解决冲突和 MemoryPolicy 审批；
+- [x] 冲突裁决保留旧事实 `superseded` + `valid_until`，新事实带 provenance；
+- [x] proposal 版本冲突会拒绝或重新计算（可恢复拒绝保留批次供重算）；正式变更单事务提交（含 watermark/意图结算），中途异常整体回滚；回滚只撤销当前 run；
+- [x] 主 Agent 看不到哪些记忆被遗忘；search_memory 默认排除 forgotten/suppressed；
+- [x] LLM/provider 不可用时 batch pending，不阻塞主 Agent；无未经审批的事实写入；deepDiveMode=script 时零 LLM；
+- [x] 运行报告完整、脱敏、可读取（summary/issues/输入快照落盘）；后台状态不污染主 Agent 对话流；
+- [x] 时间线分别展示 retention/activation 分解，检索仍以相关性为主；
+- [x] 全部质量门和 browser-use 验收通过。
 
 ---
 
@@ -329,23 +329,6 @@ T8 质量门 + browser-use 验收（主 Agent）
 3. **runId 双轨**：resolver 自生成 runId 与 MemoryAgentRunner 内部生成的不一致，SSE 事件 runId 无法匹配落盘报告 → 前端自动拉取报告 404 —— runner 支持注入 `runId`，全链路（事件/报告/回滚/journal）统一标识。
 4. **rollback/报告定位**：applyRun 自动补建未持久化 proposal、updatePayload 落库生成 id、rollback 反向变更 actor=system。
 5. **e2e 确定性**：记忆页支持 `?agent=` 深链固定目标 Agent（避免多 Agent 时自动选中歧义）；自包含测试模式（worker 轮换/重启下不依赖跨测试状态）。
-
-### 验收对照（计划 §十）
-
-- [x] 记忆 Agent 只读封存批次与白名单来源；无 shell/网络/直写；违规工具名/参数被拒
-- [x] 每日 03:00 + 空闲 30 分钟 gate；活动延期；重启按 dirty watermark 恢复；每周复核独立运行
-- [x] recall ledger 跨日期/跨 Session 聚合；回想本身不提升 retention（只作 activation 证据）
-- [x] activation 平台侧确定性更新（14 独立日期封顶/时间衰减），ledger 可重建；retention 只经提案 + MemoryPolicy
-- [x] 高优先级 intent 会话结束立即专项处理；长会话 turn 完成后 bounded micro-seal（审批后应用，agent 不可用 pending）
-- [x] 短期/中期/永久阈值与迟滞；永久不自动衰减；pin ≠ 强度 100
-- [x] 中期→永久需多来源（≥2 session/≥2 日期）+ 高可信（≥0.8）+ 无未解决冲突 + 审批
-- [x] 冲突裁决保留旧事实 superseded + valid_until，新事实带 provenance
-- [x] proposal 版本冲突拒绝；正式变更单事务提交；回滚只撤销当前 run
-- [x] search_memory 默认排除 forgotten/suppressed；主 Agent 看不到遗忘记录
-- [x] provider 不可用时 batch pending 不阻塞主 Agent；无未经审批写入
-- [x] 运行报告完整、脱敏、可读；后台状态不污染主 Agent 对话流（独立 SSE 状态卡）
-- [x] 时间线分别展示 retention/activation 分解；检索仍以相关性为主
-- [x] 全质量门 + browser-use（Playwright 45 e2e）验收通过
 
 ### 质量门（全部通过）
 

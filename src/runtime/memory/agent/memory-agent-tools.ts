@@ -76,7 +76,8 @@ export const memoryAgentTools: readonly MemoryAgentTool[] = [
     const all = ctx.factStore.listByAgent(ctx.agentId, { limit: 1_000_000 });
     const memoryId = a.memoryId;
     const facts = (memoryId !== undefined ? all.filter((f) => String(f.id) === strId(memoryId)) : all).slice(0, limit);
-    const ledger = ctx.recallStore.listByAgent(ctx.agentId);
+    // 权威统计需全量账本（存储层默认 limit 100，不能截断旧日期/旧会话证据）
+    const ledger = ctx.recallStore.listByAgent(ctx.agentId, { limit: 1_000_000 });
     return sanitizeToolResult({ facts: facts.map((f) => {
       const hits = ledger.filter((entry) => entry.targetType === "fact" && entry.targetId === String(f.id));
       return {
@@ -94,7 +95,7 @@ export const memoryAgentTools: readonly MemoryAgentTool[] = [
   make("propose_strength_change", "提议调整事实固化强度", (ctx, a) => { requireOwnFact(ctx, a.memoryId); const id = strId(a.memoryId); const f = ctx.factStore.getById(Number(a.memoryId)); return proposal(ctx, "strength_change", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence, targetType: "fact", targetId: id, ...(f ? { previousState: { retentionStrength: f.retentionStrength, status: f.status, revision: f.updatedAt } } : {}) }); }),
   make("propose_supersede", "提议以新事实取代旧事实", (ctx, a) => { if (a.payload.supersededFactId !== undefined) requireOwnFact(ctx, a.payload.supersededFactId); const id = strId(a.payload.supersededFactId); const f = ctx.factStore.getById(Number(a.payload.supersededFactId)); return proposal(ctx, "supersede", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence, targetType: "fact", targetId: id, ...(f ? { previousState: { fact: f.fact, status: f.status, revision: f.updatedAt } } : {}) }); }),
   make("propose_merge", "提议合并重复事实", (ctx, a) => { for (const factId of (a.payload.factIds as unknown[] ?? [])) requireOwnFact(ctx, String(factId)); return proposal(ctx, "merge", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence, targetType: "fact" }); }),
-  make("propose_forget", "提议认知遗忘", (ctx, a) => { if (a.payload.targetType === "fact") requireOwnFact(ctx, String(a.payload.targetId)); return proposal(ctx, "forget", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence, targetType: a.payload.targetType, targetId: a.payload.targetId }); }),
+  make("propose_forget", "提议认知遗忘", (ctx, a) => { if (a.payload.targetType === "fact") { requireOwnFact(ctx, String(a.payload.targetId)); } else if (a.payload.targetType === "event") { const evt = ctx.eventStore.getById(String(a.payload.targetId)); if (evt !== undefined && evt.agentId !== ctx.agentId) throw new Error("目标事件不属于当前 Agent"); } return proposal(ctx, "forget", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence, targetType: a.payload.targetType, targetId: a.payload.targetId }); }),
   make("propose_longterm_projection", "提议生成长期投影", (ctx, a) => proposal(ctx, "longterm_projection", { payload: a.payload, evidenceRefs: a.evidenceRefs, reason: a.reason, confidence: a.confidence })),
   make("report_run", "报告整理结果并结束运行", (_ctx, a) => ({ summary: sanitizeSensitiveText(a.summary, 2000), ...(a.issues ? { issues: a.issues.map((x) => sanitizeSensitiveText(x, 500)) } : {}) })),
 ];

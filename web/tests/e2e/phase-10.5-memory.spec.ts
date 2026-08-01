@@ -274,14 +274,16 @@ test.describe("Phase 10.5：记忆页时间线 / 整理设置 / 后台整理状�
     await expect(page.getByLabel("记忆健康状态").getByText("空闲", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /立即整理/ }).click();
-    // 手动整理可能瞬时完成（faux provider 立即应答）：容忍 已排队/整理中/整理完成 任一中间态
-    const queued = page.getByText("已排队").first();
-    const started = page.getByText("正在整理往事").first();
-    const done = page.getByText("整理完成").first();
+    // 手动整理可能瞬时完成（faux provider 立即应答）：容忍 已排队/整理中/整理完成 任一中间态。
+    // 定位器作用域限定「后台整理控制」region + exact 匹配，避免命中说明段落触发 strict mode。
+    const maintenance = page.getByLabel("后台整理控制");
+    const queued = maintenance.getByText("已排队", { exact: true });
+    const started = maintenance.getByText("正在整理往事", { exact: true });
+    const done = maintenance.getByText("整理完成", { exact: true });
     await expect(queued.or(started).or(done)).toBeVisible({ timeout: 10_000 });
-    // SSE memory.agent.*：started → processing → completed
-    await expect(page.getByText("正在整理往事").first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("整理完成").first()).toBeVisible({ timeout: 30_000 });
+    // SSE memory.agent.*：终态 整理完成（中间态文案映射由单测覆盖；faux provider 瞬时应答，
+    // 中间态可能一闪而过，不作独立断言避免竞态）
+    await expect(done).toBeVisible({ timeout: 30_000 });
 
     // completed 后自动拉取脱敏运行报告（REPORT.md：状态/提案/未解决问题，不含原文）
     const reportSummary = page.getByText("最近运行报告（脱敏）");

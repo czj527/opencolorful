@@ -260,6 +260,28 @@ describe("MemoryAgentRunner", () => {
 });
 
 describe("MemoryAgentRunner 验收修复（评审 P1-3/P2-7）", () => {
+
+  it("kind:final 自带 report → summary/issues 同样落盘（复审 P2）", async () => {
+    const { database, agentsDir } = createContext();
+    const runner = new MemoryAgentRunner({
+      agentId: "a1",
+      batchStore: new MemoryBatchStore(database),
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      agentsDir,
+      sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
+      completeText: async () => JSON.stringify({ kind: "final", report: { summary: "final 自带总结", issues: ["遗留问题 X"] } }),
+    });
+    const result = await runner.run();
+    expect(result.status).toBe("completed");
+    expect(result.report?.summary).toBe("final 自带总结");
+    const runJson = JSON.parse(fs.readFileSync(path.join(agentsDir, "a1", "memory", "runs", result.runId, "run.json"), "utf8")) as { report?: { summary: string; issues: string[] } };
+    expect(runJson.report?.summary).toBe("final 自带总结");
+    expect(runJson.report?.issues).toContain("遗留问题 X");
+  });
+
   it("weekly=true → 模型 prompt 含本周复核模式说明", async () => {
     const { database, agentsDir } = createContext();
     const prompts: string[] = [];
