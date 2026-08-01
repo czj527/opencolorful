@@ -267,7 +267,7 @@ export function registerAgentRoutes(
       const rawBody = await context.req.json() as unknown;
       if (
         !isRecord(rawBody) ||
-        !hasOnlyKeys(rawBody, ["defaultCwd", "extraReadPaths", "protectedPaths"])
+        !hasOnlyKeys(rawBody, ["defaultCwd", "extraReadPaths", "protectedPaths", "memory"])
       ) {
         return context.json(createApiError("INVALID_INPUT", "请求包含不支持的字段"), 400);
       }
@@ -275,6 +275,7 @@ export function registerAgentRoutes(
       const patch: {
         defaultCwd?: string | null;
         sandbox?: SandboxCapabilities;
+        memory?: import("../../contracts/memory.js").MemoryAgentSettings;
       } = {};
 
       // 读取现有 sandbox 避免更新一个字段时清空另一个
@@ -343,6 +344,16 @@ export function registerAgentRoutes(
           extraReadPaths: patch.sandbox?.extraReadPaths ?? existingSandbox?.extraReadPaths ?? [],
           protectedPaths: body.protectedPaths as string[],
         };
+      }
+
+      // Phase 10.5：记忆设置（完整对象，经 schema 校验）
+      if (body.memory !== undefined) {
+        const { Value } = await import("typebox/value");
+        const { MemoryAgentSettingsSchema } = await import("../../contracts/memory.js");
+        if (!Value.Check(MemoryAgentSettingsSchema, body.memory)) {
+          return context.json(createApiError("INVALID_INPUT", "memory 设置不合法"), 400);
+        }
+        patch.memory = body.memory;
       }
 
       if (Object.keys(patch).length === 0) {

@@ -220,6 +220,12 @@ export class AgentStore {
     if (mergedSandbox !== undefined) {
       next.sandbox = mergedSandbox;
     }
+    // 合并 memory 段（Phase 10.5）：patch 显式传入时优先，否则保留已有值
+    if (patch.memory !== undefined) {
+      next.memory = patch.memory;
+    } else if (base.memory !== undefined) {
+      next.memory = base.memory;
+    }
     this.writeSettings(agentId, next);
     return next;
   }

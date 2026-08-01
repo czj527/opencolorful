@@ -219,4 +219,9 @@ export class MemoryAgentResolver {
   async deepDive(agentId: string, opts: { weekly?: boolean } = {}): Promise<MaintenanceOutcome> {
     return this.runMaintenance(agentId, opts);
   }
+
+  /** 暴露审批应用器（T6 rollback 端点使用） */
+  get application(): ProposalApplication {
+    return this.deps.application;
+  }
 }

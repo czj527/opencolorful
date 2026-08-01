@@ -320,6 +320,12 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         wsReplayStore: replayStore,
         database,
         memoryFlushHook: (agentId) => memoryTicker?.requestFlush(agentId),
+        memoryAdmin: {
+          resolver: memoryAgentResolver,
+          application: memoryAgentResolver.application,
+          preferencesStore,
+          recallStore: new MemoryRecallStore(database),
+        },
       },
       dispose() {
         if (disposed) return;
