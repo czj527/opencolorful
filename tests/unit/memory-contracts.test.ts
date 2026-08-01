@@ -2,7 +2,11 @@ import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 
 import {
+  CreateFactProposalPayloadSchema,
   ForgetIntentArgsSchema,
+  ForgetProposalPayloadSchema,
+  LongtermProjectionProposalPayloadSchema,
+  MEMORY_ACTIVATION_DATES_CAP,
   MEMORY_BATCH_STATUSES,
   MEMORY_DAILY_STEPS,
   MEMORY_FACT_SOURCES,
@@ -13,19 +17,27 @@ import {
   MEMORY_JOURNAL_TARGET_TYPES,
   MEMORY_RECALL_LAYERS,
   MEMORY_RECALL_STATUSES,
+  MEMORY_RETENTION_THRESHOLD_DEFAULTS,
   MEMORY_SCHEDULER_STATUSES,
   MEMORY_SEARCH_DEPTHS,
   MEMORY_STRENGTH_TIERS,
   MEMORY_WATERMARK_SCOPES,
+  MemoryAgentPayloadSchema,
+  MemoryAgentSettingsSchema,
   MemoryRecallPayloadSchema,
+  MemoryStrengthChangedPayloadSchema,
   MemoryUpdatedPayloadSchema,
+  MergeProposalPayloadSchema,
   NON_EVIDENCE_SOURCE_TYPES,
   PinMemoryArgsSchema,
   RememberIntentArgsSchema,
   SearchMemoryArgsSchema,
   STRENGTH_MAX,
   STRENGTH_MIN,
+  StrengthChangeProposalPayloadSchema,
+  SupersedeProposalPayloadSchema,
   UnpinMemoryArgsSchema,
+  defaultMemoryAgentSettings,
 } from "../../src/contracts/memory.js";
 import { EVENT_TYPES } from "../../src/contracts/events.js";
 
@@ -213,5 +225,84 @@ describe("memory SSE payload schemas", () => {
         status: "exploding",
       }),
     ).toBe(false);
+  });
+});
+
+describe("Phase 10.5 contracts", () => {
+  it("registers memory.agent.* and memory.strength.changed event types", () => {
+    for (const type of [
+      "memory.agent.started",
+      "memory.agent.layer_changed",
+      "memory.agent.completed",
+      "memory.agent.deferred",
+      "memory.agent.failed",
+      "memory.strength.changed",
+    ]) {
+      expect(EVENT_TYPES).toContain(type);
+    }
+  });
+
+  it("proposal payload schemas validate per type", () => {
+    expect(Value.Check(CreateFactProposalPayloadSchema, { fact: "用户偏好深色模式" })).toBe(true);
+    expect(Value.Check(CreateFactProposalPayloadSchema, { fact: "" })).toBe(false);
+    expect(
+      Value.Check(StrengthChangeProposalPayloadSchema, { retentionStrength: 68 }),
+    ).toBe(true);
+    expect(Value.Check(StrengthChangeProposalPayloadSchema, { retentionStrength: 101 })).toBe(false);
+    expect(
+      Value.Check(SupersedeProposalPayloadSchema, {
+        supersededFactId: 3,
+        newFact: "新事实",
+        reason: "被更完整事实取代",
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(MergeProposalPayloadSchema, { factIds: [1, 2], mergedFact: "合并后事实" }),
+    ).toBe(true);
+    expect(Value.Check(MergeProposalPayloadSchema, { factIds: [1], mergedFact: "x" })).toBe(false);
+    expect(
+      Value.Check(ForgetProposalPayloadSchema, { targetType: "event", targetId: "ev_1", reason: "不再需要" }),
+    ).toBe(true);
+    expect(Value.Check(ForgetProposalPayloadSchema, { targetType: "memory", targetId: "x" })).toBe(false);
+    expect(
+      Value.Check(LongtermProjectionProposalPayloadSchema, { content: "长期投影", tags: ["背景"] }),
+    ).toBe(true);
+  });
+
+  it("MemoryAgentSettingsSchema validates the plan §8.2 shape", () => {
+    const settings = defaultMemoryAgentSettings();
+    expect(Value.Check(MemoryAgentSettingsSchema, settings)).toBe(true);
+    expect(Value.Check(MemoryAgentSettingsSchema, { ...settings, enabled: "yes" })).toBe(false);
+    expect(Value.Check(MemoryAgentSettingsSchema, { ...settings, dailyRunTime: "25:00" })).toBe(false);
+    expect(Value.Check(MemoryAgentSettingsSchema, { ...settings, retentionThresholds: { mediumUp: 45, mediumDown: 35, permanentUp: 85 } })).toBe(true);
+    // 迟滞约束：mediumDown < mediumUp < permanentUp
+    expect(settings.retentionThresholds.mediumDown).toBeLessThan(settings.retentionThresholds.mediumUp);
+    expect(settings.retentionThresholds.mediumUp).toBeLessThan(settings.retentionThresholds.permanentUp);
+  });
+
+  it("strength threshold and activation constants", () => {
+    expect(MEMORY_RETENTION_THRESHOLD_DEFAULTS).toEqual({ mediumUp: 45, mediumDown: 35, permanentUp: 85 });
+    expect(MEMORY_ACTIVATION_DATES_CAP).toBe(14);
+  });
+
+  it("MemoryAgentPayloadSchema / MemoryStrengthChangedPayloadSchema", () => {
+    expect(
+      Value.Check(MemoryAgentPayloadSchema, {
+        runId: "r1",
+        agentId: "a1",
+        status: "completed",
+        phase: "合并相近记忆",
+      }),
+    ).toBe(true);
+    expect(Value.Check(MemoryAgentPayloadSchema, { runId: "r1", agentId: "a1", status: "exploding" })).toBe(false);
+    expect(
+      Value.Check(MemoryStrengthChangedPayloadSchema, {
+        agentId: "a1",
+        factId: 3,
+        retentionStrength: 68,
+        activationStrength: 40,
+        previousRetention: 57,
+      }),
+    ).toBe(true);
   });
 });

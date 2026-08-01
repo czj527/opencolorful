@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export function applyMigrations(database: Database.Database): void {
   database.exec(`
@@ -298,6 +298,37 @@ export function applyMigrations(database: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_pinned_agent ON pinned_memories(agent_id);
     `);
     database.prepare("UPDATE schema_version SET version = 6").run();
+  }
+
+  // v7：Phase 10.5 记忆 Agent 审批与高优先级 intent（plans/phase-10.5.md §三/§七）
+  if (current < 7) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_mutation_proposals (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('create_fact','strength_change','supersede','merge','forget','restore','longterm_projection')),
+        target_type TEXT CHECK (target_type IN ('fact','event','session')),
+        target_id TEXT,
+        payload TEXT NOT NULL DEFAULT '{}',
+        previous_state TEXT,
+        evidence_refs TEXT NOT NULL DEFAULT '[]',
+        reason TEXT NOT NULL DEFAULT '',
+        confidence REAL NOT NULL DEFAULT 0 CHECK (confidence BETWEEN 0 AND 1),
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','rejected','applied','reverted')),
+        policy_reason TEXT,
+        created_at TEXT NOT NULL,
+        applied_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_proposals_agent_status ON memory_mutation_proposals(agent_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_proposals_run ON memory_mutation_proposals(run_id);
+
+      -- 高优先级 intent（用户明确 remember/forget）→ turn 后 micro-seal 专项处理
+      ALTER TABLE memory_journal ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_journal_agent_priority ON memory_journal(agent_id, priority, status, created_at);
+    `);
+    database.prepare("UPDATE schema_version SET version = 7").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

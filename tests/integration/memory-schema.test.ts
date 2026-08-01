@@ -44,14 +44,13 @@ function triggerNames(database: Database.Database): string[] {
 }
 
 describe("migration v6（记忆系统底座）", () => {
-  it("fresh database reaches schema version 6", () => {
+  it("fresh database reaches CURRENT_SCHEMA_VERSION", () => {
     const { database } = createDatabase();
     const version = database
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(6);
-    expect(CURRENT_SCHEMA_VERSION).toBe(6);
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
     database.close();
   });
 
@@ -95,14 +94,14 @@ describe("migration v6（记忆系统底座）", () => {
     database.close();
   });
 
-  it("is idempotent: re-running migrations keeps version 6 without errors", () => {
+  it("is idempotent: re-running migrations keeps the version without errors", () => {
     const { database } = createDatabase();
     expect(() => applyMigrations(database)).not.toThrow();
     const version = database
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(6);
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
     database.close();
   });
 
@@ -227,6 +226,64 @@ describe("migration v6（记忆系统底座）", () => {
       .pluck()
       .get() as number;
     expect(count).toBe(2);
+    database.close();
+  });
+});
+
+describe("migration v7（记忆 Agent 审批与优先级）", () => {
+  it("fresh database reaches schema version 7 with proposals table", () => {
+    const { database } = createDatabase();
+    const version = database
+      .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
+      .pluck()
+      .get() as number;
+    expect(version).toBe(7);
+    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    const tables = tableNames(database);
+    expect(tables).toContain("memory_mutation_proposals");
+    const triggers = triggerNames(database);
+    expect(triggers).toContain("memory_events_ai");
+    database.close();
+  });
+
+  it("memory_journal gains priority column defaulting to 0", () => {
+    const { database } = createDatabase();
+    database
+      .prepare(
+        "INSERT INTO memory_journal (id, agent_id, actor, intent_type, target_type, created_at) VALUES ('j-p1', 'a1', 'user', 'remember', 'fact', '2026-08-01T00:00:00Z')",
+      )
+      .run();
+    const row = database
+      .prepare("SELECT priority FROM memory_journal WHERE id = 'j-p1'")
+      .get() as { priority: number };
+    expect(row.priority).toBe(0);
+    database
+      .prepare("UPDATE memory_journal SET priority = 1 WHERE id = 'j-p1'")
+      .run();
+    const updated = database
+      .prepare("SELECT priority FROM memory_journal WHERE id = 'j-p1'")
+      .get() as { priority: number };
+    expect(updated.priority).toBe(1);
+    database.close();
+  });
+
+  it("proposal CHECK constraints: type/status/confidence", () => {
+    const { database } = createDatabase();
+    const insert = database.prepare(`
+      INSERT INTO memory_mutation_proposals
+        (id, agent_id, run_id, type, payload, evidence_refs, reason, confidence, status, created_at)
+      VALUES (?, 'a1', 'r1', ?, '{}', '[]', '', ?, 'pending', '2026-08-01T00:00:00Z')
+    `);
+    expect(() => insert.run("p1", "create_fact", 0.8)).not.toThrow();
+    expect(() => insert.run("p2", "teleport", 0.8)).toThrow();
+    expect(() => insert.run("p3", "create_fact", 1.5)).toThrow();
+    expect(() =>
+      database
+        .prepare(
+          "UPDATE memory_mutation_proposals SET status = 'mystery' WHERE id = 'p1'",
+        )
+        .run(),
+    ).toThrow();
     database.close();
   });
 });

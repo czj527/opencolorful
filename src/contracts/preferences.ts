@@ -1,6 +1,8 @@
 import { Type } from "typebox";
 
 import { THINKING_LEVELS, TOOL_MODES, type ThinkingLevel, type ToolMode } from "./session-settings.js";
+import { MemoryAgentSettingsSchema, defaultMemoryAgentSettings, type MemoryAgentSettings } from "./memory.js";
+import { Value } from "typebox/value";
 
 /**
  * 全局偏好文档。Phase 4 起作为新建 Session 的默认值来源和 Web 布局持久化载体。
@@ -39,6 +41,8 @@ export const PreferencesDocumentSchema = Type.Object(
       showThinking: Type.Boolean(),
       timelineVisible: Type.Optional(Type.Boolean()),
     }),
+    // Phase 10.5：全局记忆默认（per-Agent settings.json 的 memory 段可覆盖）
+    memory: Type.Optional(MemoryAgentSettingsSchema),
   },
   { additionalProperties: false },
 );
@@ -75,6 +79,7 @@ export interface PreferencesDocument {
   readonly defaults: DefaultsPreferences;
   readonly layout: LayoutPreferences;
   readonly appearance: AppearancePreferences;
+  readonly memory?: MemoryAgentSettings;
 }
 
 const LEFT_MIN = 200;
@@ -209,10 +214,20 @@ export function normalizePreferences(value: unknown): PreferencesDocument {
   const fallback = defaultPreferences();
   if (!isObject(value)) return { ...fallback };
 
+  const memory = normalizeMemorySettings(value.memory);
   return {
     version: 1,
     defaults: normalizeDefaults(value.defaults, fallback.defaults),
     layout: normalizeLayout(value.layout, fallback.layout),
     appearance: normalizeAppearance(value.appearance, fallback.appearance),
+    ...(memory !== undefined ? { memory } : {}),
   };
+}
+
+/** 记忆设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */
+function normalizeMemorySettings(value: unknown): MemoryAgentSettings | undefined {
+  if (value === undefined) return undefined;
+  return Value.Check(MemoryAgentSettingsSchema, value)
+    ? (value as MemoryAgentSettings)
+    : { ...defaultMemoryAgentSettings() };
 }

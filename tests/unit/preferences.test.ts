@@ -329,3 +329,37 @@ describe("preferences store persistence", () => {
     warning.mockRestore();
   });
 });
+
+describe("preferences memory section (Phase 10.5)", () => {
+  it("old preferences without memory section normalize unchanged (backward compatible)", () => {
+    const prefs = normalizePreferences({ version: 1, defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" }, layout: { leftSidebarWidth: 280, rightSidebarWidth: 320, leftCollapsed: false, rightCollapsed: false, focusMode: false, reducedMotion: "system" }, appearance: { theme: "dark", showToolCalls: true, showThinking: true } });
+    expect(prefs.version).toBe(1);
+    expect(prefs.memory).toBeUndefined();
+  });
+
+  it("valid memory section is preserved", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: defaultPreferences().defaults,
+      layout: defaultPreferences().layout,
+      appearance: defaultPreferences().appearance,
+      memory: { enabled: true, utilityProviderId: "openai", utilityModel: "gpt-4o-mini", deepDiveMode: "script", dailyRunTime: "04:00", minIdleMinutes: 45, weeklyReviewDay: 1, weeklyReviewTime: "04:30", turnsPerSummary: 12, injectBudgetChars: 3000, retentionThresholds: { mediumUp: 50, mediumDown: 40, permanentUp: 90 } },
+    });
+    expect(prefs.memory?.dailyRunTime).toBe("04:00");
+    expect(prefs.memory?.utilityProviderId).toBe("openai");
+    expect(prefs.memory?.retentionThresholds.permanentUp).toBe(90);
+  });
+
+  it("invalid memory section falls back to global defaults", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: defaultPreferences().defaults,
+      layout: defaultPreferences().layout,
+      appearance: defaultPreferences().appearance,
+      memory: { enabled: "maybe", deepDiveMode: "skynet" },
+    });
+    expect(prefs.memory?.enabled).toBe(true);
+    expect(prefs.memory?.deepDiveMode).toBe("script");
+    expect(prefs.memory?.dailyRunTime).toBe("03:00");
+  });
+});
