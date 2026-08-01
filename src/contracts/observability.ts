@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 统一可观测性契约（plans/phase-11.md §三）
@@ -55,19 +55,50 @@ export const TARGET_KINDS = [
 export type TargetKind = (typeof TARGET_KINDS)[number];
 
 export const ActorRefSchema = Type.Object({
-  kind: Type.Union(ACTOR_KINDS.map((k) => Type.Literal(k))),
+  kind: Type.Union([
+      Type.Literal("user"),
+      Type.Literal("agent"),
+      Type.Literal("subagent"),
+      Type.Literal("memory_agent"),
+      Type.Literal("plugin"),
+      Type.Literal("scheduler"),
+      Type.Literal("system"),
+      Type.Literal("supervisor"),
+    ]),
   id: Type.String({ minLength: 1, maxLength: 128 }),
 });
 export type ActorRef = Static<typeof ActorRefSchema>;
 
 export const ExecutorRefSchema = Type.Object({
-  kind: Type.Union(EXECUTOR_KINDS.map((k) => Type.Literal(k))),
+  kind: Type.Union([
+      Type.Literal("service"),
+      Type.Literal("agent"),
+      Type.Literal("subagent"),
+      Type.Literal("memory_agent"),
+      Type.Literal("plugin"),
+      Type.Literal("worker"),
+      Type.Literal("system"),
+    ]),
   id: Type.String({ minLength: 1, maxLength: 128 }),
 });
 export type ExecutorRef = Static<typeof ExecutorRefSchema>;
 
 export const ResourceRefSchema = Type.Object({
-  kind: Type.Union(TARGET_KINDS.map((k) => Type.Literal(k))),
+  kind: Type.Union([
+      Type.Literal("platform"),
+      Type.Literal("agent"),
+      Type.Literal("session"),
+      Type.Literal("turn"),
+      Type.Literal("tool"),
+      Type.Literal("file"),
+      Type.Literal("workspace"),
+      Type.Literal("memory_fact"),
+      Type.Literal("memory_batch"),
+      Type.Literal("plugin"),
+      Type.Literal("provider"),
+      Type.Literal("configuration"),
+      Type.Literal("external_resource"),
+    ]),
   id: Type.String({ minLength: 1, maxLength: 256 }),
 });
 export type ResourceRef = Static<typeof ResourceRefSchema>;
@@ -109,7 +140,13 @@ export type ObservabilityProcessType = (typeof PROCESS_TYPES)[number];
 export const ProducerContextSchema = Type.Object(
   {
     component: Type.String({ minLength: 1, maxLength: 96 }),
-    processType: Type.Union(PROCESS_TYPES.map((p) => Type.Literal(p))),
+    processType: Type.Union([
+      Type.Literal("server"),
+      Type.Literal("supervisor"),
+      Type.Literal("web"),
+      Type.Literal("plugin"),
+      Type.Literal("worker"),
+    ]),
     processId: Type.String({ minLength: 1, maxLength: 32 }),
     bootId: Type.String({ minLength: 1, maxLength: 64 }),
     appVersion: Type.String({ minLength: 1, maxLength: 32 }),
@@ -150,6 +187,10 @@ export const SafeValueSchema = Type.Union([
 ]);
 export type SafeValue = Static<typeof SafeValueSchema>;
 
+/** attributes/metrics 容器：值域为 SafeValue（含嵌套对象/数组，由 normalize 收敛深度） */
+export const SafeObjectSchema = Type.Object({}, { additionalProperties: SafeValueSchema });
+export type SafeObject = Static<typeof SafeObjectSchema>;
+
 // ─── 三类 Payload ──────────────────────────────────────────────
 
 /** ActivityPayload：语义摘要而非原文副本（§3.7） */
@@ -159,11 +200,11 @@ export const ActivityPayloadSchema = Type.Object(
     summaryCode: Type.String({ minLength: 1, maxLength: 96 }),
     durationMs: Type.Optional(Type.Number({ minimum: 0 })),
     attempt: Type.Optional(Type.Integer({ minimum: 1 })),
-    metrics: Type.Optional(Type.Object({}, { additionalProperties: SafeScalarSchema })),
+    metrics: Type.Optional(SafeObjectSchema),
     /** 指向领域事实源（sessionEntryId/memoryId/batchId…），不复制正文 */
     resultRef: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     relatedResources: Type.Optional(Type.Array(ResourceRefSchema, { maxItems: 8 })),
-    attributes: Type.Optional(Type.Object({}, { additionalProperties: SafeScalarSchema })),
+    attributes: Type.Optional(SafeObjectSchema),
   },
   { additionalProperties: false },
 );
@@ -190,7 +231,7 @@ export const DiagnosticPayloadSchema = Type.Object(
   {
     message: Type.String({ minLength: 1, maxLength: 4_000 }),
     stack: Type.Optional(Type.String({ maxLength: 16_000 })),
-    attributes: Type.Optional(Type.Object({}, { additionalProperties: SafeScalarSchema })),
+    attributes: Type.Optional(SafeObjectSchema),
   },
   { additionalProperties: false },
 );
@@ -199,51 +240,97 @@ export type DiagnosticPayload = Static<typeof DiagnosticPayloadSchema>;
 // ─── Envelope 判别联合 ─────────────────────────────────────────
 
 /**
- * 展开构造各通道 Envelope（typebox 本版本的 Value.Check 不支持 Type.Intersect，
- * 判别联合必须用完整 Object schema）。
+ * 各通道 Envelope 用完整 Object schema 内联定义
+ * （typebox 本版本的 Value.Check 不支持 Type.Intersect；spread 展开也会丢失 props 类型推断）。
  */
-function envelopeObject(
-  channel: "activity" | "audit" | "diagnostic",
-  extra: Record<string, unknown>,
-) {
-  return Type.Object(
-    {
-      schemaVersion: Type.Literal(OBSERVABILITY_SCHEMA_VERSION),
-      eventVersion: Type.Integer({ minimum: 1 }),
-      eventId: Type.String({ minLength: 1, maxLength: 64 }),
-      eventName: Type.String({ minLength: 1, maxLength: 120 }),
-      occurredAt: Type.String({ minLength: 1 }),
-      recordedAt: Type.String({ minLength: 1 }),
-      level: Type.Union(OBSERVABILITY_LEVELS.map((l) => Type.Literal(l))),
-      actor: ActorRefSchema,
-      executor: ExecutorRefSchema,
-      target: Type.Optional(ResourceRefSchema),
-      scope: EventScopeSchema,
-      trace: TraceContextSchema,
-      producer: ProducerContextSchema,
-      channel: Type.Literal(channel),
-      ...extra,
-    },
-    { additionalProperties: false },
-  );
-}
+const BASE_FIELDS = [
+  "schemaVersion",
+  "eventVersion",
+  "eventId",
+  "eventName",
+  "occurredAt",
+  "recordedAt",
+  "level",
+  "actor",
+  "executor",
+  "target",
+  "scope",
+  "trace",
+  "producer",
+] as const;
 
-export const ActivityEnvelopeSchema = envelopeObject("activity", {
-  status: Type.Optional(Type.Union(ACTIVITY_STATUSES.map((s) => Type.Literal(s)))),
-  significance: Type.Optional(Type.Union(OBSERVABILITY_SIGNIFICANCES.map((s) => Type.Literal(s)))),
-  payload: ActivityPayloadSchema,
-});
+function envelopeProps(extra: Record<string, TSchema>): Record<string, TSchema> {
+  return {
+    schemaVersion: Type.Literal(OBSERVABILITY_SCHEMA_VERSION),
+    eventVersion: Type.Integer({ minimum: 1 }),
+    eventId: Type.String({ minLength: 1, maxLength: 64 }),
+    eventName: Type.String({ minLength: 1, maxLength: 120 }),
+    occurredAt: Type.String({ minLength: 1 }),
+    recordedAt: Type.String({ minLength: 1 }),
+    level: Type.Union([
+      Type.Literal("trace"),
+      Type.Literal("debug"),
+      Type.Literal("info"),
+      Type.Literal("warn"),
+      Type.Literal("error"),
+      Type.Literal("fatal"),
+    ]),
+    actor: ActorRefSchema,
+    executor: ExecutorRefSchema,
+    target: Type.Optional(ResourceRefSchema),
+    scope: EventScopeSchema,
+    trace: TraceContextSchema,
+    producer: ProducerContextSchema,
+    ...extra,
+  };
+}
+void BASE_FIELDS;
+
+export const ActivityEnvelopeSchema = Type.Object(
+  envelopeProps({
+    channel: Type.Literal("activity"),
+    status: Type.Optional(Type.Union([
+      Type.Literal("started"),
+      Type.Literal("processing"),
+      Type.Literal("completed"),
+      Type.Literal("degraded"),
+      Type.Literal("failed"),
+      Type.Literal("cancelled"),
+      Type.Literal("denied"),
+      Type.Literal("deferred"),
+      Type.Literal("retrying"),
+      Type.Literal("skipped"),
+      Type.Literal("interrupted"),
+    ])),
+    significance: Type.Optional(Type.Union([
+      Type.Literal("routine"),
+      Type.Literal("notable"),
+      Type.Literal("milestone"),
+    ])),
+    payload: ActivityPayloadSchema,
+  }),
+  { additionalProperties: false },
+);
 export type ActivityEnvelope = Static<typeof ActivityEnvelopeSchema>;
 
-export const AuditEnvelopeSchema = envelopeObject("audit", {
-  payload: AuditPayloadSchema,
-});
+export const AuditEnvelopeSchema = Type.Object(
+  envelopeProps({
+    channel: Type.Literal("audit"),
+    payload: AuditPayloadSchema,
+  }),
+  { additionalProperties: false },
+);
 export type AuditEnvelope = Static<typeof AuditEnvelopeSchema>;
 
-export const DiagnosticEnvelopeSchema = envelopeObject("diagnostic", {
-  payload: DiagnosticPayloadSchema,
-});
+export const DiagnosticEnvelopeSchema = Type.Object(
+  envelopeProps({
+    channel: Type.Literal("diagnostic"),
+    payload: DiagnosticPayloadSchema,
+  }),
+  { additionalProperties: false },
+);
 export type DiagnosticEnvelope = Static<typeof DiagnosticEnvelopeSchema>;
+
 
 export const ObservabilityEventEnvelopeSchema = Type.Union([
   ActivityEnvelopeSchema,
