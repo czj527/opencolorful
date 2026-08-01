@@ -492,4 +492,24 @@ cd web; npx playwright test
 - 最终门（全部独立通过）：verify-pi-sdk-imports 0 / tsc --noEmit 0 / vitest 57 文件 564 全过 / web 29 文件 328 全过 / web:build 通过 / tsc -p tsconfig.build.json 0 / Playwright 41/41
 - browser-use 实际验收：启动本地服务 → `/memory` 页 → Agent 选择器列出全部 Agent 并自动选中 → 健康卡片（RecallEpisode idle / pending batch 0 / 15 秒刷新）→ 选中播种 Agent 后四段正确渲染（今天/本周含 ## 日期子标题/长期/重要事实）→ API 全链路（compiled 四段、facts 空为 Phase 10 预期、events、pinned、health、flush 202 安全响应、跨 Agent 404）→ 截图留存
 - 验收发现并修复 3 项真实缺陷（`0659c80`）：AgentView 扁平化、compiled sections 契约、week 子标题解析
-- 结论：**Phase 10 验收通过**
+- 结论：**Phase 10 验收通过（含评审修复轮后重验）**
+
+### 评审修复轮（2026-08-01，P0 阻断 + 计划缺口，提交 `74eaf87`）
+
+评审复现 P0：`MemoryEventPublisher` 每实例从 0 起计，却发布到共享 `agent:<agentId>` 流，连续两次回想产生 `[1,1]` 而非 `[1,2]`，破坏 Last-Event-ID 续传与 Replay。
+
+- **P0 修复**：进程内按 streamId 共享的单调序号分配器（`agentStreamSequences`）；新增测试：连续两次回想 sequence 严格递增、并发两次（Promise.all）严格递增且无重复、中途游标 `getSince` 续传不重不漏（recall 13 测试全过）
+- **归档封存钩子**：`SessionService.onArchive`（可选回调）→ `MemoryTicker.onSessionArchived` 立即创建高优先级（priority=1）sealed batch，落地计划「Session 结束/归档创建 sealed batch」；ticker 新增归档测试
+- **ticker 驱动编译流水线**：摘要成功后 `compilePipeline.refreshToday`（S1+S4）——四段 Markdown 生产链路打通（此前 pipeline 无人驱动）；housekeeping 跨日执行 `runDaily`（scheduler_state.lastDailyDate 防重）
+- **flush 落地**：组合根注入 `memoryFlushHook` → `requestFlush`（封存活跃会话 + 每日重建），生产路径不再是 202 占位；无钩子环境返回安全降级
+- **生产 LLM 接线**：completeText 经 ModelService 首个已配置 Provider；opaque PiResolvedModel 在 pi-sdk 内收窄（`completeUtilityTextForResolved`）；无凭据抛错 → 记忆组件走 degraded 不阻塞对话
+- 重跑质量门：vitest 57 文件 **567** 全过 / web 328 全过 / web:build / tsc / 构建 / 边界 0
+
+### 已知未完成项（Phase 10 边界，记录在案）
+
+- `flush` 在无组合根钩子环境（测试/嵌入式）仍为安全占位响应；生产路径已真实封存+重建
+- batch 恢复无租约/attempt 计数（per-Agent 串行队列当前防重复；Phase 10.5 并行整理时需补原子 claim）
+- 生产 ticker 的 completeText 固定取第一个已配置 Provider 的第一个模型，未做 per-Agent/per-Session 解析（Phase 10.5 §六 utility 模型链预留）
+- `memory.updated` 事件类型已注册但尚无发布方（T4 assemble 返回 revision；SSE 广播留给 10.5）
+- 事件索引 deterministic stub 保留 events dirty，LLM 可用后由 recovery 重新整理（预期行为）
+- 评审方环境 Playwright CLI 不可用；本环境 Playwright 41/41 通过，browser-use 已用真实 Agent（新建 + 播种 memory.md）完成四段渲染与 API 全链路验收
