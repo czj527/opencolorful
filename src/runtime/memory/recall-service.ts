@@ -21,6 +21,8 @@ import {
   extractMessageText,
 } from "./jsonl-branch-reader.js";
 import { sanitizeSensitiveText } from "../sanitize.js";
+import type { ActivationUpdater } from "./activation-updater.js";
+import { strengthTierOf } from "./intensity-calculator.js";
 
 // ═══════════════════════════════════════════════════════════════
 // MemoryEventPublisher：per-stream sequence 计数器
@@ -98,6 +100,7 @@ export interface MemoryRecallServiceDeps {
   readonly publish: (envelope: PlatformEventEnvelope) => void;
   /** agents 根目录，用于路径 inclusion 校验（防穿越） */
   readonly agentsDir: string;
+  readonly activationUpdater?: Pick<ActivationUpdater, "updateForHits">;
 }
 
 export interface MemoryRecallServiceSearchArgs {
@@ -122,6 +125,7 @@ export class MemoryRecallService {
   private readonly sessionIndex: SessionIndex;
   private readonly publish: (envelope: PlatformEventEnvelope) => void;
   private readonly agentsDir: string;
+  private readonly activationUpdater: Pick<ActivationUpdater, "updateForHits"> | undefined;
 
   constructor(deps: MemoryRecallServiceDeps) {
     this.factStore = deps.factStore;
@@ -130,6 +134,7 @@ export class MemoryRecallService {
     this.sessionIndex = deps.sessionIndex;
     this.publish = deps.publish;
     this.agentsDir = deps.agentsDir;
+    this.activationUpdater = deps.activationUpdater;
   }
 
   async search(
@@ -353,9 +358,11 @@ export class MemoryRecallService {
   }
 
   private strengthTier(retentionStrength: number): MemoryStrengthTier {
-    if (retentionStrength < 45) return "short";
-    if (retentionStrength < 85) return "medium";
-    return "permanent";
+    return strengthTierOf(retentionStrength, {
+      mediumUp: 45,
+      mediumDown: 35,
+      permanentUp: 85,
+    });
   }
 
   private recallEntryInput(
@@ -530,6 +537,12 @@ export class MemoryRecallService {
     reachedLayer: MemoryRecallLayer,
     publisher: MemoryEventPublisher,
   ): MemorySearchResult {
+    const factTargetIds = [...new Set(hits
+      .filter((hit) => hit.targetType === "fact")
+      .map((hit) => hit.targetId))];
+    if (factTargetIds.length > 0) {
+      this.activationUpdater?.updateForHits({ agentId, targetIds: factTargetIds });
+    }
     const now = new Date().toISOString();
     try {
       this.recallStore.updateEpisode(episodeId, {
