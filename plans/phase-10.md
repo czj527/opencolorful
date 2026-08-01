@@ -1,6 +1,6 @@
 # Phase 10：记忆系统底座 - openhanako 传送带、主动回想与封存队列
 
-**状态：规划中** | 分支：`phase-10-memory`
+**状态：已完成（2026-08-01）** | 分支：`phase-10-memory`
 **基线：** `main`（Phase 9 验收点之后）
 **架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
 **实现参考：** `<local-workspace>\references\openhanako\lib\memory\`（借机制，不抄代码）
@@ -390,20 +390,20 @@ cd web; npx playwright test
 
 ## 十、验收标准
 
-- [ ] v6 migration 幂等；FTS5 触发器同步；`memory_journal` 和 suppression 参与 rebuild；
-- [ ] 绑定 Agent 每 10 轮生成 rolling summary，格式校验/修复和 branch cursor 生效；
-- [ ] 四段 Markdown 按 openhanako 传送带编译；新 revision 从下一轮生效；失败继续上一版；
-- [ ] 事件索引同一 source batch 幂等，LLM 不可用时 deterministic stub 仍可检索；
-- [ ] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
-- [ ] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
-- [ ] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
-- [ ] 分支摘要按 `(session_id, branch_revision)` 隔离；watermark/scheduler_state 可在中断后恢复；RecallEpisode 的 SSE 状态可从 `memory_recall_events` Replay；
-- [ ] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
-- [ ] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
-- [ ] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；
-- [ ] 启动按 dirty watermark 恢复摘要、Markdown 和 pending batch；
-- [ ] `/memory` 只读页面展示四段/事实/事件/回想状态并自动刷新；
-- [ ] 全部质量门和 browser-use 验收通过。
+- [x] v6 migration 幂等；FTS5 触发器同步；`memory_journal` 和 suppression 参与 rebuild；
+- [x] 绑定 Agent 每 10 轮生成 rolling summary，格式校验/修复和 branch cursor 生效；
+- [x] 四段 Markdown 按 openhanako 传送带编译；新 revision 从下一轮生效；失败继续上一版；
+- [x] 事件索引同一 source batch 幂等，LLM 不可用时 deterministic stub 仍可检索；
+- [x] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
+- [x] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
+- [x] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
+- [x] 分支摘要按 `(session_id, branch_revision)` 隔离；watermark/scheduler_state 可在中断后恢复；RecallEpisode 的 SSE 状态可从 `memory_recall_events` Replay；
+- [x] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
+- [x] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
+- [x] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；
+- [x] 启动按 dirty watermark 恢复摘要、Markdown 和 pending batch；
+- [x] `/memory` 只读页面展示四段/事实/事件/回想状态并自动刷新；
+- [x] 全部质量门和 browser-use 验收通过。
 
 ---
 
@@ -423,3 +423,99 @@ cd web; npx playwright test
 ## 实施记录
 
 （实施中回填）
+
+### T1 契约 + migration v6（2026-07-31，主 Agent）
+
+- 提交：`d8c6bd0` feat(memory): T1 契约 + migration v6（记忆系统底座）
+- 前置：`b429f33` docs(memory): finalize Phase 10/10.5 review revisions（main）
+- 交付：
+  - `src/contracts/memory.ts`：RecallEpisode / memory_journal / memory_batches / 强度与状态枚举 / search_memory 与 remember/forget/pin/unpin 工具参数 TypeBox schema / MemoryUpdatedPayload、MemoryRecallPayload SSE 契约；`NON_EVIDENCE_SOURCE_TYPES` 防自我强化标记
+  - `src/contracts/events.ts` + `web/src/lib/sse-client.ts`：注册 `memory.updated` 与 `memory.recall.started/layer_changed/completed/empty/failed/cancelled` 事件族
+  - `src/storage/migrations.ts` v6：12 张记忆表 + `memory_events_fts`/`memory_facts_fts` 虚表 + 三向同步触发器（events 用 rowid、facts 用 id 作 content_rowid）
+  - `src/storage/memory/cjk-ngram.ts`：NFKC 归一、CJK 2/3-gram、FTS 查询构建、单字 LIKE 降级（`ESCAPE '\'` 通配符转义）
+  - `src/storage/database.ts`（连带修复）：迁移失败关闭句柄，消除 Windows 文件占用泄漏
+- 测试：`tests/integration/memory-schema.test.ts`（10）、`tests/unit/cjk-ngram.test.ts`（20）、`tests/unit/memory-contracts.test.ts`（19）
+- 验证证据：`npx tsc --noEmit` exit 0；`verify-pi-sdk-imports` exit 0；`npx vitest run` 47 文件 439 全过；`npm run test --workspace=web` 28 文件 326 全过
+- 测试中发现并修正：FTS OR 查询的 n-gram 部分重叠语义（更新同步断言改用完全不重叠词项）；openhanako base+gram 结构的去重语义（断言改为跨 run gram 去重）
+- 已知偏差：无
+
+### T2 存储层（2026-08-01，子 Agent 实现 + 主 Agent 审查）
+
+- 提交：`9beb588` feat(memory): T2 存储层 stores
+- 交付：`src/storage/memory/` 下 8 个 store（summary/event/fact/recall/journal/batch/recovery/pinned）；fact store 只读无写入方法；journal append-only + suppression 查询；batch pending 聚合排序；54 个集成测试
+- 审查：tsc 0 / 54 测试全过 / 主 Agent 独立复核 diff 后提交
+
+### T3 rolling summary + 事件索引（2026-08-01）
+
+- 提交：`2c7021d`（共享件分支读取器）+ `ce5b737`（T3 本体）
+- 关键前置：`tests/integration/memory-branch.test.ts` 用真实 SessionManager + branch() 分叉验证 entry/revision 语义，**cursor 契约据此冻结**：cursor = {lastEntryId}；分支变更 ⇔ entriesAfterEntry 返回 null；revision = 当前路径 id 序列 sha256 前 16 hex
+- 交付：`pi-sdk/complete-text.ts`（completeSimple 工具型 LLM 适配）、summary-format/prompts、RollingSummaryService（全量/增量/分支三模式、repair once、失败不推进 cursor、degraded + dirty watermark、落盘前脱敏）、EventIndexer（零额外 LLM、确定性 id 幂等、deterministic stub）
+- 测试：summary-format 16 + memory-summary 12 + branch 6
+- 审查修正：未使用导入清理
+
+### T4 openhanako 编译流水线（2026-08-01）
+
+- 提交：`39b75e3` feat(memory): T4 四段 Markdown 编译传送带 S0-S4
+- 交付：memory-files（04:00 逻辑日边界、atomicWrite）、compile-prompts、MemoryCompilePipeline（S0 daily → S1 today → S2 longterm fold → S3 facts → S4 assemble；daily_state 断点幂等续跑；LLM 失败保留上一版、markdown watermark dirty；week 纯文件拼接零 LLM；memory.md 四段标题固定 + 占位符；revision = sha256 前 12）
+- 审查修正：S0/S1 的 session summaries 按日期过滤（today/yesterday 分别取对应日期的摘要）
+- 测试：memory-files 2 + memory-compile 1
+
+### T5 MemoryTicker + Session 生命周期 + sealed batch + dirty recovery（2026-08-01，主 Agent）
+
+- 提交：`22ef498` feat(memory): T5 MemoryTicker 接入生产生命周期与恢复队列
+- 交付：turn.completed 每 10 轮触发（turnsPerSummary 可配）、per-Agent 串行 promise tail 队列 + 去重、summary 成功后才封存确定性 batch（degraded/failed 不产假 batch）、idle gate 兜底 housekeeping、启动按 dirty watermark/pending batch 恢复、生产组合根 start/stop 接线
+- 审查修正：EventIndexer deterministic stub 保留 events dirty（避免 LLM 恢复后不再整理）；degraded 摘要直接短路不封存
+- 测试：memory-ticker 2（threshold 触发 + degraded 路径）
+
+### T6 search_memory + RecallEpisode + intent 工具 + 注入（2026-08-01）
+
+- 提交：`1563832` feat(memory): T6 search_memory + RecallEpisode + intent-only 工具 + 注入
+- 交付：MemoryRecallService（facts→events→source 确定性下钻、RecallEpisode 生命周期、memory.recall.* SSE agent stream、每 hit 写 recall ledger、memory_recall_events 落库 Replay、source 层归属 + 路径 containment 校验）；5 个工具（search_memory/remember/forget/pin/unpin，global-Symbol 上下文 fail-closed；remember/forget 只追加 journal；pin/unpin 即时应用 + 留痕）；注入（规则→Pinned 独立保底→Memory 四段、8 条威胁扫描 [BLOCKED]、预算截断优先级、revision 参与重建比较实现下一轮生效）；MEMORY_TOOL_NAMES 不受 tool_mode 影响
+- 审查修正：source 层 ledger 的 queryHash/sessionId 语义、empty reachedLayer 按实际下钻深度、注入预算完整计量（规则段/头部计入）、SessionRuntime onDispose 注销 memory context 防泄漏
+- 测试：recall 11 + injection 11 + tools 9
+
+### T7 只读 API + Agent SSE（2026-08-01）
+
+- 提交：`163e5b8` feat(memory): T7 只读 API + Agent SSE 与 T8 memory 页面（与 T8 合并提交）
+- 交付：`/api/agents/:id/memory/{compiled,facts,events,pinned,flush,health}`；Agent-scoped SSE `/api/agents/:id/events`（Replay + ownership 过滤）；SseClient 支持 agent stream
+- 验收修正（`0659c80`）：compiled 返回四段 sections（复用注入解析器防契约漂移）
+
+### T8 /memory 只读页（2026-08-01）
+
+- 提交：`163e5b8`（与 T7 合并）+ `0659c80` 修复
+- 交付：四段编译记忆卡片、Pinned、已审批事实、事件时间线、RecallEpisode/pending batch 健康卡片、搜索、加载/错误/空态、Agent 选择、15 秒自动刷新；Phase 10 无编辑入口
+- 验收修正（`0659c80`）：/api/agents 返回嵌套 AgentView，页面扁平化为 {id,name}（修复选择器空选项与自动选中）；段解析器未知 ## 标题视为内容（week 段内 ## {date} 子标题不再清空当前段）
+- 测试：MemoryPage 2（夹具对齐真实 API 形状）
+
+### T9 质量门 + browser-use 验收（2026-08-01，主 Agent）
+
+- 最终门（全部独立通过）：verify-pi-sdk-imports 0 / tsc --noEmit 0 / vitest 57 文件 569 全过 / web 29 文件 328 全过 / web:build 通过 / tsc -p tsconfig.build.json 0 / Playwright 41/41
+- browser-use 实际验收：启动本地服务 → `/memory` 页 → Agent 选择器列出全部 Agent 并自动选中 → 健康卡片（RecallEpisode idle / pending batch 0 / 15 秒刷新）→ 选中播种 Agent 后四段正确渲染（今天/本周含 ## 日期子标题/长期/重要事实）→ API 全链路（compiled 四段、facts 空为 Phase 10 预期、events、pinned、health、flush 202 安全响应、跨 Agent 404）→ 截图留存
+- 验收发现并修复 3 项真实缺陷（`0659c80`）：AgentView 扁平化、compiled sections 契约、week 子标题解析
+- 结论：**Phase 10 验收通过（含评审修复轮后重验）**
+
+### 评审修复轮（2026-08-01，P0 阻断 + 计划缺口，提交 `74eaf87`）
+
+评审复现 P0：`MemoryEventPublisher` 每实例从 0 起计，却发布到共享 `agent:<agentId>` 流，连续两次回想产生 `[1,1]` 而非 `[1,2]`，破坏 Last-Event-ID 续传与 Replay。
+
+- **P0 修复**：进程内按 streamId 共享的单调序号分配器（`agentStreamSequences`）；新增测试：连续两次回想 sequence 严格递增、并发两次（Promise.all）严格递增且无重复、中途游标 `getSince` 续传不重不漏（recall 13 测试全过）
+- **归档封存钩子**：`SessionService.onArchive`（可选回调）→ `MemoryTicker.onSessionArchived` 立即创建高优先级（priority=1）sealed batch，落地计划「Session 结束/归档创建 sealed batch」；ticker 新增归档测试
+- **ticker 驱动编译流水线**：摘要成功后 `compilePipeline.refreshToday`（S1+S4）——四段 Markdown 生产链路打通（此前 pipeline 无人驱动）；housekeeping 跨日执行 `runDaily`（scheduler_state.lastDailyDate 防重）
+- **flush 落地**：组合根注入 `memoryFlushHook` → `requestFlush`（封存活跃会话 + 每日重建），生产路径不再是 202 占位；无钩子环境返回安全降级
+- **生产 LLM 接线**：completeText 经 ModelService 首个已配置 Provider；opaque PiResolvedModel 在 pi-sdk 内收窄（`completeUtilityTextForResolved`）；无凭据抛错 → 记忆组件走 degraded 不阻塞对话
+- 重跑质量门：vitest 57 文件 **569** 全过 / web 328 全过 / web:build / tsc / 构建 / 边界 0
+
+### 验收补丁（2026-08-01，主 Agent 独立复现）
+
+- 修复真实 `SessionService.archive()` 时序：索引先标记 `archived` 后，归档 ticker 仍允许读取最终 JSONL 快照并创建 priority=1 sealed batch；新增真实生命周期集成测试。
+- 修复每日 Markdown 编译失败推进 `lastDailyDate` 的问题：`degraded/failures` 现在写入 `scheduler_state.status=failed` 和 `nextRetryAt`，不推进当天完成日期；成功后才推进日期并记录 `lastDailyCompletedAt`。
+- 本轮验证：服务端 57 文件 569 测试通过；Web 29 文件 328 测试通过；PI import boundary、strict typecheck、生产构建、Web 构建全部通过。
+
+### 已知未完成项（Phase 10 边界，记录在案）
+
+- `flush` 在无组合根钩子环境（测试/嵌入式）仍为安全占位响应；生产路径已真实封存+重建
+- batch 恢复无租约/attempt 计数（per-Agent 串行队列当前防重复；Phase 10.5 并行整理时需补原子 claim）
+- 生产 ticker 的 completeText 固定取第一个已配置 Provider 的第一个模型，未做 per-Agent/per-Session 解析（Phase 10.5 §六 utility 模型链预留）
+- `memory.updated` 事件类型已注册但尚无发布方（T4 assemble 返回 revision；SSE 广播留给 10.5）
+- 事件索引 deterministic stub 保留 events dirty，LLM 可用后由 recovery 重新整理（预期行为）
+- 评审方环境 Playwright CLI 不可用；本环境 Playwright 41/41 通过，browser-use 已用真实 Agent（新建 + 播种 memory.md）完成四段渲染与 API 全链路验收

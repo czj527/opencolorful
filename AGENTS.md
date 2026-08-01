@@ -27,7 +27,9 @@
 | `docs/product.md` | 产品说明（旧定位，部分已过时，以 positioning-and-roadmap.md 为准） | 参考历史 |
 | `plans/phase-00~07.md` | 已完成阶段计划 | 了解历史 |
 | `plans/phase-08.md` | Phase 8 实施计划、范围校正与验收记录 | 接续 Agent 模型工作时读 |
-| `plans/phase-09.md` 起 | 后续阶段计划 | 进入新 Phase 时读 |
+| `plans/phase-09.md` | Phase 9 实施计划与验收记录 | 了解历史 |
+| `plans/phase-10.md` | Phase 10 实施计划、评审修复与验收记录 | 了解历史 |
+| `plans/phase-10.5.md` 起 | 后续阶段计划 | 进入新 Phase 时读 |
 
 ## 参考仓库
 
@@ -37,9 +39,11 @@
 
 - **Phase 0-7 已完成并通过验收（2026-07-25）**：平台层运行时底座——Server / Session / Provider / Supervisor / Web UI / Agent 身份证+人设注入 / Token 用量 / UI 重构。质量门全过，Playwright 23/23。
 - **Phase 8 已完成（2026-07-28）**：Agent 模型去枚举化（identity v2，无 `type`）、底色与运行设置分离、旧数据迁移、底色模板、Windows 工作目录选择、独立 Agent 创建/编辑页和新会话创建页。模板只用于初始化，不是 Agent 的持久化依赖。
+- **Phase 9 已完成（2026-07-28 验收，已合并）**：应用层 PathGuard 沙箱系统（能力声明 + 执行边界 + 审计日志），多轮安全审查后合入 `main`。
+- **Phase 10 已完成（2026-08-01 验收，`phase-10-complete`）**：记忆系统底座——openhanako 四段 Markdown 传送带、PI 分支感知 rolling summary、事件索引（FTS5 + CJK n-gram）、`search_memory` 主动回想（RecallEpisode + Agent SSE）、intent-only 记忆工具、封存队列、dirty 恢复与 `/memory` 只读页。
 - **当前定位已重新明确（2026-07-27）**：从"全能私人助理平台"修正为"承载 agent 完整一生的平台基础设施"。
-- **下一阶段（Phase 9-10）**：沙箱机制 / 记忆系统(案头/笺/今日记/往事/识见/手艺/梦境)，穿插完善结构化日志框架。
-- Phase 8 已移除 `type: work|coding|assistant` 硬枚举；yuan 模板、capabilities、skills、记忆与插件仍属于后续阶段，不在本阶段提前固化。
+- **下一阶段（Phase 10.5）**：记忆 Agent 与后台整理——sealed batch 消化、retention/activation 强度、proposal + MemoryPolicy 审批、每日空闲/每周复核调度、时间线强度 UI。穿插完善结构化日志框架。
+- Phase 8 已移除 `type: work|coding|assistant` 硬枚举；yuan 模板、capabilities、skills、插件与梦境仍属于后续阶段，不在本阶段提前固化。
 
 接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。
 

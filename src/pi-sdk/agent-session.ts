@@ -41,8 +41,27 @@ const SANDBOX_EXTENSION_PATH = fs.existsSync(SANDBOX_EXTENSION_JS)
   ? SANDBOX_EXTENSION_JS
   : SANDBOX_EXTENSION_TS;
 
+// 记忆工具扩展文件路径
+const MEMORY_TOOLS_EXTENSION_JS = path.resolve(__dirname, "memory-tools.js");
+const MEMORY_TOOLS_EXTENSION_TS = path.resolve(__dirname, "memory-tools.ts");
+const MEMORY_TOOLS_EXTENSION_PATH = fs.existsSync(MEMORY_TOOLS_EXTENSION_JS)
+  ? MEMORY_TOOLS_EXTENSION_JS
+  : MEMORY_TOOLS_EXTENSION_TS;
+
+/** 记忆工具名称列表（始终可用，不受 tool_mode 影响） */
+export const MEMORY_TOOL_NAMES = [
+  "search_memory",
+  "remember",
+  "forget",
+  "pin_memory",
+  "unpin_memory",
+] as const;
+
 /** 预加载的沙箱扩展（进程级加载一次，工具执行时通过 AsyncLocalStorage 读取 per-Session 上下文） */
 let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
+
+/** 预加载的记忆工具扩展（进程级加载一次） */
+let memoryToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
 export interface SandboxExtensionLoadResult {
   readonly errors: readonly {
@@ -82,6 +101,25 @@ async function ensureSandboxExtensionLoaded(): Promise<void> {
   );
   validateSandboxExtensionLoadResult(result);
   sandboxExtensionsLoaded = result;
+}
+
+async function ensureMemoryToolsExtensionLoaded(): Promise<void> {
+  if (memoryToolsExtensionsLoaded) return;
+  if (!fs.existsSync(MEMORY_TOOLS_EXTENSION_PATH)) {
+    throw new Error(
+      `Memory tools extension not found at ${MEMORY_TOOLS_EXTENSION_PATH}. ` +
+      "Run 'npm run build' to compile memory-tools.",
+    );
+  }
+  const result = await discoverAndLoadExtensions(
+    [MEMORY_TOOLS_EXTENSION_PATH],
+    path.resolve(__dirname, "..", ".."),
+  );
+  if (result.errors.length > 0) {
+    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
+    throw new Error(`Memory tools extension failed to load: ${msg}`);
+  }
+  memoryToolsExtensionsLoaded = result;
 }
 
 function messageText(message: unknown): string {
@@ -239,14 +277,27 @@ function minimalResourceLoader(
 ): ResourceLoader {
   return {
     getExtensions: () => {
-      if (useSandbox && sandboxExtensionsLoaded) {
-        return {
-          extensions: sandboxExtensionsLoaded.extensions,
-          errors: sandboxExtensionsLoaded.errors,
-          runtime: sandboxExtensionsLoaded.runtime ?? createExtensionRuntime(),
-        };
+      const runtime = createExtensionRuntime();
+      const extensions: unknown[] = [];
+      const errors: { path: string; error: unknown }[] = [];
+
+      // 始终加载记忆工具扩展
+      if (memoryToolsExtensionsLoaded) {
+        extensions.push(...memoryToolsExtensionsLoaded.extensions);
+        errors.push(...memoryToolsExtensionsLoaded.errors);
       }
-      return { extensions: [], errors: [], runtime: createExtensionRuntime() };
+
+      // 按需加载沙箱扩展
+      if (useSandbox && sandboxExtensionsLoaded) {
+        extensions.push(...sandboxExtensionsLoaded.extensions);
+        errors.push(...sandboxExtensionsLoaded.errors);
+      }
+
+      return {
+        extensions: extensions as import("@earendil-works/pi-coding-agent").Extension[],
+        errors: errors as Array<{ path: string; error: string }>,
+        runtime,
+      };
     },
     getSkills: () => ({ skills: [], diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
@@ -260,7 +311,12 @@ function minimalResourceLoader(
 }
 
 export async function createPiFauxAgentSession(
-  options: PiFauxAgentOptions & { toolPolicy?: ToolPolicy; sandboxContext?: SandboxContext },
+  options: PiFauxAgentOptions & {
+    toolPolicy?: ToolPolicy;
+    sandboxContext?: SandboxContext;
+    /** 额外启用的工具名称（如记忆工具），不受 noTools 影响 */
+    extraTools?: readonly string[];
+  },
 ): Promise<PiAgentSessionHandle> {
   const faux = fauxProvider({
     provider: options.providerId,
@@ -316,9 +372,13 @@ export async function createPiFauxAgentSession(
 
   const toolPolicy: ToolPolicy | undefined = options.toolPolicy;
 
-  // 预加载沙箱扩展 + 设定 per-Session AsyncLocalStorage 上下文
+  // 预加载扩展
   if (toolPolicy) {
     await ensureSandboxExtensionLoaded();
+  }
+  const hasExtraTools = options.extraTools && options.extraTools.length > 0;
+  if (hasExtraTools) {
+    await ensureMemoryToolsExtensionLoaded();
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
@@ -337,7 +397,9 @@ export async function createPiFauxAgentSession(
       options.systemPrompt,
       !!toolPolicy,
     ),
-    noTools: "all",
+    ...(hasExtraTools
+      ? { tools: [...options.extraTools!] }
+      : { noTools: "all" as const }),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   });
   const { session } = sandboxCtx
@@ -393,7 +455,12 @@ export async function createPiFauxAgentSession(
 }
 
 export async function createPiAgentSession(
-  options: PiAgentSessionOptions & { toolPolicy?: ToolPolicy; sandboxContext?: SandboxContext },
+  options: PiAgentSessionOptions & {
+    toolPolicy?: ToolPolicy;
+    sandboxContext?: SandboxContext;
+    /** 额外启用的工具名称（如记忆工具），不受 noTools 影响 */
+    extraTools?: readonly string[];
+  },
 ): Promise<PiAgentSessionHandle> {
   const resolved = options.modelRuntime.resolveModel(options.providerId, options.modelId);
   const modelRuntime = resolved.runtime as ModelRuntime;
@@ -411,6 +478,10 @@ export async function createPiAgentSession(
 
   if (toolPolicy) {
     await ensureSandboxExtensionLoaded();
+  }
+  const hasExtraTools = options.extraTools && options.extraTools.length > 0;
+  if (hasExtraTools) {
+    await ensureMemoryToolsExtensionLoaded();
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
@@ -432,8 +503,12 @@ export async function createPiAgentSession(
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };
 
-  if (options.noTools === "all") {
+  if (options.noTools === "all" && !hasExtraTools) {
     createOptions.noTools = "all";
+  } else if (hasExtraTools) {
+    // 合并文件工具与记忆工具；无文件工具时仅记忆工具
+    const fileTools = options.tools ?? [];
+    createOptions.tools = [...fileTools, ...options.extraTools!];
   } else if (options.tools && options.tools.length > 0) {
     createOptions.tools = [...options.tools];
   }

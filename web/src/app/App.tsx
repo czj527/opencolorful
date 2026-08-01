@@ -6,6 +6,7 @@ import { NewSessionPage } from "../features/sessions/NewSessionPage.js";
 import { ApiClient } from "../lib/api-client.js";
 import { AgentCreatePage } from "../features/agents/AgentCreatePage.js";
 import { AgentEditPage } from "../features/agents/AgentEditPage.js";
+import { MemoryPage } from "../features/memory/MemoryPage.js";
 import {
   navigateToSettings,
   navigateToSettingsSection,
@@ -109,6 +110,9 @@ export function App() {
           onSessionCreatedConsumed={handleSessionCreatedConsumed}
         />
       </div>
+      {route === "memory" && (
+        <MemoryPage agentId={typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("agent") : null} />
+      )}
       {route === "settings" && (
         <SettingsPage
           api={api}

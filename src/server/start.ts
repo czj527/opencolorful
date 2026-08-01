@@ -13,6 +13,15 @@ import { openMetadataDatabase } from "../storage/database.js";
 import { SessionIndex } from "../storage/session-index.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
+import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
+import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
+import { EventIndexer } from "../runtime/memory/event-indexer.js";
+import { MemoryCompilePipeline } from "../runtime/memory/compile-pipeline.js";
+import { completeUtilityTextForResolved } from "../pi-sdk/complete-text.js";
+import { MemoryBatchStore } from "../storage/memory/batch-store.js";
+import { MemoryDailyStateStore, MemoryWatermarkStore, SchedulerStateStore } from "../storage/memory/recovery-store.js";
+import { SessionSummaryStore } from "../storage/memory/summary-store.js";
+import { MemoryEventStore } from "../storage/memory/event-store.js";
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -149,7 +158,13 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     const sessionIndex = new SessionIndex(database);
     const providerStore = new ProviderStore(paths.providerSettings);
     const modelService = await ModelService.create(paths, providerStore);
-    const sessionService = new SessionService(paths, sessionIndex);
+    // 记忆 ticker 在 sessionService 之后创建，archive 钩子用可变引用延迟接线
+    let memoryTicker: MemoryTicker | undefined;
+    const sessionService = new SessionService(
+      paths,
+      sessionIndex,
+      (sessionId) => memoryTicker?.onSessionArchived(sessionId),
+    );
     const preferencesStore = new PreferencesStore(paths.preferences);
     const agentStore = new AgentStore(paths.agents);
     // 启动时迁移旧 Agent 数据（去 type、profile.json→base-color.json、补 innerSetting）
@@ -175,6 +190,48 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         return null;
       }
     });
+    // 工具型 LLM：取第一个已配置凭据的 Provider 及其第一个模型；
+    // 无凭据/解析失败时抛错 → 各记忆组件走 degraded 路径（不阻塞对话）
+    const completeText = async (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
+      const provider = modelService.listProviders().find((p) => p.credentialConfigured);
+      if (provider === undefined) throw new Error("无可用 Provider 凭据");
+      const model = modelService.listModels().find((m) => m.providerId === provider.providerId);
+      if (model === undefined) throw new Error("Provider 未配置模型");
+      const resolved = modelService.resolveModel(provider.providerId, model.modelId);
+      return completeUtilityTextForResolved(resolved, {
+        systemPrompt: req.systemPrompt,
+        prompt: req.prompt,
+        ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
+      });
+    };
+
+    const summaryStore = new SessionSummaryStore(database);
+    const watermarkStore = new MemoryWatermarkStore(database);
+    const compilePipeline = new MemoryCompilePipeline({
+      summaryStore,
+      dailyStateStore: new MemoryDailyStateStore(database),
+      watermarkStore,
+      completeText,
+    });
+    const ticker = new MemoryTicker({
+      replayStore,
+      sessionService,
+      promptService,
+      agentStore,
+      summaryStore,
+      batchStore: new MemoryBatchStore(database),
+      watermarkStore,
+      schedulerStore: new SchedulerStateStore(database),
+      rollingSummary: new RollingSummaryService({ summaryStore, watermarkStore, completeText }),
+      eventIndexer: new EventIndexer({
+        eventStore: new MemoryEventStore(database),
+        watermarkStore,
+      }),
+      compilePipeline,
+      agentsDir: paths.agents,
+    });
+    memoryTicker = ticker;
+    ticker.start();
     let disposed = false;
 
     return {
@@ -190,10 +247,13 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         wsRegistry,
         wsPromptService: promptService,
         wsReplayStore: replayStore,
+        database,
+        memoryFlushHook: (agentId) => memoryTicker?.requestFlush(agentId),
       },
       dispose() {
         if (disposed) return;
         disposed = true;
+        memoryTicker.stop();
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();

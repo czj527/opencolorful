@@ -11,6 +11,17 @@ import type { PromptService } from "../../runtime/prompt-service.js";
 import type { SessionService } from "../../runtime/session-service.js";
 import { SessionRuntime } from "../../runtime/session-runtime.js";
 import { ToolPolicy } from "../../runtime/tool-policy.js";
+import { buildMemoryInjectionBlock } from "../../runtime/memory/memory-injection.js";
+import { MemoryRecallService } from "../../runtime/memory/recall-service.js";
+import { MemoryFactStore } from "../../storage/memory/fact-store.js";
+import { MemoryEventStore } from "../../storage/memory/event-store.js";
+import { MemoryRecallStore } from "../../storage/memory/recall-store.js";
+import { MemoryJournalStore } from "../../storage/memory/journal-store.js";
+import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
+import { SessionIndex } from "../../storage/session-index.js";
+import { registerMemoryContext } from "../../pi-sdk/memory-tools.js";
+import { MEMORY_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
+import type Database from "better-sqlite3";
 
 export interface MessageRoutesOptions {
   readonly promptService: PromptService;
@@ -19,6 +30,7 @@ export interface MessageRoutesOptions {
   readonly paths?: RuntimePaths;
   readonly modelService?: ModelService;
   readonly agentStore?: AgentStore;
+  readonly database?: Database.Database;
 }
 
 // ensureRuntime 的失败结果：路由层直接转成对应状态码
@@ -29,11 +41,12 @@ class EnsureRuntimeError extends Error {
 }
 
 export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions): void {
-  const { promptService, sessionService, replayStore, paths, modelService, agentStore } = options;
+  const { promptService, sessionService, replayStore, paths, modelService, agentStore, database } = options;
 
-  // 跟踪每个 session 运行时使用的 systemPrompt，用于检测 profile 更新
+  // 跟踪每个 session 运行时使用的 systemPrompt（含记忆块 revision），用于检测 profile/memory 更新
   const runtimeSystemPrompt = new Map<string, string | undefined>();
 
+  /** 构建含记忆注入的完整 system prompt。未绑定 Agent 或不具备记忆条件时仅返回 persona。 */
   function buildSystemPrompt(agentId: string): string | undefined {
     if (agentStore === undefined) return undefined;
     const baseColor = agentStore.getBaseColor(agentId);
@@ -50,6 +63,18 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
     if (baseColor.innerSetting) {
       parts.push(`相处边界: ${baseColor.innerSetting}`);
     }
+
+    // 记忆注入：在 persona 之后追加
+    if (paths && database) {
+      const memoryDir = path.join(paths.agents, agentId, "memory");
+      const pinnedStore = new PinnedMemoryStore(database);
+      const pinned = pinnedStore.listByAgent(agentId);
+      const injection = buildMemoryInjectionBlock({ memoryDir, pinned });
+      if (injection) {
+        parts.push(injection.block);
+      }
+    }
+
     return parts.length > 0 ? parts.join("\n\n") : undefined;
   }
 
@@ -66,13 +91,21 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       const view = sessionService.getView(sessionId);
       const toolMode = (view.toolMode ?? "off") as ToolMode;
       const toolPolicy = new ToolPolicy();
-      const tools = toolPolicy.resolveTools(
+      const fileTools = toolPolicy.resolveTools(
         toolMode,
         view.workspaceCwd ?? undefined,
         view.workspaceConfirmed,
       );
-      const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
       const runtimeCwd = view.workspaceCwd || process.cwd();
+
+      // 记忆工具：Agent 绑定 + 数据库可用时始终启用
+      const hasMemoryTools = !!(view.agentId && database);
+      const extraTools = hasMemoryTools ? [...MEMORY_TOOL_NAMES] : undefined;
+      // 有记忆工具时决不使用 noTools: "all"
+      const noTools = (toolPolicy.shouldDisableAllTools(toolMode) && !hasMemoryTools)
+        ? ("all" as const)
+        : undefined;
+      const tools = fileTools.length > 0 ? [...fileTools] : undefined;
 
       // 构建沙箱上下文：当 session 绑定 Agent 且 paths/agentStore 可用时
       let agentSettings: import("../../contracts/agent-settings.js").AgentSettingsV2 | undefined;
@@ -88,6 +121,40 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
       }
 
+      // 构建记忆层上下文（在 runtime 创建后注册）
+      let unregisterMemory: (() => void) | undefined;
+      const setupMemoryContext = (runtime: SessionRuntime) => {
+        if (!database || !view.agentId || !paths) return;
+        try {
+          const factStore = new MemoryFactStore(database);
+          const eventStore = new MemoryEventStore(database);
+          const recallStore = new MemoryRecallStore(database);
+          const journalStore = new MemoryJournalStore(database);
+          const pinnedStore = new PinnedMemoryStore(database);
+          const sessionIndex = new SessionIndex(database);
+
+          const recallService = new MemoryRecallService({
+            factStore,
+            eventStore,
+            recallStore,
+            sessionIndex,
+            publish: (env) => {
+              if (replayStore) replayStore.publish(env);
+            },
+            agentsDir: paths.agents,
+          });
+
+          unregisterMemory = registerMemoryContext(sessionId, {
+            agentId: view.agentId!,
+            recallService,
+            journalStore,
+            pinnedStore,
+          });
+        } catch {
+          // 记忆层初始化失败不阻塞会话创建
+        }
+      };
+
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;
       if (selectedModel && modelService && selectedModel.providerId !== "faux") {
@@ -101,7 +168,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           resolveProviderId: selectedModel.providerId,
           resolveModelId: selectedModel.modelId,
           ...(noTools ? { noTools } : {}),
-          ...(tools.length > 0 && !noTools ? { tools } : {}),
+          ...(tools ? { tools } : {}),
+          ...(extraTools ? { extraTools } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -109,7 +177,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
           workspaceCwd: view.workspaceCwd,
+          onDispose: () => unregisterMemory?.(),
         });
+        setupMemoryContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
       } else {
@@ -124,7 +194,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           publish: () => {},
           sessionHandle: session,
           ...(noTools ? { noTools } : {}),
-          ...(tools.length > 0 && !noTools ? { tools } : {}),
+          ...(tools ? { tools } : {}),
+          ...(extraTools ? { extraTools } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -132,7 +203,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
           workspaceCwd: view.workspaceCwd,
+          onDispose: () => unregisterMemory?.(),
         });
+        setupMemoryContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
       }

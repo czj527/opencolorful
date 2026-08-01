@@ -21,6 +21,8 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerSandboxRoutes } from "./routes/sandbox.js";
 import { registerUsageRoutes } from "./routes/usage.js";
+import { registerMemoryRoutes } from "./routes/memory.js";
+import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -40,6 +42,9 @@ export interface ServerAppOptions {
   readonly wsRegistry?: ClientRegistry;
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;
+  readonly database?: import("better-sqlite3").Database;
+  /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
+  readonly memoryFlushHook?: (agentId: string) => void;
 }
 
 export interface ServerAppResult {
@@ -83,6 +88,12 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.usageStore !== undefined) {
     registerUsageRoutes(app, options.usageStore);
   }
+  if (options.database !== undefined && options.paths !== undefined) {
+    registerMemoryRoutes(app, options.database, options.paths, options.agentStore, options.memoryFlushHook);
+  }
+  if (options.replayStore !== undefined) {
+    registerAgentEventRoutes(app, options.replayStore, options.agentStore, options.sessionService);
+  }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(
       app,
@@ -101,6 +112,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.paths !== undefined ? { paths: options.paths } : {}),
       ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
       ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
+      ...(options.database !== undefined ? { database: options.database } : {}),
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {
