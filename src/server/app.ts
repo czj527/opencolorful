@@ -21,6 +21,8 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerSandboxRoutes } from "./routes/sandbox.js";
 import { registerUsageRoutes } from "./routes/usage.js";
+import { registerMemoryRoutes } from "./routes/memory.js";
+import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -83,6 +85,12 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.usageStore !== undefined) {
     registerUsageRoutes(app, options.usageStore);
+  }
+  if (options.database !== undefined && options.paths !== undefined) {
+    registerMemoryRoutes(app, options.database, options.paths, options.agentStore);
+  }
+  if (options.replayStore !== undefined) {
+    registerAgentEventRoutes(app, options.replayStore, options.agentStore, options.sessionService);
   }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(

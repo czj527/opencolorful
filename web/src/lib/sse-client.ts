@@ -27,6 +27,7 @@ const KNOWN_EVENT_TYPES = [
   "memory.recall.empty",
   "memory.recall.failed",
   "memory.recall.cancelled",
+  "reset",
 ] as const;
 
 export interface SseResetPayload {
@@ -36,7 +37,8 @@ export interface SseResetPayload {
 
 export interface SseClientOptions {
   readonly baseUrl: string;
-  readonly sessionId: string;
+  readonly sessionId?: string;
+  readonly agentId?: string;
   readonly onEvent: (event: PlatformEventEnvelope) => void;
   readonly onReset?: (payload: SseResetPayload) => void;
   readonly onError?: (error: Error) => void;
@@ -58,7 +60,8 @@ export class SseClient {
   private disposed = false;
 
   private readonly baseUrl: string;
-  private readonly sessionId: string;
+  private readonly sessionId: string | undefined;
+  private readonly agentId: string | undefined;
   private readonly onEvent: (event: PlatformEventEnvelope) => void;
   private readonly onReset: ((payload: SseResetPayload) => void) | undefined;
   private readonly onError: ((error: Error) => void) | undefined;
@@ -68,6 +71,8 @@ export class SseClient {
   constructor(options: SseClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
     this.sessionId = options.sessionId;
+    this.agentId = options.agentId;
+    if (this.sessionId === undefined && this.agentId === undefined) throw new Error("sessionId or agentId is required");
     this.onEvent = options.onEvent;
     this.onReset = options.onReset;
     this.onError = options.onError;
@@ -79,7 +84,9 @@ export class SseClient {
     if (this.disposed) return;
     this.disconnect();
 
-    const url = `${this.baseUrl}/api/sessions/${this.sessionId}/events`;
+    const url = this.agentId !== undefined
+      ? `${this.baseUrl}/api/agents/${this.agentId}/events`
+      : `${this.baseUrl}/api/sessions/${this.sessionId!}/events`;
     const source = new EventSource(url);
     this.eventSource = source;
 
