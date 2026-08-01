@@ -13,6 +13,13 @@ import { openMetadataDatabase } from "../storage/database.js";
 import { SessionIndex } from "../storage/session-index.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
+import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
+import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
+import { EventIndexer } from "../runtime/memory/event-indexer.js";
+import { MemoryBatchStore } from "../storage/memory/batch-store.js";
+import { MemoryWatermarkStore } from "../storage/memory/recovery-store.js";
+import { SessionSummaryStore } from "../storage/memory/summary-store.js";
+import { MemoryEventStore } from "../storage/memory/event-store.js";
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -175,6 +182,24 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         return null;
       }
     });
+    const memoryTicker = new MemoryTicker({
+      replayStore,
+      sessionService,
+      promptService,
+      agentStore,
+      summaryStore: new SessionSummaryStore(database),
+      batchStore: new MemoryBatchStore(database),
+      watermarkStore: new MemoryWatermarkStore(database),
+      rollingSummary: new RollingSummaryService({
+        summaryStore: new SessionSummaryStore(database),
+        watermarkStore: new MemoryWatermarkStore(database),
+      }),
+      eventIndexer: new EventIndexer({
+        eventStore: new MemoryEventStore(database),
+        watermarkStore: new MemoryWatermarkStore(database),
+      }),
+    });
+    memoryTicker.start();
     let disposed = false;
 
     return {
@@ -195,6 +220,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       dispose() {
         if (disposed) return;
         disposed = true;
+        memoryTicker.stop();
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();

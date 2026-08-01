@@ -269,13 +269,14 @@ export class EventIndexer {
       status: "active",
     });
 
-    // 水位线推进
+    // 只有正常 summary 路径才推进为 clean；deterministic stub 仍可检索，
+    // 但保留 dirty 标记，便于后续 LLM 可用时重新整理。
     this.watermarkStore.upsert(
       agentId,
       "events",
       branchRevision,
       { lastEntryId: sEnd },
-      false,
+      summary !== undefined && summary.summary.length > 0 ? false : true,
     );
 
     if (summary !== undefined && summary.summary.length > 0) {

@@ -26,9 +26,11 @@ export interface MemoryTickerDeps {
   readonly summaryStore: SessionSummaryStore;
   readonly batchStore: MemoryBatchStore;
   readonly watermarkStore: MemoryWatermarkStore;
-  readonly rollingSummary: RollingSummaryService;
-  readonly eventIndexer: EventIndexer;
+  readonly rollingSummary: Pick<RollingSummaryService, "maybeSummarize">;
+  readonly eventIndexer: Pick<EventIndexer, "indexSession">;
   readonly options?: MemoryTickerOptions;
+  /** turn.completed 后的去抖窗口；默认 10 轮触发一次 */
+  readonly turnsPerSummary?: number;
 }
 
 export type MemoryTickerRunStatus = "updated" | "degraded" | "failed" | "skipped";
@@ -53,6 +55,7 @@ export class MemoryTicker {
   private readonly tails = new Map<string, Promise<unknown>>();
   private readonly queued = new Set<string>();
   private readonly lastActivity = new Map<string, number>();
+  private readonly turnCounts = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopped = false;
 
@@ -88,7 +91,12 @@ export class MemoryTicker {
     if (event.type !== "turn.completed") return;
     const view = this.safeView(event.sessionId);
     if (!view?.agentId || view.archived) return;
-    this.enqueue(view.agentId, event.sessionId, "turn.completed");
+    const count = (this.turnCounts.get(event.sessionId) ?? 0) + 1;
+    this.turnCounts.set(event.sessionId, count);
+    const threshold = this.deps.turnsPerSummary ?? 10;
+    if (count % threshold === 0) {
+      this.enqueue(view.agentId, event.sessionId, "turn.completed");
+    }
   }
 
   private safeView(sessionId: string) {
@@ -129,6 +137,11 @@ export class MemoryTicker {
     });
     if (summary.status === "skipped") {
       return { sessionId, agentId, status: "skipped", reason: summary.reason };
+    }
+    // 摘要尚未成功时不能封存一个没有稳定 summary revision 的 batch；
+    // watermark 已由 RollingSummaryService 标记 dirty，后续 recovery 重试。
+    if (summary.status === "degraded" || summary.status === "failed") {
+      return { sessionId, agentId, status: summary.status, reason: summary.reason };
     }
 
     const latest = this.deps.summaryStore.getLatestForSession(sessionId);
