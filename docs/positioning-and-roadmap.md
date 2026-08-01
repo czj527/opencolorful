@@ -140,6 +140,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **验收**：Agent 跨会话可通过上下文和主动回想获得事实；四段制品可恢复、可检索；长期记忆不会因上下文滚动被静默改写
 
 ### Phase 11：结构化日志与可观测性
+- 架构与阶段草案：[logging-architecture.md](logging-architecture.md) / [phase-11.md](../plans/phase-11.md)；
 - 统一结构化日志 Envelope、级别、脱敏与生命周期；
 - 记忆链路埋点：回想、sealed batch、调度、proposal、审批、强度变化、降级、恢复；
 - Session/Agent/工具/Provider/沙箱事件统一关联 ID；
