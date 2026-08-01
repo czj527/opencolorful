@@ -117,6 +117,7 @@ export class MemoryAgentResolver {
         agentsDir: this.deps.agentsDir,
         completeText: this.deps.completeText,
         sessionPathResolver: this.deps.sessionPathResolver,
+        runId,
         ...(this.deps.assertSessionReadable !== undefined
           ? { assertSessionReadable: this.deps.assertSessionReadable }
           : {}),

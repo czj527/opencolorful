@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryPage, maintenanceLabel } from "./MemoryPage.js";
 
 /** 最小 EventSource 假实现：捕获实例以便手动触发 memory.agent.* 事件 */
@@ -132,11 +132,13 @@ describe("MemoryPage", () => {
   it("shows strength timeline with retention/activation breakdown and salience", async () => {
     render(<MemoryPage />);
     expect(await screen.findByText("强度时间线")).toBeTruthy();
-    expect(screen.getByText("时间线事实")).toBeTruthy();
+    // 等待时间线数据到达（与 heading 同一批次渲染，但保留等待以消除调度竞态）
+    expect(await screen.findByText("时间线事实")).toBeTruthy();
+    const strengthSection = within(screen.getByLabelText("时间线事实强度"));
     // 双强度分解：retention 60 / activation 30
-    expect(screen.getByText("60")).toBeTruthy();
-    expect(screen.getByText("30")).toBeTruthy();
-    expect(screen.getByText("2 个回想日")).toBeTruthy();
+    expect(strengthSection.getByText("60")).toBeTruthy();
+    expect(strengthSection.getByText("30")).toBeTruthy();
+    expect(strengthSection.getByText("2 个回想日")).toBeTruthy();
     // 事件显著度
     expect(screen.getByText("显著事件")).toBeTruthy();
     expect(screen.getByText("80")).toBeTruthy();
