@@ -189,6 +189,7 @@ describe("ProposalApplication", () => {
       runId: "run-2",
       type: "supersede", targetId: String(old.id),
       payload: { supersededFactId: old.id, newFact: "更完整的新事实", reason: "旧事实过时" },
+      previousState: { fact: "旧事实", status: "active" },
     });
     const result = application.applyRun({ agentId: "a1", runId: "run-2", proposals: [supersede] });
     expect(result.applied).toHaveLength(1);

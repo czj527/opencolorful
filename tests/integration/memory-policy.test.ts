@@ -235,7 +235,7 @@ describe("MemoryPolicy", () => {
     expect(result.approved).toBe(true);
   });
 
-  it("journal 水位线之后出现用户 intent → 拒绝", () => {
+  it("隐式水位线：提案生成后出现用户 intent → 拒绝；生成前已存在 → 放行", () => {
     const { database } = createContext();
     const factStore = new MemoryFactStore(database);
     const journalStore = new MemoryJournalStore(database);
@@ -256,14 +256,26 @@ describe("MemoryPolicy", () => {
       eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
+    // 用户 intent 的 createdAt 晚于提案 createdAt（makeProposal 默认 2026-08-01T00:00:00Z）→ 拒绝
     const result = policy.check(makeProposal({
       type: "strength_change",
       targetId: String(fact.id),
-      payload: { retentionStrength: 60, journalWatermark: "2026-01-01T00:00:00Z" },
+      payload: { retentionStrength: 60 },
       previousState: { retentionStrength: 50 },
     }));
     expect(result.approved).toBe(false);
-    expect(result.reason).toContain("水位线");
+    expect(result.reason).toContain("新的用户意图");
+
+    // 提案生成前已存在的 intent（createdAt 早于提案）→ 放行：
+    // 提案 createdAt 设为晚于第一个 intent（真实 now ≈ 2026-08-01T21:xx）的 08-02
+    const older = policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 60 },
+      previousState: { retentionStrength: 50 },
+      createdAt: "2026-08-02T00:00:00Z",
+    }));
+    expect(older.approved).toBe(true);
   });
 
   it("forget 缺少理由 → 拒绝；restore 仅限 forgotten 事实", () => {
@@ -327,5 +339,90 @@ describe("MemoryPolicy 迟滞接线（评审 P1-3）", () => {
       previousState: { retentionStrength: 50 },
     }));
     expect(ok.approved).toBe(true);
+  });
+});
+
+describe("MemoryPolicy 自审修复（版本冲突 / session forget）", () => {
+  function build(database: import("better-sqlite3").Database) {
+    const factStore = new MemoryFactStore(database);
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(database),
+      journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    return { factStore, policy };
+  }
+
+  it("supersede：previousState 与当前事实不一致 → 版本冲突拒绝", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const fact = factStore.createFact({
+      agentId: "a1", fact: "旧事实 v1", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 50,
+    });
+    // 提案生成时读到的是 active，但应用时事实已被其他运行遗忘（status 变化 → 版本冲突）
+    factStore.markForgotten(fact.id, { reason: "其他运行已处理" });
+    const result = policy.check(makeProposal({
+      type: "supersede", targetId: String(fact.id),
+      payload: { supersededFactId: fact.id, newFact: "新事实", reason: "过时" },
+      previousState: { fact: "旧事实 v1", status: "active" },
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("版本冲突");
+    // previousState 缺失同样拒绝
+    const missing = policy.check(makeProposal({
+      type: "supersede", targetId: String(fact.id),
+      payload: { supersededFactId: fact.id, newFact: "新事实", reason: "过时" },
+    }));
+    expect(missing.approved).toBe(false);
+  });
+
+  it("merge：previousState.facts 快照缺失或不一致 → 版本冲突拒绝", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const a = factStore.createFact({
+      agentId: "a1", fact: "重复 A", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 30,
+    });
+    const b = factStore.createFact({
+      agentId: "a1", fact: "重复 B", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 30,
+    });
+    // 快照正确 → 放行
+    const ok = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 A", status: "active" }, { id: String(b.id), fact: "重复 B", status: "active" }] },
+    }));
+    expect(ok.approved).toBe(true);
+    // 快照缺失 → 拒绝
+    const missing = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+    }));
+    expect(missing.approved).toBe(false);
+    expect(missing.reason).toContain("版本冲突");
+    // 快照与当前不一致（a 已被其他运行遗忘）→ 拒绝
+    factStore.markForgotten(a.id, { reason: "其他运行已处理" });
+    const stale = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 A", status: "active" }, { id: String(b.id), fact: "重复 B", status: "active" }] },
+    }));
+    expect(stale.approved).toBe(false);
+  });
+
+  it("forget 目标为 session → 拒绝（无实现不得空操作通过）", () => {
+    const { database } = createContext();
+    const { policy } = build(database);
+    const result = policy.check(makeProposal({
+      type: "forget", targetType: "session", targetId: "s1",
+      payload: { targetType: "session", targetId: "s1", reason: "会话过期" },
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("暂不支持");
   });
 });

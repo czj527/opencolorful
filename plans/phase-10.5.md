@@ -322,6 +322,25 @@ T8 质量门 + browser-use 验收（主 Agent）
 
 专项验收测试：`tests/integration/memory-isolation.test.ts`（6 例，含评审复现的 A/B 场景端到端）+ scheduler 重试/串行/enabled 门 + 事务中途异常 + script 模式 + 确定性强度 + 迟滞 + strength.changed 发布 + report 落盘。
 
+### 第三轮：主 Agent 自审（严格评审视角，2026-08-01）
+
+定向排查未覆盖盲区，修复 3 项并补 5 例测试：
+
+1. **supersede/merge 版本冲突缺失**：previousState 从未与当前事实比对，提案生成后事实被其他运行修改仍会继续应用。
+   修复：policy 比对 `fact 文本 + status`（status 变化如被遗忘/取代即冲突）；merge 工具补充 previousState.facts 快照。
+2. **journal watermark 机制失效**：payload schema 收紧（additionalProperties:false）后模型无法传入 journalWatermark，
+   原校验成为死代码。修复：改为平台侧隐式水位线——以提案 createdAt 为界，之后出现的用户 intent 即拒绝，
+   水位线完全由平台判定，模型不可伪造。
+3. **forget(session) 空操作**：targetType=session 无实现却在 policy 通过、application 标记 applied。
+   修复：policy 明确拒绝"暂不支持对会话目标执行遗忘"。
+
+其余方向复查结论（无需修改）：
+- 跨 Agent 隔离：batch/session/event/fact 四类目标均已三层校验；sessionPathResolver 越权路径被组合根拦截；
+  restore 分支由 check() 顶部的 current.agentId 全局检查覆盖；rollbackRun 按 agentId 过滤
+- schedulerStore.upsert 为 INSERT OR REPLACE 整行替换 → 成功后 nextRetryAt 自动清空，无残留跳过
+- 设置链路：routes GET settings 与 start.ts resolveMemorySettings 实现一致；enabled/deepDiveMode 运行时读取
+- 预算熔断/串行队列/批次结算/报告脱敏/strength.changed 发布：两轮评审已验证
+
 ### 实施中修复的关键缺陷
 
 1. **P0（Phase 10 遗留，reviewer 提出）**：MemoryEventPublisher 每次 search_memory 新建实例导致 agent 流序列号重复 —— 改为模块级共享分配器 `nextAgentStreamSequence`，连续/并发/重放场景测试覆盖。

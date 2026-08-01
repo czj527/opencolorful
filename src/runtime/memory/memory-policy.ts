@@ -111,12 +111,33 @@ export class MemoryPolicy {
       if (!ids?.length || ids.some((id) => !this.deps.factStore.getActiveById(id))) return { approved: false, reason: "目标事实版本冲突或已非 active" };
       // 跨 Agent 隔离：merge 的所有目标事实都必须属于当前 Agent
       if (ids.some((id) => this.deps.factStore.getById(id)?.agentId !== proposal.agentId)) return { approved: false, reason: "目标事实不属于当前 Agent" };
+      // 版本冲突（自审发现）：提案生成时的 previousState 必须与当前事实一致
+      // （fact 文本 + status；status 变化如被其他运行遗忘/取代即冲突），
+      // 防止提案生成后被其他运行修改仍继续应用（计划 §六"版本冲突会拒绝或重新计算"）
+      if (proposal.type === "supersede") {
+        const previous = proposal.previousState as Record<string, unknown> | undefined;
+        const target = this.deps.factStore.getById(ids[0]!);
+        if (!previous || target === undefined || previous["fact"] !== target.fact || previous["status"] !== target.status) {
+          return { approved: false, reason: "事实版本冲突，请重新计算提案" };
+        }
+      } else {
+        const previousFacts = (proposal.previousState as Record<string, unknown> | undefined)?.["facts"];
+        if (!Array.isArray(previousFacts)) return { approved: false, reason: "事实版本冲突，请重新计算提案" };
+        for (const id of ids) {
+          const target = this.deps.factStore.getById(id);
+          const snap = (previousFacts as Array<Record<string, unknown>>).find((entry) => String(entry["id"]) === String(id));
+          if (target === undefined || snap === undefined || snap["fact"] !== target.fact || snap["status"] !== target.status) {
+            return { approved: false, reason: "事实版本冲突，请重新计算提案" };
+          }
+        }
+      }
       const firstId = ids[0];
       if (firstId === undefined) return { approved: false, reason: "目标事实不存在" };
       return this.checkWatermark(proposal, firstId);
     }
     if (proposal.type === "forget") {
       if (!proposal.reason.trim()) return { approved: false, reason: "遗忘必须提供理由" };
+      if (proposal.targetType === "session") return { approved: false, reason: "暂不支持对会话目标执行遗忘" };
       if (proposal.targetType === "fact" && (!current || current.status === "suppressed")) return { approved: false, reason: "目标事实不存在" };
       // 跨 Agent 隔离：事件目标必须属于当前 Agent
       if (proposal.targetType === "event") {
@@ -178,11 +199,15 @@ export class MemoryPolicy {
     return computed.proposed;
   }
 
+  /**
+   * 平台侧隐式水位线（自审修复）：payload 收紧后模型无法传入 journalWatermark，
+   * 改为以提案生成时间（createdAt）为界——之后出现的用户 intent 说明提案已过期，
+   * 拒绝并提示重新计算；水位线完全由平台判定，模型不可伪造。
+   */
   private checkWatermark(proposal: MemoryMutationProposal, targetId: number | undefined): MemoryPolicyResult {
-    const watermark = typeof proposal.payload.journalWatermark === "string" ? proposal.payload.journalWatermark : undefined;
-    if (!watermark || targetId === undefined) return { approved: true, reason: "策略检查通过" };
+    if (targetId === undefined) return { approved: true, reason: "策略检查通过" };
     const newer = this.deps.journalStore.listByAgent(proposal.agentId).some((intent) =>
-      intent.actor === "user" && intent.targetId === String(targetId) && intent.createdAt > watermark);
-    return newer ? { approved: false, reason: "journal 水位线之后出现用户意图，请重新计算提案" } : { approved: true, reason: "策略检查通过" };
+      intent.actor === "user" && intent.targetId === String(targetId) && intent.createdAt > proposal.createdAt);
+    return newer ? { approved: false, reason: "提案生成后出现新的用户意图，请重新计算提案" } : { approved: true, reason: "策略检查通过" };
   }
 }
