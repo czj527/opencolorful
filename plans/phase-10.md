@@ -1,6 +1,6 @@
 # Phase 10：记忆系统底座 - openhanako 传送带、主动回想与封存队列
 
-**状态：进行中** | 分支：`phase-10-memory`
+**状态：已完成（2026-08-01）** | 分支：`phase-10-memory`
 **基线：** `main`（Phase 9 验收点之后）
 **架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
 **实现参考：** `<local-workspace>\references\openhanako\lib\memory\`（借机制，不抄代码）
@@ -438,3 +438,58 @@ cd web; npx playwright test
 - 验证证据：`npx tsc --noEmit` exit 0；`verify-pi-sdk-imports` exit 0；`npx vitest run` 47 文件 439 全过；`npm run test --workspace=web` 28 文件 326 全过
 - 测试中发现并修正：FTS OR 查询的 n-gram 部分重叠语义（更新同步断言改用完全不重叠词项）；openhanako base+gram 结构的去重语义（断言改为跨 run gram 去重）
 - 已知偏差：无
+
+### T2 存储层（2026-08-01，子 Agent 实现 + 主 Agent 审查）
+
+- 提交：`9beb588` feat(memory): T2 存储层 stores
+- 交付：`src/storage/memory/` 下 8 个 store（summary/event/fact/recall/journal/batch/recovery/pinned）；fact store 只读无写入方法；journal append-only + suppression 查询；batch pending 聚合排序；54 个集成测试
+- 审查：tsc 0 / 54 测试全过 / 主 Agent 独立复核 diff 后提交
+
+### T3 rolling summary + 事件索引（2026-08-01）
+
+- 提交：`2c7021d`（共享件分支读取器）+ `ce5b737`（T3 本体）
+- 关键前置：`tests/integration/memory-branch.test.ts` 用真实 SessionManager + branch() 分叉验证 entry/revision 语义，**cursor 契约据此冻结**：cursor = {lastEntryId}；分支变更 ⇔ entriesAfterEntry 返回 null；revision = 当前路径 id 序列 sha256 前 16 hex
+- 交付：`pi-sdk/complete-text.ts`（completeSimple 工具型 LLM 适配）、summary-format/prompts、RollingSummaryService（全量/增量/分支三模式、repair once、失败不推进 cursor、degraded + dirty watermark、落盘前脱敏）、EventIndexer（零额外 LLM、确定性 id 幂等、deterministic stub）
+- 测试：summary-format 16 + memory-summary 12 + branch 6
+- 审查修正：未使用导入清理
+
+### T4 openhanako 编译流水线（2026-08-01）
+
+- 提交：`39b75e3` feat(memory): T4 四段 Markdown 编译传送带 S0-S4
+- 交付：memory-files（04:00 逻辑日边界、atomicWrite）、compile-prompts、MemoryCompilePipeline（S0 daily → S1 today → S2 longterm fold → S3 facts → S4 assemble；daily_state 断点幂等续跑；LLM 失败保留上一版、markdown watermark dirty；week 纯文件拼接零 LLM；memory.md 四段标题固定 + 占位符；revision = sha256 前 12）
+- 审查修正：S0/S1 的 session summaries 按日期过滤（today/yesterday 分别取对应日期的摘要）
+- 测试：memory-files 2 + memory-compile 1
+
+### T5 MemoryTicker + Session 生命周期 + sealed batch + dirty recovery（2026-08-01，主 Agent）
+
+- 提交：`22ef498` feat(memory): T5 MemoryTicker 接入生产生命周期与恢复队列
+- 交付：turn.completed 每 10 轮触发（turnsPerSummary 可配）、per-Agent 串行 promise tail 队列 + 去重、summary 成功后才封存确定性 batch（degraded/failed 不产假 batch）、idle gate 兜底 housekeeping、启动按 dirty watermark/pending batch 恢复、生产组合根 start/stop 接线
+- 审查修正：EventIndexer deterministic stub 保留 events dirty（避免 LLM 恢复后不再整理）；degraded 摘要直接短路不封存
+- 测试：memory-ticker 2（threshold 触发 + degraded 路径）
+
+### T6 search_memory + RecallEpisode + intent 工具 + 注入（2026-08-01）
+
+- 提交：`1563832` feat(memory): T6 search_memory + RecallEpisode + intent-only 工具 + 注入
+- 交付：MemoryRecallService（facts→events→source 确定性下钻、RecallEpisode 生命周期、memory.recall.* SSE agent stream、每 hit 写 recall ledger、memory_recall_events 落库 Replay、source 层归属 + 路径 containment 校验）；5 个工具（search_memory/remember/forget/pin/unpin，global-Symbol 上下文 fail-closed；remember/forget 只追加 journal；pin/unpin 即时应用 + 留痕）；注入（规则→Pinned 独立保底→Memory 四段、8 条威胁扫描 [BLOCKED]、预算截断优先级、revision 参与重建比较实现下一轮生效）；MEMORY_TOOL_NAMES 不受 tool_mode 影响
+- 审查修正：source 层 ledger 的 queryHash/sessionId 语义、empty reachedLayer 按实际下钻深度、注入预算完整计量（规则段/头部计入）、SessionRuntime onDispose 注销 memory context 防泄漏
+- 测试：recall 11 + injection 11 + tools 9
+
+### T7 只读 API + Agent SSE（2026-08-01）
+
+- 提交：`163e5b8` feat(memory): T7 只读 API + Agent SSE 与 T8 memory 页面（与 T8 合并提交）
+- 交付：`/api/agents/:id/memory/{compiled,facts,events,pinned,flush,health}`；Agent-scoped SSE `/api/agents/:id/events`（Replay + ownership 过滤）；SseClient 支持 agent stream
+- 验收修正（`0659c80`）：compiled 返回四段 sections（复用注入解析器防契约漂移）
+
+### T8 /memory 只读页（2026-08-01）
+
+- 提交：`163e5b8`（与 T7 合并）+ `0659c80` 修复
+- 交付：四段编译记忆卡片、Pinned、已审批事实、事件时间线、RecallEpisode/pending batch 健康卡片、搜索、加载/错误/空态、Agent 选择、15 秒自动刷新；Phase 10 无编辑入口
+- 验收修正（`0659c80`）：/api/agents 返回嵌套 AgentView，页面扁平化为 {id,name}（修复选择器空选项与自动选中）；段解析器未知 ## 标题视为内容（week 段内 ## {date} 子标题不再清空当前段）
+- 测试：MemoryPage 2（夹具对齐真实 API 形状）
+
+### T9 质量门 + browser-use 验收（2026-08-01，主 Agent）
+
+- 最终门（全部独立通过）：verify-pi-sdk-imports 0 / tsc --noEmit 0 / vitest 57 文件 564 全过 / web 29 文件 328 全过 / web:build 通过 / tsc -p tsconfig.build.json 0 / Playwright 41/41
+- browser-use 实际验收：启动本地服务 → `/memory` 页 → Agent 选择器列出全部 Agent 并自动选中 → 健康卡片（RecallEpisode idle / pending batch 0 / 15 秒刷新）→ 选中播种 Agent 后四段正确渲染（今天/本周含 ## 日期子标题/长期/重要事实）→ API 全链路（compiled 四段、facts 空为 Phase 10 预期、events、pinned、health、flush 202 安全响应、跨 Agent 404）→ 截图留存
+- 验收发现并修复 3 项真实缺陷（`0659c80`）：AgentView 扁平化、compiled sections 契约、week 子标题解析
+- 结论：**Phase 10 验收通过**
