@@ -31,6 +31,8 @@ export function registerMemoryRoutes(
   database: Database.Database,
   paths: RuntimePaths,
   agentStore?: AgentStore,
+  /** Phase 10 手动 flush 钩子（由组合根注入 MemoryTicker.requestFlush） */
+  flushHook?: (agentId: string) => void,
 ): void {
   const facts = new MemoryFactStore(database);
   const events = new MemoryEventStore(database);
@@ -79,6 +81,12 @@ export function registerMemoryRoutes(
   app.post("/api/agents/:id/memory/flush", (context) => {
     const agentId = context.req.param("id");
     const missing = ensureAgent(agentStore, agentId); if (missing) return missing;
+    // Phase 10 flush：封存活跃 Session + 重建 Markdown/事件索引（fire-and-forget）；
+    // 不运行记忆 Agent、不应用长期事实 proposal。
+    if (flushHook !== undefined) {
+      flushHook(agentId);
+      return context.json({ agentId, status: "accepted", implementation: "seal_and_rebuild", message: "已排队封存并重建记忆索引" }, 202);
+    }
     return context.json({ agentId, status: "accepted", implementation: "not_implemented_safe", message: "Phase 10 flush 仅返回安全排队确认，不运行记忆 Agent 或写入 memory_facts" }, 202);
   });
 

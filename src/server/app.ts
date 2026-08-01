@@ -43,6 +43,8 @@ export interface ServerAppOptions {
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;
   readonly database?: import("better-sqlite3").Database;
+  /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
+  readonly memoryFlushHook?: (agentId: string) => void;
 }
 
 export interface ServerAppResult {
@@ -87,7 +89,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     registerUsageRoutes(app, options.usageStore);
   }
   if (options.database !== undefined && options.paths !== undefined) {
-    registerMemoryRoutes(app, options.database, options.paths, options.agentStore);
+    registerMemoryRoutes(app, options.database, options.paths, options.agentStore, options.memoryFlushHook);
   }
   if (options.replayStore !== undefined) {
     registerAgentEventRoutes(app, options.replayStore, options.agentStore, options.sessionService);

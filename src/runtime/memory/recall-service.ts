@@ -25,6 +25,11 @@ import { sanitizeSensitiveText } from "../sanitize.js";
 // ═══════════════════════════════════════════════════════════════
 // MemoryEventPublisher：per-stream sequence 计数器
 // streamId = `agent:${agentId}`，sequence 从 1 递增
+//
+// 注意：agent 流是跨会话共享的（同 Agent 的所有会话回想事件发布到同一条
+// 流），因此序号必须由「流级共享分配器」维护，而不是每个 publisher 实例
+// 各自从 0 起计——否则并发/连续回想会产生重复 sequence，破坏
+// Last-Event-ID 续传与 Replay 语义。
 // ═══════════════════════════════════════════════════════════════
 
 const RECALL_EVENT_TYPE_MAP: Record<MemoryRecallStatus, PlatformEventType> = {
@@ -36,9 +41,22 @@ const RECALL_EVENT_TYPE_MAP: Record<MemoryRecallStatus, PlatformEventType> = {
   cancelled: "memory.recall.cancelled",
 };
 
-export class MemoryEventPublisher {
-  private sequence = 0;
+/** 进程内共享的 agent 流序号（streamId → 已用最大 sequence） */
+const agentStreamSequences = new Map<string, number>();
 
+/** 测试用：重置共享序号（单测隔离） */
+export function resetAgentStreamSequences(): void {
+  agentStreamSequences.clear();
+}
+
+/** 取流内下一条单调递增序号（单线程内同步递增，天然无竞争） */
+function nextAgentStreamSequence(streamId: string): number {
+  const next = (agentStreamSequences.get(streamId) ?? 0) + 1;
+  agentStreamSequences.set(streamId, next);
+  return next;
+}
+
+export class MemoryEventPublisher {
   constructor(
     private readonly sessionId: string,
     private readonly agentId: string,
@@ -53,13 +71,13 @@ export class MemoryEventPublisher {
     type: PlatformEventType,
     payload: MemoryRecallPayload,
   ): void {
-    this.sequence += 1;
+    const sequence = nextAgentStreamSequence(this.streamId);
     const envelope: PlatformEventEnvelope = {
       protocolVersion: 1,
       eventId: crypto.randomUUID(),
       sessionId: this.sessionId,
       streamId: this.streamId,
-      sequence: this.sequence,
+      sequence,
       timestamp: new Date().toISOString(),
       type,
       payload,

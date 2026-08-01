@@ -1,6 +1,8 @@
 import type { Api, Model, AssistantMessage } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
+import type { PiResolvedModel } from "./types.js";
+
 /**
  * 工具型 LLM 调用的轻量适配器。
  * 不挂载工具、不流式——仅发送单轮 prompt 并提取纯文本响应。
@@ -58,4 +60,27 @@ export async function completeUtilityText(options: {
   }
 
   return texts.join("");
+}
+
+/**
+ * 基于平台契约的 opaque PiResolvedModel 直接调用（平台侧不暴露 PI 私有类型，
+ * 由适配层在此完成 model/runtime 的类型收窄）。
+ */
+export async function completeUtilityTextForResolved(
+  resolved: PiResolvedModel,
+  options: {
+    systemPrompt?: string;
+    prompt: string;
+    maxTokens?: number;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  return completeUtilityText({
+    runtime: resolved.runtime as ModelRuntime,
+    model: resolved.model as Model<Api>,
+    ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
+    prompt: options.prompt,
+    ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+    ...(options.signal !== undefined ? { signal: options.signal } : {}),
+  });
 }

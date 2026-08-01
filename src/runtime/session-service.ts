@@ -29,6 +29,8 @@ export class SessionService {
   constructor(
     private readonly paths: RuntimePaths,
     private readonly index: SessionIndex,
+    /** 归档时的可选回调（记忆系统用它触发 sealed batch 封存，fire-and-forget） */
+    private readonly onArchive?: (sessionId: string) => void,
   ) {}
 
 create(request: CreateSessionRequest): PiSessionHandle {
@@ -97,6 +99,11 @@ create(request: CreateSessionRequest): PiSessionHandle {
   archive(id: string): SessionView {
     const current = this.getView(id);
     const archived = this.index.archive(id);
+    try {
+      this.onArchive?.(id);
+    } catch {
+      // 封存触发失败不阻塞归档本身
+    }
     return { ...archived, messages: current.messages, messageEntries: current.messageEntries, model: current.model };
   }
 

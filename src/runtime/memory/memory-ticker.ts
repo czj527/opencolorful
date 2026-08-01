@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import path from "node:path";
 
 import type { AgentStore } from "../../config/agent-store.js";
 import type { PlatformEventEnvelope } from "../../contracts/events.js";
@@ -6,10 +7,12 @@ import type { EventReplayStore } from "../event-replay-store.js";
 import type { PromptService } from "../prompt-service.js";
 import type { SessionService } from "../session-service.js";
 import type { MemoryBatchStore } from "../../storage/memory/batch-store.js";
-import type { MemoryWatermarkStore } from "../../storage/memory/recovery-store.js";
+import type { MemoryWatermarkStore, SchedulerStateStore } from "../../storage/memory/recovery-store.js";
 import type { SessionSummaryStore } from "../../storage/memory/summary-store.js";
 import type { RollingSummaryService } from "./rolling-summary.js";
 import type { EventIndexer } from "./event-indexer.js";
+import type { MemoryCompilePipeline } from "./compile-pipeline.js";
+import { getLogicalDate } from "./memory-files.js";
 import { readSessionBranchSnapshot } from "./jsonl-branch-reader.js";
 
 export interface MemoryTickerOptions {
@@ -26,8 +29,13 @@ export interface MemoryTickerDeps {
   readonly summaryStore: SessionSummaryStore;
   readonly batchStore: MemoryBatchStore;
   readonly watermarkStore: MemoryWatermarkStore;
+  readonly schedulerStore: SchedulerStateStore;
   readonly rollingSummary: Pick<RollingSummaryService, "maybeSummarize">;
   readonly eventIndexer: Pick<EventIndexer, "indexSession">;
+  /** T4 四段 Markdown 编译流水线（每 10 轮 refreshToday；跨日 runDaily） */
+  readonly compilePipeline: Pick<MemoryCompilePipeline, "refreshToday" | "runDaily">;
+  /** agents 根目录，用于定位 <agentId>/memory/ */
+  readonly agentsDir: string;
   readonly options?: MemoryTickerOptions;
   /** turn.completed 后的去抖窗口；默认 10 轮触发一次 */
   readonly turnsPerSummary?: number;
@@ -107,7 +115,7 @@ export class MemoryTicker {
     }
   }
 
-  private enqueue(agentId: string, sessionId: string, reason: string): void {
+  private enqueue(agentId: string, sessionId: string, reason: string, priority = 0): void {
     const key = `${agentId}:${sessionId}`;
     if (this.queued.has(key)) return;
     this.queued.add(key);
@@ -116,7 +124,7 @@ export class MemoryTicker {
       .catch(() => undefined)
       .then(async () => {
         try {
-          await this.process(agentId, sessionId, reason);
+          await this.process(agentId, sessionId, reason, priority);
         } finally {
           this.queued.delete(key);
         }
@@ -125,7 +133,33 @@ export class MemoryTicker {
     void next.catch(() => undefined);
   }
 
-  private async process(agentId: string, sessionId: string, _reason: string): Promise<MemoryTickerRunResult> {
+  /**
+   * Session 归档触发：立即补摘要并创建高优先级 sealed batch（fire-and-forget）。
+   * 由 SessionService.archive 的 onArchive 钩子调用。
+   */
+  onSessionArchived(sessionId: string): void {
+    const view = this.safeView(sessionId);
+    if (!view?.agentId) return;
+    this.enqueue(view.agentId, sessionId, "archive", 1);
+  }
+
+  /**
+   * 手动 flush（Phase 10）：封存所有活跃 Session + 重建 Markdown/事件索引。
+   * 只做近期整理，不运行记忆 Agent、不应用长期事实 proposal。
+   */
+  requestFlush(agentId: string): void {
+    for (const view of this.deps.sessionService.list({ agentId })) {
+      if (!view.archived) this.enqueue(agentId, view.id, "flush", 1);
+    }
+    void this.runDailyIfNeeded(agentId);
+  }
+
+  private async process(
+    agentId: string,
+    sessionId: string,
+    _reason: string,
+    priority = 0,
+  ): Promise<MemoryTickerRunResult> {
     const view = this.safeView(sessionId);
     if (!view?.agentId || view.agentId !== agentId || view.archived) {
       return { sessionId, agentId, status: "skipped", reason: "会话未绑定 Agent 或已归档" };
@@ -177,9 +211,15 @@ export class MemoryTicker {
         revision: { branchRevision: revision, cursor: latest?.cursor ?? {} },
         sourceStartEntry: startEntry,
         sourceEndEntry: endEntry,
-        priority: 0,
+        priority,
       }, "sealed");
     }
+
+    // 每 10 轮/封存后：重新编译 today.md + assemble memory.md（LLM 不可用时
+    // S4 assemble 仍执行，四段用上一版/占位符拼装）
+    const memoryDir = path.join(this.deps.agentsDir, agentId, "memory");
+    await this.deps.compilePipeline.refreshToday(agentId, memoryDir).catch(() => undefined);
+
     return {
       sessionId,
       agentId,
@@ -189,12 +229,31 @@ export class MemoryTicker {
     };
   }
 
+  /** 跨日边界：scheduler_state.lastDailyDate ≠ 今日时执行 S0-S4 每日整理 */
+  private async runDailyIfNeeded(agentId: string): Promise<void> {
+    const today = getLogicalDate();
+    const state = this.deps.schedulerStore.get(agentId);
+    if (state?.lastDailyDate === today) return;
+    const memoryDir = path.join(this.deps.agentsDir, agentId, "memory");
+    await this.deps.compilePipeline.runDaily(agentId, memoryDir, today).catch(() => undefined);
+    this.deps.schedulerStore.upsert({
+      agentId,
+      status: "idle",
+      ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
+      ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
+      ...(state?.nextRetryAt !== undefined ? { nextRetryAt: state.nextRetryAt } : {}),
+      lastDailyDate: today,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   private async housekeeping(): Promise<void> {
     if (this.stopped) return;
     const now = this.deps.options?.now?.() ?? Date.now();
     const idleMs = this.deps.options?.idleMs ?? 30 * 60 * 1000;
     for (const agent of this.deps.agentStore.list()) {
       const agentId = agent.identity.id;
+      void this.runDailyIfNeeded(agentId);
       for (const view of this.deps.sessionService.list({ agentId })) {
         if (view.archived || this.deps.promptService.isBusy(view.id)) continue;
         const last = this.lastActivity.get(view.id);

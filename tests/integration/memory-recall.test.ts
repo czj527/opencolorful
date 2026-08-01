@@ -15,6 +15,7 @@ import { SessionIndex, type CreateSessionInput } from "../../src/storage/session
 import { buildMemorySearchText } from "../../src/storage/memory/cjk-ngram.js";
 import { MemoryRecallService } from "../../src/runtime/memory/recall-service.js";
 import { createPersistentSession } from "../../src/pi-sdk/index.js";
+import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 
 const temporaryDirectories: string[] = [];
@@ -621,5 +622,76 @@ describe("MemoryRecallService", () => {
     expect(events[0]?.status).toBe("started");
     const lastEvent = events[events.length - 1];
     expect(["completed", "empty"].includes(lastEvent?.status ?? "")).toBe(true);
+  });
+
+  it("agent stream sequence is strictly increasing across consecutive recalls", async () => {
+    const { database, agentsDir } = createContext();
+    const factStore = new MemoryFactStore(database);
+    const eventStore = new MemoryEventStore(database);
+    const recallStore = new MemoryRecallStore(database);
+    const sessionIndex = new SessionIndex(database);
+    seedFact(database, "agent-a", "连续回想", buildMemorySearchText("连续回想"));
+
+    const publishedEnvelopes: PlatformEventEnvelope[] = [];
+    const makeService = () => new MemoryRecallService({
+      factStore,
+      eventStore,
+      recallStore,
+      sessionIndex,
+      publish: (env) => publishedEnvelopes.push(env),
+      agentsDir,
+    });
+
+    // 两次回想各自创建新的 service/publisher 实例（模拟两个会话/两轮调用）
+    await makeService().search({ agentId: "agent-a", sessionId: "sess-1", args: { query: "连续回想", depth: "quick" } });
+    await makeService().search({ agentId: "agent-a", sessionId: "sess-2", args: { query: "连续回想", depth: "quick" } });
+
+    const sequences = publishedEnvelopes.map((e) => e.sequence);
+    expect(sequences.length).toBeGreaterThanOrEqual(4);
+    for (let i = 1; i < sequences.length; i += 1) {
+      expect(sequences[i]!).toBeGreaterThan(sequences[i - 1]!);
+    }
+    expect(new Set(sequences).size).toBe(sequences.length);
+    expect(new Set(publishedEnvelopes.map((e) => e.streamId))).toEqual(new Set(["agent:agent-a"]));
+  });
+
+  it("agent stream sequence is strictly increasing under concurrent recalls and replayable", async () => {
+    const { database, agentsDir } = createContext();
+    const factStore = new MemoryFactStore(database);
+    const eventStore = new MemoryEventStore(database);
+    const recallStore = new MemoryRecallStore(database);
+    const sessionIndex = new SessionIndex(database);
+    const replayStore = new EventReplayStore();
+    seedFact(database, "agent-a", "并发回想", buildMemorySearchText("并发回想"));
+
+    const makeService = () => new MemoryRecallService({
+      factStore,
+      eventStore,
+      recallStore,
+      sessionIndex,
+      publish: (env) => replayStore.publish(env),
+      agentsDir,
+    });
+
+    // 并发两次回想（Promise.all，共享同一 agent 流）
+    await Promise.all([
+      makeService().search({ agentId: "agent-a", sessionId: "sess-1", args: { query: "并发回想", depth: "quick" } }),
+      makeService().search({ agentId: "agent-a", sessionId: "sess-2", args: { query: "并发回想", depth: "quick" } }),
+    ]);
+
+    // 流内 sequence 严格递增、无重复
+    const replay = replayStore.getSince("agent:agent-a", 0);
+    const sequences = replay.events.map((e) => e.sequence);
+    expect(sequences.length).toBeGreaterThanOrEqual(4);
+    for (let i = 1; i < sequences.length; i += 1) {
+      expect(sequences[i]!).toBeGreaterThan(sequences[i - 1]!);
+    }
+    expect(new Set(sequences).size).toBe(sequences.length);
+
+    // 从中间游标续传：不重复、不丢失
+    const midpoint = sequences[Math.floor(sequences.length / 2)]!;
+    const resume = replayStore.getSince("agent:agent-a", midpoint);
+    expect(resume.events.every((e) => e.sequence > midpoint)).toBe(true);
+    expect(resume.events.map((e) => e.sequence)).toEqual(sequences.filter((s) => s > midpoint));
   });
 });
