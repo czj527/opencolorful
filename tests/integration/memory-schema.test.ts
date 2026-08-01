@@ -231,18 +231,24 @@ describe("migration v6（记忆系统底座）", () => {
 });
 
 describe("migration v7（记忆 Agent 审批与优先级）", () => {
-  it("fresh database reaches schema version 7 with proposals table", () => {
+  it("fresh database reaches schema version 8 with proposals and observability tables", () => {
     const { database } = createDatabase();
     const version = database
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(7);
-    expect(CURRENT_SCHEMA_VERSION).toBe(7);
+    expect(version).toBe(8);
+    expect(CURRENT_SCHEMA_VERSION).toBe(8);
     const tables = tableNames(database);
     expect(tables).toContain("memory_mutation_proposals");
+    expect(tables).toContain("activity_events");
+    expect(tables).toContain("audit_events");
+    expect(tables).toContain("observability_trace_links");
+    expect(tables).toContain("activity_daily_metrics");
+    expect(tables).toContain("observability_state");
     const triggers = triggerNames(database);
     expect(triggers).toContain("memory_events_ai");
+    expect(triggers).toContain("activity_events_ai");
     database.close();
   });
 
@@ -284,6 +290,75 @@ describe("migration v7（记忆 Agent 审批与优先级）", () => {
         )
         .run(),
     ).toThrow();
+    database.close();
+  });
+});
+
+describe("migration v8（Phase 11 可观测性）", () => {
+  it("v7 数据库升级到 v8：保留 Phase 10.5 数据且新增可观测性表", () => {
+    const { paths, database } = createDatabase();
+    // 构造 v7 数据（记忆提案 + 事实）
+    const factId = Number(database.prepare(
+      "INSERT INTO memory_facts (agent_id, fact, search_text, created_at, updated_at) VALUES ('a1', 'v7 事实', ?, '2026-07-31T00:00:00Z', '2026-07-31T00:00:00Z')",
+    ).run(buildMemorySearchText("v7 事实")).lastInsertRowid);
+    database.prepare(`
+      INSERT INTO memory_mutation_proposals (id, agent_id, run_id, type, payload, evidence_refs, reason, confidence, status, created_at)
+      VALUES ('p1', 'a1', 'run-1', 'create_fact', '{"fact":"v7 事实"}', '["session:s1"]', '测试', 0.9, 'applied', '2026-07-31T00:00:00Z')
+    `).run();
+    // 把 schema_version 拉回 7，模拟 v7 现场升级
+    database.prepare("UPDATE schema_version SET version = 7 WHERE version = 8").run();
+    database.close();
+
+    // 重新打开 → 触发升级到 v8
+    const reopened = openMetadataDatabase(paths.database);
+    const version = reopened.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").pluck().get() as number;
+    expect(version).toBe(8);
+    // Phase 10.5 数据保留
+    const fact = reopened.prepare("SELECT fact FROM memory_facts WHERE id = ?").get(factId) as { fact: string };
+    expect(fact.fact).toBe("v7 事实");
+    const proposal = reopened.prepare("SELECT status FROM memory_mutation_proposals WHERE id = 'p1'").get() as { status: string };
+    expect(proposal.status).toBe("applied");
+    // 新表存在
+    const tables = tableNames(reopened);
+    for (const table of ["activity_events", "audit_events", "observability_trace_links", "activity_daily_metrics", "observability_state"]) {
+      expect(tables).toContain(table);
+    }
+    // ledger epoch 默认 1
+    const epoch = reopened.prepare("SELECT value FROM observability_state WHERE key = 'audit.ledger_epoch'").pluck().get() as string;
+    expect(epoch).toBe("1");
+    reopened.close();
+  });
+
+  it("activity_events FTS 触发器与主表同步（insert/update/delete）", () => {
+    const { database } = createDatabase();
+    const now = "2026-08-01T12:00:00.000Z";
+    const insert = database.prepare(`
+      INSERT INTO activity_events
+        (event_id, recorded_at, occurred_at, event_name, category, level, significance,
+         actor_kind, actor_id, executor_kind, executor_id, trace_id, span_id,
+         producer_component, producer_process_type, boot_id, search_text, payload_json)
+      VALUES (?, ?, ?, 'turn.started', 'turn', 'info', 'routine', 'user', 'u1', 'service', 'server', 't1', 's1', 'test', 'server', 'b1', ?, '{}')
+    `);
+    insert.run("evt-a1", now, now, buildMemorySearchText("用户提问深色模式"));
+    const rowId = database.prepare("SELECT id FROM activity_events WHERE event_id = 'evt-a1'").pluck().get() as number;
+
+    const match = database
+      .prepare("SELECT rowid FROM activity_events_fts WHERE activity_events_fts MATCH ?")
+      .all(buildMemoryFtsQuery("深色模式")) as Array<{ rowid: number }>;
+    expect(match.map((r) => r.rowid)).toContain(rowId);
+
+    database.prepare("UPDATE activity_events SET search_text = ? WHERE event_id = 'evt-a1'")
+      .run(buildMemorySearchText("用户坚持清淡饮食"));
+    const afterUpdate = database
+      .prepare("SELECT rowid FROM activity_events_fts WHERE activity_events_fts MATCH ?")
+      .all(buildMemoryFtsQuery("深色模式")) as Array<{ rowid: number }>;
+    expect(afterUpdate.map((r) => r.rowid)).not.toContain(rowId);
+
+    database.prepare("DELETE FROM activity_events WHERE event_id = 'evt-a1'").run();
+    const afterDelete = database
+      .prepare("SELECT rowid FROM activity_events_fts WHERE activity_events_fts MATCH ?")
+      .all(buildMemoryFtsQuery("清淡饮食")) as Array<{ rowid: number }>;
+    expect(afterDelete).toHaveLength(0);
     database.close();
   });
 });

@@ -72,7 +72,7 @@ describe("preferences routes", () => {
       const resp = await app.request("http://local/api/settings/preferences");
       expect(resp.status).toBe(200);
       const body = (await resp.json()) as { version: number; layout: Record<string, unknown> };
-      expect(body.version).toBe(1);
+      expect(body.version).toBe(2);
       expect(body.layout).toMatchObject({
         leftSidebarWidth: expect.any(Number),
         rightSidebarWidth: expect.any(Number),

@@ -20,10 +20,10 @@ function tempPaths(home: string) {
 }
 
 describe("preferences document normalization", () => {
-  it("returns version 1 defaults when value is missing entirely", () => {
+  it("returns version 2 defaults when value is missing entirely", () => {
     const prefs = normalizePreferences(undefined);
 
-    expect(prefs.version).toBe(1);
+    expect(prefs.version).toBe(2);
     expect(prefs.defaults.model).toBeNull();
     expect(prefs.defaults.thinkingLevel).toBe("medium");
     expect(prefs.defaults.toolMode).toBe("read-only");
@@ -331,10 +331,13 @@ describe("preferences store persistence", () => {
 });
 
 describe("preferences memory section (Phase 10.5)", () => {
-  it("old preferences without memory section normalize unchanged (backward compatible)", () => {
+  it("v1 preferences migrate to v2 with observability defaults (backward compatible)", () => {
     const prefs = normalizePreferences({ version: 1, defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" }, layout: { leftSidebarWidth: 280, rightSidebarWidth: 320, leftCollapsed: false, rightCollapsed: false, focusMode: false, reducedMotion: "system" }, appearance: { theme: "dark", showToolCalls: true, showThinking: true } });
-    expect(prefs.version).toBe(1);
+    expect(prefs.version).toBe(2);
     expect(prefs.memory).toBeUndefined();
+    // Phase 11：v1 → v2 迁移自动补 observability 默认段
+    expect(prefs.observability?.diagnosticLevel).toBe("info");
+    expect(prefs.observability?.diagnosticDiskBudgetBytes).toBe(500 * 1024 * 1024);
   });
 
   it("valid memory section is preserved", () => {
