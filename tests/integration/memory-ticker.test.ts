@@ -14,6 +14,8 @@ import { MemoryBatchStore } from "../../src/storage/memory/batch-store.js";
 import { MemoryEventStore } from "../../src/storage/memory/event-store.js";
 import { MemoryWatermarkStore, SchedulerStateStore } from "../../src/storage/memory/recovery-store.js";
 import { SessionSummaryStore } from "../../src/storage/memory/summary-store.js";
+import { SessionService } from "../../src/runtime/session-service.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
 
 const contexts: Array<{ dir: string; close: () => void }> = [];
 
@@ -158,6 +160,75 @@ describe("MemoryTicker", () => {
     expect(batches).toHaveLength(1);
     expect(batches[0]?.status).toBe("sealed");
     expect(batches[0]?.priority).toBe(1);
+    ticker.stop();
+  });
+
+  it("真实 SessionService.archive 时仍会封存最终会话快照", async () => {
+    const { paths, database } = makeContext();
+    const index = new SessionIndex(database);
+    let ticker: MemoryTicker | undefined;
+    const sessionService = new SessionService(paths, index, (sessionId) => ticker?.onSessionArchived(sessionId));
+    const session = sessionService.create({ title: "真实归档", cwd: process.cwd(), agentId: "a1" });
+    session.appendUserMessage("归档前消息");
+    session.persist();
+
+    const batchStore = new MemoryBatchStore(database);
+    ticker = new MemoryTicker({
+      replayStore: new EventReplayStore(),
+      sessionService,
+      promptService: { isBusy: vi.fn(() => false) } as never,
+      agentStore: { list: vi.fn(() => []) } as never,
+      summaryStore: new SessionSummaryStore(database),
+      batchStore,
+      watermarkStore: new MemoryWatermarkStore(database),
+      schedulerStore: new SchedulerStateStore(database),
+      rollingSummary: { maybeSummarize: vi.fn(async () => ({ status: "updated" as const, branchRevision: "rev-real-archive", messageCount: 1 })) },
+      eventIndexer: { indexSession: vi.fn(() => ({ status: "indexed" as const, eventId: "ev-real-archive" })) },
+      compilePipeline: { refreshToday: vi.fn(async () => ({ date: "2026-08-01", revision: "r", degraded: false, completed: [], failures: [] })), runDaily: vi.fn(async () => ({ date: "2026-08-01", revision: "r", degraded: false, completed: [], failures: [] })) },
+      agentsDir: paths.agents,
+    });
+
+    sessionService.archive(session.id);
+    await ticker.flush();
+
+    const batches = batchStore.listPendingBatches("a1");
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.status).toBe("sealed");
+    expect(batches[0]?.priority).toBe(1);
+    ticker.stop();
+    sessionService.closeAll();
+  });
+
+  it("每日编译 degraded 时不推进日期，并保留失败状态以便重试", async () => {
+    const { paths, database } = makeContext();
+    const schedulerStore = new SchedulerStateStore(database);
+    const compilePipeline = {
+      refreshToday: vi.fn(async () => ({ date: "2026-08-01", revision: "r", degraded: false, completed: [], failures: [] })),
+      runDaily: vi.fn(async () => ({ date: "2026-08-01", revision: "r", degraded: true, completed: [], failures: [{ step: "S1" as const, error: "LLM unavailable" }] })),
+    };
+    const ticker = new MemoryTicker({
+      replayStore: new EventReplayStore(),
+      sessionService: { getView: vi.fn(() => { throw new Error("not used"); }), list: vi.fn(() => []) } as never,
+      promptService: { isBusy: vi.fn(() => false) } as never,
+      agentStore: { list: vi.fn(() => []) } as never,
+      summaryStore: new SessionSummaryStore(database),
+      batchStore: new MemoryBatchStore(database),
+      watermarkStore: new MemoryWatermarkStore(database),
+      schedulerStore,
+      rollingSummary: { maybeSummarize: vi.fn(async () => ({ status: "skipped" as const, reason: "not used" })) },
+      eventIndexer: { indexSession: vi.fn(() => ({ status: "indexed" as const, eventId: "not-used" })) },
+      compilePipeline,
+      agentsDir: paths.agents,
+    });
+
+    ticker.requestFlush("a1");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const state = schedulerStore.get("a1");
+    expect(state?.status).toBe("failed");
+    expect(state?.lastDailyDate).toBeUndefined();
+    expect(state?.nextRetryAt).toBeDefined();
+    expect(compilePipeline.runDaily).toHaveBeenCalledTimes(1);
     ticker.stop();
   });
 });

@@ -390,20 +390,20 @@ cd web; npx playwright test
 
 ## 十、验收标准
 
-- [ ] v6 migration 幂等；FTS5 触发器同步；`memory_journal` 和 suppression 参与 rebuild；
-- [ ] 绑定 Agent 每 10 轮生成 rolling summary，格式校验/修复和 branch cursor 生效；
-- [ ] 四段 Markdown 按 openhanako 传送带编译；新 revision 从下一轮生效；失败继续上一版；
-- [ ] 事件索引同一 source batch 幂等，LLM 不可用时 deterministic stub 仍可检索；
-- [ ] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
-- [ ] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
-- [ ] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
-- [ ] 分支摘要按 `(session_id, branch_revision)` 隔离；watermark/scheduler_state 可在中断后恢复；RecallEpisode 的 SSE 状态可从 `memory_recall_events` Replay；
-- [ ] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
-- [ ] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
-- [ ] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；
-- [ ] 启动按 dirty watermark 恢复摘要、Markdown 和 pending batch；
-- [ ] `/memory` 只读页面展示四段/事实/事件/回想状态并自动刷新；
-- [ ] 全部质量门和 browser-use 验收通过。
+- [x] v6 migration 幂等；FTS5 触发器同步；`memory_journal` 和 suppression 参与 rebuild；
+- [x] 绑定 Agent 每 10 轮生成 rolling summary，格式校验/修复和 branch cursor 生效；
+- [x] 四段 Markdown 按 openhanako 传送带编译；新 revision 从下一轮生效；失败继续上一版；
+- [x] 事件索引同一 source batch 幂等，LLM 不可用时 deterministic stub 仍可检索；
+- [x] `search_memory` 只读入口可用，facts → events → source 下钻聚合成 RecallEpisode；
+- [x] `memory.recall.*` 事件支持 started/layer_changed/completed/empty/failed/cancelled 并可 Replay；
+- [x] recall ledger、`memory_journal`、`sealed_memory_batch` 有写入记录；主 Agent 没有长期库写权限；
+- [x] 分支摘要按 `(session_id, branch_revision)` 隔离；watermark/scheduler_state 可在中断后恢复；RecallEpisode 的 SSE 状态可从 `memory_recall_events` Replay；
+- [x] 注入前威胁扫描、落盘前 PII 脱敏、超预算按优先级截断（Pinned 独立保底）生效；
+- [x] 未绑定 Session 不产生 Agent 记忆；Agent A 无法检索 Agent B；
+- [x] 中文混排和中文单字查询可用（单字安全 LIKE 降级）；
+- [x] 启动按 dirty watermark 恢复摘要、Markdown 和 pending batch；
+- [x] `/memory` 只读页面展示四段/事实/事件/回想状态并自动刷新；
+- [x] 全部质量门和 browser-use 验收通过。
 
 ---
 
@@ -489,7 +489,7 @@ cd web; npx playwright test
 
 ### T9 质量门 + browser-use 验收（2026-08-01，主 Agent）
 
-- 最终门（全部独立通过）：verify-pi-sdk-imports 0 / tsc --noEmit 0 / vitest 57 文件 564 全过 / web 29 文件 328 全过 / web:build 通过 / tsc -p tsconfig.build.json 0 / Playwright 41/41
+- 最终门（全部独立通过）：verify-pi-sdk-imports 0 / tsc --noEmit 0 / vitest 57 文件 569 全过 / web 29 文件 328 全过 / web:build 通过 / tsc -p tsconfig.build.json 0 / Playwright 41/41
 - browser-use 实际验收：启动本地服务 → `/memory` 页 → Agent 选择器列出全部 Agent 并自动选中 → 健康卡片（RecallEpisode idle / pending batch 0 / 15 秒刷新）→ 选中播种 Agent 后四段正确渲染（今天/本周含 ## 日期子标题/长期/重要事实）→ API 全链路（compiled 四段、facts 空为 Phase 10 预期、events、pinned、health、flush 202 安全响应、跨 Agent 404）→ 截图留存
 - 验收发现并修复 3 项真实缺陷（`0659c80`）：AgentView 扁平化、compiled sections 契约、week 子标题解析
 - 结论：**Phase 10 验收通过（含评审修复轮后重验）**
@@ -503,7 +503,13 @@ cd web; npx playwright test
 - **ticker 驱动编译流水线**：摘要成功后 `compilePipeline.refreshToday`（S1+S4）——四段 Markdown 生产链路打通（此前 pipeline 无人驱动）；housekeeping 跨日执行 `runDaily`（scheduler_state.lastDailyDate 防重）
 - **flush 落地**：组合根注入 `memoryFlushHook` → `requestFlush`（封存活跃会话 + 每日重建），生产路径不再是 202 占位；无钩子环境返回安全降级
 - **生产 LLM 接线**：completeText 经 ModelService 首个已配置 Provider；opaque PiResolvedModel 在 pi-sdk 内收窄（`completeUtilityTextForResolved`）；无凭据抛错 → 记忆组件走 degraded 不阻塞对话
-- 重跑质量门：vitest 57 文件 **567** 全过 / web 328 全过 / web:build / tsc / 构建 / 边界 0
+- 重跑质量门：vitest 57 文件 **569** 全过 / web 328 全过 / web:build / tsc / 构建 / 边界 0
+
+### 验收补丁（2026-08-01，主 Agent 独立复现）
+
+- 修复真实 `SessionService.archive()` 时序：索引先标记 `archived` 后，归档 ticker 仍允许读取最终 JSONL 快照并创建 priority=1 sealed batch；新增真实生命周期集成测试。
+- 修复每日 Markdown 编译失败推进 `lastDailyDate` 的问题：`degraded/failures` 现在写入 `scheduler_state.status=failed` 和 `nextRetryAt`，不推进当天完成日期；成功后才推进日期并记录 `lastDailyCompletedAt`。
+- 本轮验证：服务端 57 文件 569 测试通过；Web 29 文件 328 测试通过；PI import boundary、strict typecheck、生产构建、Web 构建全部通过。
 
 ### 已知未完成项（Phase 10 边界，记录在案）
 

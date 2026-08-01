@@ -157,11 +157,13 @@ export class MemoryTicker {
   private async process(
     agentId: string,
     sessionId: string,
-    _reason: string,
+    reason: string,
     priority = 0,
   ): Promise<MemoryTickerRunResult> {
     const view = this.safeView(sessionId);
-    if (!view?.agentId || view.agentId !== agentId || view.archived) {
+    // 归档钩子在索引标记 archived 后才开始异步处理；归档批次仍必须读取
+    // 该 Session 的最终 JSONL 快照，其他后台路径则继续拒绝已归档会话。
+    if (!view?.agentId || view.agentId !== agentId || (view.archived && reason !== "archive")) {
       return { sessionId, agentId, status: "skipped", reason: "会话未绑定 Agent 或已归档" };
     }
     const summary = await this.deps.rollingSummary.maybeSummarize({
@@ -234,15 +236,34 @@ export class MemoryTicker {
     const today = getLogicalDate();
     const state = this.deps.schedulerStore.get(agentId);
     if (state?.lastDailyDate === today) return;
+    if (state?.nextRetryAt !== undefined && Date.parse(state.nextRetryAt) > Date.now()) return;
     const memoryDir = path.join(this.deps.agentsDir, agentId, "memory");
-    await this.deps.compilePipeline.runDaily(agentId, memoryDir, today).catch(() => undefined);
+    const result = await this.deps.compilePipeline.runDaily(agentId, memoryDir, today).catch((error) => ({
+      date: today,
+      revision: "",
+      degraded: true,
+      completed: [],
+      failures: [{ step: "S0" as const, error: error instanceof Error ? error.message : String(error) }],
+    }));
+    if (result.degraded || result.failures.length > 0) {
+      this.deps.schedulerStore.upsert({
+        agentId,
+        status: "failed",
+        ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
+        ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
+        ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
+        nextRetryAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    }
     this.deps.schedulerStore.upsert({
       agentId,
       status: "idle",
       ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
       ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
-      ...(state?.nextRetryAt !== undefined ? { nextRetryAt: state.nextRetryAt } : {}),
       lastDailyDate: today,
+      lastDailyCompletedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
   }
