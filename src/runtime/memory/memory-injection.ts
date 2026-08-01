@@ -56,7 +56,11 @@ interface MemoryMdSections {
   longterm: string;
 }
 
-function parseMemoryMd(content: string): MemoryMdSections {
+/**
+ * 按 MEMORY_MD_SECTION_TITLES 四段标题切分 memory.md 正文（去掉 ## 标题行）。
+ * 供注入组装与 /api/agents/:id/memory/compiled 共用，避免契约漂移。
+ */
+export function parseMemoryMdSections(content: string): MemoryMdSections {
   const sections: MemoryMdSections = {
     facts: "",
     today: "",
@@ -80,7 +84,8 @@ function parseMemoryMd(content: string): MemoryMdSections {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    // Match "## 标题" pattern
+    // 仅四个已知段头切段；week 内部的 "## {date}" 等未知标题视为内容，
+    // 否则四段契约内的子标题会清空当前段导致内容丢失
     const headerMatch = trimmed.match(/^##\s+(.+)$/);
     if (headerMatch) {
       const headerTitle = headerMatch[1]?.trim() ?? "";
@@ -89,9 +94,7 @@ function parseMemoryMd(content: string): MemoryMdSections {
         currentSection = matchedKey;
         continue;
       }
-      // Unknown section header, not part of our four sections
-      currentSection = null;
-      continue;
+      // Unknown section header: keep current section, treat as content line
     }
 
     if (currentSection) {
@@ -149,7 +152,7 @@ export function buildMemoryInjectionBlock(
   try {
     const content = fs.readFileSync(memoryMdPath, "utf8");
     hasMemoryMd = true;
-    sections = parseMemoryMd(content);
+    sections = parseMemoryMdSections(content);
   } catch {
     // File not found → treat as empty
   }

@@ -115,6 +115,28 @@ describe("buildMemoryInjectionBlock", () => {
     expect(weekIdx).toBeLessThan(longtermIdx);
   });
 
+  it("keeps week sub-headings (## date) inside the week section", () => {
+    const memoryDir = createMemoryDir();
+    // T4 assemble 的 week 段内含 "## {date}" 子标题，不得被当作段边界清空
+    const md = [
+      `## ${MEMORY_MD_SECTION_TITLES.today}`,
+      "TODAY",
+      `## ${MEMORY_MD_SECTION_TITLES.week}`,
+      "## 2026-08-01",
+      "",
+      "- 联调记录",
+      `## ${MEMORY_MD_SECTION_TITLES.longterm}`,
+      "LONGTERM",
+    ].join("\n");
+    fs.writeFileSync(path.join(memoryDir, "memory.md"), md, "utf8");
+
+    const result = buildMemoryInjectionBlock({ memoryDir, pinned: [] });
+    expect(result).toBeDefined();
+    expect(result!.block).toContain("2026-08-01");
+    expect(result!.block).toContain("- 联调记录");
+    expect(result!.block).toContain("LONGTERM");
+  });
+
   it("truncates sections when exceeding total budget", () => {
     const memoryDir = createMemoryDir();
     // Create a very long today section that will consume the budget

@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryPage } from "./MemoryPage.js";
 
 const payloads: Record<string, unknown> = {
-  "/api/agents/agent-1/memory/compiled": { today: "今天完成了记忆页面", week: "本周摘要", longterm: "项目背景", facts: "重要事实" },
+  "/api/agents/agent-1/memory/compiled": {
+    agentId: "agent-1",
+    content: "## 重要事实\n重要事实\n",
+    sections: { today: "今天完成了记忆页面", week: "本周摘要", longterm: "项目背景", facts: "重要事实" },
+  },
   "/api/agents/agent-1/memory/facts": { facts: [{ id: 1, fact: "偏好简洁回复", tags: ["preference"] }] },
   "/api/agents/agent-1/memory/events": { events: [{ id: "event-1", startedAt: "2026-08-01T10:00:00Z", summary: "完成 UI" }] },
   "/api/agents/agent-1/memory/pinned": { pinned: [{ id: "pin-1", content: "Pinned note" }] },
@@ -14,7 +18,7 @@ describe("MemoryPage", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input), window.location.origin).pathname;
-      if (path === "/api/agents") return new Response(JSON.stringify({ agents: [{ id: "agent-1", name: "Hanako" }] }), { status: 200 });
+      if (path === "/api/agents") return new Response(JSON.stringify({ agents: [{ identity: { id: "agent-1", name: "Hanako" } }] }), { status: 200 });
       return new Response(JSON.stringify(payloads[path] ?? {}), { status: 200 });
     }));
   });

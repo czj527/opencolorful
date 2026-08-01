@@ -34,8 +34,7 @@ function healthValue(health: MemoryHealth, key: string): unknown {
 
 export function MemoryPage({ agentId }: MemoryPageProps) {
   const [data, setData] = useState<MemoryData>(emptyData);
-  const [agents, setAgents] = useState<Array<{ id: string; name?: string }>>([]);
-  const [selectedAgent, setSelectedAgent] = useState(agentId ?? "");
+  const [agents, setAgents] = useState<Array<{ id: string; name?: string }>>([]);  const [selectedAgent, setSelectedAgent] = useState(agentId ?? "");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,7 +55,8 @@ export function MemoryPage({ agentId }: MemoryPageProps) {
         getJson<MemoryHealth>(`${base}/health`),
       ]);
       setData({
-        compiled: unwrap<MemoryCompiled>(compiled, "compiled") ?? {},
+        // compiled 响应为 {agentId, content, sections}，取 sections 四段
+        compiled: unwrap<MemoryCompiled>(compiled, "sections") ?? {},
         facts: asArray<MemoryFact>(unwrap<unknown>(facts, "facts")),
         events: asArray<MemoryEvent>(unwrap<unknown>(events, "events")),
         pinned: asArray<{ id?: string; content?: string; createdAt?: string }>(unwrap<unknown>(pinned, "pinned")),
@@ -66,8 +66,12 @@ export function MemoryPage({ agentId }: MemoryPageProps) {
     finally { setLoading(false); setRefreshing(false); }
   }, [query, selectedAgent]);
 
-  useEffect(() => { void getJson<Array<{ id: string; name?: string }> | JsonObject>("/api/agents").then((value) => {
-    const list = asArray<{ id: string; name?: string }>(unwrap<unknown>(value, "agents"));
+  useEffect(() => { void getJson<Array<{ identity?: { id?: string; name?: string } }> | JsonObject>("/api/agents").then((value) => {
+    // /api/agents 返回嵌套 AgentView（identity.id/name），需扁平化
+    const list: Array<{ id: string; name?: string }> = asArray<{ identity?: { id?: string; name?: string } }>(unwrap<unknown>(value, "agents"))
+      .flatMap((item) => item.identity?.id
+        ? [{ id: item.identity.id, ...(item.identity.name !== undefined ? { name: item.identity.name } : {}) }]
+        : []);
     setAgents(list); if (!selectedAgent && list[0]) setSelectedAgent(list[0].id);
   }).catch(() => { /* the page still explains how to retry */ }); }, [selectedAgent]);
   useEffect(() => { void load(); }, [load]);

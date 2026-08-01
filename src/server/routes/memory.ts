@@ -12,6 +12,7 @@ import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
 import { MemoryBatchStore } from "../../storage/memory/batch-store.js";
 import { MemoryWatermarkStore, SchedulerStateStore } from "../../storage/memory/recovery-store.js";
 import { MemoryRecallStore } from "../../storage/memory/recall-store.js";
+import { parseMemoryMdSections } from "../../runtime/memory/memory-injection.js";
 
 function parseTags(value: string | undefined): string[] {
   return value === undefined || value.trim() === ""
@@ -45,7 +46,8 @@ export function registerMemoryRoutes(
     let content = "";
     try { content = await fs.readFile(path.join(paths.agents, agentId, "memory", "memory.md"), "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    return context.json({ agentId, content });
+    // 按四段契约切分（与注入共用同一解析器），页面按段展示
+    return context.json({ agentId, content, sections: parseMemoryMdSections(content) });
   });
 
   app.get("/api/agents/:id/memory/facts", (context) => {
