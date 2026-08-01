@@ -174,7 +174,8 @@ export const SafeScalarSchema = Type.Union([
   Type.Boolean(),
   Type.Null(),
 ]);
-export type SafeScalar = Static<typeof SafeScalarSchema>;
+/** Static 显式声明：空 props Object + additionalProperties 的 Static 会退化为 `{}`，无法索引 */
+export type SafeScalar = string | number | boolean | null;
 
 /** 单层 SafeValue（标量 / 标量数组 / 标量对象）；更深结构由 T2 SafeValue normalize 收敛到单层 */
 export const SafeValueSchema = Type.Union([
@@ -185,15 +186,18 @@ export const SafeValueSchema = Type.Union([
   Type.Array(SafeScalarSchema, { maxItems: OBSERVABILITY_ATTRIBUTE_LIMITS.maxArrayLength }),
   Type.Object({}, { additionalProperties: SafeScalarSchema }),
 ]);
-export type SafeValue = Static<typeof SafeValueSchema>;
+/** 递归显式声明（Static 对空 props Object + additionalProperties 会退化为 `{}`；别名直接自引用会 TS2456，故经 interface 间接） */
+export interface SafeValueList extends Array<SafeValue> {}
+export interface SafeValueMap { [key: string]: SafeValue }
+export type SafeValue = SafeScalar | SafeValueList | SafeValueMap;
 
 /** attributes/metrics 容器：值域为 SafeValue（含嵌套对象/数组，由 normalize 收敛深度） */
 export const SafeObjectSchema = Type.Object({}, { additionalProperties: SafeValueSchema });
-export type SafeObject = Static<typeof SafeObjectSchema>;
+export type SafeObject = Record<string, SafeValue>;
 
 // ─── 三类 Payload ──────────────────────────────────────────────
 
-/** ActivityPayload：语义摘要而非原文副本（§3.7） */
+/** ActivityPayload：语义摘要而非原文副本（§3.7）；Static 显式声明（Optional(SafeObjectSchema) 的 Static 会退化为 object） */
 export const ActivityPayloadSchema = Type.Object(
   {
     /** 稳定英文机器标识，中文文案由 Web 映射 */
@@ -208,7 +212,17 @@ export const ActivityPayloadSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export type ActivityPayload = Static<typeof ActivityPayloadSchema>;
+export interface ActivityPayload {
+  /** 稳定英文机器标识，中文文案由 Web 映射 */
+  summaryCode: string;
+  durationMs?: number;
+  attempt?: number;
+  metrics?: SafeObject;
+  /** 指向领域事实源（sessionEntryId/memoryId/batchId…），不复制正文 */
+  resultRef?: string;
+  relatedResources?: ResourceRef[];
+  attributes?: SafeObject;
+}
 
 /** AuditPayload：责任与策略证据，不含正文（§3.7 / §6.3） */
 export const AuditPayloadSchema = Type.Object(
@@ -224,7 +238,16 @@ export const AuditPayloadSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export type AuditPayload = Static<typeof AuditPayloadSchema>;
+export interface AuditPayload {
+  action: string;
+  decision: "allowed" | "denied" | "required" | "deferred" | "reset";
+  reasonCode?: string;
+  policyVersion?: string;
+  beforeRevision?: string;
+  afterRevision?: string;
+  changedFields?: string[];
+  approver?: string;
+}
 
 /** DiagnosticPayload：可丢弃的排错材料，message 上限 4KB / stack 16KB */
 export const DiagnosticPayloadSchema = Type.Object(
@@ -235,7 +258,11 @@ export const DiagnosticPayloadSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export type DiagnosticPayload = Static<typeof DiagnosticPayloadSchema>;
+export interface DiagnosticPayload {
+  message: string;
+  stack?: string;
+  attributes?: SafeObject;
+}
 
 // ─── Envelope 判别联合 ─────────────────────────────────────────
 
@@ -311,7 +338,31 @@ export const ActivityEnvelopeSchema = Type.Object(
   }),
   { additionalProperties: false },
 );
-export type ActivityEnvelope = Static<typeof ActivityEnvelopeSchema>;
+
+/**
+ * Envelope 的静态类型显式声明：schema 经 Record spread 构造后 Static 会丢失
+ * props 推断（actor/trace/payload 等退化为 unknown），故类型与 schema 分离——
+ * schema 仅用于运行时 Value.Check，静态类型以本接口为准。
+ */
+export interface ActivityEnvelope {
+  schemaVersion: 1;
+  eventVersion: number;
+  eventId: string;
+  eventName: string;
+  occurredAt: string;
+  recordedAt: string;
+  level: ObservabilityLevel;
+  actor: ActorRef;
+  executor: ExecutorRef;
+  target?: ResourceRef;
+  scope: EventScope;
+  trace: TraceContext;
+  producer: ProducerContext;
+  channel: "activity";
+  status?: ActivityStatus;
+  significance?: ObservabilitySignificance;
+  payload: ActivityPayload;
+}
 
 export const AuditEnvelopeSchema = Type.Object(
   envelopeProps({
@@ -320,7 +371,24 @@ export const AuditEnvelopeSchema = Type.Object(
   }),
   { additionalProperties: false },
 );
-export type AuditEnvelope = Static<typeof AuditEnvelopeSchema>;
+
+export interface AuditEnvelope {
+  schemaVersion: 1;
+  eventVersion: number;
+  eventId: string;
+  eventName: string;
+  occurredAt: string;
+  recordedAt: string;
+  level: ObservabilityLevel;
+  actor: ActorRef;
+  executor: ExecutorRef;
+  target?: ResourceRef;
+  scope: EventScope;
+  trace: TraceContext;
+  producer: ProducerContext;
+  channel: "audit";
+  payload: AuditPayload;
+}
 
 export const DiagnosticEnvelopeSchema = Type.Object(
   envelopeProps({
@@ -329,7 +397,24 @@ export const DiagnosticEnvelopeSchema = Type.Object(
   }),
   { additionalProperties: false },
 );
-export type DiagnosticEnvelope = Static<typeof DiagnosticEnvelopeSchema>;
+
+export interface DiagnosticEnvelope {
+  schemaVersion: 1;
+  eventVersion: number;
+  eventId: string;
+  eventName: string;
+  occurredAt: string;
+  recordedAt: string;
+  level: ObservabilityLevel;
+  actor: ActorRef;
+  executor: ExecutorRef;
+  target?: ResourceRef;
+  scope: EventScope;
+  trace: TraceContext;
+  producer: ProducerContext;
+  channel: "diagnostic";
+  payload: DiagnosticPayload;
+}
 
 
 export const ObservabilityEventEnvelopeSchema = Type.Union([
@@ -337,7 +422,7 @@ export const ObservabilityEventEnvelopeSchema = Type.Union([
   AuditEnvelopeSchema,
   DiagnosticEnvelopeSchema,
 ]);
-export type ObservabilityEventEnvelope = Static<typeof ObservabilityEventEnvelopeSchema>;
+export type ObservabilityEventEnvelope = ActivityEnvelope | AuditEnvelope | DiagnosticEnvelope;
 
 // ─── 事件目录条目类型（实例见 src/observability/event-catalog.ts） ──
 
