@@ -34,6 +34,7 @@ export const EVENT_TYPES = [
   "memory.recall.cancelled",
   "memory.agent.started",
   "memory.agent.layer_changed",
+  "memory.agent.processing",
   "memory.agent.completed",
   "memory.agent.deferred",
   "memory.agent.failed",
