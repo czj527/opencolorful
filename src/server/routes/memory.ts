@@ -16,6 +16,7 @@ import { MemoryWatermarkStore, SchedulerStateStore } from "../../storage/memory/
 import { MemoryRecallStore } from "../../storage/memory/recall-store.js";
 import { parseMemoryMdSections } from "../../runtime/memory/memory-injection.js";
 import type { MemoryAgentResolver } from "../../runtime/memory/resolver.js";
+import type { MemoryAgentScheduler } from "../../runtime/memory/scheduler.js";
 import type { ProposalApplication } from "../../runtime/memory/proposal-application.js";
 import type { PreferencesStore } from "../../config/preferences-store.js";
 import {
@@ -41,6 +42,10 @@ export interface MemoryAdminDeps {
   readonly application: ProposalApplication;
   readonly preferencesStore: PreferencesStore;
   readonly recallStore: MemoryRecallStore;
+  /** 手动 deep-dive 经 Scheduler 的 per-Agent 串行队列（与定时任务不重叠） */
+  readonly scheduler?: Pick<MemoryAgentScheduler, "enqueueDeepDive">;
+  /** 生效的记忆设置（per-Agent → 全局 → 默认）；deep-dive 尊重 enabled=false */
+  readonly settingsResolver: (agentId: string) => MemoryAgentSettings;
 }
 
 export function registerMemoryRoutes(
@@ -126,14 +131,21 @@ export function registerMemoryRoutes(
 
   // ── Phase 10.5 管理端点 ──────────────────────────────────────
 
-  // 手动排队一次整理（仍经 MemoryPolicy）
+  // 手动排队一次整理（仍经 MemoryPolicy；走 Scheduler per-Agent 串行队列）
   app.post("/api/agents/:id/memory/deep-dive", (context) => {
     const agentId = context.req.param("id");
     const missing = ensureAgent(agentStore, agentId); if (missing) return missing;
     if (admin === undefined) {
       return context.json({ agentId, status: "unavailable", message: "记忆 Agent 未启用" }, 503);
     }
-    void admin.resolver.deepDive(agentId).catch(() => undefined);
+    if (!admin.settingsResolver(agentId).enabled) {
+      return context.json({ agentId, status: "disabled", message: "记忆 Agent 已关闭，请先在设置中启用" }, 503);
+    }
+    if (admin.scheduler !== undefined) {
+      void admin.scheduler.enqueueDeepDive(agentId).catch(() => undefined);
+    } else {
+      void admin.resolver.deepDive(agentId).catch(() => undefined);
+    }
     return context.json({ agentId, status: "queued", message: "已排队整理，结果将异步更新" }, 202);
   });
 

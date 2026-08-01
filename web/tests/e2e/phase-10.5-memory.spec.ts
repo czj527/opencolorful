@@ -44,6 +44,20 @@ function streamChunk(delta: Record<string, unknown>, finishReason: string | null
   })}\n\n`;
 }
 
+const defaultSettings = {
+  enabled: true,
+  utilityProviderId: null,
+  utilityModel: null,
+  deepDiveMode: "script",
+  dailyRunTime: "03:00",
+  minIdleMinutes: 30,
+  weeklyReviewDay: 0,
+  weeklyReviewTime: "03:30",
+  turnsPerSummary: 10,
+  injectBudgetChars: 2500,
+  retentionThresholds: { mediumUp: 45, mediumDown: 35, permanentUp: 85 },
+};
+
 const MEMORY_AGENT_FINAL = JSON.stringify({
   kind: "final",
   report: { summary: "e2e 整理完成", issues: [] },
@@ -250,6 +264,11 @@ test.describe("Phase 10.5：记忆页时间线 / 整理设置 / 后台整理状�
     test.setTimeout(90_000);
     await ensureFixtureProvider(page);
     const agentId = await createAgentViaApi(page);
+    // P0-2 验收：设置必须真实生效——显式开启 experimental-agent（默认 script 不调用 LLM）
+    const settingsResponse = await page.request.put(`${baseUrl()}/api/agents/${agentId}/memory/settings`, {
+      data: { ...defaultSettings, deepDiveMode: "experimental-agent" },
+    });
+    expect(settingsResponse.ok()).toBe(true);
 
     await page.goto(`${baseUrl()}/memory?agent=${encodeURIComponent(agentId)}`);
     await expect(page.getByLabel("记忆健康状态").getByText("空闲", { exact: true })).toBeVisible({ timeout: 15_000 });

@@ -307,6 +307,21 @@ T8 质量门 + browser-use 验收（主 Agent）
 | T7 时间线 UI | 3bac9cd | 记忆页：后台整理状态卡（SSE memory.agent.* 状态文案 §8.3）+ 强度时间线双分解 + 整理设置表单 |
 | T8 质量门 + 验收 | （本提交） | 全质量门 + Playwright e2e 45 例（含 phase-10.5-memory 4 例） |
 
+### 评审修复轮（2026-08-01，评审结论：暂不通过 → 已修复 2×P0/4×P1/2×P2）
+
+| 发现 | 等级 | 修复 |
+|---|---|---|
+| 跨 Agent 读写隔离：read_session_entries 不校验批次归属、可传任意 sessionId/范围；policy/application 用全局事实 ID 无归属校验 | P0 | 工具强制 batchId + 批次归属 + 会话/范围限定（子集判定）；assertSessionReadable 收紧到 `agents/<agentId>/sessions/`；policy/application 双处 agentId 归属校验；提案工具 requireOwnFact |
+| 设置未接线：policy/resolver/scheduler 三处固定 defaultMemoryAgentSettings() | P0 | 组合根统一 `resolveMemorySettings`（per-Agent → 全局 → 默认）；enabled=false 拦截定时/高优先级/deep-dive(503)；deepDiveMode script=零 LLM 确定性路径（重建 activation + 报告，不触碰 batch）；completeText 按 utilityProviderId/utilityModel 解析；ticker turnsPerSummary 走 per-Agent 设置 |
+| retention 无生产闭环 | P1 | 新工具 `get_activation_summary`（账本跨日期/跨会话聚合）；证据引用格式+归属校验（session 必须在回忆账本）；晋升会话数改由账本确定性统计（防伪造）；新事实初始强度 computeRetention 确定性计算（remember 意图 ≥70，不再默认 0）；mediumDown 迟滞接入 policy |
+| 单事务异常路径半成品 | P1 | applyRun 不再吞异常：应用期 SQL 错误整体回滚；markdown dirty watermark 与用户 intent 结算移入同一事务；新增真实事务中途异常测试（CHECK 约束违反 → 零提交） |
+| 调度失败重试与 weekly 语义 | P1 | 失败不推进 lastDaily/WeeklyCompletedAt 与 done*Dates，仅设 nextRetryAt；到期 tick 自动重试；weekly:true 透传 runner（prompt 附本周复核模式） |
+| 串行与 batch 结算 | P1 | deep-dive 改经 Scheduler.enqueueDeepDive（per-Agent promise tail 串行）；completed（含无提案/全拒绝）统一结算批次为 applied；outcome.failed 参与状态判定 |
+| 运行报告与强度事件 | P2 | report_run 的 summary/issues 落盘 run.json/REPORT.md（report_run 即结束运行）；输入快照（batch revision/pendingIntents）落盘；memory.strength.changed 由 resolver 在应用后发布 |
+| 健康卡 API/UI 契约错位 | P2 | 页面改读 latestRecallStatus/latestRecallEpisodes/pendingBatches 数组长度 |
+
+专项验收测试：`tests/integration/memory-isolation.test.ts`（6 例，含评审复现的 A/B 场景端到端）+ scheduler 重试/串行/enabled 门 + 事务中途异常 + script 模式 + 确定性强度 + 迟滞 + strength.changed 发布 + report 落盘。
+
 ### 实施中修复的关键缺陷
 
 1. **P0（Phase 10 遗留，reviewer 提出）**：MemoryEventPublisher 每次 search_memory 新建实例导致 agent 流序列号重复 —— 改为模块级共享分配器 `nextAgentStreamSequence`，连续/并发/重放场景测试覆盖。

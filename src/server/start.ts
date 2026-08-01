@@ -201,12 +201,25 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         return null;
       }
     });
-    // 工具型 LLM：取第一个已配置凭据的 Provider 及其第一个模型；
+    // 记忆设置生效链路：per-Agent 覆盖 → 全局默认 → 平台默认（P0-2：生产必须读真实设置）
+    const resolveMemorySettings = (agentId: string) => {
+      const global = preferencesStore.get().memory ?? defaultMemoryAgentSettings();
+      try {
+        const perAgent = agentStore.getSettings(agentId)?.memory;
+        if (perAgent !== undefined) return perAgent;
+      } catch { /* 读取失败用全局默认 */ }
+      return global;
+    };
+    // 工具型 LLM：按记忆设置解析 Provider/模型（utilityProviderId/utilityModel），
+    // 未配置时回退第一个有凭据的 Provider 及其第一个模型；
     // 无凭据/解析失败时抛错 → 各记忆组件走 degraded 路径（不阻塞对话）
-    const completeText = async (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
-      const provider = modelService.listProviders().find((p) => p.credentialConfigured);
+    const completeText = async (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
+      const settings = resolveMemorySettings(agentId);
+      let provider = modelService.listProviders().find((p) => p.credentialConfigured && p.providerId === settings.utilityProviderId);
+      provider = provider ?? modelService.listProviders().find((p) => p.credentialConfigured);
       if (provider === undefined) throw new Error("无可用 Provider 凭据");
-      const model = modelService.listModels().find((m) => m.providerId === provider.providerId);
+      let model = modelService.listModels().find((m) => m.providerId === provider.providerId && m.modelId === settings.utilityModel);
+      model = model ?? modelService.listModels().find((m) => m.providerId === provider.providerId);
       if (model === undefined) throw new Error("Provider 未配置模型");
       const resolved = modelService.resolveModel(provider.providerId, model.modelId);
       return completeUtilityTextForResolved(resolved, {
@@ -218,11 +231,13 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
 
     const summaryStore = new SessionSummaryStore(database);
     const watermarkStore = new MemoryWatermarkStore(database);
+    // 编译/滚动摘要属 agent-agnostic 工具型调用：走全局记忆设置（resolveMemorySettings("") 回退全局/默认）
+    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req);
     const compilePipeline = new MemoryCompilePipeline({
       summaryStore,
       dailyStateStore: new MemoryDailyStateStore(database),
       watermarkStore,
-      completeText,
+      completeText: utilityCompleteText,
     });
     const ticker = new MemoryTicker({
       replayStore,
@@ -233,13 +248,14 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       batchStore: new MemoryBatchStore(database),
       watermarkStore,
       schedulerStore: new SchedulerStateStore(database),
-      rollingSummary: new RollingSummaryService({ summaryStore, watermarkStore, completeText }),
+      rollingSummary: new RollingSummaryService({ summaryStore, watermarkStore, completeText: utilityCompleteText }),
       eventIndexer: new EventIndexer({
         eventStore: new MemoryEventStore(database),
         watermarkStore,
       }),
       compilePipeline,
       agentsDir: paths.agents,
+      settingsResolver: (agentId) => ({ turnsPerSummary: resolveMemorySettings(agentId).turnsPerSummary }),
     });
     memoryTicker = ticker;
     ticker.start();
@@ -266,11 +282,13 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
           factStore: new MemoryFactStore(database),
           recallStore: new MemoryRecallStore(database),
           journalStore: new MemoryJournalStore(database),
-          settingsResolver: () => defaultMemoryAgentSettings(),
+          batchStore: new MemoryBatchStore(database),
+          eventStore: new MemoryEventStore(database),
+          settingsResolver: resolveMemorySettings,
         }),
       }),
-      settingsResolver: () => defaultMemoryAgentSettings(),
-      completeText,
+      settingsResolver: resolveMemorySettings,
+      completeText: async (agentId, req) => completeText(agentId, req),
       sessionPathResolver: (sessionId) => {
         const meta = sessionIndex.get(sessionId);
         if (!meta) throw new Error(`Session 不存在: ${sessionId}`);
@@ -283,11 +301,11 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         factStore: new MemoryFactStore(database),
         recallStore: new MemoryRecallStore(database),
       }),
-      assertSessionReadable: (sessionPath) => {
+      assertSessionReadable: (sessionPath, agentId) => {
         const resolved = path.resolve(sessionPath);
-        const root = path.resolve(paths.agents);
+        const root = path.resolve(path.join(paths.agents, agentId, "sessions"));
         if (resolved.startsWith(root + path.sep)) return;
-        throw new Error("Session 路径不在受控目录内");
+        throw new Error("Session 路径不在当前 Agent 的会话目录内");
       },
     });
     const memoryAgentScheduler = new MemoryAgentScheduler({
@@ -299,7 +317,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       batchStore: new MemoryBatchStore(database),
       summaryStore,
       schedulerStore: new SchedulerStateStore(database),
-      settingsResolver: () => defaultMemoryAgentSettings(),
+      settingsResolver: resolveMemorySettings,
       resolver: memoryAgentResolver,
     });
     memoryAgentScheduler.start();
@@ -325,6 +343,8 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
           application: memoryAgentResolver.application,
           preferencesStore,
           recallStore: new MemoryRecallStore(database),
+          scheduler: memoryAgentScheduler,
+          settingsResolver: resolveMemorySettings,
         },
       },
       dispose() {

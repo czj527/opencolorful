@@ -14,7 +14,17 @@ type JsonObject = Record<string, unknown>;
 export interface MemoryCompiled { today?: string; week?: string; longterm?: string; facts?: string; }
 export interface MemoryFact { id?: number | string; fact?: string; tags?: string[]; factTime?: string | null; createdAt?: string; confidence?: number; }
 export interface MemoryEvent { id?: string; date?: string; startedAt?: string; endedAt?: string; summary?: string; topics?: string[]; sessionId?: string; messageCount?: number; toolCalls?: number; }
-export interface MemoryHealth { recallEpisode?: JsonObject | null; recall?: JsonObject | null; pendingBatches?: number | JsonObject; batches?: JsonObject; watermarks?: JsonObject; scheduler?: JsonObject; }
+export interface MemoryHealth {
+  recallEpisode?: JsonObject | null;
+  recall?: JsonObject | null;
+  /** 服务端返回 pending batch 数组（API/UI 契约：长度即待处理数） */
+  pendingBatches?: number | JsonObject | Array<{ id?: string }>;
+  batches?: JsonObject;
+  watermarks?: JsonObject;
+  scheduler?: JsonObject;
+  latestRecallStatus?: string | null;
+  latestRecallEpisodes?: Array<{ status?: string; resultCount?: number; layer?: string }>;
+}
 export interface TimelineFact { id?: number | string; fact?: string; retentionStrength?: number; activationStrength?: number; confidence?: number; status?: string; validUntil?: string | null; hitDates?: number; }
 export interface TimelineEvent { id?: string; summary?: string; date?: string; salience?: number; status?: string; }
 export interface MemoryAgentSettings {
@@ -196,8 +206,14 @@ export function MemoryPage({ agentId }: MemoryPageProps) {
 
   const filteredFacts = useMemo(() => query.trim() ? data.facts.filter((fact) => JSON.stringify(fact).toLowerCase().includes(query.toLowerCase())) : data.facts, [data.facts, query]);
   const filteredEvents = useMemo(() => query.trim() ? data.events.filter((event) => JSON.stringify(event).toLowerCase().includes(query.toLowerCase())) : data.events, [data.events, query]);
-  const recallStatus = text(healthValue(data.health, "status"), "idle");
-  const pending = typeof data.health.pendingBatches === "number" ? data.health.pendingBatches : text(data.health.pendingBatches ?? data.health.batches, "0");
+  const latestEpisode = asArray<{ status?: string; resultCount?: number; layer?: string }>(data.health.latestRecallEpisodes)[0];
+  const recallStatus = typeof data.health.latestRecallStatus === "string" ? data.health.latestRecallStatus : (latestEpisode?.status ?? "idle");
+  const pending = Array.isArray(data.health.pendingBatches)
+    ? data.health.pendingBatches.length
+    : typeof data.health.pendingBatches === "number" ? data.health.pendingBatches : text(data.health.batches, "0");
+  const recallDetail = latestEpisode !== undefined
+    ? `${text(latestEpisode.resultCount, "0")} 个结果 · ${text(latestEpisode.layer, "等待回想")}`
+    : "0 个结果 · 等待回想";
   const maintenanceStatus = maintenance !== null ? maintenanceLabel(maintenance.status, maintenance.phase) : "空闲";
 
   return <main className={styles.page}>
@@ -209,7 +225,7 @@ export function MemoryPage({ agentId }: MemoryPageProps) {
     {error && <div role="alert" className={styles.error}><CircleAlert size={17} /> {error}<Button variant="ghost" size="sm" onClick={() => void load()}>重试</Button></div>}
     {!selectedAgent && !loading && <EmptyState title="还没有可查看的 Agent" description="选择一个 Agent 后，这里会显示它的只读记忆。" />}
     {loading ? <div className={styles.loading}><Spinner /> 正在加载记忆…</div> : selectedAgent && <>
-      <section className={styles.healthGrid} aria-label="记忆健康状态"><Card><strong>RecallEpisode</strong><span className={styles.status}>{recallStatus}</span><small>{text(healthValue(data.health, "resultCount"), "0")} 个结果 · {text(healthValue(data.health, "layer"), "等待回想")}</small></Card><Card><strong>Pending batch</strong><span className={styles.status}>{pending}</span><small>封存队列状态</small></Card><Card><strong>后台整理</strong><span className={styles.status}>{maintenanceStatus}</span><small>{maintenance !== null && maintenance.runId !== undefined ? `run ${maintenance.runId.slice(0, 12)}… · ${formatDate(maintenance.at)}` : "空闲窗口每日运行"}</small></Card></section>
+      <section className={styles.healthGrid} aria-label="记忆健康状态"><Card><strong>RecallEpisode</strong><span className={styles.status}>{recallStatus}</span><small>{recallDetail}</small></Card><Card><strong>Pending batch</strong><span className={styles.status}>{pending}</span><small>封存队列状态</small></Card><Card><strong>后台整理</strong><span className={styles.status}>{maintenanceStatus}</span><small>{maintenance !== null && maintenance.runId !== undefined ? `run ${maintenance.runId.slice(0, 12)}… · ${formatDate(maintenance.at)}` : "空闲窗口每日运行"}</small></Card></section>
       <section className={styles.healthGrid} aria-label="后台整理控制">
         <Card as="section" className={styles.maintenanceCard ?? ""}>
           <div className={styles.cardTitle}><h2>后台整理</h2><span>{maintenanceStatus}</span></div>

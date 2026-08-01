@@ -18,6 +18,7 @@ import { MemoryWatermarkStore, SchedulerStateStore } from "../../src/storage/mem
 import { SessionSummaryStore } from "../../src/storage/memory/summary-store.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
+import { ActivationUpdater } from "../../src/runtime/memory/activation-updater.js";
 import { MemoryAgentResolver } from "../../src/runtime/memory/resolver.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
@@ -31,6 +32,11 @@ function createContext() {
   const paths = getRuntimePaths({ OPENCOLORFUL_HOME: dir });
   const database = openMetadataDatabase(paths.database);
   openDatabases.push(database);
+  // 会话证据验证基线：agent a1 在 session s1 有一次回忆
+  database.prepare(`
+    INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+    VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+  `).run(crypto.randomUUID());
   const agentsDir = path.join(dir, "agents");
   fs.mkdirSync(path.join(agentsDir, "a1", "sessions"), { recursive: true });
   return { dir, paths, database, agentsDir };
@@ -45,7 +51,7 @@ afterEach(() => {
   }
 });
 
-type CompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }) => Promise<string>;
+type CompleteText = (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }) => Promise<string>;
 
 function buildResolver(
   database: Database.Database,
@@ -63,20 +69,23 @@ function buildResolver(
   const proposalStore = new MemoryProposalStore(database);
   const policy = new MemoryPolicy({
     factStore, recallStore, journalStore,
+    batchStore, eventStore,
     settingsResolver: () => defaultMemoryAgentSettings(),
   });
   const application = new ProposalApplication({
     database, proposalStore, factStore, eventStore, journalStore, batchStore, watermarkStore, policy,
   });
+  const activationUpdater = new ActivationUpdater({ database, factStore, recallStore });
   const envelopes: PlatformEventEnvelope[] = [];
   const resolver = new MemoryAgentResolver({
     batchStore, journalStore, factStore, eventStore, recallStore, proposalStore, watermarkStore, summaryStore,
     application,
-    settingsResolver: () => defaultMemoryAgentSettings(),
+    settingsResolver: () => ({ ...defaultMemoryAgentSettings(), deepDiveMode: "experimental-agent" }),
     completeText,
     sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
     agentsDir,
     publish: (env) => envelopes.push(env),
+    activationUpdater,
     ...(limits !== undefined ? { limits } : {}),
     now: () => new Date("2026-08-01T12:00:00Z"),
   });
@@ -93,7 +102,7 @@ describe("MemoryAgentResolver", () => {
     ].join("\n");
     const { factStore, journalStore, batchStore, watermarkStore, resolver, envelopes } = buildResolver(
       database, agentsDir,
-      async () => {
+      async (_agentId: string) => {
         const line = script.split("\n").shift()!;
         script = script.slice(script.indexOf("\n") + 1);
         return line;
@@ -141,7 +150,7 @@ describe("MemoryAgentResolver", () => {
     const { database, agentsDir } = createContext();
     const { batchStore, resolver, envelopes } = buildResolver(
       database, agentsDir,
-      async () => { throw new Error("模型不可用"); },
+      async (_agentId: string) => { throw new Error("模型不可用"); },
     );
     batchStore.createBatch({
       id: "b3", agentId: "a1", sessionId: "s1", revision: { branchRevision: "br" },
@@ -153,12 +162,12 @@ describe("MemoryAgentResolver", () => {
     expect(envelopes.some((e) => e.type === "memory.agent.failed")).toBe(true);
   });
 
-  it("全部提案被策略拒绝 → completed（策略拒绝属正常结果），批次保留", async () => {
+  it("全部提案被策略拒绝 → completed（策略拒绝属正常结果），批次按本轮读取结算为 applied", async () => {
     const { database, agentsDir } = createContext();
     let rejected = false;
     const { batchStore, resolver } = buildResolver(
       database, agentsDir,
-      async () => {
+      async (_agentId: string) => {
         if (!rejected) {
           rejected = true;
           return JSON.stringify({ kind: "tool_call", tool: "propose_fact", args: { payload: { fact: "无证据事实" }, evidenceRefs: [], reason: "x", confidence: 0.9 } });
@@ -174,6 +183,78 @@ describe("MemoryAgentResolver", () => {
     expect(outcome.status).toBe("completed");
     expect(outcome.rejected).toBe(1);
     expect(outcome.applied).toBe(0);
-    expect(batchStore.get("b4")?.status).toBe("sealed");
+    // 运行完成即结算（评审 P1-6：避免"无提案/全拒绝"批次永久 pending 每天重复消耗模型）
+    expect(batchStore.get("b4")?.status).toBe("applied");
+  });
+});
+
+describe("MemoryAgentResolver 验收修复（评审 P2-7）", () => {
+  it("应用 strength_change → 发布 memory.strength.changed（含前后强度）", async () => {
+    const { database, agentsDir } = createContext();
+    const factStore = new MemoryFactStore(database);
+    const fact = factStore.createFact({
+      agentId: "a1", fact: "强度事实", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 50,
+    });
+    let proposed = true;
+    const { batchStore, resolver, envelopes } = buildResolver(
+      database, agentsDir,
+      async (_agentId: string) => {
+        if (proposed) {
+          proposed = false;
+          return JSON.stringify({ kind: "tool_call", tool: "propose_strength_change", args: { memoryId: fact.id, payload: { retentionStrength: 60 }, evidenceRefs: ["session:s1"], reason: "新增回忆证据", confidence: 0.9 } });
+        }
+        return JSON.stringify({ kind: "final", report: { summary: "完成" } });
+      },
+    );
+    batchStore.createBatch({
+      id: "b-s", agentId: "a1", sessionId: "s1", revision: { branchRevision: "br" },
+      sourceStartEntry: "e1", sourceEndEntry: "e2", priority: 0,
+    }, "sealed");
+    const outcome = await resolver.runMaintenance("a1");
+    expect(outcome.status).toBe("completed");
+    expect(outcome.applied).toBe(1);
+    const changed = envelopes.filter((e) => e.type === "memory.strength.changed");
+    expect(changed).toHaveLength(1);
+    const payload = changed[0]?.payload as { factId: number; retentionStrength: number; previousRetention: number };
+    expect(payload.factId).toBe(fact.id);
+    expect(payload.retentionStrength).toBe(60);
+    expect(payload.previousRetention).toBe(50);
+  });
+});
+
+describe("MemoryAgentResolver deepDiveMode 接线（评审 P0-2）", () => {
+  it("script 模式：不调用 LLM，确定性重建 activation，不触碰 sealed batch，落运行报告", async () => {
+    const { database, agentsDir } = createContext();
+    const factStore = new MemoryFactStore(database);
+    const fact = factStore.createFact({
+      agentId: "a1", fact: "投影事实", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 50, activationStrength: 0,
+    });
+    database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's1', ?, 'fact', ?, 'q', 'facts', 'memory_recall', '2026-07-31T10:00:00.000Z')
+    `).run(crypto.randomUUID(), String(fact.id));
+    let llmCalled = false;
+    const { batchStore, resolver } = buildResolver(
+      database, agentsDir,
+      async (_agentId: string) => { llmCalled = true; return JSON.stringify({ kind: "final", report: { summary: "不应被调用" } }); },
+    );
+    // 覆盖 settingsResolver 为 script 模式
+    (resolver as unknown as { deps: { settingsResolver: () => unknown } }).deps.settingsResolver = () => ({ ...defaultMemoryAgentSettings(), deepDiveMode: "script" });
+    batchStore.createBatch({
+      id: "b-sc", agentId: "a1", sessionId: "s1", revision: { branchRevision: "br" },
+      sourceStartEntry: "e1", sourceEndEntry: "e2", priority: 0,
+    }, "sealed");
+    const outcome = await resolver.runMaintenance("a1");
+    expect(outcome.status).toBe("completed");
+    expect(outcome.applied).toBe(0);
+    expect(llmCalled).toBe(false);
+    // sealed batch 未触碰；activation 投影已由账本重建
+    expect(batchStore.get("b-sc")?.status).toBe("sealed");
+    expect(factStore.getById(fact.id)?.activationStrength).toBeGreaterThan(0);
+    // 运行报告落盘（script 模式也有报告）
+    const runsDir = path.join(agentsDir, "a1", "memory", "runs");
+    expect(fs.existsSync(path.join(runsDir, outcome.runId, "run.json"))).toBe(true);
   });
 });

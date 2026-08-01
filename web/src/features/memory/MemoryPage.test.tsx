@@ -54,7 +54,7 @@ const payloads: Record<string, unknown> = {
   "/api/agents/agent-1/memory/facts": { facts: [{ id: 1, fact: "偏好简洁回复", tags: ["preference"] }] },
   "/api/agents/agent-1/memory/events": { events: [{ id: "event-1", startedAt: "2026-08-01T10:00:00Z", summary: "完成 UI" }] },
   "/api/agents/agent-1/memory/pinned": { pinned: [{ id: "pin-1", content: "Pinned note" }] },
-  "/api/agents/agent-1/memory/health": { health: { recallEpisode: { status: "completed", resultCount: 2, layer: "facts" }, pendingBatches: 1 } },
+  "/api/agents/agent-1/memory/health": { agentId: "agent-1", latestRecallStatus: "completed", latestRecallEpisodes: [{ status: "completed", resultCount: 2, layer: "facts" }], pendingBatches: [{ id: "b1" }, { id: "b2" }] },
   "/api/agents/agent-1/memory/timeline": {
     facts: [{ id: 1, fact: "时间线事实", retentionStrength: 60, activationStrength: 30, confidence: 0.9, status: "active", hitDates: 2 }],
     events: [{ id: "event-2", summary: "显著事件", date: "2026-07-30", salience: 80 }],

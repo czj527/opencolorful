@@ -39,6 +39,8 @@ export interface MemoryTickerDeps {
   readonly options?: MemoryTickerOptions;
   /** turn.completed 后的去抖窗口；默认 10 轮触发一次 */
   readonly turnsPerSummary?: number;
+  /** per-Agent 记忆设置（settings.turnsPerSummary 优先级高于全局 turnsPerSummary） */
+  readonly settingsResolver?: (agentId: string) => { readonly turnsPerSummary: number };
 }
 
 export type MemoryTickerRunStatus = "updated" | "degraded" | "failed" | "skipped";
@@ -101,7 +103,7 @@ export class MemoryTicker {
     if (!view?.agentId || view.archived) return;
     const count = (this.turnCounts.get(event.sessionId) ?? 0) + 1;
     this.turnCounts.set(event.sessionId, count);
-    const threshold = this.deps.turnsPerSummary ?? 10;
+    const threshold = this.deps.settingsResolver?.(view.agentId).turnsPerSummary ?? this.deps.turnsPerSummary ?? 10;
     if (count % threshold === 0) {
       this.enqueue(view.agentId, event.sessionId, "turn.completed");
     }

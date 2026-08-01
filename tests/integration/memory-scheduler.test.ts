@@ -182,3 +182,111 @@ describe("MemoryAgentScheduler", () => {
     scheduler.stop();
   });
 });
+
+describe("MemoryAgentScheduler 验收修复（评审 P0-2/P1-5/P1-6）", () => {
+  it("每日运行失败 → 不推进 lastDailyCompletedAt/doneMaintenanceDates，nextRetryAt 到期后自动重试", async () => {
+    const { database, agentsDir } = createContext();
+    // 03:10 失败 → 03:25 重试到期 → 03:30 tick 再次触发
+    const clock = { now: new Date("2026-08-02T03:10:00Z") };
+    const calls: string[] = [];
+    let failFirst = true;
+    const { scheduler, schedulerStore } = buildScheduler(database, agentsDir, {
+      now: () => clock.now,
+      resolver: {
+        runMaintenance: vi.fn(async () => {
+          calls.push("run");
+          if (failFirst) { failFirst = false; return { status: "failed", applied: 0, rejected: 0, batchIds: [], runId: "r1", reason: "模型不可用" }; }
+          return { status: "completed", applied: 0, rejected: 0, batchIds: [], runId: "r2" };
+        }),
+      } as never,
+    });
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(calls).toHaveLength(1);
+    // 失败：完成日期不得推进；nextRetryAt 已设置
+    let state = schedulerStore.get("a1");
+    expect(state?.lastDailyCompletedAt).toBeUndefined();
+    expect(state?.nextRetryAt).toBeTruthy();
+
+    // 重试到期（03:30）：再次 tick → 重试执行且成功后推进完成日期
+    clock.now = new Date("2026-08-02T03:30:00Z");
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(calls).toHaveLength(2);
+    state = schedulerStore.get("a1");
+    expect(state?.lastDailyCompletedAt?.slice(0, 10)).toBe("2026-08-02");
+  });
+
+  it("enabled=false → 定时维护与高优先级 micro-seal 专项整理均不运行", async () => {
+    const { database, agentsDir } = createContext();
+    const { scheduler, replayStore, journalStore, batchStore, resolver } = buildScheduler(database, agentsDir, {
+      now: () => new Date("2026-08-02T03:10:00Z"),
+      settings: { ...defaultMemoryAgentSettings(), enabled: false, minIdleMinutes: 0, weeklyReviewDay: 3 },
+    });
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(resolver.runMaintenance).not.toHaveBeenCalled();
+
+    // 高优先级 intent 的 turn.completed 同样被 enabled 门拦截
+    journalStore.appendIntent({ id: "hi-1", agentId: "a1", actor: "user", intentType: "remember", targetType: "fact", payload: { fact: "紧急" }, priority: 1 });
+    replayStore.publish(envelope("s1", "turn.completed", 99));
+    await scheduler.flush();
+    expect(resolver.runMaintenance).not.toHaveBeenCalled();
+    expect(batchStore.listByAgent("a1")).toHaveLength(0);
+  });
+
+  it("enqueueDeepDive：并发调用经 per-Agent promise tail 串行执行（不重叠）", async () => {
+    const { database, agentsDir } = createContext();
+    let active = 0;
+    let maxActive = 0;
+    const { scheduler, resolver } = buildScheduler(database, agentsDir, {
+      now: () => new Date("2026-08-02T12:00:00Z"),
+      resolver: {
+        runMaintenance: vi.fn(async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          active -= 1;
+          return { status: "completed", applied: 0, rejected: 0, batchIds: [], runId: "r" };
+        }),
+      } as never,
+    });
+    await Promise.all([
+      scheduler.enqueueDeepDive("a1"),
+      scheduler.enqueueDeepDive("a1"),
+      scheduler.enqueueDeepDive("a1"),
+    ]);
+    expect(maxActive).toBe(1);
+    expect(resolver.runMaintenance).toHaveBeenCalledTimes(3);
+  });
+
+  it("每周复核失败 → 不推进 lastWeeklyCompletedAt，重试到期后再次执行（weekly:true 透传）", async () => {
+    const { database, agentsDir } = createContext();
+    const clock = { now: new Date("2026-08-02T03:40:00Z") }; // 周日 + 超过 weeklyReviewTime
+    const weeklyCalls: Array<{ weekly: boolean }> = [];
+    let failFirst = true;
+    const { scheduler, schedulerStore } = buildScheduler(database, agentsDir, {
+      now: () => clock.now,
+      // dailyRunTime 设为 23:00 隔离每周窗口（避免同 tick 每日窗口竞争）
+      settings: { ...defaultMemoryAgentSettings(), minIdleMinutes: 0, dailyRunTime: "23:00", weeklyReviewDay: 0, weeklyReviewTime: "03:30" },
+      resolver: {
+        runMaintenance: vi.fn(async (_agentId: string, opts: { weekly?: boolean } = {}) => {
+          weeklyCalls.push({ weekly: opts.weekly === true });
+          if (failFirst) { failFirst = false; return { status: "failed", applied: 0, rejected: 0, batchIds: [], runId: "w1" }; }
+          return { status: "completed", applied: 0, rejected: 0, batchIds: [], runId: "w2" };
+        }),
+      } as never,
+    });
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(schedulerStore.get("a1")?.lastWeeklyCompletedAt).toBeUndefined();
+    expect(weeklyCalls[0]?.weekly).toBe(true);
+
+    clock.now = new Date("2026-08-02T04:00:00Z");
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(weeklyCalls).toHaveLength(2);
+    expect(weeklyCalls[1]?.weekly).toBe(true);
+    expect(schedulerStore.get("a1")?.lastWeeklyCompletedAt?.slice(0, 10)).toBe("2026-08-02");
+  });
+});

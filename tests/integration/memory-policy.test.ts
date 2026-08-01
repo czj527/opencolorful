@@ -10,6 +10,8 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { MemoryFactStore } from "../../src/storage/memory/fact-store.js";
 import { MemoryJournalStore } from "../../src/storage/memory/journal-store.js";
+import { MemoryBatchStore } from "../../src/storage/memory/batch-store.js";
+import { MemoryEventStore } from "../../src/storage/memory/event-store.js";
 import { MemoryRecallStore } from "../../src/storage/memory/recall-store.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
@@ -24,6 +26,11 @@ function createContext() {
   const paths = getRuntimePaths({ OPENCOLORFUL_HOME: dir });
   const database = openMetadataDatabase(paths.database);
   openDatabases.push(database);
+  // 会话证据验证基线：agent a1 在 session s1 有一次回忆（session:<id> 证据可验证）
+  database.prepare(`
+    INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+    VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+  `).run(crypto.randomUUID());
   return { dir, database };
 }
 
@@ -60,6 +67,8 @@ describe("MemoryPolicy", () => {
       factStore: new MemoryFactStore(database),
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({ reason: "", evidenceRefs: [] }));
@@ -78,6 +87,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({ payload: { fact: "用户偏好深色模式" } }));
@@ -96,6 +107,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({
@@ -119,6 +132,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({
@@ -142,6 +157,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({
@@ -166,6 +183,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore,
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     // 单会话单日期 → 拒绝
@@ -199,7 +218,12 @@ describe("MemoryPolicy", () => {
     }));
     expect(result.approved).toBe(false);
 
-    // 两独立会话证据 + 两日期 ledger + 高置信度 → 放行
+    // 账本中出现第二个独立会话（s2，指向该事实）+ 两日期 + 高置信度 → 放行
+    insertRecall.run(crypto.randomUUID(), String(fact.id), "2026-07-03T10:00:00.000Z");
+    database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's2', ?, 'fact', ?, 'q', 'facts', 'memory_recall', ?)
+    `).run(crypto.randomUUID(), String(fact.id), "2026-07-03T12:00:00.000Z");
     result = policy.check(makeProposal({
       type: "strength_change",
       targetId: String(fact.id),
@@ -228,6 +252,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore,
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     const result = policy.check(makeProposal({
@@ -247,6 +273,8 @@ describe("MemoryPolicy", () => {
       factStore,
       recallStore: new MemoryRecallStore(database),
       journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
       settingsResolver: () => defaultMemoryAgentSettings(),
     });
     expect(policy.check(makeProposal({ type: "forget", reason: "" })).approved).toBe(false);
@@ -263,5 +291,41 @@ describe("MemoryPolicy", () => {
     expect(policy.check(makeProposal({
       type: "restore", targetId: String(fact.id), payload: {},
     })).approved).toBe(true);
+  });
+});
+
+describe("MemoryPolicy 迟滞接线（评审 P1-3）", () => {
+  it("strength_change 中期降短期：proposed 不低于 mediumDown → 拒绝（迟滞区间）", () => {
+    const { database } = createContext();
+    const factStore = new MemoryFactStore(database);
+    // 默认阈值 mediumUp=45 / mediumDown=35：50 属中期，降到 36 仍在迟滞区间（≥35）→ 拒绝
+    const fact = factStore.createFact({
+      agentId: "a1", fact: "迟滞事实", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 50,
+    });
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(database),
+      journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    const result = policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 36 },
+      previousState: { retentionStrength: 50 },
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("迟滞");
+    // 低于 mediumDown（34）→ 允许降档
+    const ok = policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 34 },
+      previousState: { retentionStrength: 50 },
+    }));
+    expect(ok.approved).toBe(true);
   });
 });

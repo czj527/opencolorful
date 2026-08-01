@@ -14,6 +14,7 @@ import { MemoryJournalStore } from "../../src/storage/memory/journal-store.js";
 import { MemoryRecallStore } from "../../src/storage/memory/recall-store.js";
 import { buildMemorySearchText } from "../../src/storage/memory/cjk-ngram.js";
 import { MemoryAgentRunner } from "../../src/runtime/memory/agent/memory-agent-runner.js";
+import { memoryAgentToolMap } from "../../src/runtime/memory/agent/memory-agent-tools.js";
 import { createPersistentSession } from "../../src/pi-sdk/index.js";
 
 const temporaryDirectories: string[] = [];
@@ -61,6 +62,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       completeText: async () => {
@@ -103,6 +105,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       completeText: async () => JSON.stringify({ kind: "final", report: { summary: "x" } }),
@@ -120,6 +123,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       completeText: async () => "不是 JSON 的内容",
@@ -147,6 +151,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore,
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       completeText: async () => {
@@ -196,6 +201,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => sessionPaths.get(sessionId) ?? path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       assertSessionReadable: (sessionPath) => { if (!sessionPath.startsWith(sessionDir)) denied.push(sessionPath); },
@@ -216,6 +222,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: () => path.join(os.tmpdir(), "outside.jsonl"),
       assertSessionReadable: (sessionPath) => { throw new Error("路径越界"); },
@@ -237,6 +244,7 @@ describe("MemoryAgentRunner", () => {
       journalStore: new MemoryJournalStore(database),
       factStore: new MemoryFactStore(database),
       eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
       agentsDir,
       sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
       completeText: async () => {
@@ -248,5 +256,117 @@ describe("MemoryAgentRunner", () => {
     const result = await runner.run();
     expect(result.status).toBe("completed");
     expect(result.proposals).toHaveLength(0);
+  });
+});
+
+describe("MemoryAgentRunner 验收修复（评审 P1-3/P2-7）", () => {
+  it("weekly=true → 模型 prompt 含本周复核模式说明", async () => {
+    const { database, agentsDir } = createContext();
+    const prompts: string[] = [];
+    const runner = new MemoryAgentRunner({
+      agentId: "a1",
+      batchStore: new MemoryBatchStore(database),
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      agentsDir,
+      sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
+      weekly: true,
+      completeText: async (req) => {
+        prompts.push(req.prompt);
+        return JSON.stringify({ kind: "final", report: { summary: "周复核完成" } });
+      },
+    });
+    const result = await runner.run();
+    expect(result.status).toBe("completed");
+    expect(prompts.join("\n")).toContain("本周复核模式");
+    // 非 weekly 运行不含该提示（默认分支不受影响）
+    const plainPrompts: string[] = [];
+    const plain = new MemoryAgentRunner({
+      agentId: "a1",
+      batchStore: new MemoryBatchStore(database),
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      agentsDir,
+      sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
+      completeText: async (req) => {
+        plainPrompts.push(req.prompt);
+        return JSON.stringify({ kind: "final", report: { summary: "完成" } });
+      },
+    });
+    await plain.run();
+    expect(plainPrompts.join("\n")).not.toContain("本周复核模式");
+  });
+
+  it("get_activation_summary：回忆账本聚合（跨日期/跨会话去重），不含其他 Agent 数据", async () => {
+    const { database, agentsDir } = createContext();
+    const factStore = new MemoryFactStore(database);
+    const recallStore = new MemoryRecallStore(database);
+    const fact = factStore.createFact({
+      agentId: "a1", fact: "账本事实", tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 40, activationStrength: 10,
+    });
+    const other = factStore.createFact({
+      agentId: "a2", fact: "B 的事实", tags: [], source: "agent_approved",
+      sourceRefs: ["session:sB"], confidence: 0.9, retentionStrength: 70,
+    });
+    const insertRecall = database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES (?, 's1', ?, 'fact', ?, 'q', 'facts', 'memory_recall', ?)
+    `);
+    insertRecall.run("a1", crypto.randomUUID(), String(fact.id), "2026-07-28T10:00:00.000Z");
+    insertRecall.run("a1", crypto.randomUUID(), String(fact.id), "2026-07-30T10:00:00.000Z");
+    insertRecall.run("a2", crypto.randomUUID(), String(other.id), "2026-07-29T10:00:00.000Z");
+
+    const ctx: import("../../src/runtime/memory/agent/memory-agent-tools.js").MemoryToolContext = {
+      agentId: "a1", runId: "r", factStore, eventStore: new MemoryEventStore(database),
+      journalStore: new MemoryJournalStore(database), batchStore: new MemoryBatchStore(database),
+      recallStore, agentsDir, proposals: [],
+      assertSessionReadable: () => undefined,
+      now: () => new Date("2026-08-01T12:00:00Z"),
+      sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
+    };
+    const tool = memoryAgentToolMap.get("get_activation_summary")!;
+    const result = JSON.parse(tool.execute(ctx, {}) as string) as { facts: Array<{ id: number; fact: string; hitDates: number; hitSessions: number }> };
+    const row = result.facts.find((f) => f.id === fact.id);
+    expect(row).toBeDefined();
+    expect(row?.hitDates).toBe(2);
+    expect(row?.hitSessions).toBe(1);
+    // 不包含其他 Agent 的事实
+    expect(result.facts.some((f) => f.id === other.id)).toBe(false);
+  });
+
+  it("report_run 的 summary/issues 与输入快照落盘到 run.json", async () => {
+    const { database, agentsDir } = createContext();
+    const batchStore = new MemoryBatchStore(database);
+    batchStore.createBatch({
+      id: "b-report", agentId: "a1", sessionId: "s1",
+      revision: { branchRevision: "br-1" }, sourceStartEntry: "e1", sourceEndEntry: "e2", priority: 0,
+    }, "sealed");
+    const runner = new MemoryAgentRunner({
+      agentId: "a1",
+      batchStore,
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      agentsDir,
+      sessionPathResolver: (sessionId) => path.join(agentsDir, "a1", "sessions", `${sessionId}.jsonl`),
+      completeText: async () => JSON.stringify({ kind: "tool_call", tool: "report_run", args: { summary: "本轮整理完成", issues: ["候选 A 证据不足"] } }),
+    });
+    const result = await runner.run();
+    expect(result.status).toBe("completed");
+    expect(result.report?.summary).toBe("本轮整理完成");
+    expect(result.report?.issues).toContain("候选 A 证据不足");
+    expect(result.inputSnapshot?.batches.some((b) => b.id === "b-report")).toBe(true);
+    expect(result.inputSnapshot?.batches[0]?.revision.branchRevision).toBe("br-1");
+
+    // run.json 已持久化 summary + 输入快照
+    const runJson = JSON.parse(fs.readFileSync(path.join(agentsDir, "a1", "memory", "runs", result.runId, "run.json"), "utf8")) as { report?: { summary: string }; inputSnapshot?: { pendingIntents: number } };
+    expect(runJson.report?.summary).toBe("本轮整理完成");
+    expect(runJson.inputSnapshot?.pendingIntents).toBe(0);
   });
 });

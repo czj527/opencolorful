@@ -53,6 +53,8 @@ function createApp() {
   const proposalStore = new MemoryProposalStore(database);
   const policy = new MemoryPolicy({
     factStore, recallStore, journalStore,
+    batchStore: new MemoryBatchStore(database),
+    eventStore: new MemoryEventStore(database),
     settingsResolver: () => defaultMemoryAgentSettings(),
   });
   const application = new ProposalApplication({
@@ -76,7 +78,13 @@ function createApp() {
     database,
     agentStore,
     preferencesStore,
-    memoryAdmin: { resolver, application, preferencesStore, recallStore },
+    memoryAdmin: {
+      resolver, application, preferencesStore, recallStore,
+      settingsResolver: (agentId) => {
+        const global = preferencesStore.get().memory ?? defaultMemoryAgentSettings();
+        try { return agentStore.getSettings(agentId)?.memory ?? global; } catch { return global; }
+      },
+    },
   });
   return { app, dir, paths, database, agentStore, preferencesStore, factStore, recallStore };
 }
@@ -91,6 +99,15 @@ afterEach(() => {
 });
 
 describe("memory admin API", () => {
+  it("enabled=false → deep-dive 返回 503 已关闭", async () => {
+    const ctx = createApp();
+    await ctx.preferencesStore.update({ memory: { ...defaultMemoryAgentSettings(), enabled: false } } as never);
+    const deep = await ctx.app.request(`http://x/api/agents/a1/memory/deep-dive`, { method: "POST" });
+    expect(deep.status).toBe(503);
+    const body = await deep.json() as { status: string };
+    expect(body.status).toBe("disabled");
+  });
+
   it("deep-dive 排队返回 202；rollback 缺少 run 返回 400", async () => {
     const ctx = createApp();
     const base = `http://x/api/agents/a1/memory`;

@@ -43,12 +43,12 @@ export interface MemoryAgentResolverDeps {
   readonly summaryStore: SessionSummaryStore;
   readonly application: ProposalApplication;
   readonly settingsResolver: (agentId: string) => MemoryAgentSettings;
-  readonly completeText: (req: { systemPrompt: string; prompt: string; maxTokens?: number }) => Promise<string>;
+  readonly completeText: (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }) => Promise<string>;
   readonly sessionPathResolver: (sessionId: string) => string;
   readonly agentsDir: string;
   readonly publish: (envelope: PlatformEventEnvelope) => void;
   readonly activationUpdater?: Pick<ActivationUpdater, "updateForHits">;
-  readonly assertSessionReadable?: (sessionPath: string) => void;
+  readonly assertSessionReadable?: (sessionPath: string, agentId: string) => void;
   readonly limits?: { maxIterations?: number; maxTokens?: number; maxMinutes?: number };
   readonly now?: () => Date;
 }
@@ -67,7 +67,7 @@ function agentEnvelope(
   agentId: string,
   sessionId: string | null,
   type: PlatformEventEnvelope["type"],
-  payload: MemoryAgentPayload,
+  payload: MemoryAgentPayload | import("../../contracts/memory.js").MemoryStrengthChangedPayload,
   publish: (envelope: PlatformEventEnvelope) => void,
 ): void {
   publish({
@@ -108,16 +108,41 @@ export class MemoryAgentResolver {
 
     emit("started", "提取候选");
     try {
+      // deepDiveMode 接线（评审 P0-2）：script = 零 LLM 确定性整理（不把记忆意图交给模型）；
+      // experimental-agent = LLM 记忆 Agent（只提案，仍经 MemoryPolicy 审批）
+      const settings = this.deps.settingsResolver(agentId);
+      if (settings.deepDiveMode !== "experimental-agent") {
+        emit("processing", "确定性整理（script 模式）");
+        // 确定性 housekeeping：activation 投影重建（回忆账本 → activation_strength）
+        const allFacts = this.deps.factStore.listByAgent(agentId, { limit: 1_000_000 });
+        if (allFacts.length > 0) {
+          this.deps.activationUpdater?.updateForHits({ agentId, targetIds: allFacts.map((f) => String(f.id)) });
+        }
+        // 不触碰 sealed batch（等待用户显式开启 experimental-agent 后处理）
+        const completedAt = this.now().toISOString();
+        const { writeMemoryRunReport } = await import("./agent/run-report.js");
+        await writeMemoryRunReport({
+          runId, agentId, agentsDir: this.deps.agentsDir, batchIds: [],
+          proposals: [], iterations: 0, status: "completed",
+          reason: "script 模式确定性整理（未运行 LLM 代理）",
+          startedAt, completedAt, tokenEstimate: 0, issues: [],
+          inputSnapshot: { batches: [], pendingIntents: 0 },
+        });
+        emit("completed", "script 模式：确定性整理完成（未运行 LLM 代理）");
+        return { runId, agentId, status: "completed", applied: 0, rejected: 0, batchIds: [] };
+      }
       const runner = new MemoryAgentRunner({
         agentId,
         batchStore: this.deps.batchStore,
         journalStore: this.deps.journalStore,
         factStore: this.deps.factStore,
         eventStore: this.deps.eventStore,
+        recallStore: this.deps.recallStore,
         agentsDir: this.deps.agentsDir,
-        completeText: this.deps.completeText,
+        completeText: (req) => this.deps.completeText(agentId, req),
         sessionPathResolver: this.deps.sessionPathResolver,
         runId,
+        ...(opts.weekly === true ? { weekly: true } : {}),
         ...(this.deps.assertSessionReadable !== undefined
           ? { assertSessionReadable: this.deps.assertSessionReadable }
           : {}),
@@ -143,29 +168,38 @@ export class MemoryAgentResolver {
       }
 
       emit("processing", "策略审批");
-      const outcome = this.deps.application.applyRun({ agentId, runId: run.runId, proposals: run.proposals });
+      // 事实/journal/watermark/意图结算同事务提交；应用异常整体回滚
+      const outcome = this.deps.application.applyRun(
+        { agentId, runId: run.runId, proposals: run.proposals },
+        { settleIntents: (targetAgentId, applied) => this.settleJournalIntents(targetAgentId, applied) },
+      );
 
-      // 应用成功后推进批次/意图/水印状态
+      if (outcome.failed.length > 0) {
+        // 应用阶段失败（策略层已拒绝的走 rejected；此处为事务外异常兜底）→ 批次保留待重试
+        const reason = outcome.failed[0]?.error.message ?? "应用阶段失败";
+        emit("failed", undefined, reason);
+        return { runId, agentId, status: "failed", applied: 0, rejected: outcome.rejected.length, batchIds, reason };
+      }
+
+      // 运行完成（无论是否产出提案）→ 本轮读取的批次结算为 applied，
+      // 避免"无提案"批次永久 pending 每天重复消耗模型
+      for (const batchId of batchIds) {
+        try { this.deps.batchStore.markStatus(batchId, "applied"); } catch { /* ignore */ }
+      }
+
       if (outcome.applied.length > 0) {
-        for (const batchId of batchIds) {
-          try { this.deps.batchStore.markStatus(batchId, "applied"); } catch { /* ignore */ }
-        }
-        // 事实变更 → facts.md/memory.md 过期，标记 markdown dirty 等待跨日重编译
-        this.deps.watermarkStore.upsert(agentId, "markdown", "", { stale: true }, true);
         // activation 投影重算（本轮新增/调整的事实）
         const factIds = outcome.applied
-          .filter((p) => p.type === "create_fact" || p.type === "strength_change")
+          .filter((p) => p.type === "create_fact" || p.type === "strength_change" || p.type === "supersede" || p.type === "merge")
           .map((p) => p.targetId ?? p.payload.createdFactId)
           .filter((v): v is string | number => v !== undefined)
           .map(String);
         if (factIds.length > 0) {
           this.deps.activationUpdater?.updateForHits({ agentId, targetIds: factIds });
         }
-        // 匹配的用户意图标记 applied（remember↔create_fact 文本一致；forget↔forget 目标一致）
-        this.settleJournalIntents(agentId, outcome);
+        this.publishStrengthChanged(agentId, outcome.applied);
         emit("completed", "整理完成");
       } else if (outcome.rejected.length > 0) {
-        // 全被拒绝：批次保持 pending，不标记失败（策略拒绝是正常结果）
         emit("completed", "策略拒绝，批次保留");
       } else {
         emit("completed", "无可用提案");
@@ -186,9 +220,26 @@ export class MemoryAgentResolver {
     }
   }
 
+  /** 已应用的事实强度变更发布 memory.strength.changed（契约已在列，补上生产发布方） */
+  private publishStrengthChanged(agentId: string, applied: readonly import("../../contracts/memory.js").MemoryMutationProposal[]): void {
+    for (const proposal of applied) {
+      const factId = proposal.type === "strength_change" ? proposal.targetId : proposal.payload.createdFactId;
+      if (factId === undefined) continue;
+      const fact = this.deps.factStore.getById(Number(factId));
+      if (fact === undefined) continue;
+      agentEnvelope(agentId, null, "memory.strength.changed", {
+        agentId,
+        factId: Number(factId),
+        retentionStrength: fact.retentionStrength,
+        activationStrength: fact.activationStrength,
+        ...(proposal.type === "strength_change" ? { previousRetention: Number((proposal.previousState as Record<string, unknown> | undefined)?.["retention"] ?? (proposal.previousState as Record<string, unknown> | undefined)?.["retentionStrength"] ?? 0) } : {}),
+      }, this.deps.publish);
+    }
+  }
+
   /** remember/forget 用户意图与已应用提案对齐后标记 applied */
-  private settleJournalIntents(agentId: string, outcome: { applied: readonly import("../../contracts/memory.js").MemoryMutationProposal[] }): void {
-    for (const proposal of outcome.applied) {
+  private settleJournalIntents(agentId: string, applied: readonly import("../../contracts/memory.js").MemoryMutationProposal[]): void {
+    for (const proposal of applied) {
       if (proposal.type === "create_fact" || proposal.type === "longterm_projection") {
         const text = String(proposal.payload.fact ?? proposal.payload.content ?? "");
         for (const intent of this.deps.journalStore.listPending(agentId)) {

@@ -53,8 +53,15 @@ function makeApplier(database: Database.Database) {
     factStore,
     recallStore,
     journalStore,
+    batchStore,
+    eventStore,
     settingsResolver: () => defaultMemoryAgentSettings(),
   });
+  // 会话证据验证基线：agent a1 在 session s1 有一次回忆
+  database.prepare(`
+    INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+    VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+  `).run(crypto.randomUUID());
   const application = new ProposalApplication({
     database,
     proposalStore,
@@ -114,21 +121,21 @@ describe("ProposalApplication", () => {
     expect(journal.filter((j) => j.actor === "memory_agent").length).toBe(2);
   });
 
-  it("事务异常 → 零提交（无半提交状态）", () => {
+  it("事务中途异常 → 整体回滚（无半成品提交）", () => {
     const { database } = createContext();
-    // 用被篡改的 previousState 制造应用期异常：目标不存在 → updateRetention 抛错
-    const { factStore, proposalStore, application } = makeApplier(database);
+    const { factStore, proposalStore, journalStore, application } = makeApplier(database);
+    // 第一个提案正常（会在事务内先落地），第二个提案制造 CHECK 约束异常：
+    // confidence=1.5 违反 memory_facts 的 CHECK（0-1）→ createFact 抛错
+    const good = proposal({ type: "create_fact", payload: { fact: "事务内先落地的正常事实" } });
     const broken = proposal({
-      type: "strength_change", targetId: "999999",
-      payload: { retentionStrength: 60 }, previousState: { retentionStrength: 50 },
+      type: "create_fact", payload: { fact: "触发约束异常的事实" }, confidence: 1.5,
     });
-    // policy 会先拒绝（目标不存在）——为触发事务内异常，直接绕过 policy 不可行；
-    // 改用超长 fact 触发 CHECK 之外的异常：fact 文本超长不受约束，
-    // 改为验证 rejected 路径不产生任何应用副作用
-    const result = application.applyRun({ agentId: "a1", runId: "run-1", proposals: [broken] });
-    expect(result.rejected).toHaveLength(1);
-    expect(proposalStore.getById(broken.id)?.status).toBe("rejected");
+    expect(() => application.applyRun({ agentId: "a1", runId: "run-1", proposals: [good, broken] })).toThrow();
+    // 整个事务回滚：无任何事实、提案、journal 留痕残留
     expect(factStore.listByAgent("a1")).toHaveLength(0);
+    expect(proposalStore.getById(good.id)).toBeUndefined();
+    expect(proposalStore.getById(broken.id)).toBeUndefined();
+    expect(journalStore.listByAgent("a1")).toHaveLength(0);
   });
 
   it("rollbackRun 反向恢复：strength 还原、create_fact 抑制、forget restore、journal 留痕", () => {
@@ -192,5 +199,29 @@ describe("ProposalApplication", () => {
     application.rollbackRun({ agentId: "a1", runId: "run-2" });
     expect(factStore.getById(old.id)?.status).toBe("active");
     expect(newFact && factStore.getById(newFact.id)?.status).toBe("suppressed");
+  });
+});
+
+describe("ProposalApplication 确定性初始强度（评审 P1-3）", () => {
+  it("create_fact 缺省 retentionStrength → 按证据/可信度确定性计算（非 0）；匹配 remember 意图 → 用户意图强度", async () => {
+    const { database } = createContext();
+    const { factStore, journalStore, application } = makeApplier(database);
+    const plain = proposal({ type: "create_fact", payload: { fact: "普通新事实" }, evidenceRefs: ["session:s1"], confidence: 0.9 });
+    const result = application.applyRun({ agentId: "a1", runId: "run-1", proposals: [plain] });
+    expect(result.applied).toHaveLength(1);
+    const created = factStore.listByAgent("a1").find((f) => f.fact === "普通新事实");
+    expect(created).toBeDefined();
+    expect(created!.retentionStrength).toBeGreaterThan(0);
+
+    // 用户显式 remember 意图匹配 → computeRetention(userIntent) 至少 70
+    journalStore.appendIntent({
+      id: crypto.randomUUID(), agentId: "a1", actor: "user", intentType: "remember",
+      targetType: "fact", payload: { fact: "请记住这件重要的事" },
+    });
+    const user = proposal({ type: "create_fact", payload: { fact: "请记住这件重要的事" }, evidenceRefs: ["session:s1"], confidence: 0.9 });
+    const result2 = application.applyRun({ agentId: "a1", runId: "run-2", proposals: [user] });
+    expect(result2.applied).toHaveLength(1);
+    const remembered = factStore.listByAgent("a1").find((f) => f.fact === "请记住这件重要的事");
+    expect(remembered!.retentionStrength).toBeGreaterThanOrEqual(70);
   });
 });

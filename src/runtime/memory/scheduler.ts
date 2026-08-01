@@ -89,6 +89,7 @@ export class MemoryAgentScheduler {
     const view = this.safeView(event.sessionId);
     if (!view?.agentId || view.archived) return;
     const agentId = view.agentId;
+    if (!this.deps.settingsResolver(agentId).enabled) return;
     const hasHighPriority = this.deps.journalStore
       .listPending(agentId)
       .some((intent) => (intent.priority ?? 0) > 0);
@@ -171,18 +172,28 @@ export class MemoryAgentScheduler {
       if (dailyDue) {
         this.enqueueAgent(agentId, async () => {
           const outcome = await this.deps.resolver.runMaintenance(agentId);
-          this.doneMaintenanceDates.set(agentId, today);
-          this.deps.schedulerStore.upsert({
-            agentId,
-            status: outcome.status === "completed" ? "idle" : "failed",
-            ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
-            lastDailyCompletedAt: nowIso,
-            ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
-            ...(outcome.status !== "completed"
-              ? { nextRetryAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString() }
-              : {}),
-            updatedAt: nowIso,
-          });
+          if (outcome.status === "completed") {
+            // 仅成功推进"今日已完成"；失败只设置 nextRetryAt，稍后 tick 自动重试
+            this.doneMaintenanceDates.set(agentId, today);
+            this.deps.schedulerStore.upsert({
+              agentId,
+              status: "idle",
+              ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
+              lastDailyCompletedAt: nowIso,
+              ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
+              updatedAt: nowIso,
+            });
+          } else {
+            this.deps.schedulerStore.upsert({
+              agentId,
+              status: "failed",
+              ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
+              ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
+              ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
+              nextRetryAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+              updatedAt: nowIso,
+            });
+          }
         });
       }
 
@@ -194,18 +205,44 @@ export class MemoryAgentScheduler {
       if (weeklyDue) {
         this.enqueueAgent(agentId, async () => {
           const outcome = await this.deps.resolver.runMaintenance(agentId, { weekly: true });
-          this.doneWeeklyDates.set(agentId, today);
-          this.deps.schedulerStore.upsert({
-            agentId,
-            status: outcome.status === "completed" ? "idle" : "failed",
-            ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
-            ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
-            lastWeeklyCompletedAt: nowIso,
-            updatedAt: nowIso,
-          });
+          if (outcome.status === "completed") {
+            this.doneWeeklyDates.set(agentId, today);
+            this.deps.schedulerStore.upsert({
+              agentId,
+              status: "idle",
+              ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
+              ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
+              lastWeeklyCompletedAt: nowIso,
+              updatedAt: nowIso,
+            });
+          } else {
+            // 每周复核失败同样不推进完成日期，设置重试
+            this.deps.schedulerStore.upsert({
+              agentId,
+              status: "failed",
+              ...(state?.lastDailyDate !== undefined ? { lastDailyDate: state.lastDailyDate } : {}),
+              ...(state?.lastDailyCompletedAt !== undefined ? { lastDailyCompletedAt: state.lastDailyCompletedAt } : {}),
+              ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
+              nextRetryAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString(),
+              updatedAt: nowIso,
+            });
+          }
         });
       }
     }
+  }
+
+  /**
+   * 手动 deep-dive 入口：与定时任务共用 per-Agent promise tail，
+   * 保证同一 Agent 的整理串行执行（并发点击/与定时重叠不会重复消化同一批 batches）。
+   */
+  async enqueueDeepDive(agentId: string, opts: { weekly?: boolean } = {}): Promise<unknown> {
+    let resolved: unknown;
+    this.enqueueAgent(agentId, async () => {
+      resolved = await this.deps.resolver.runMaintenance(agentId, opts);
+    });
+    await this.flush();
+    return resolved;
   }
 
   private isAgentIdle(agentId: string, now: Date, settings: MemoryAgentSettings): boolean {
