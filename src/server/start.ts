@@ -14,6 +14,15 @@ import { SessionIndex } from "../storage/session-index.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
+import { MemoryAgentResolver } from "../runtime/memory/resolver.js";
+import { MemoryAgentScheduler } from "../runtime/memory/scheduler.js";
+import { MemoryProposalStore } from "../storage/memory/proposal-store.js";
+import { MemoryJournalStore } from "../storage/memory/journal-store.js";
+import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
+import { ProposalApplication } from "../runtime/memory/proposal-application.js";
+import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { MemoryRecallStore } from "../storage/memory/recall-store.js";
+import { ActivationUpdater } from "../runtime/memory/activation-updater.js";
 import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
 import { EventIndexer } from "../runtime/memory/event-indexer.js";
 import { MemoryCompilePipeline } from "../runtime/memory/compile-pipeline.js";
@@ -22,6 +31,8 @@ import { MemoryBatchStore } from "../storage/memory/batch-store.js";
 import { MemoryDailyStateStore, MemoryWatermarkStore, SchedulerStateStore } from "../storage/memory/recovery-store.js";
 import { SessionSummaryStore } from "../storage/memory/summary-store.js";
 import { MemoryEventStore } from "../storage/memory/event-store.js";
+import { MemoryFactStore } from "../storage/memory/fact-store.js";
+import path from "node:path";
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -232,6 +243,66 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     });
     memoryTicker = ticker;
     ticker.start();
+
+    // ── Phase 10.5：记忆 Agent 整理（每日/每周窗口 + 高优先级 micro-seal）──
+    const memoryAgentResolver = new MemoryAgentResolver({
+      batchStore: new MemoryBatchStore(database),
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      proposalStore: new MemoryProposalStore(database),
+      watermarkStore,
+      summaryStore,
+      application: new ProposalApplication({
+        database,
+        proposalStore: new MemoryProposalStore(database),
+        factStore: new MemoryFactStore(database),
+        eventStore: new MemoryEventStore(database),
+        journalStore: new MemoryJournalStore(database),
+        batchStore: new MemoryBatchStore(database),
+        watermarkStore,
+        policy: new MemoryPolicy({
+          factStore: new MemoryFactStore(database),
+          recallStore: new MemoryRecallStore(database),
+          journalStore: new MemoryJournalStore(database),
+          settingsResolver: () => defaultMemoryAgentSettings(),
+        }),
+      }),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+      completeText,
+      sessionPathResolver: (sessionId) => {
+        const meta = sessionIndex.get(sessionId);
+        if (!meta) throw new Error(`Session 不存在: ${sessionId}`);
+        return meta.sessionPath;
+      },
+      agentsDir: paths.agents,
+      publish: (env) => replayStore.publish(env),
+      activationUpdater: new ActivationUpdater({
+        database,
+        factStore: new MemoryFactStore(database),
+        recallStore: new MemoryRecallStore(database),
+      }),
+      assertSessionReadable: (sessionPath) => {
+        const resolved = path.resolve(sessionPath);
+        const root = path.resolve(paths.agents);
+        if (resolved.startsWith(root + path.sep)) return;
+        throw new Error("Session 路径不在受控目录内");
+      },
+    });
+    const memoryAgentScheduler = new MemoryAgentScheduler({
+      replayStore,
+      sessionService,
+      promptService,
+      agentStore,
+      journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      summaryStore,
+      schedulerStore: new SchedulerStateStore(database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+      resolver: memoryAgentResolver,
+    });
+    memoryAgentScheduler.start();
     let disposed = false;
 
     return {
@@ -254,6 +325,7 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         if (disposed) return;
         disposed = true;
         memoryTicker.stop();
+        memoryAgentScheduler.stop();
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();

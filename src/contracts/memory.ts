@@ -203,6 +203,8 @@ export interface MemoryJournalIntent {
   readonly targetType: MemoryJournalTargetType;
   readonly targetId?: string;
   readonly payload: Record<string, unknown>;
+  /** 高优先级（用户明确「请记住/不要再记得」）→ turn 后 micro-seal 专项处理 */
+  readonly priority?: number;
   readonly status: MemoryJournalStatus;
   readonly createdAt: string;
   readonly appliedAt?: string;
@@ -331,6 +333,8 @@ export const RememberIntentArgsSchema = Type.Object({
   fact: Type.String({ minLength: 1 }),
   tags: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
   validUntil: Type.Optional(Type.String({ minLength: 1 })),
+  /** 高优先级：用户明确要求立刻记住（0 默认，1-10 提高） */
+  priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
 });
 export type RememberIntentArgs = Static<typeof RememberIntentArgsSchema>;
 

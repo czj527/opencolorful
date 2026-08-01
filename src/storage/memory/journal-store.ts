@@ -15,6 +15,7 @@ interface JournalRow {
   target_type: string;
   target_id: string | null;
   payload: string;
+  priority: number;
   status: string;
   created_at: string;
   applied_at: string | null;
@@ -29,6 +30,7 @@ function mapRow(row: JournalRow): MemoryJournalIntent {
     targetType: row.target_type as MemoryJournalTargetType,
     ...(row.target_id !== null ? { targetId: row.target_id } : {}),
     payload: JSON.parse(row.payload) as Record<string, unknown>,
+    ...(row.priority !== 0 ? { priority: row.priority } : {}),
     status: row.status as MemoryJournalStatus,
     createdAt: row.created_at,
     ...(row.applied_at !== null ? { appliedAt: row.applied_at } : {}),
@@ -43,6 +45,8 @@ export interface MemoryJournalIntentInput {
   targetType: MemoryJournalTargetType;
   targetId?: string;
   payload: Record<string, unknown>;
+  /** 高优先级（v7 列，默认 0） */
+  priority?: number;
 }
 
 export class MemoryJournalStore {
@@ -58,10 +62,10 @@ export class MemoryJournalStore {
       .prepare(
         `INSERT INTO memory_journal
           (id, agent_id, actor, intent_type, target_type, target_id,
-           payload, status, created_at)
+           payload, priority, status, created_at)
          VALUES (
            @id, @agentId, @actor, @intentType, @targetType, @targetId,
-           @payload, 'pending', @createdAt
+           @payload, @priority, 'pending', @createdAt
          )`,
       )
       .run({
@@ -72,6 +76,7 @@ export class MemoryJournalStore {
         targetType: input.targetType,
         targetId: input.targetId ?? null,
         payload: JSON.stringify(input.payload),
+        priority: input.priority ?? 0,
         createdAt,
       });
     return this.get(input.id) as MemoryJournalIntent;
@@ -91,10 +96,10 @@ export class MemoryJournalStore {
       .prepare(
         `INSERT INTO memory_journal
           (id, agent_id, actor, intent_type, target_type, target_id,
-           payload, status, created_at, applied_at)
+           payload, priority, status, created_at, applied_at)
          VALUES (
            @id, @agentId, @actor, @intentType, @targetType, @targetId,
-           @payload, @status, @createdAt, @appliedAt
+           @payload, @priority, @status, @createdAt, @appliedAt
          )`,
       )
       .run({
@@ -105,6 +110,7 @@ export class MemoryJournalStore {
         targetType: input.targetType,
         targetId: input.targetId ?? null,
         payload: JSON.stringify(input.payload),
+        priority: input.priority ?? 0,
         status: input.status,
         createdAt,
         appliedAt: input.appliedAt ?? null,

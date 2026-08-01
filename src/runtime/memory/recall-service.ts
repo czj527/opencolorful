@@ -51,8 +51,9 @@ export function resetAgentStreamSequences(): void {
   agentStreamSequences.clear();
 }
 
-/** 取流内下一条单调递增序号（单线程内同步递增，天然无竞争） */
-function nextAgentStreamSequence(streamId: string): number {
+/** 取流内下一条单调递增序号（单线程内同步递增，天然无竞争）。
+ *  后台整理（resolver/scheduler）与回想共用同一条 agent 流，必须共享分配器。 */
+export function nextAgentStreamSequence(streamId: string): number {
   const next = (agentStreamSequences.get(streamId) ?? 0) + 1;
   agentStreamSequences.set(streamId, next);
   return next;

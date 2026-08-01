@@ -178,6 +178,7 @@ export default function (pi: ExtensionAPI): void {
         fact: string;
         tags?: string[];
         validUntil?: string;
+        priority?: number;
       };
 
       const payload: Record<string, unknown> = { fact: raw.fact };
@@ -191,6 +192,7 @@ export default function (pi: ExtensionAPI): void {
         intentType: "remember",
         targetType: "fact",
         payload,
+        ...(raw.priority !== undefined ? { priority: raw.priority } : {}),
       });
 
       return textResult(
