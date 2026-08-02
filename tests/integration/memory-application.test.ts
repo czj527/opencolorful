@@ -189,7 +189,7 @@ describe("ProposalApplication", () => {
       runId: "run-2",
       type: "supersede", targetId: String(old.id),
       payload: { supersededFactId: old.id, newFact: "更完整的新事实", reason: "旧事实过时" },
-      previousState: { fact: "旧事实", status: "active" },
+      previousState: { fact: "旧事实", status: "active", revision: old.updatedAt },
     });
     const result = application.applyRun({ agentId: "a1", runId: "run-2", proposals: [supersede] });
     expect(result.applied).toHaveLength(1);
@@ -224,5 +224,63 @@ describe("ProposalApplication 确定性初始强度（评审 P1-3）", () => {
     expect(result2.applied).toHaveLength(1);
     const remembered = factStore.listByAgent("a1").find((f) => f.fact === "请记住这件重要的事");
     expect(remembered!.retentionStrength).toBeGreaterThanOrEqual(70);
+  });
+});
+
+describe("ProposalApplication 复审修复（评审 P1#3 复现级测试）", () => {
+  it("rollbackRun：event forget 回滚恢复事件为 active（原实现把事件 id 当数字事实 id → 事实不存在: NaN）", () => {
+    const { database } = createContext();
+    const { factStore, eventStore, proposalStore, journalStore, application } = makeApplier(database);
+    const event = eventStore.insertEvent({
+      id: "evt-rollback-1", agentId: "a1", sessionId: "s1", branchRevision: "b1",
+      date: "2026-07-30", startedAt: "2026-07-30T10:00:00Z", endedAt: "2026-07-30T10:30:00Z",
+      summary: "一次对话", topics: [], searchText: "对话", messageCount: 3, toolCalls: 0,
+      durationSec: 1800, status: "active",
+    });
+    expect(event).toBe(true);
+
+    const forgetEvent = proposal({
+      runId: "run-ev",
+      type: "forget", targetType: "event", targetId: "evt-rollback-1",
+      payload: { targetType: "event", targetId: "evt-rollback-1", reason: "过时事件" },
+      reason: "过时事件",
+    });
+    const applied = application.applyRun({ agentId: "a1", runId: "run-ev", proposals: [forgetEvent] });
+    expect(applied.applied).toHaveLength(1);
+    expect(eventStore.getById("evt-rollback-1")?.status).toBe("forgotten");
+
+    const rollback = application.rollbackRun({ agentId: "a1", runId: "run-ev" });
+    expect(rollback.failed).toHaveLength(0);
+    expect(rollback.applied).toHaveLength(1);
+    expect(eventStore.getById("evt-rollback-1")?.status).toBe("active");
+    expect(proposalStore.getById(forgetEvent.id)?.status).toBe("reverted");
+    expect(journalStore.listByAgent("a1").filter((j) => j.actor === "system" && j.payload["rollback"] === true).length).toBe(1);
+  });
+
+  it("rollbackRun：create_fact 回滚用持久化 createdFactId 定位（>50 条事实时 findCreatedFact 的 50 条限制不再误报）", () => {
+    const { database } = createContext();
+    const { factStore, application } = makeApplier(database);
+    // 先造 60 条无关事实，把目标事实挤到 listByAgent 默认 50 条之外
+    for (let i = 0; i < 60; i++) {
+      factStore.createFact({
+        agentId: "a1", fact: `填充事实 ${i}`, tags: [], source: "agent_approved",
+        sourceRefs: ["session:s1"], confidence: 0.5, retentionStrength: 10,
+      });
+    }
+    const target = proposal({
+      runId: "run-61",
+      type: "create_fact", payload: { fact: "第 61 条目标事实" }, evidenceRefs: ["session:s1"],
+    });
+    const applied = application.applyRun({ agentId: "a1", runId: "run-61", proposals: [target] });
+    expect(applied.applied).toHaveLength(1);
+    const createdId = (target.payload as Record<string, unknown>)["createdFactId"];
+    expect(typeof createdId).toBe("number");
+    const row = database.prepare("SELECT status FROM memory_facts WHERE id = ?").get(createdId as number) as { status: string } | undefined;
+    expect(row?.status).toBe("active");
+
+    const rollback = application.rollbackRun({ agentId: "a1", runId: "run-61" });
+    expect(rollback.failed).toHaveLength(0);
+    const after = database.prepare("SELECT status FROM memory_facts WHERE id = ?").get(createdId as number) as { status: string } | undefined;
+    expect(after?.status).toBe("suppressed");
   });
 });

@@ -74,6 +74,7 @@ export class SessionRuntime {
     private readonly replayStore: EventReplayStore | undefined,
     toolPolicy: ToolPolicy,
     private readonly onDispose?: () => void,
+    readonly systemPrompt?: string,
   ) {
     this.toolPolicy = toolPolicy;
     this.unsubscribe = agent.subscribe((event) => {
@@ -179,6 +180,7 @@ export class SessionRuntime {
       options.replayStore,
       toolPolicy,
       options.onDispose,
+      options.systemPrompt,
     );
   }
 

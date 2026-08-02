@@ -197,3 +197,57 @@ describe("memory admin API", () => {
     expect(missing.status).toBe(404);
   });
 });
+
+describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
+  it("迟滞阈值乱序（{mediumDown:90, mediumUp:10, permanentUp:5}）→ 400；顺序合法 → 200", async () => {
+    const ctx = createApp();
+    // per-Agent PUT：乱序阈值必须被拒绝（TypeBox 无法表达跨字段约束）
+    const badAgent = await ctx.app.request(`http://x/api/agents/a1/memory/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...defaultMemoryAgentSettings(),
+        retentionThresholds: { mediumDown: 90, mediumUp: 10, permanentUp: 5 },
+      }),
+    });
+    expect(badAgent.status).toBe(400);
+    expect((await badAgent.json() as { message: string }).message).toContain("迟滞阈值");
+
+    // 全局 PUT 同样拒绝
+    const badGlobal = await ctx.app.request(`http://x/api/preferences/memory`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...defaultMemoryAgentSettings(),
+        retentionThresholds: { mediumDown: 90, mediumUp: 10, permanentUp: 5 },
+      }),
+    });
+    expect(badGlobal.status).toBe(400);
+
+    // 合法排序（mediumDown < mediumUp < permanentUp）→ 200
+    const good = await ctx.app.request(`http://x/api/agents/a1/memory/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...defaultMemoryAgentSettings(),
+        retentionThresholds: { mediumDown: 30, mediumUp: 50, permanentUp: 90 },
+      }),
+    });
+    expect(good.status).toBe(200);
+  });
+
+  it("Agent PUT 携带乱序 memory 阈值 → 400", async () => {
+    const ctx = createApp();
+    const response = await ctx.app.request(`http://x/api/agents/a1`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        memory: {
+          ...defaultMemoryAgentSettings(),
+          retentionThresholds: { mediumDown: 90, mediumUp: 10, permanentUp: 5 },
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
+});

@@ -267,13 +267,13 @@ describe("MemoryPolicy", () => {
     expect(result.reason).toContain("新的用户意图");
 
     // 提案生成前已存在的 intent（createdAt 早于提案）→ 放行：
-    // 提案 createdAt 设为晚于第一个 intent（真实 now ≈ 2026-08-01T21:xx）的 08-02
+    // 提案 createdAt 设为晚于第一个 intent（appendIntent 用真实 now，需相对时钟）的 60 秒后
     const older = policy.check(makeProposal({
       type: "strength_change",
       targetId: String(fact.id),
       payload: { retentionStrength: 60 },
       previousState: { retentionStrength: 50 },
-      createdAt: "2026-08-02T00:00:00Z",
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
     }));
     expect(older.approved).toBe(true);
   });
@@ -391,11 +391,11 @@ describe("MemoryPolicy 自审修复（版本冲突 / session forget）", () => {
       agentId: "a1", fact: "重复 B", tags: [], source: "agent_approved",
       sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 30,
     });
-    // 快照正确 → 放行
+    // 快照正确（含 revision=updatedAt）→ 放行
     const ok = policy.check(makeProposal({
       type: "merge", targetType: "fact",
       payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
-      previousState: { facts: [{ id: String(a.id), fact: "重复 A", status: "active" }, { id: String(b.id), fact: "重复 B", status: "active" }] },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 A", status: "active", revision: a.updatedAt }, { id: String(b.id), fact: "重复 B", status: "active", revision: b.updatedAt }] },
     }));
     expect(ok.approved).toBe(true);
     // 快照缺失 → 拒绝
@@ -424,5 +424,178 @@ describe("MemoryPolicy 自审修复（版本冲突 / session forget）", () => {
     }));
     expect(result.approved).toBe(false);
     expect(result.reason).toContain("暂不支持");
+  });
+});
+
+describe("MemoryPolicy 复审修复（评审 P0/P1#2/P1#6 复现级测试）", () => {
+  function build(database: Database.Database) {
+    const factStore = new MemoryFactStore(database);
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(database),
+      journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      eventStore: new MemoryEventStore(database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    return { factStore, policy };
+  }
+
+  function createFact(factStore: MemoryFactStore, fact: string, retentionStrength: number) {
+    return factStore.createFact({
+      agentId: "a1", fact, tags: [], source: "agent_approved",
+      sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength,
+    });
+  }
+
+  it("P0：pi-sdk 的 main_agent 意图同样触发水位线（原只认 user → 不匹配）", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const fact = createFact(factStore, "水位线事实", 50);
+    // pi-sdk remember/forget 工具写入 actor=main_agent（memory-tools.ts）
+    database.prepare(`
+      INSERT INTO memory_journal (id, agent_id, actor, intent_type, target_type, target_id, payload, priority, status, created_at)
+      VALUES (?, 'a1', 'main_agent', 'forget', 'fact', ?, '{}', 0, 'pending', ?)
+    `).run(crypto.randomUUID(), String(fact.id), "2026-08-01T12:00:00.000Z");
+    const result = policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 60 },
+      previousState: { retentionStrength: 50 },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("新的用户意图");
+  });
+
+  it("P0：水位线全量扫描 journal（>50 条时旧的冲突意图不再被 50 条截断漏掉）", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const fact = createFact(factStore, "截断事实", 50);
+    const insertIntent = database.prepare(`
+      INSERT INTO memory_journal (id, agent_id, actor, intent_type, target_type, target_id, payload, priority, status, created_at)
+      VALUES (?, 'a1', 'user', 'remember', 'fact', ?, '{"fact":"x"}', 0, 'pending', ?)
+    `);
+    // 60 条 intent 全部晚于提案 createdAt；指向目标事实的那条最早（created_at 最小）。
+    // listByAgent 默认 limit 50 且按 created_at DESC → 最早 10 条被截断 → 旧实现漏检。
+    for (let i = 0; i < 60; i++) {
+      insertIntent.run(crypto.randomUUID(), String(i === 0 ? fact.id : 9999), `2026-08-01T00:00:${String(i + 1).padStart(2, "0")}.000Z`);
+    }
+    const result = policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 60 },
+      previousState: { retentionStrength: 50 },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("新的用户意图");
+  });
+
+  it("P0：merge 水位线检查全部目标事实（原只查第一个）", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const a = createFact(factStore, "重复 A", 30);
+    const b = createFact(factStore, "重复 B", 30);
+    // 用户意图针对第二个目标事实 b，晚于提案 createdAt
+    database.prepare(`
+      INSERT INTO memory_journal (id, agent_id, actor, intent_type, target_type, target_id, payload, priority, status, created_at)
+      VALUES (?, 'a1', 'user', 'forget', 'fact', ?, '{"reason":"过时"}', 0, 'pending', ?)
+    `).run(crypto.randomUUID(), String(b.id), "2026-08-01T12:00:00.000Z");
+    const result = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 A", status: "active", revision: a.updatedAt }, { id: String(b.id), fact: "重复 B", status: "active", revision: b.updatedAt }] },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("新的用户意图");
+  });
+
+  it("P1#2：supersede revision 变化（fact/status 未变但被提强）→ 版本冲突", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const fact = createFact(factStore, "版本事实", 50);
+    // 提案生成时快照的 revision 比当前 updatedAt 早 1 秒（确定性过期，不依赖时钟粒度）
+    const snapshotRevision = new Date(Date.parse(fact.updatedAt) - 1_000).toISOString();
+    // 提案生成后，另一运行对该事实提强（updatedAt 变化，fact/status 不变）
+    factStore.updateRetention(fact.id, 60);
+    const result = policy.check(makeProposal({
+      type: "supersede", targetId: String(fact.id),
+      payload: { supersededFactId: fact.id, newFact: "新事实", reason: "过时" },
+      previousState: { fact: "版本事实", status: "active", revision: snapshotRevision },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(result.approved).toBe(false);
+    expect(result.reason).toContain("版本冲突");
+  });
+
+  it("P1#2：merge 快照缺少 revision → 版本冲突；revision 与当前一致 → 放行", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const a = createFact(factStore, "重复 C", 30);
+    const b = createFact(factStore, "重复 D", 30);
+    // 缺 revision（旧版 snapshot 形状）→ 拒绝
+    const missing = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 C", status: "active" }, { id: String(b.id), fact: "重复 D", status: "active" }] },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(missing.approved).toBe(false);
+    expect(missing.reason).toContain("版本冲突");
+    // revision 与当前 updatedAt 一致 → 放行
+    const ok = policy.check(makeProposal({
+      type: "merge", targetType: "fact",
+      payload: { factIds: [a.id, b.id], mergedFact: "合并事实" },
+      previousState: { facts: [{ id: String(a.id), fact: "重复 C", status: "active", revision: a.updatedAt }, { id: String(b.id), fact: "重复 D", status: "active", revision: b.updatedAt }] },
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+    expect(ok.approved).toBe(true);
+  });
+
+  it("P1#6：晋升永久引用 provisional 批次 → 拒绝；引用 sealed 批次 → 放行", () => {
+    const { database } = createContext();
+    const { factStore, policy } = build(database);
+    const fact = createFact(factStore, "候选永久", 70);
+    const batchStore = new MemoryBatchStore(database);
+    const insertRecall = database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's1', ?, 'fact', ?, 'q', 'facts', 'memory_recall', ?)
+    `);
+    for (const day of ["2026-07-01", "2026-07-02"]) {
+      insertRecall.run(crypto.randomUUID(), String(fact.id), `${day}T10:00:00.000Z`);
+    }
+    insertRecall.run(crypto.randomUUID(), String(fact.id), "2026-07-03T10:00:00.000Z");
+    database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's2', ?, 'fact', ?, 'q', 'facts', 'memory_recall', ?)
+    `).run(crypto.randomUUID(), String(fact.id), "2026-07-03T12:00:00.000Z");
+
+    const promotion = (evidenceRefs: readonly string[]) => policy.check(makeProposal({
+      type: "strength_change",
+      targetId: String(fact.id),
+      payload: { retentionStrength: 88 },
+      previousState: { retentionStrength: 70 },
+      evidenceRefs,
+      confidence: 0.9,
+      createdAt: "2026-08-01T00:00:00Z",
+    }));
+
+    // provisional micro-seal（内容未定稿）→ 拒绝
+    batchStore.createBatch({
+      id: "batch-provisional-1", agentId: "a1", sessionId: "s1",
+      revision: {}, priority: 1,
+    }, "provisional");
+    const rejected = promotion(["batch:batch-provisional-1"]);
+    expect(rejected.approved).toBe(false);
+    expect(rejected.reason).toContain("未封存");
+
+    // sealed（已定稿）→ 放行
+    batchStore.createBatch({
+      id: "batch-sealed-1", agentId: "a1", sessionId: "s1",
+      revision: {}, priority: 1,
+    }, "sealed");
+    expect(promotion(["batch:batch-sealed-1"]).approved).toBe(true);
   });
 });

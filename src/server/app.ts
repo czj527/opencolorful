@@ -11,6 +11,7 @@ import type { PreferencesStore } from "../config/preferences-store.js";
 import type { AgentStore } from "../config/agent-store.js";
 import type { FolderPicker } from "../platform/folder-picker.js";
 import type { UsageStore } from "../storage/usage-store.js";
+import { defaultMemoryAgentSettings } from "../contracts/memory.js";
 import { registerDirectoryRoutes } from "./routes/directories.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
@@ -115,6 +116,18 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
       ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
       ...(options.database !== undefined ? { database: options.database } : {}),
+      // 评审 P1#7b：injectBudgetChars 走真实记忆设置（per-Agent 覆盖 → 全局默认 → 平台默认），
+      // 与 start.ts resolveMemorySettings 同一优先级链
+      ...(options.preferencesStore !== undefined && options.agentStore !== undefined ? {
+        memorySettingsResolver: (agentId: string) => {
+          const global = options.preferencesStore!.get().memory ?? defaultMemoryAgentSettings();
+          try {
+            const perAgent = options.agentStore!.getSettings(agentId)?.memory;
+            if (perAgent !== undefined) return perAgent;
+          } catch { /* 读取失败用全局默认 */ }
+          return global;
+        },
+      } : {}),
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {

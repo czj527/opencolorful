@@ -22,6 +22,7 @@ import type { PreferencesStore } from "../../config/preferences-store.js";
 import {
   MemoryAgentSettingsSchema,
   defaultMemoryAgentSettings,
+  isValidRetentionThresholds,
   type MemoryAgentSettings,
 } from "../../contracts/memory.js";
 
@@ -204,7 +205,12 @@ export function registerMemoryRoutes(
     if (!Value.Check(MemoryAgentSettingsSchema, raw)) {
       return context.json(createApiError("INVALID_INPUT", "记忆设置不合法"), 400);
     }
-    agentStore.saveSettings(agentId, { memory: raw as MemoryAgentSettings });
+    // 评审 P1#7a：迟滞阈值必须 mediumDown < mediumUp < permanentUp（{90,10,5} 直接拒绝）
+    const settings = raw as MemoryAgentSettings;
+    if (!isValidRetentionThresholds(settings.retentionThresholds)) {
+      return context.json(createApiError("INVALID_INPUT", "迟滞阈值必须满足 mediumDown < mediumUp < permanentUp"), 400);
+    }
+    agentStore.saveSettings(agentId, { memory: settings });
     return context.json({ agentId, settings: raw });
   });
 
@@ -220,7 +226,12 @@ export function registerMemoryRoutes(
     if (!Value.Check(MemoryAgentSettingsSchema, raw)) {
       return context.json(createApiError("INVALID_INPUT", "记忆设置不合法"), 400);
     }
-    admin.preferencesStore.update({ memory: raw as MemoryAgentSettings } as never);
+    // 评审 P1#7a：迟滞阈值排序校验（TypeBox 无法表达跨字段约束）
+    const settings = raw as MemoryAgentSettings;
+    if (!isValidRetentionThresholds(settings.retentionThresholds)) {
+      return context.json(createApiError("INVALID_INPUT", "迟滞阈值必须满足 mediumDown < mediumUp < permanentUp"), 400);
+    }
+    admin.preferencesStore.update({ memory: settings } as never);
     return context.json({ settings: raw });
   });
 

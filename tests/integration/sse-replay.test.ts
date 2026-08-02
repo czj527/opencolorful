@@ -382,7 +382,10 @@ describe("SSE event replay", () => {
   it("returns 404 for SSE on non-existent session when sessionService is provided", async () => {
     const replayStore = new EventReplayStore();
     const promptService = new PromptService();
-    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: os.tmpdir() });
+    // 评审 P2：独立临时目录（os.tmpdir() 直用会与并行测试/Phase 11 v8 DB 冲突）
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-sse-replay-"));
+    temporaryDirectories.push(directory);
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
     const db = openMetadataDatabase(paths.database);
     const idx = new SessionIndex(db);
     const { SessionService: Svc } = await import("../../src/runtime/session-service.js");

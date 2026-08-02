@@ -349,9 +349,14 @@ export function registerAgentRoutes(
       // Phase 10.5：记忆设置（完整对象，经 schema 校验）
       if (body.memory !== undefined) {
         const { Value } = await import("typebox/value");
-        const { MemoryAgentSettingsSchema } = await import("../../contracts/memory.js");
+        const { MemoryAgentSettingsSchema, isValidRetentionThresholds } = await import("../../contracts/memory.js");
         if (!Value.Check(MemoryAgentSettingsSchema, body.memory)) {
           return context.json(createApiError("INVALID_INPUT", "memory 设置不合法"), 400);
+        }
+        // 评审 P1#7a：迟滞阈值排序校验（TypeBox 无法表达跨字段约束）
+        const memorySettings = body.memory as import("../../contracts/memory.js").MemoryAgentSettings;
+        if (!isValidRetentionThresholds(memorySettings.retentionThresholds)) {
+          return context.json(createApiError("INVALID_INPUT", "迟滞阈值必须满足 mediumDown < mediumUp < permanentUp"), 400);
         }
         patch.memory = body.memory;
       }

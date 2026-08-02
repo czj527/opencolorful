@@ -514,6 +514,19 @@ export const MEMORY_RETENTION_THRESHOLD_DEFAULTS = {
   permanentUp: 85,
 } as const;
 
+/**
+ * 迟滞阈值排序校验（评审 P1#7a）：三个阈值必须是 mediumDown < mediumUp < permanentUp，
+ * 否则迟滞区间为负、分档逻辑自相矛盾（如 {90,10,5} 必须被拒绝）。
+ * TypeBox schema 无法表达跨字段约束，路由层在 Value.Check 之后调用本函数。
+ */
+export function isValidRetentionThresholds(thresholds: {
+  mediumDown: number;
+  mediumUp: number;
+  permanentUp: number;
+}): boolean {
+  return thresholds.mediumDown < thresholds.mediumUp && thresholds.mediumUp < thresholds.permanentUp;
+}
+
 /** activation 独立日期统计封顶（防「越容易搜到越容易被搜到」反馈循环） */
 export const MEMORY_ACTIVATION_DATES_CAP = 14;
 

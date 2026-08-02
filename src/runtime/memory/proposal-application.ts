@@ -75,12 +75,26 @@ export class ProposalApplication {
         const previous = proposal.previousState;
         if (proposal.type === "create_fact" || proposal.type === "longterm_projection") {
           const text = String(proposal.payload.fact ?? proposal.payload.content);
-          const target = proposal.targetId !== undefined ? id(proposal.targetId) : this.findCreatedFact(proposal.agentId, text, proposal.evidenceRefs);
+          // 优先使用 applyRun 回写并持久化的 createdFactId（确定性定位），
+          // 回退旧路径（findCreatedFact 受 listByAgent 默认 50 条限制，事实多时会误报找不到）
+          const createdId = typeof proposal.payload.createdFactId === "number" ? proposal.payload.createdFactId : undefined;
+          const created = createdId !== undefined ? this.deps.factStore.getById(createdId) : undefined;
+          const target = created !== undefined && created.agentId === proposal.agentId
+            ? created.id
+            : (proposal.targetId !== undefined ? id(proposal.targetId) : this.findCreatedFact(proposal.agentId, text, proposal.evidenceRefs));
           this.deps.factStore.markSuppressed(target);
         } else if (proposal.type === "strength_change") {
           this.deps.factStore.updateRetention(id(proposal.targetId), Number(previous?.retention ?? previous?.retentionStrength));
         } else if (proposal.type === "forget") {
-          this.deps.factStore.restoreFact(id(proposal.targetId));
+          if (proposal.targetType === "event") {
+            // 事件遗忘回滚：恢复事件为 active（原实现误把事件 id 当数字事实 id → 事实不存在: NaN）
+            const targetEvent = this.deps.eventStore.getById(proposal.targetId as string);
+            if (targetEvent !== undefined && targetEvent.status === "forgotten") {
+              this.deps.eventStore.updateStatus(targetEvent.id, "active");
+            }
+          } else {
+            this.deps.factStore.restoreFact(id(proposal.targetId));
+          }
         } else if (proposal.type === "supersede") {
           this.deps.factStore.restoreFact(id(proposal.payload.supersededFactId));
           if (proposal.payload.newFactId !== undefined) this.deps.factStore.markSuppressed(id(proposal.payload.newFactId));

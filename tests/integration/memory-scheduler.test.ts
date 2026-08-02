@@ -290,3 +290,55 @@ describe("MemoryAgentScheduler 验收修复（评审 P0-2/P1-5/P1-6）", () => {
     expect(schedulerStore.get("a1")?.lastWeeklyCompletedAt?.slice(0, 10)).toBe("2026-08-02");
   });
 });
+
+describe("MemoryAgentScheduler 复审修复（评审 P1#4/P1#5 复现级测试）", () => {
+  it("P1#4：每日+每周窗口同时到期 → 两次 upsert 不互相覆盖（lastDailyCompletedAt 与 lastWeeklyCompletedAt 都保留）", async () => {
+    const { database, agentsDir } = createContext();
+    const { scheduler, schedulerStore, resolver } = buildScheduler(database, agentsDir, {
+      now: () => new Date("2026-08-02T03:40:00Z"), // 周日；daily 03:00 与 weekly 03:30 都已过
+      settings: {
+        ...defaultMemoryAgentSettings(), minIdleMinutes: 0,
+        dailyRunTime: "03:00", weeklyReviewDay: 0, weeklyReviewTime: "03:30",
+      },
+      resolver: {
+        runMaintenance: vi.fn(async () => ({ status: "completed", applied: 0, rejected: 0, batchIds: [], runId: "r" })),
+      } as never,
+    });
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(resolver.runMaintenance).toHaveBeenCalledTimes(2);
+    const state = schedulerStore.get("a1");
+    // 修复前：两个闭包都 spread tick 时捕获的旧 state → 后写覆盖先写，两个字段双双丢失
+    expect(state?.lastDailyCompletedAt?.slice(0, 10)).toBe("2026-08-02");
+    expect(state?.lastWeeklyCompletedAt?.slice(0, 10)).toBe("2026-08-02");
+    expect(state?.status).toBe("idle");
+  });
+
+  it("P1#5：重启后空闲判定纳入持久化 SessionView.updatedAt（进程内 lastActivity 为空时不误判空闲）", async () => {
+    const { database, agentsDir } = createContext();
+    // 模拟重启：新 scheduler 实例、无任何事件发布 → lastActivity 为空
+    const sessions = [{
+      id: "s1", agentId: "a1", archived: false,
+      sessionPath: path.join(agentsDir, "a1", "sessions", "s1.jsonl"),
+      updatedAt: "2026-08-02T03:00:00Z", // 10 分钟前的持久化活动
+    }];
+    const { scheduler, resolver } = buildScheduler(database, agentsDir, {
+      now: () => new Date("2026-08-02T03:10:00Z"),
+      settings: {
+        ...defaultMemoryAgentSettings(), minIdleMinutes: 30,
+        dailyRunTime: "03:00", weeklyReviewDay: 0, weeklyReviewTime: "23:00",
+      },
+      sessions,
+    });
+    // 持久化活动距今 10 分钟 < minIdleMinutes=30 → 不空闲 → 不运行（修复前会误运行）
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(resolver.runMaintenance).not.toHaveBeenCalled();
+
+    // 持久化活动距今 100 分钟 ≥ 30 → 空闲 → 运行
+    sessions[0]!.updatedAt = "2026-08-02T01:30:00Z";
+    await scheduler["tick"]();
+    await scheduler.flush();
+    expect(resolver.runMaintenance).toHaveBeenCalledTimes(1);
+  });
+});
