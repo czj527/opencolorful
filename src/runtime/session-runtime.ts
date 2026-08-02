@@ -131,11 +131,6 @@ export class SessionRuntime {
         agentId: path.basename(options.agentHomeDir),
         agentHomeDir: options.agentHomeDir,
         platformHome: options.platformHome,
-        auditLogPath: path.join(
-          options.platformHome,
-          "logs",
-          "security-audit.jsonl",
-        ),
         sessionId: options.sessionId,
         ...(options.workspaceCwd !== undefined ? { workspaceCwd: options.workspaceCwd } : {}),
       });

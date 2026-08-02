@@ -21,6 +21,7 @@ import {
   extractMessageText,
 } from "./jsonl-branch-reader.js";
 import { sanitizeSensitiveText } from "../sanitize.js";
+import { instrument } from "../../observability/instrument.js";
 import type { ActivationUpdater } from "./activation-updater.js";
 import { strengthTierOf } from "./intensity-calculator.js";
 
@@ -139,6 +140,47 @@ export class MemoryRecallService {
   }
 
   async search(
+    input: MemoryRecallServiceSearchInput,
+  ): Promise<MemorySearchResult> {
+    const { agentId, sessionId } = input;
+    // Phase 11 T5：一次 recall run = 一个 operation；trace 继承调用方
+    // （search_memory 工具在 turn 的 runWithTrace 域内执行，自动同 trace）
+    const operationId = `recall-${agentId}-${sessionId}-${crypto.randomUUID().slice(0, 8)}`;
+    const lifecycle = instrument.startLifecycle({
+      startEventName: "memory.recall.started",
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "agent", id: agentId },
+      scope: { ownerAgentId: agentId, sessionId },
+      operationId,
+      terminals: {
+        completed: "memory.recall.completed",
+        failed: "memory.recall.failed",
+        cancelled: "memory.recall.cancelled",
+      },
+    });
+    const result = await this.searchInner(input);
+    if (result.status === "failed") {
+      lifecycle.fail("recall failed");
+    } else if (result.status === "cancelled") {
+      lifecycle.cancel("aborted");
+    } else if (result.hits.length === 0) {
+      // 空结果 → 独立 memory.recall.empty（completed 语义，同一 operationId）
+      instrument.activity({
+        eventName: "memory.recall.empty",
+        status: "completed",
+        operationId,
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "agent", id: agentId },
+        scope: { ownerAgentId: agentId, sessionId },
+        payload: { summaryCode: "memory_recall_empty" },
+      });
+    } else {
+      lifecycle.complete({ attributes: { hits: result.hits.length, reachedLayer: result.reachedLayer } });
+    }
+    return result;
+  }
+
+  private async searchInner(
     input: MemoryRecallServiceSearchInput,
   ): Promise<MemorySearchResult> {
     const { agentId, sessionId, turnId, args, signal } = input;

@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 import type { MemoryMutationProposal } from "../../contracts/memory.js";
+import type { ResourceRef } from "../../contracts/observability.js";
+import { instrument } from "../../observability/instrument.js";
 import type { MemoryFactStore } from "../../storage/memory/fact-store.js";
 import type { MemoryEventStore } from "../../storage/memory/event-store.js";
 import type { MemoryJournalStore } from "../../storage/memory/journal-store.js";
@@ -42,11 +44,33 @@ export class ProposalApplication {
         // 提案必须已持久化（记忆 Agent 只收集内存提案；先落 proposals 表再审批）
         if (this.deps.proposalStore.getById(proposal.id) === undefined) {
           this.deps.proposalStore.createProposal(proposal);
+          // Phase 11 T5：提案创建（不含记忆正文，只记 id/类型）
+          instrument.activity({
+            eventName: "memory.proposal.created",
+            actor: { kind: "memory_agent", id: proposal.agentId },
+            executor: { kind: "memory_agent", id: proposal.agentId },
+            scope: { ownerAgentId: proposal.agentId },
+            target: { kind: "memory_fact", id: String(proposal.targetId ?? proposal.id) },
+            payload: { summaryCode: "memory_proposal_created", attributes: { type: proposal.type, runId: proposal.runId } },
+          });
         }
         const check = this.deps.policy.check(proposal);
         if (!check.approved) {
           this.deps.proposalStore.markStatus(proposal.id, "rejected", { policyReason: check.reason });
           result.rejected.push({ proposal, reason: check.reason });
+          // Phase 11 T5：审批证据（auditMirror 同库；版本冲突归 conflicted）
+          const conflicted = /版本冲突|未解决冲突/.test(check.reason);
+          instrument.activity({
+            eventName: conflicted ? "memory.proposal.conflicted" : "memory.proposal.rejected",
+            actor: { kind: "memory_agent", id: proposal.agentId },
+            executor: { kind: "memory_agent", id: proposal.agentId },
+            scope: { ownerAgentId: proposal.agentId },
+            target: { kind: "memory_fact", id: String(proposal.targetId ?? proposal.id) },
+            payload: {
+              summaryCode: conflicted ? "memory_proposal_conflicted" : "memory_proposal_rejected",
+              attributes: { type: proposal.type, reason: check.reason.slice(0, 200) },
+            },
+          });
           continue;
         }
         // 应用异常不捕获：向上抛出 → 整个事务回滚（不留下已执行 SQL 的半成品）
@@ -55,6 +79,8 @@ export class ProposalApplication {
         this.deps.proposalStore.updatePayload(proposal.id, proposal.payload);
         this.deps.proposalStore.markStatus(proposal.id, "applied", { appliedAt: this.now().toISOString() });
         this.deps.journalStore.appendSystemIntent({ id: `proposal:${proposal.id}`, agentId: proposal.agentId, actor: "memory_agent", intentType: journalType(proposal.type), targetType: proposal.targetType === "event" ? "event" : "fact", ...(proposal.targetId ? { targetId: proposal.targetId } : {}), payload: { mutationType: proposal.type, proposalId: proposal.id, ...proposal.payload }, status: "applied", appliedAt: this.now().toISOString() });
+        // Phase 11 T5：审批通过与逐类事实证据（auditMirror；只记 id/强度，不记正文）
+        this.recordAppliedEvidence(proposal);
         result.applied.push(applied);
       }
       if (result.applied.length > 0) {
@@ -118,6 +144,68 @@ export class ProposalApplication {
   private assertOwnFact(proposal: MemoryMutationProposal, factId: number): void {
     const fact = this.deps.factStore.getById(factId);
     if (fact !== undefined && fact.agentId !== proposal.agentId) throw new Error("目标事实不属于当前 Agent");
+  }
+
+  /**
+   * Phase 11 T5：审批通过证据 + 逐类事实变更（auditMirror 同库）。
+   * 只记 id/强度数字，绝不记录事实正文。
+   */
+  private recordAppliedEvidence(proposal: MemoryMutationProposal): void {
+    const scope = { ownerAgentId: proposal.agentId };
+    const factTarget = (id: string | number | undefined): ResourceRef | undefined =>
+      id === undefined ? undefined : { kind: "memory_fact" as const, id: String(id) };
+    const approvedTarget = factTarget(proposal.targetId);
+    instrument.activity({
+      eventName: "memory.proposal.approved",
+      actor: { kind: "memory_agent", id: proposal.agentId },
+      executor: { kind: "memory_agent", id: proposal.agentId },
+      scope,
+      ...(approvedTarget !== undefined ? { target: approvedTarget } : {}),
+      payload: { summaryCode: "memory_proposal_approved", attributes: { type: proposal.type, runId: proposal.runId } },
+    });
+    if (proposal.type === "strength_change") {
+      instrument.activity({
+        eventName: "memory.strength.changed",
+        actor: { kind: "memory_agent", id: proposal.agentId },
+        executor: { kind: "memory_agent", id: proposal.agentId },
+        scope,
+        target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: "unknown" },
+        payload: {
+          summaryCode: "memory_strength_changed",
+          attributes: {
+            factId: String(proposal.targetId ?? ""),
+            from: Number(proposal.previousState?.retention ?? proposal.previousState?.retentionStrength ?? 0),
+            to: Number(proposal.payload.retentionStrength ?? 0),
+          },
+        },
+      });
+    } else if (proposal.type === "forget") {
+      instrument.activity({
+        eventName: "memory.fact.forgotten",
+        actor: { kind: "memory_agent", id: proposal.agentId },
+        executor: { kind: "memory_agent", id: proposal.agentId },
+        scope,
+        target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: "unknown" },
+        payload: { summaryCode: "memory_fact_forgotten", attributes: { factId: String(proposal.targetId ?? "") } },
+      });
+    } else if (proposal.type === "supersede") {
+      const supersededId = proposal.payload.supersededFactId as string | number | undefined;
+      const newFactId = proposal.payload.newFactId as string | number | undefined;
+      instrument.activity({
+        eventName: "memory.fact.superseded",
+        actor: { kind: "memory_agent", id: proposal.agentId },
+        executor: { kind: "memory_agent", id: proposal.agentId },
+        scope,
+        target: factTarget(supersededId) ?? { kind: "memory_fact", id: "unknown" },
+        payload: {
+          summaryCode: "memory_fact_superseded",
+          attributes: {
+            factId: String(supersededId ?? ""),
+            newFactId: String(newFactId ?? ""),
+          },
+        },
+      });
+    }
   }
 
   private applyMutation(proposal: MemoryMutationProposal): MemoryMutationProposal {

@@ -34,7 +34,7 @@ export interface LifecycleOptions {
   /** started 事件的补充 payload（summaryCode 由平台生成） */
   readonly startPayload?: Omit<ActivityPayload, "summaryCode">;
   /** 终态状态 → 事件名映射；缺省用 startEventName */
-  readonly terminals?: Partial<Record<"completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "skipped", string>>;
+  readonly terminals?: Partial<Record<"completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "deferred" | "skipped", string>>;
 }
 
 export interface LifecycleHandle {
@@ -46,6 +46,7 @@ export interface LifecycleHandle {
   interrupt(reason: string, payload?: Omit<ActivityPayload, "summaryCode">): void;
   deny(reason: string, payload?: Omit<ActivityPayload, "summaryCode">): void;
   degraded(reason: string, payload?: Omit<ActivityPayload, "summaryCode">): void;
+  deferred(reason: string, payload?: Omit<ActivityPayload, "summaryCode">): void;
   skipped(reason: string, payload?: Omit<ActivityPayload, "summaryCode">): void;
 }
 
@@ -102,6 +103,11 @@ class Instrument {
     return this.context === undefined ? callback() : this.context.runWithTrace(input, callback);
   }
 
+  /** 后台任务：新根 trace（不继承调用方 ALS），避免跨会话 trace 污染 */
+  runAsBackground<T>(input: { linkedTraceIds?: readonly string[]; operationId?: string }, callback: () => T): T {
+    return this.context === undefined ? callback() : this.context.runAsBackground(input, callback);
+  }
+
   currentTrace(): TraceContext | undefined {
     return this.context?.currentTrace() ?? currentTrace();
   }
@@ -133,7 +139,7 @@ class Instrument {
         ...options.startPayload,
       },
     });
-    const base = (status: "completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "skipped"): ActivityRecordInput => {
+    const base = (status: "completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "deferred" | "skipped"): ActivityRecordInput => {
       const eventName = options.terminals?.[status] ?? options.startEventName;
       return {
         eventName,
@@ -147,7 +153,7 @@ class Instrument {
         payload: { summaryCode: summaryCodeOf(eventName), durationMs: Date.now() - startedAt },
       };
     };
-    const terminal = (status: "completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "skipped") =>
+    const terminal = (status: "completed" | "failed" | "cancelled" | "interrupted" | "denied" | "degraded" | "deferred" | "skipped") =>
       (patch?: ActivityPatch): void => {
         this.activity({
           ...base(status),
@@ -192,6 +198,12 @@ class Instrument {
         this.activity({
           ...base("degraded"),
           payload: { ...base("degraded").payload, ...patch, attributes: { reason: reason.slice(0, 200) } },
+        });
+      },
+      deferred: (reason, patch) => {
+        this.activity({
+          ...base("deferred"),
+          payload: { ...base("deferred").payload, ...patch, attributes: { reason: reason.slice(0, 200) } },
         });
       },
       skipped: (reason, patch) => {

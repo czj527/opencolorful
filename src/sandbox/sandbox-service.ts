@@ -1,15 +1,11 @@
 import * as crypto from "node:crypto";
-import * as fs from "node:fs";
-import * as path from "node:path";
 
 import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
 import type {
   FileOperation,
   PathCheckResult,
-  SandboxDeniedPayload,
-  SandboxPreflightDeniedPayload,
 } from "../contracts/sandbox.js";
-import { sanitizeSensitiveText } from "../runtime/sanitize.js";
+import { instrument } from "../observability/instrument.js";
 import { PathGuard } from "./path-guard.js";
 import { buildPathGuardPolicy } from "./policy.js";
 
@@ -18,15 +14,18 @@ import { buildPathGuardPolicy } from "./policy.js";
  *
  * 负责：
  * - 创建 PathGuard 实例（基于 Agent 配置和平台路径）
- * - 将拒绝事件写入安全审计日志（~/.opencolorful/logs/security-audit.jsonl）
+ * - 将拒绝事件写入可观测性 Activity 通道（sandbox.path.denied /
+ *   sandbox.command.denied，目录级 auditMirror 自动同库落 audit 证据）
  *
- * 日志格式为 JSONL（每行一条 JSON），写入失败不抛出异常。
+ * Phase 11 T5：不再写 logs/security-audit.jsonl（停止双事实源），
+ * 事件只进 observability 管线；路径/命令/参数一律不落盘（计划 §6.3：
+ * 工作区和工具审计不得保存原始敏感路径、命令或参数），只保留
+ * operation/level/required/pattern 等语义字段。
  */
 export class SandboxService {
   constructor(
     private readonly pathGuard: PathGuard,
     private readonly agentId: string,
-    private readonly auditLogPath: string,
     private readonly sessionId?: string,
   ) {}
 
@@ -36,7 +35,6 @@ export class SandboxService {
     agentId: string;
     agentHomeDir: string;
     platformHome: string;
-    auditLogPath: string;
     workspaceCwd?: string | null;
     sessionId?: string;
   }): SandboxService {
@@ -45,7 +43,6 @@ export class SandboxService {
       agentId,
       agentHomeDir,
       platformHome,
-      auditLogPath,
       workspaceCwd,
       sessionId,
     } = params;
@@ -56,7 +53,7 @@ export class SandboxService {
       ...(workspaceCwd !== undefined ? { workspaceCwd } : {}),
     });
     const pathGuard = new PathGuard(policy);
-    return new SandboxService(pathGuard, agentId, auditLogPath, sessionId);
+    return new SandboxService(pathGuard, agentId, sessionId);
   }
 
   /** 获取 PathGuard 供外部调用 */
@@ -64,70 +61,53 @@ export class SandboxService {
     return this.pathGuard;
   }
 
-  /** 将 PathGuard 的拒绝结果记录为生产安全审计事件。 */
+  /** 将 PathGuard 的拒绝结果记录为 sandbox.path.denied（+audit 镜像）。 */
   recordDenied(
     operation: FileOperation,
     targetPath: string,
     result: PathCheckResult,
   ): void {
-    this.logDenied({
-      operation,
-      path: result.canonicalPath || targetPath,
-      level: result.level,
-      required: result.required,
-      reason: result.reason,
-      agentId: this.agentId,
+    // 路径/理由可能含绝对路径，一律不落盘；只保留语义字段
+    void targetPath;
+    instrument.activity({
+      eventName: "sandbox.path.denied",
+      status: "denied",
+      operationId: `sandbox-${this.agentId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+      actor: { kind: "agent", id: this.agentId },
+      executor: { kind: "agent", id: this.agentId },
+      scope: this.scope(),
+      payload: {
+        summaryCode: "sandbox_path_denied",
+        attributes: {
+          operation,
+          level: result.level,
+          ...(result.required !== undefined ? { required: result.required } : {}),
+        },
+      },
     });
   }
 
-  /** 记录 bash 禁用或危险模式命中的生产审计事件。 */
+  /** 记录 bash 禁用或危险模式命中为 sandbox.command.denied（+audit 镜像）。 */
   recordPreflightDenied(command: string, pattern: string): void {
-    this.logPreflightDenied({
-      command,
-      pattern,
-      agentId: this.agentId,
+    // 命令本身可能含参数/敏感内容，一律不落盘；pattern 是策略标识
+    void command;
+    instrument.activity({
+      eventName: "sandbox.command.denied",
+      status: "denied",
+      operationId: `sandbox-${this.agentId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+      actor: { kind: "agent", id: this.agentId },
+      executor: { kind: "agent", id: this.agentId },
+      scope: this.scope(),
+      payload: {
+        summaryCode: "sandbox_command_denied",
+        attributes: { pattern: pattern.slice(0, 200) },
+      },
     });
   }
 
-  /** 记录 sandbox.denied 事件到审计日志 */
-  logDenied(payload: SandboxDeniedPayload): void {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      eventId: crypto.randomUUID(),
-      type: "sandbox.denied" as const,
-      agentId: payload.agentId,
-      ...(this.sessionId ? { sessionId: this.sessionId } : {}),
-      operation: payload.operation,
-      path: sanitizeSensitiveText(payload.path),
-      level: payload.level,
-      required: payload.required,
-      reason: sanitizeSensitiveText(payload.reason),
-    };
-    this.appendLine(entry);
-  }
-
-  /** 记录 sandbox.preflight-denied 事件到审计日志 */
-  logPreflightDenied(payload: SandboxPreflightDeniedPayload): void {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      eventId: crypto.randomUUID(),
-      type: "sandbox.preflight-denied" as const,
-      agentId: payload.agentId,
-      ...(this.sessionId ? { sessionId: this.sessionId } : {}),
-      command: sanitizeSensitiveText(payload.command),
-      pattern: sanitizeSensitiveText(payload.pattern),
-    };
-    this.appendLine(entry);
-  }
-
-  // ── private helpers ───────────────────────────────────────────────
-
-  private appendLine(entry: Record<string, unknown>): void {
-    try {
-      fs.mkdirSync(path.dirname(this.auditLogPath), { recursive: true });
-      fs.appendFileSync(this.auditLogPath, JSON.stringify(entry) + "\n");
-    } catch (err) {
-      console.warn("Failed to write sandbox audit log:", err);
-    }
+  private scope(): { ownerAgentId: string; sessionId?: string } {
+    return this.sessionId !== undefined
+      ? { ownerAgentId: this.agentId, sessionId: this.sessionId }
+      : { ownerAgentId: this.agentId };
   }
 }

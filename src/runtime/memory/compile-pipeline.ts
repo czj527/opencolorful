@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
   MEMORY_DAILY_STEPS,
@@ -9,6 +9,7 @@ import {
 import { SessionSummaryStore } from "../../storage/memory/summary-store.js";
 import { MemoryDailyStateStore, MemoryWatermarkStore } from "../../storage/memory/recovery-store.js";
 import { sanitizeSensitiveText } from "../sanitize.js";
+import { instrument } from "../../observability/instrument.js";
 import { extractSummarySection } from "./summary-format.js";
 import {
   atomicWriteFile,
@@ -57,7 +58,34 @@ export class MemoryCompilePipeline {
   constructor(private readonly deps: MemoryCompilePipelineDeps) {}
 
   async runDaily(agentId: string, memoryDir: string, logicalDate?: string, forceSteps: readonly MemoryDailyStep[] = []): Promise<MemoryCompileResult> {
+    // Phase 11 T5：一次每日编译 = 一个 operation（后台 trace 由调用方 runAsBackground 提供）
     const date = logicalDate ?? getLogicalDate(this.deps.now?.());
+    const lifecycle = instrument.startLifecycle({
+      startEventName: "memory.compile.started",
+      actor: { kind: "scheduler", id: "memory-ticker" },
+      executor: { kind: "memory_agent", id: agentId },
+      scope: { ownerAgentId: agentId },
+      operationId: `compile-${agentId}-${date}-${randomUUID().slice(0, 8)}`,
+      terminals: {
+        completed: "memory.compile.completed",
+        failed: "memory.compile.failed",
+      },
+      startPayload: { attributes: { date, forceSteps: forceSteps.join(",") } },
+    });
+    const result = await this.runDailyInner(agentId, memoryDir, date, forceSteps);
+    if (result.failures.length > 0) {
+      lifecycle.fail(`${result.failures.length} 个步骤失败`, {
+        attributes: { steps: result.failures.map((f) => f.step) },
+      });
+    } else {
+      lifecycle.complete({
+        attributes: { date: result.date, revision: result.revision, degraded: result.degraded },
+      });
+    }
+    return result;
+  }
+
+  private async runDailyInner(agentId: string, memoryDir: string, date: string, forceSteps: readonly MemoryDailyStep[]): Promise<MemoryCompileResult> {
     const forced = (step: MemoryDailyStep): boolean => forceSteps.includes(step);
     await ensureMemoryDir(memoryDir);
     const completed: MemoryDailyStep[] = [];

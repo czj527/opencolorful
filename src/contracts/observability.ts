@@ -28,7 +28,7 @@ export type ActivityStatus = (typeof ACTIVITY_STATUSES)[number];
 
 /** 唯一终态集合（一个 operationId 只能有一个 started 与一个终态） */
 export const ACTIVITY_TERMINAL_STATUSES = [
-  "completed", "degraded", "failed", "cancelled", "denied", "skipped", "interrupted",
+  "completed", "degraded", "failed", "cancelled", "denied", "deferred", "skipped", "interrupted",
 ] as const satisfies readonly ActivityStatus[];
 
 export const OBSERVABILITY_SIGNIFICANCES = ["routine", "notable", "milestone"] as const;

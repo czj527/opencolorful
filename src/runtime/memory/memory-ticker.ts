@@ -14,6 +14,7 @@ import type { EventIndexer } from "./event-indexer.js";
 import type { MemoryCompilePipeline } from "./compile-pipeline.js";
 import { getLogicalDate } from "./memory-files.js";
 import { readSessionBranchSnapshot } from "./jsonl-branch-reader.js";
+import { instrument } from "../../observability/instrument.js";
 
 export interface MemoryTickerOptions {
   readonly idleMs?: number;
@@ -162,6 +163,19 @@ export class MemoryTicker {
     reason: string,
     priority = 0,
   ): Promise<MemoryTickerRunResult> {
+    // Phase 11 T5：后台新根 trace（per-agent tail 可能继承触发方 ALS，必须隔离）
+    return instrument.runAsBackground(
+      { operationId: `ticker-${agentId}-${sessionId}-${Date.now()}` },
+      () => this.processInner(agentId, sessionId, reason, priority),
+    );
+  }
+
+  private async processInner(
+    agentId: string,
+    sessionId: string,
+    reason: string,
+    priority = 0,
+  ): Promise<MemoryTickerRunResult> {
     const view = this.safeView(sessionId);
     // 归档钩子在索引标记 archived 后才开始异步处理；归档批次仍必须读取
     // 该 Session 的最终 JSONL 快照，其他后台路径则继续拒绝已归档会话。
@@ -217,6 +231,15 @@ export class MemoryTicker {
         sourceEndEntry: endEntry,
         priority,
       }, "sealed");
+      // Phase 11 T5：批次封存（不含记忆正文，只记 id 与范围）
+      instrument.activity({
+        eventName: "memory.batch.sealed",
+        actor: { kind: "scheduler", id: "memory-ticker" },
+        executor: { kind: "memory_agent", id: agentId },
+        scope: { ownerAgentId: agentId, sessionId },
+        target: { kind: "memory_batch", id: batchId },
+        payload: { summaryCode: "memory_batch_sealed", attributes: { reason: reason.slice(0, 64) } },
+      });
     }
 
     // 每 10 轮/封存后：重新编译 today.md + assemble memory.md（LLM 不可用时

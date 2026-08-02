@@ -25,6 +25,7 @@ import type { SessionSummaryStore } from "../../storage/memory/summary-store.js"
 import type { MemoryAgentResolver } from "./resolver.js";
 import { readSessionBranchSnapshot } from "./jsonl-branch-reader.js";
 import crypto from "node:crypto";
+import { instrument } from "../../observability/instrument.js";
 
 export interface MemoryAgentSchedulerDeps {
   readonly replayStore: EventReplayStore;
@@ -171,6 +172,22 @@ export class MemoryAgentScheduler {
         (state?.lastDailyCompletedAt ?? "").slice(0, 10) !== today;
       if (dailyDue) {
         this.enqueueAgent(agentId, async () => {
+          // Phase 11 T5：每日整理 run = 一个 operation；重试成功记 recovered
+          const isRetry = state?.nextRetryAt !== undefined;
+          const opId = `sched-${agentId}-daily-${today}`;
+          const lifecycle = instrument.startLifecycle({
+            startEventName: "memory.scheduler.run.started",
+            actor: { kind: "scheduler", id: "memory-scheduler" },
+            executor: { kind: "memory_agent", id: agentId },
+            scope: { ownerAgentId: agentId },
+            operationId: opId,
+            terminals: {
+              completed: "memory.scheduler.run.completed",
+              failed: "memory.scheduler.run.failed",
+              deferred: "memory.scheduler.run.deferred",
+            },
+            startPayload: { attributes: { window: "daily" } },
+          });
           const outcome = await this.deps.resolver.runMaintenance(agentId);
           if (outcome.status === "completed") {
             // 仅成功推进"今日已完成"；失败只设置 nextRetryAt，稍后 tick 自动重试
@@ -183,7 +200,25 @@ export class MemoryAgentScheduler {
               ...(state?.lastWeeklyCompletedAt !== undefined ? { lastWeeklyCompletedAt: state.lastWeeklyCompletedAt } : {}),
               updatedAt: nowIso,
             });
+            if (isRetry) {
+              instrument.activity({
+                eventName: "memory.scheduler.run.recovered",
+                status: "completed",
+                operationId: opId,
+                actor: { kind: "scheduler", id: "memory-scheduler" },
+                executor: { kind: "memory_agent", id: agentId },
+                scope: { ownerAgentId: agentId },
+                payload: { summaryCode: "memory_scheduler_run_recovered", attributes: { window: "daily" } },
+              });
+            } else {
+              lifecycle.complete({ attributes: { window: "daily" } });
+            }
           } else {
+            if (outcome.status === "deferred") {
+              lifecycle.deferred(outcome.reason ?? "预算或模型不可用");
+            } else {
+              lifecycle.fail(outcome.reason ?? "整理失败");
+            }
             this.deps.schedulerStore.upsert({
               agentId,
               status: "failed",
@@ -204,6 +239,22 @@ export class MemoryAgentScheduler {
         (state?.lastWeeklyCompletedAt ?? "").slice(0, 10) !== today;
       if (weeklyDue) {
         this.enqueueAgent(agentId, async () => {
+          // Phase 11 T5：每周复核 run = 一个 operation（window=weekly）
+          const isRetry = state?.nextRetryAt !== undefined;
+          const opId = `sched-${agentId}-weekly-${today}`;
+          const lifecycle = instrument.startLifecycle({
+            startEventName: "memory.scheduler.run.started",
+            actor: { kind: "scheduler", id: "memory-scheduler" },
+            executor: { kind: "memory_agent", id: agentId },
+            scope: { ownerAgentId: agentId },
+            operationId: opId,
+            terminals: {
+              completed: "memory.scheduler.run.completed",
+              failed: "memory.scheduler.run.failed",
+              deferred: "memory.scheduler.run.deferred",
+            },
+            startPayload: { attributes: { window: "weekly" } },
+          });
           const outcome = await this.deps.resolver.runMaintenance(agentId, { weekly: true });
           if (outcome.status === "completed") {
             this.doneWeeklyDates.set(agentId, today);
@@ -215,7 +266,25 @@ export class MemoryAgentScheduler {
               lastWeeklyCompletedAt: nowIso,
               updatedAt: nowIso,
             });
+            if (isRetry) {
+              instrument.activity({
+                eventName: "memory.scheduler.run.recovered",
+                status: "completed",
+                operationId: opId,
+                actor: { kind: "scheduler", id: "memory-scheduler" },
+                executor: { kind: "memory_agent", id: agentId },
+                scope: { ownerAgentId: agentId },
+                payload: { summaryCode: "memory_scheduler_run_recovered", attributes: { window: "weekly" } },
+              });
+            } else {
+              lifecycle.complete({ attributes: { window: "weekly" } });
+            }
           } else {
+            if (outcome.status === "deferred") {
+              lifecycle.deferred(outcome.reason ?? "预算或模型不可用");
+            } else {
+              lifecycle.fail(outcome.reason ?? "整理失败");
+            }
             // 每周复核失败同样不推进完成日期，设置重试
             this.deps.schedulerStore.upsert({
               agentId,
