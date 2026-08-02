@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
+import { assertDurableAudit } from "../../observability/audit-recorder.js";
+import { instrument } from "../../observability/instrument.js";
 import { BASE_COLOR_TEMPLATES } from "../../contracts/base-color-templates.js";
 import type { SandboxCapabilities } from "../../contracts/sandbox.js";
 import type { AgentStore } from "../../config/agent-store.js";
@@ -142,6 +144,15 @@ export function registerAgentRoutes(
         ...(defaultCwd !== undefined ? { defaultCwd } : {}),
         ...(sandbox ? { sandbox } : {}),
       });
+      // 评审 P1（第三轮）：Agent 创建进 Activity 时间线（milestone）
+      instrument.activity({
+        eventName: "agent.created",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "agent", id: agentId },
+        scope: { ownerAgentId: agentId },
+        payload: { summaryCode: "agent_created" },
+      });
       return context.json(agentStore.load(agentId), 201);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "创建失败";
@@ -186,6 +197,15 @@ export function registerAgentRoutes(
         return context.json(createApiError("INVALID_INPUT", "没有可更新的字段"), 400);
       }
       const identity = agentStore.updateIdentity(context.req.param("id"), patch);
+      // 评审 P1（第三轮）：名称修改进 Activity 时间线（notable）
+      instrument.activity({
+        eventName: "agent.settings.changed",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "agent", id: identity.id },
+        scope: { ownerAgentId: identity.id },
+        payload: { summaryCode: "agent_settings_changed", attributes: { changedFields: ["name"] } },
+      });
       return context.json(agentStore.load(identity.id));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
@@ -249,7 +269,17 @@ export function registerAgentRoutes(
       }
 
       agentStore.saveBaseColor(context.req.param("id"), patch);
-      return context.json(agentStore.load(context.req.param("id")));
+      // 评审 P1（第三轮）：底色修改进 Activity 时间线（notable）
+      const baseColorAgentId = context.req.param("id");
+      instrument.activity({
+        eventName: "agent.base_color.changed",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "agent", id: baseColorAgentId },
+        scope: { ownerAgentId: baseColorAgentId },
+        payload: { summaryCode: "agent_base_color_changed" },
+      });
+      return context.json(agentStore.load(baseColorAgentId));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
     }
@@ -381,16 +411,19 @@ export function registerAgentRoutes(
       if (patch.sandbox !== undefined) {
         auditChanges.push({ eventName: "audit.sandbox.policy_changed", action: "sandbox.policy.changed", changedFields: ["sandbox.workspaceAccess", "sandbox.extraReadPaths", "sandbox.protectedPaths"] });
       }
-      if (auditChanges.length > 0 && audit !== undefined) {
+      if (auditChanges.length > 0) {
         try {
+          // 评审 P0（第三轮）：audit 未配置同样拒绝执行（fail-closed 由构造保证不了，这里显式检查）；
+          // 只接受 accepted/accepted-idempotent，rejected 一律抛错 → 回滚
+          if (audit === undefined) throw new Error("可观测性未初始化，高风险修改拒绝执行");
           for (const change of auditChanges) {
-            audit.appendStrict({
+            assertDurableAudit(audit.appendStrict({
               eventName: change.eventName,
               payload: { action: change.action, decision: "allowed", changedFields: change.changedFields },
               actor: { kind: "user", id: "web" },
               executor: { kind: "service", id: "agent-server" },
               target: { kind: "agent", id: agentId },
-            });
+            }), "Agent 设置变更");
           }
         } catch {
           // fail-closed：Audit 无法持久化 → 回滚设置并拒绝操作
@@ -398,6 +431,15 @@ export function registerAgentRoutes(
           return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险修改被拒绝"), 503);
         }
       }
+      // 评审 P1（第三轮）：设置变更进 Activity 时间线（audit fail-closed 已在前）
+      instrument.activity({
+        eventName: "agent.settings.changed",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "agent", id: agentId },
+        scope: { ownerAgentId: agentId },
+        payload: { summaryCode: "agent_settings_changed", attributes: { changedFields: Object.keys(patch) } },
+      });
       return context.json(agentStore.load(agentId));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
@@ -406,7 +448,17 @@ export function registerAgentRoutes(
 
   app.post("/api/agents/:id/archive", (context) => {
     try {
-      agentStore.archive(context.req.param("id"));
+      const archivedAgentId = context.req.param("id");
+      agentStore.archive(archivedAgentId);
+      // 评审 P1（第三轮）：归档进 Activity 时间线（notable）
+      instrument.activity({
+        eventName: "agent.archived",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "agent", id: archivedAgentId },
+        scope: { ownerAgentId: archivedAgentId },
+        payload: { summaryCode: "agent_archived" },
+      });
       return context.json({ status: "archived" });
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);

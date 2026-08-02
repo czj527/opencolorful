@@ -204,9 +204,22 @@ export class ObservabilityContext {
     this.flush();
   }
 
+  /**
+   * 评审 P1（第三轮）：偏好更新应用到当前运行时（无需重启）。
+   * logger 的级别/磁盘预算/保留天数与 spool 预算立即生效。
+   */
+  applyPreferences(prefs: import("../contracts/preferences.js").ObservabilityPreferences): void {
+    this.logger.applyOptions({
+      minLevel: prefs.diagnosticLevel,
+      diskBudgetBytes: prefs.diagnosticDiskBudgetBytes,
+      debugRetentionDays: prefs.diagnosticRetentionDays.debug,
+      mainRetentionDays: prefs.diagnosticRetentionDays.main,
+    });
+    this.spool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
+  }
+
   /** 聚合 health（§5.7）：logger 降级、spool 状态、ledger epoch 一览 */
-  getHealth(): ObservabilityHealth {
-    return {
+  getHealth(): ObservabilityHealth {    return {
       logger: {
         dropped: this.logger.getDroppedCount(),
         failed: this.logger.getFailedCount(),

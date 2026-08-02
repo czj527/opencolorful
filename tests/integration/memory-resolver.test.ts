@@ -18,6 +18,7 @@ import { MemoryWatermarkStore, SchedulerStateStore } from "../../src/storage/mem
 import { SessionSummaryStore } from "../../src/storage/memory/summary-store.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { ActivationUpdater } from "../../src/runtime/memory/activation-updater.js";
 import { MemoryAgentResolver } from "../../src/runtime/memory/resolver.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
@@ -74,6 +75,7 @@ function buildResolver(
   });
   const application = new ProposalApplication({
     database, proposalStore, factStore, eventStore, journalStore, batchStore, watermarkStore, policy,
+    audit: new AuditRecorder({ database, producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" } }),
   });
   const activationUpdater = new ActivationUpdater({ database, factStore, recallStore });
   const envelopes: PlatformEventEnvelope[] = [];

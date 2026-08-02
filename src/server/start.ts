@@ -346,6 +346,8 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         journalStore: new MemoryJournalStore(database),
         batchStore: new MemoryBatchStore(database),
         watermarkStore,
+        // 评审 P0（第三轮）：记忆审批/遗忘/强度与事实修改同事务严格审计
+        audit: observability.audit,
         policy: new MemoryPolicy({
           factStore: new MemoryFactStore(database),
           recallStore: new MemoryRecallStore(database),

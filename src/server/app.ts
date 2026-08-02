@@ -174,6 +174,8 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       getHealth: () => instrument.getHealth(),
       // 评审 P1-7：observability 偏好（retention 默认天数/logger 参数）接入路由
       ...(options.preferencesStore !== undefined ? { preferencesStore: options.preferencesStore } : {}),
+      // 评审 P0（第三轮）：retention 删除与 Audit 同事务（fail-closed）
+      ...(options.audit !== undefined ? { audit: options.audit } : {}),
     });
   }
 

@@ -94,20 +94,9 @@ export class ActivityRecorder {
     // 评审 P1-9：status 必须符合目录 lifecycleRole/terminalStatuses
     // （system.started + status=denied 之类的组合一律拒绝）。
     // started 角色事件可自带终态（startOperation 复用事件名）或 processing。
-    const role = entry.lifecycleRole;
-    if (role === "started") {
-      const allowed = ["started", "processing", ...(entry.terminalStatuses ?? [])];
-      if (input.status === undefined || !allowed.includes(input.status)) {
-        return { kind: "rejected", eventName: input.eventName, reason: `started 事件 status 必须是 ${allowed.join("/")} 之一` };
-      }
-    } else if (role === "terminal") {
-      const allowed = entry.terminalStatuses ?? [];
-      if (input.status === undefined || !allowed.includes(input.status)) {
-        return { kind: "rejected", eventName: input.eventName, reason: `终态事件 status 必须是 ${allowed.join("/")} 之一` };
-      }
-    } else if (input.status !== undefined) {
-      // point/progress：无生命周期状态
-      return { kind: "rejected", eventName: input.eventName, reason: "point/progress 事件不允许带 status" };
+    const statusIssue = this.validateLifecycleStatus(entry, input.status);
+    if (statusIssue !== null) {
+      return { kind: "rejected", eventName: input.eventName, reason: statusIssue };
     }
     // 唯一终态校验（同 operationId 已有终态 → 拒绝/幂等）
     if (input.operationId !== undefined && input.status !== undefined) {
@@ -121,7 +110,7 @@ export class ActivityRecorder {
     }
     // 评审 P1-9：同 operationId 未收尾前不允许重复 started（重试需先有终态）。
     // DB 不可用时跳过预检——真正的 insert 失败会走 spool/rejected 矩阵
-    if (role === "started" && input.status === "started" && input.operationId !== undefined) {
+    if (entry.lifecycleRole === "started" && input.status === "started" && input.operationId !== undefined) {
       const open = this.findOpenStartedSafe(input.operationId);
       if (open !== null) {
         return { kind: "rejected", eventName: input.eventName, reason: "同一 operationId 已有未收尾的 started 记录" };
@@ -182,12 +171,42 @@ export class ActivityRecorder {
     }
   }
 
+  /** 评审 P1-9：status 是否符合目录 lifecycleRole/terminalStatuses；null = 合法 */
+  private validateLifecycleStatus(
+    entry: import("../contracts/observability.js").EventCatalogEntry,
+    status: ActivityEnvelope["status"] | undefined,
+  ): string | null {
+    const role = entry.lifecycleRole;
+    if (role === "started") {
+      const allowed = ["started", "processing", ...(entry.terminalStatuses ?? [])];
+      if (status === undefined || !allowed.includes(status)) {
+        return `started 事件 status 必须是 ${allowed.join("/")} 之一`;
+      }
+    } else if (role === "terminal") {
+      const allowed = entry.terminalStatuses ?? [];
+      if (status === undefined || !allowed.includes(status)) {
+        return `终态事件 status 必须是 ${allowed.join("/")} 之一`;
+      }
+    } else if (status !== undefined) {
+      // point/progress：无生命周期状态
+      return "point/progress 事件不允许带 status";
+    }
+    return null;
+  }
+
   /** 应急导入：spool 行幂等写入 SQLite（eventId UNIQUE）；坏行/未知事件 quarantine */
   importEnvelope(line: unknown): { ok: boolean; error?: string } {
     if (!Value.Check(ActivityEnvelopeSchema, line)) return { ok: false, error: "quarantine" };
     const envelope = line as unknown as ActivityEnvelope;
     const entry = getCatalogEntry(envelope.eventName, envelope.eventVersion);
     if (entry === undefined || entry.channel !== "activity") return { ok: false, error: "quarantine" };
+    // 评审 P1（第三轮）：导入重新执行目录约束——被篡改/损坏的 spool 行
+    // 不得绕过生命周期校验、payload schema 或伪造 significance
+    if (!Value.Check(entry.payloadSchema, envelope.payload)) return { ok: false, error: "quarantine" };
+    if (this.validateLifecycleStatus(entry, envelope.status) !== null) return { ok: false, error: "quarantine" };
+    if (envelope.significance !== undefined && envelope.significance !== entry.significance) {
+      return { ok: false, error: "quarantine" };
+    }
     try {
       // spool 行可能缺 significance（schema 可选，DB 列 NOT NULL，INSERT OR IGNORE 会静默丢弃）：以目录为准补全
       const normalized: ActivityEnvelope = envelope.significance === undefined

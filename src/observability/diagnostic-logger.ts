@@ -46,11 +46,11 @@ export class DiagnosticLogger {
   private readonly logsRoot: string;
   private readonly producer: ProducerContext;
   private readonly fileSizeBytes: number;
-  private readonly diskBudgetBytes: number;
-  private readonly debugRetentionDays: number;
-  private readonly mainRetentionDays: number;
+  private diskBudgetBytes: number;
+  private debugRetentionDays: number;
+  private mainRetentionDays: number;
   private readonly queueSize: number;
-  private readonly minLevelRank: number;
+  private minLevelRank: number;
   private readonly now: () => Date;
   private queue: Array<{ line: string; level: ObservabilityLevel; signature: string }> = [];
   private pendingBatch: Array<{ line: string; level: ObservabilityLevel; signature: string }> | null = null;
@@ -76,6 +76,26 @@ export class DiagnosticLogger {
   getDroppedCount(): number { return this.droppedCount; }
   getFailedCount(): number { return this.failedCount; }
   isDegraded(): boolean { return this.degraded; }
+
+  /** 评审 P1（第三轮）：retention preview 用实际配置的保留天数（不再硬编码 7/30） */
+  getDebugRetentionDays(): number { return this.debugRetentionDays; }
+  getMainRetentionDays(): number { return this.mainRetentionDays; }
+
+  /**
+   * 评审 P1（第三轮）：偏好更新应用到当前运行时——无需重启即调整
+   * 级别过滤/磁盘预算/保留天数（文件大小轮转阈值沿用构造值，避免轮转中换规则）。
+   */
+  applyOptions(partial: {
+    readonly minLevel?: ObservabilityLevel;
+    readonly diskBudgetBytes?: number;
+    readonly debugRetentionDays?: number;
+    readonly mainRetentionDays?: number;
+  }): void {
+    if (partial.minLevel !== undefined) this.minLevelRank = LEVEL_RANK[partial.minLevel];
+    if (partial.diskBudgetBytes !== undefined) this.diskBudgetBytes = partial.diskBudgetBytes;
+    if (partial.debugRetentionDays !== undefined) this.debugRetentionDays = partial.debugRetentionDays;
+    if (partial.mainRetentionDays !== undefined) this.mainRetentionDays = partial.mainRetentionDays;
+  }
 
   /** 直接落盘（不进队列）：仅用于进程退出/紧急路径 */
   flushSync(): void {

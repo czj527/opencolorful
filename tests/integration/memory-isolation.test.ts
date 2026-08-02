@@ -17,6 +17,7 @@ import { MemoryProposalStore } from "../../src/storage/memory/proposal-store.js"
 import { MemoryWatermarkStore } from "../../src/storage/memory/recovery-store.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
 import { MemoryAgentRunner } from "../../src/runtime/memory/agent/memory-agent-runner.js";
 import { memoryAgentToolMap, type MemoryToolContext } from "../../src/runtime/memory/agent/memory-agent-tools.js";
@@ -212,6 +213,10 @@ describe("跨 Agent 读写隔离（P0-1 验收）", () => {
       batchStore: new MemoryBatchStore(database),
       watermarkStore: new MemoryWatermarkStore(database),
       policy,
+      audit: new AuditRecorder({
+        database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
     });
     const proposal = {
       id: crypto.randomUUID(), agentId: "a1", runId: "run-1", type: "strength_change",
@@ -343,6 +348,10 @@ describe("复审 P0-1：事件跨 Agent 隔离", () => {
       batchStore: new MemoryBatchStore(database),
       watermarkStore: new MemoryWatermarkStore(database),
       policy,
+      audit: new AuditRecorder({
+        database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
     });
     const result = application.applyRun({ agentId: "a1", runId: "run-1", proposals: [proposal] });
     expect(result.applied).toHaveLength(0);
@@ -392,6 +401,10 @@ describe("复审 P0-2：初始强度不可由模型指定", () => {
       batchStore: new MemoryBatchStore(database),
       watermarkStore: new MemoryWatermarkStore(database),
       policy,
+      audit: new AuditRecorder({
+        database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
     });
     const proposal = {
       id: crypto.randomUUID(), agentId: "a1", runId: "run-1", type: "create_fact",

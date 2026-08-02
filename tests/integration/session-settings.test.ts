@@ -12,6 +12,7 @@ import { SessionService } from "../../src/runtime/session-service.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { createServerApp } from "../../src/server/app.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { parseSessionSettings } from "../../src/contracts/session-settings.js";
 
 const temporaryDirectories: string[] = [];
@@ -47,7 +48,13 @@ describe("session settings", () => {
 
   it("persists and recovers toolMode via updateSettings", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
 
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
@@ -80,7 +87,13 @@ describe("session settings", () => {
 
   it("rejects all mode without workspace confirmation", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -104,7 +117,13 @@ describe("session settings", () => {
 
   it("accepts all mode with cwd and workspaceConfirmed", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -135,7 +154,13 @@ describe("session settings", () => {
 
   it("requires reconfirmation when an all-mode workspace changes", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -165,7 +190,13 @@ describe("session settings", () => {
 
   it("allows a read-only workspace change without write confirmation", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -206,7 +237,13 @@ describe("session settings", () => {
 
   it("persists a valid thinking level and rejects an unknown level", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -323,7 +360,13 @@ describe("session settings", () => {
 
   it("rejects directory switch without re-confirmation in all mode", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },

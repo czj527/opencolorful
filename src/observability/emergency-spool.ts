@@ -42,7 +42,7 @@ export class EmergencySpool {
   private readonly processType: string;
   private readonly bootId: string;
   private readonly segmentSizeBytes: number;
-  private readonly budgetBytes: number;
+  private budgetBytes: number;
   private readonly now: () => Date;
   private failedWrites = 0;
 
@@ -56,6 +56,11 @@ export class EmergencySpool {
   }
 
   getFailedWriteCount(): number { return this.failedWrites; }
+
+  /** 评审 P1（第三轮）：偏好更新应用到当前运行时（spool 预算可重配，无需重启） */
+  setBudgetBytes(budgetBytes: number): void {
+    this.budgetBytes = Math.max(1, Math.floor(budgetBytes));
+  }
 
   /** 当前进程的待导入 segment 数（含上一进程崩溃遗留的同 processType 段） */
   pendingSegments(): number {

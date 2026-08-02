@@ -8,6 +8,8 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { ProviderStore } from "../../src/config/provider-store.js";
 import { parseProviderInput } from "../../src/contracts/provider-settings.js";
 import { ModelService } from "../../src/runtime/model-service.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
 import { createServerApp } from "../../src/server/app.js";
 
 const temporaryDirectories: string[] = [];
@@ -17,6 +19,19 @@ function createPaths() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-provider-"));
   temporaryDirectories.push(directory);
   return getRuntimePaths({ OPENCOLORFUL_HOME: directory });
+}
+
+// 评审 P0（第三轮）：凭据变更属 fail-closed——测试提供真实审计（挂同一 metadata DB）
+function makeAudit(paths: ReturnType<typeof getRuntimePaths>) {
+  const database = openMetadataDatabase(paths.database);
+  temporaryDirectories.push(paths.home);
+  return {
+    audit: new AuditRecorder({
+      database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+    }),
+    close: () => database.close(),
+  };
 }
 
 function providerInput(overrides: Record<string, unknown> = {}) {
@@ -51,7 +66,8 @@ afterEach(() => {
 describe("provider settings", () => {
   it("persists provider settings and PI credentials separately", async () => {
     const paths = createPaths();
-    const firstService = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
+    const { audit: firstAudit, close: closeFirst } = makeAudit(paths);
+    const firstService = await ModelService.create(paths, new ProviderStore(paths.providerSettings), firstAudit);
     const { app: firstApp } = createServerApp({ modelService: firstService });
 
     const putResponse = await firstApp.request("http://local/api/settings/providers", {
@@ -67,18 +83,21 @@ describe("provider settings", () => {
       credentialConfigured: true,
       credentialRef: "provider:local-openai",
     });
+    closeFirst();
 
     const settingsJson = fs.readFileSync(paths.providerSettings, "utf8");
     expect(settingsJson).not.toContain(API_KEY);
     expect(settingsJson).toContain("provider:local-openai");
     expect(fs.readFileSync(paths.authFile, "utf8")).toContain(API_KEY);
 
-    const reopenedService = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
+    const { audit: reopenedAudit, close: closeReopened } = makeAudit(paths);
+    const reopenedService = await ModelService.create(paths, new ProviderStore(paths.providerSettings), reopenedAudit);
     const { app: reopenedApp } = createServerApp({ modelService: reopenedService });
     const providers = await (await reopenedApp.request("http://local/api/settings/providers")).json();
     expect(providers).toEqual([
       expect.objectContaining({ providerId: "local-openai", credentialConfigured: true }),
     ]);
+    closeReopened();
 
     const models = await (await reopenedApp.request("http://local/api/models")).json();
     expect(models).toEqual([

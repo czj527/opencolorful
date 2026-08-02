@@ -44,6 +44,18 @@ export type AuditAcceptResult =
   | { kind: "rejected"; eventName: string; reason: string }
   | { kind: "spooled"; eventId: string; reason: string };
 
+/**
+ * 评审 P0（第三轮）：统一 durable audit 断言——只接受 accepted / accepted-idempotent，
+ * 其余结果（rejected/spooled）一律抛错；调用方 catch 后回滚领域修改并拒绝操作。
+ * appendStrict 不会走 spool，故此处 spooled 也按失败处理（防御性）。
+ */
+export function assertDurableAudit(result: AuditAcceptResult, context: string): AuditAcceptResult {
+  if (result.kind !== "accepted" && result.kind !== "accepted-idempotent") {
+    throw new Error(`${context}：审计记录未被接受（${result.kind === "rejected" ? result.reason : "spooled"}）`);
+  }
+  return result;
+}
+
 export interface AuditRecorderDeps {
   database: Database.Database;
   producer: ProducerContext;
@@ -154,6 +166,8 @@ export class AuditRecorder {
     const envelope = line as unknown as AuditEnvelope;
     const entry = getCatalogEntry(envelope.eventName, envelope.eventVersion);
     if (entry === undefined || entry.channel !== "audit") return { ok: false, error: "quarantine" };
+    // 评审 P1（第三轮）：导入重新校验目录 payload schema（防篡改 spool 行绕过）
+    if (!Value.Check(entry.payloadSchema, envelope.payload)) return { ok: false, error: "quarantine" };
     try {
       // spool 行无 epoch 字段：导入时归属当前 ledger epoch
       const result = this.deps.database

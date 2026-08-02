@@ -7,10 +7,12 @@ import { serve, type ServerType } from "@hono/node-server";
 
 import type { ProducerContext } from "../../src/contracts/observability.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
+import { AgentStore } from "../../src/config/agent-store.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { defaultObservabilityPreferences } from "../../src/contracts/preferences.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { getCatalogEntry } from "../../src/observability/event-catalog.js";
 import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -198,6 +200,26 @@ describe("T6 查询端点", () => {
     expect(body.lines).toBe(3);
     expect(JSON.parse(body.tail[2]!)).toMatchObject({ seq: 4 });
   });
+
+  it("Phase 11 第三轮：diagnostic tail 拒绝路径穿越进程名（P1-2 复现级测试）", async () => {
+    const { paths } = makeFixture();
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: openDatabases[openDatabases.length - 1]!,
+    });
+    for (const traversal of ["..", "../..", "%2e%2e", "..%5c..", ".\\runtime\\..", "a/../../b", "..\\..\\windows"]) {
+      const response = await app.request(`http://127.0.0.1/api/observability/diagnostic/tail?process=${encodeURIComponent(traversal)}`);
+      expect(response.status).toBe(400);
+      const body = await response.json() as { code: string };
+      expect(body.code).toBe("INVALID_INPUT");
+    }
+    // 含绝对路径风格的进程名同样拒绝
+    const absolute = await app.request(`http://127.0.0.1/api/observability/diagnostic/tail?process=${encodeURIComponent(path.resolve(paths.logs, "runtime", "server"))}`);
+    expect(absolute.status).toBe(400);
+  });
 });
 
 describe("T6 operator SSE（重连不重不漏 / gap / spool import 高水位）", () => {
@@ -251,12 +273,18 @@ describe("T9 retention / audit reset / export 端点", () => {
   it("retention preview 只读 + run 幂等（删除前聚合、audit 不动）", async () => {
     const { db, paths } = makeFixture();
     seedOldRows(db, "2026-01-01T00:00:00.000Z");
+    // 评审 P0（第三轮）：retention 删除与 Audit 同事务（fail-closed）
+    const audit = new AuditRecorder({
+      database: db,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
+    });
     const { app } = createServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
       paths,
       database: db,
+      audit,
     });
     const base = "http://127.0.0.1";
     const preview = await (await app.request(`${base}/api/observability/retention/preview`, {
@@ -534,6 +562,10 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
         activityRetentionDays: { routine: 7, notable: 730 },
       },
     } as never);
+    const audit = new AuditRecorder({
+      database: db,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
+    });
     const { app } = createServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
@@ -541,6 +573,7 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
       paths: getRuntimePaths({ OPENCOLORFUL_HOME: directory }),
       database: db,
       preferencesStore,
+      audit,
     });
     // 8 天前的行：默认 30 天会保留，偏好 7 天会删除
     const past = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
@@ -559,5 +592,85 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
     });
     const result = await response.json() as { deleted: number };
     expect(result.deleted).toBe(1);
+  });
+});
+
+describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
+  it("偏好更新立即应用到当前运行时：PUT 后 logger 丢弃低于新级别的行（无需重启）", async () => {
+    const { directory, paths, db, context } = makeFixture();
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+      preferencesStore,
+    });
+    const logDir = path.join(paths.logs, "runtime", "server");
+    // 文件名规则：<date>_<bootId>_<segment>.jsonl（bootId 来自测试 producer）
+    const mainFile = path.join(logDir, `${new Date().toISOString().slice(0, 10)}_boot-test_0.jsonl`);
+    context.logger.info("prefs.before", "更新前 info 行");
+    context.logger.flushSync();
+    const before = fs.existsSync(mainFile) ? fs.readFileSync(mainFile, "utf8") : "";
+    expect(before).toContain("更新前 info 行");
+
+    const response = await app.request(`http://127.0.0.1/api/preferences/observability`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...defaultObservabilityPreferences(), diagnosticLevel: "warn" }),
+    });
+    expect(response.status).toBe(200);
+    // 更新后：info 低于 warn → 直接丢弃，不再落盘
+    context.logger.info("prefs.after", "更新后 info 行（应被丢弃）");
+    context.logger.flushSync();
+    const after = fs.readFileSync(mainFile, "utf8");
+    expect(after).toContain("更新前 info 行");
+    expect(after).not.toContain("更新后 info 行");
+    // warn 级别仍正常落盘
+    context.logger.warn("prefs.after.warn", "更新后 warn 行");
+    context.logger.flushSync();
+    expect(fs.readFileSync(mainFile, "utf8")).toContain("更新后 warn 行");
+  });
+
+  it("Agent 关键活动埋点：create/name/base-color/archive 全部进入 activity 时间线", async () => {
+    const { directory, paths, db } = makeFixture();
+    const agentStore = new AgentStore(path.join(directory, "agents"));
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+      agentStore,
+    });
+    const create = await app.request(`http://127.0.0.1/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "埋点 Agent", baseColor: {} }),
+    });
+    expect(create.status).toBe(201);
+    const created = await create.json() as { identity: { id: string } };
+    const events = (): string[] =>
+      (db.prepare("SELECT event_name FROM activity_events ORDER BY event_id").all() as Array<{ event_name: string }>)
+        .map((row) => row.event_name);
+    expect(events()).toContain("agent.created");
+
+    await app.request(`http://127.0.0.1/api/agents/${created.identity.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "改名后的 Agent" }),
+    });
+    expect(events()).toContain("agent.settings.changed");
+
+    await app.request(`http://127.0.0.1/api/agents/${created.identity.id}/base-color`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ persona: "新人格" }),
+    });
+    expect(events()).toContain("agent.base_color.changed");
+
+    await app.request(`http://127.0.0.1/api/agents/${created.identity.id}/archive`, { method: "POST" });
+    expect(events()).toContain("agent.archived");
   });
 });

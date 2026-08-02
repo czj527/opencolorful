@@ -1,6 +1,6 @@
 # Phase 11：完整日志系统与统一可观测性
 
-**状态：已评审定稿（2026-08-01），待开发** | 建议分支：`phase-11-observability`
+**状态：已实现（2026-08-02 第三轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
 **基线：** `main`（Phase 10.5 验收点之后）
 **架构权威：** [docs/logging-architecture.md](../docs/logging-architecture.md)
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 11
@@ -1010,27 +1010,27 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 
 ## 十四、验收标准
 
-- [ ] diagnostic/activity/audit 三通道职责明确；Observability Envelope 与 Platform transport Envelope 保持分离；
-- [ ] migration v8 可从真实 v7 数据库升级，也可从空数据库完整创建；
-- [ ] 事件目录固定 channel/level/significance/schema，未注册和越权事件被拒绝；
-- [ ] 所有关键长任务都有 started 与唯一终态；重启后旧 running 能补为 interrupted；
-- [ ] Agent/Session/Turn/model/tool/sandbox/memory 当前关键链路均能按 trace 查询；
-- [ ] linked trace 可正反向查询，ownerAgentId 能正确归属主 Agent、记忆 Agent、未来 subagent 和 plugin；
-- [ ] diagnostic 每进程独立双 JSONL、10MB 轮转、7/30 天保留和 500MB 总预算均生效；
-- [ ] Activity durable-on-accept，不存在未落盘的权威内存 batch；写入失败在 health/UI 明确可见；
-- [ ] emergency spool 按进程隔离、可恢复且幂等；坏行不破坏整个 segment；
-- [ ] 同库高风险修改与 Audit 同事务；文件/外部高风险修改在 Audit 完全不可持久化时 fail closed；
-- [ ] SQLite commit 后才广播；spool-only 不广播；独立 SSE cursor 重连、gap 和 reset 不重不漏；
-- [ ] Audit 普通路径 append-only，专用 ledger reset 原子、可确认且留下新 epoch 记录；
-- [ ] Web 客户端错误入口落实 schema、Origin、大小和速率限制，平台重新盖章；
-- [ ] 隐私删除不级联清理 Activity/Audit，且日志不含被删对象正文；
-- [ ] 日志不包含 API Key、Authorization、Cookie、完整 Prompt、完整记忆、文件内容或完整工具输入输出；
-- [ ] `/logs` 页面具备活动、错误、审计、性能、原始日志和诊断导出完整状态；
-- [ ] 诊断包经过二次脱敏，包含 privacy manifest，不包含原始敏感事实源；
-- [ ] retention 按 significance 分级，routine 清理前形成幂等 daily metrics；
-- [ ] fake plugin/subagent 通过统一 Observability Port 接入，不能覆盖权威字段或制造长期事件；
-- [ ] 日志永不自动进入 Agent 上下文或长期记忆；
-- [ ] 全部质量门、Playwright 与 browser-use 验收通过。
+- [x] diagnostic/activity/audit 三通道职责明确；Observability Envelope 与 Platform transport Envelope 保持分离；
+- [x] migration v8 可从真实 v7 数据库升级，也可从空数据库完整创建；
+- [x] 事件目录固定 channel/level/significance/schema，未注册和越权事件被拒绝；
+- [x] 所有关键长任务都有 started 与唯一终态；重启后旧 running 能补为 interrupted；
+- [x] Agent/Session/Turn/model/tool/sandbox/memory 当前关键链路均能按 trace 查询；
+- [x] linked trace 可正反向查询，ownerAgentId 能正确归属主 Agent、记忆 Agent、未来 subagent 和 plugin；
+- [x] diagnostic 每进程独立双 JSONL、10MB 轮转、7/30 天保留和 500MB 总预算均生效；
+- [x] Activity durable-on-accept，不存在未落盘的权威内存 batch；写入失败在 health/UI 明确可见；
+- [x] emergency spool 按进程隔离、可恢复且幂等；坏行不破坏整个 segment；
+- [x] 同库高风险修改与 Audit 同事务；文件/外部高风险修改在 Audit 完全不可持久化时 fail closed；
+- [x] SQLite commit 后才广播；spool-only 不广播；独立 SSE cursor 重连、gap 和 reset 不重不漏；
+- [x] Audit 普通路径 append-only，专用 ledger reset 原子、可确认且留下新 epoch 记录；
+- [x] Web 客户端错误入口落实 schema、Origin、大小和速率限制，平台重新盖章；
+- [x] 隐私删除不级联清理 Activity/Audit，且日志不含被删对象正文；
+- [x] 日志不包含 API Key、Authorization、Cookie、完整 Prompt、完整记忆、文件内容或完整工具输入输出；
+- [x] `/logs` 页面具备活动、错误、审计、性能、原始日志和诊断导出完整状态；
+- [x] 诊断包经过二次脱敏，包含 privacy manifest，不包含原始敏感事实源；
+- [x] retention 按 significance 分级，routine 清理前形成幂等 daily metrics；
+- [x] fake plugin/subagent 通过统一 Observability Port 接入，不能覆盖权威字段或制造长期事件；
+- [x] 日志永不自动进入 Agent 上下文或长期记忆；
+- [x] 全部质量门、Playwright 与 browser-use 验收通过。
 
 ---
 
@@ -1154,3 +1154,20 @@ reviewer 结论："Phase 11 暂不通过…4 个 P0、7 个 P1、1 个 P2…先�
 **复现级测试 24 个**：observability-failclosed 4、retention 3、query 3、runtime 3、store 4、extension-port 2、observability-api 4、web logs 1。
 
 **质量门（commit 89e1181）**：tsc ✓ check:pi-imports ✓ build ✓ 779 server tests ✓（78 文件）web tsc ✓ 349 web tests ✓ web build ✓ Playwright 52/52 ✓。
+
+### 第三轮外部复审修复（2026-08-02，commit 966d391 + 本提交）
+
+reviewer 结论："第二轮修复仍未通过验收…先修复 3 个 P0，并为上述复现补充自动化测试，再进行第三轮复审"。
+3 个 P0 + 5 个 P1 全部修复，每个均配复现级回归测试（新增 16 个），文档状态已同步。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | `appendStrict()` 校验失败只返回 `{ kind: "rejected" }` 不抛异常；Agent 设置与 Provider 凭据路径只捕获异常不看返回值；`audit === undefined` 时静默继续高风险修改 | 新增 `assertDurableAudit()` 工具（只接受 `accepted`/`accepted-idempotent`，其余一律抛错）；Agent 设置/Session 工作区/Provider 凭据统一 fail-closed——audit 未配置即拒绝（503/抛错回滚），rejected 返回值同样触发回滚 |
+| 2 | P0 | 记忆审批、遗忘、强度修改无 fail-closed；`ProposalApplication`/`recordAppliedEvidence` 忽略 `instrument.activity()` 返回 | `ProposalApplication` 新增 `recordStrictAudit()`：audit 未配置抛「可观测性未初始化」；`audit.memory.proposal_approved` + 类型证据（strength_changed/fact_forgotten/fact_superseded）与事实修改同一 SQLite 事务，任一审计 rejected → 整体回滚 |
+| 3 | P0 | retention 删除在审计之前完成 | `runRetention` 审计未配置即拒绝执行；删除与 `audit.observability.retention_executed` 同一事务，审计失败 → 删除回滚 |
+| 4 | P1 | retention preview 与实际执行范围不一致（统计全部 significance）；preview 硬编码 7/30 天 | preview 与 run 同为 `significance='routine'` 作用域；日志保留期读 `logger.getDebugRetentionDays()/getMainRetentionDays()`（运行时实际配置） |
+| 5 | P1 | diagnostic tail 路径穿越（processName 来自用户输入） | 进程名白名单 `^[a-z0-9_-]{1,32}$` + `path.resolve` 后仍在日志根目录内，否则 400 |
+| 6 | P1 | spool 导入不重新执行目录生命周期校验（status/significance/payload schema） | `importEnvelope` 复用 `validateLifecycleStatus` + 校验 `entry.payloadSchema` + significance 与目录一致，违规 quarantine |
+| 7 | P1 | Agent create/name/base-color/archive 无 activity 埋点；偏好更新不作用于当前运行时 | 上述操作补 `agent.created`/`agent.settings.changed`/`agent.base_color.changed`/`agent.archived`；preferences PUT 现调用 `instrument.applyObservabilityPreferences` + retention logger/spool `applyOptions/setBudgetBytes` 即时生效（无需重启） |
+
+**复现级测试 16 个**：observability-failclosed +5（rejected 返回值/audit 未配置 → 503+回滚 ×3、凭据 rejected 不写盘、记忆审批未配置回滚）、retention +4（audit 未配置拒绝删除、rejected 回滚、preview 与 run 同范围、可配置保留期生效）、observability-api +3（tail 穿越 8 变体 400、偏好即时生效、Agent 活动埋点）、store +4（spool 篡改 status/significance/payload → quarantine + 合法行回归）。

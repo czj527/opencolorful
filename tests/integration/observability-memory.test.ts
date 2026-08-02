@@ -19,6 +19,7 @@ import { SessionSummaryStore } from "../../src/storage/memory/summary-store.js";
 import { defaultMemoryAgentSettings, type MemoryMutationProposal } from "../../src/contracts/memory.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { MemoryAgentResolver } from "../../src/runtime/memory/resolver.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
 import { instrument } from "../../src/observability/instrument.js";
@@ -86,6 +87,7 @@ function makeApplier(database: Database.Database) {
     batchStore,
     watermarkStore,
     policy,
+    audit: new AuditRecorder({ database, producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" } }),
   });
   return { database, factStore, proposalStore, application };
 }
@@ -152,12 +154,15 @@ describe("T5 记忆审批与强度修改证据", () => {
     // 强度修改只记 id/数字
     const strengthPayload = JSON.parse(String(strengthRow["payload_json"])) as { summaryCode: string; attributes: { factId: string; from: number; to: number } };
     expect(strengthPayload.attributes).toMatchObject({ factId: String(fact.id), from: 50, to: 60 });
-    // audit 镜像：每个 applied 提案一条 approved + strength.changed 一条
+    // 严格审计（评审 P0 第三轮：与事实修改同事务 fail-closed）+ activity auditMirror 各一份
     const mirrors = database.prepare("SELECT action FROM audit_events ORDER BY id").all() as Array<{ action: string }>;
     expect(mirrors.map((row) => row.action).sort()).toEqual([
       "audit.memory.proposal_approved",
       "audit.memory.proposal_approved",
       "audit.memory.strength_changed",
+      "memory.proposal.approved",
+      "memory.proposal.approved",
+      "memory.strength.changed",
     ]);
     // 记忆正文绝不在任何 activity/audit 行中
     const serialized = JSON.stringify([...rows, ...database.prepare("SELECT * FROM audit_events").all()]);
@@ -244,6 +249,7 @@ describe("T5 MemoryAgentResolver 整理 run", () => {
         journalStore: new MemoryJournalStore(database),
         batchStore: new MemoryBatchStore(database),
         watermarkStore: new MemoryWatermarkStore(database),
+        audit: new AuditRecorder({ database, producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" } }),
         policy: new MemoryPolicy({
           factStore,
           recallStore: new MemoryRecallStore(database),

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type { MemoryMutationProposal } from "../../contracts/memory.js";
 import type { ResourceRef } from "../../contracts/observability.js";
 import { instrument } from "../../observability/instrument.js";
+import { assertDurableAudit, type AuditRecorder } from "../../observability/audit-recorder.js";
 import type { MemoryFactStore } from "../../storage/memory/fact-store.js";
 import type { MemoryEventStore } from "../../storage/memory/event-store.js";
 import type { MemoryJournalStore } from "../../storage/memory/journal-store.js";
@@ -18,7 +19,14 @@ export interface ApplicationResult {
 interface Deps {
   database: Database.Database; proposalStore: MemoryProposalStore; factStore: MemoryFactStore;
   eventStore: MemoryEventStore; journalStore: MemoryJournalStore; batchStore: MemoryBatchStore;
-  watermarkStore: MemoryWatermarkStore; policy: MemoryPolicy; now?: () => Date;
+  watermarkStore: MemoryWatermarkStore; policy: MemoryPolicy;
+  /**
+   * 评审 P0（第三轮）：记忆审批/遗忘/强度变更属 fail-closed 清单——
+   * 审计与事实修改同一 SQLite 事务（appendStrict 同库）；
+   * 审计未配置或未被接受 → 抛错 → 整体回滚。
+   */
+  audit?: AuditRecorder;
+  now?: () => Date;
 }
 function id(value: unknown): number { if (typeof value === "number") return value; if (typeof value === "string") return Number(value); throw new Error("事实 ID 无效"); }
 function journalType(type: MemoryMutationProposal["type"]): "remember" | "forget" | "supersede" | "merge" | "restore" { const mapped: Record<MemoryMutationProposal["type"], "remember" | "forget" | "supersede" | "merge" | "restore"> = { create_fact: "remember", strength_change: "remember", supersede: "supersede", merge: "merge", forget: "forget", restore: "restore", longterm_projection: "remember" }; return mapped[type]; }
@@ -79,6 +87,9 @@ export class ProposalApplication {
         this.deps.proposalStore.updatePayload(proposal.id, proposal.payload);
         this.deps.proposalStore.markStatus(proposal.id, "applied", { appliedAt: this.now().toISOString() });
         this.deps.journalStore.appendSystemIntent({ id: `proposal:${proposal.id}`, agentId: proposal.agentId, actor: "memory_agent", intentType: journalType(proposal.type), targetType: proposal.targetType === "event" ? "event" : "fact", ...(proposal.targetId ? { targetId: proposal.targetId } : {}), payload: { mutationType: proposal.type, proposalId: proposal.id, ...proposal.payload }, status: "applied", appliedAt: this.now().toISOString() });
+        // 评审 P0（第三轮）：审批/遗忘/强度变更与事实修改同一事务落严格审计——
+        // 审计未配置或未被接受 → 抛错 → 整个事务回滚，事实不会"已改但无审计"
+        this.recordStrictAudit(proposal);
         // Phase 11 T5：审批通过与逐类事实证据（auditMirror；只记 id/强度，不记正文）
         this.recordAppliedEvidence(proposal);
         result.applied.push(applied);
@@ -158,6 +169,64 @@ export class ProposalApplication {
   private assertOwnFact(proposal: MemoryMutationProposal, factId: number): void {
     const fact = this.deps.factStore.getById(factId);
     if (fact !== undefined && fact.agentId !== proposal.agentId) throw new Error("目标事实不属于当前 Agent");
+  }
+
+  /**
+   * 评审 P0（第三轮）：严格审计（fail-closed）。与事实修改同一 SQLite 事务——
+   * appendStrict 同库写入，任何失败（含审计未配置）抛错 → 整体回滚。
+   * 只记 id/类型/强度，绝不记录事实正文。
+   */
+  private recordStrictAudit(proposal: MemoryMutationProposal): void {
+    if (this.deps.audit === undefined) {
+      throw new Error("可观测性未初始化，记忆审批拒绝执行");
+    }
+    const scope = { ownerAgentId: proposal.agentId };
+    const factTarget = (id: string | number | undefined): ResourceRef | undefined =>
+      id === undefined ? undefined : { kind: "memory_fact" as const, id: String(id) };
+    const target = factTarget(proposal.targetId);
+    const actor = { kind: "memory_agent" as const, id: proposal.agentId };
+    // 审批通过本身（每个 applied 提案）
+    assertDurableAudit(this.deps.audit.appendStrict({
+      eventName: "audit.memory.proposal_approved",
+      payload: { action: "memory.proposal.approved", decision: "allowed", changedFields: ["memory"] },
+      actor,
+      executor: actor,
+      scope,
+      ...(target !== undefined ? { target } : {}),
+    }), "记忆审批");
+    // 逐类变更证据（目录固定的 audit 事件）
+    if (proposal.type === "strength_change") {
+      assertDurableAudit(this.deps.audit.appendStrict({
+        eventName: "audit.memory.strength_changed",
+        payload: {
+          action: "memory.strength.changed", decision: "allowed",
+          changedFields: ["retentionStrength"],
+        },
+        actor,
+        executor: actor,
+        scope,
+        target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: "unknown" },
+      }), "记忆强度变更");
+    } else if (proposal.type === "forget" && proposal.targetType === "fact") {
+      assertDurableAudit(this.deps.audit.appendStrict({
+        eventName: "audit.memory.fact_forgotten",
+        payload: { action: "memory.fact.forgotten", decision: "allowed", changedFields: ["status"] },
+        actor,
+        executor: actor,
+        scope,
+        target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: "unknown" },
+      }), "记忆遗忘");
+    } else if (proposal.type === "supersede") {
+      const supersededId = proposal.payload.supersededFactId as string | number | undefined;
+      assertDurableAudit(this.deps.audit.appendStrict({
+        eventName: "audit.memory.fact_superseded",
+        payload: { action: "memory.fact.superseded", decision: "allowed", changedFields: ["status", "valid_until"] },
+        actor,
+        executor: actor,
+        scope,
+        target: factTarget(supersededId) ?? { kind: "memory_fact", id: "unknown" },
+      }), "记忆取代");
+    }
   }
 
   /**

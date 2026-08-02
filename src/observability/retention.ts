@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type { DiagnosticLogger } from "./diagnostic-logger.js";
 import type { EmergencySpool } from "./emergency-spool.js";
+import { assertDurableAudit, type AuditRecorder, type AuditRecordInput } from "./audit-recorder.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 T9：幂等 Retention / 按日聚合 / 预算（plans/phase-11.md §九）
@@ -47,6 +48,11 @@ export class RetentionService {
     private readonly database: Database.Database,
     private readonly logger?: DiagnosticLogger,
     private readonly spool?: EmergencySpool,
+    /**
+     * 评审 P0（第三轮）：删除属 fail-closed 清单——runRetention 的聚合/watermark/删除
+     * 与 Audit 同一事务，审计未被接受（含未配置）→ 抛错 → 删除整体回滚。
+     */
+    private readonly audit?: AuditRecorder,
     now?: () => Date,
   ) {
     this.now = now ?? (() => new Date());
@@ -85,20 +91,22 @@ export class RetentionService {
       params.push(cutoff);
       return { where, params };
     };
-    const { where, params } = scope("1=1");
+    // 评审 P1（第三轮）：preview 必须与实际删除范围一致——只统计 routine
+    // （notable/milestone 长期保留，preview 不得虚报它们会被删除）
+    const { where, params } = scope("significance = 'routine'");
     const stats = this.database
       .prepare(
         `SELECT COUNT(*) AS rows, COALESCE(MIN(recorded_at), '') AS oldest, COALESCE(MAX(recorded_at), '') AS newest,
                 COALESCE(SUM(LENGTH(payload_json)), 0) AS bytes FROM activity_events WHERE ${where}`,
       )
       .get(...params) as { rows: number; oldest: string; newest: string; bytes: number };
-    // diagnostic 文件预览（沿用 7/30 天保留规则）
+    // diagnostic 文件预览（沿用 logger 实际配置的保留天数，不再硬编码 7/30）
     const logFilesToDelete: string[] = [];
     let logBytesToFree = 0;
     if (this.logger !== undefined) {
       try {
-        const cutoffDebug = this.now().getTime() - 7 * 24 * 3600 * 1000;
-        const cutoffMain = this.now().getTime() - 30 * 24 * 3600 * 1000;
+        const cutoffDebug = this.now().getTime() - this.logger.getDebugRetentionDays() * 24 * 3600 * 1000;
+        const cutoffMain = this.now().getTime() - this.logger.getMainRetentionDays() * 24 * 3600 * 1000;
         for (const file of this.logger.measureDiskFiles()) {
           const datePrefix = file.name.slice(0, 10);
           const fileDay = Date.parse(`${datePrefix}T00:00:00Z`);
@@ -124,11 +132,25 @@ export class RetentionService {
   }
 
   /** 幂等执行：聚合 → watermark → 删除（同一事务）；重复执行结果一致 */
-  runRetention(days: number): RetentionRunResult {
+  runRetention(days: number, auditInput?: AuditRecordInput): RetentionRunResult {
     const cutoff = this.cutoffDate(days);
     const watermark = this.getWatermark();
     let aggregated = 0;
     let deleted = 0;
+    // 评审 P0（第三轮）：审计未配置 → 拒绝执行删除（fail-closed，不再"删完才想起审计"）
+    if (this.audit === undefined) {
+      throw new Error("可观测性未初始化，拒绝执行 retention");
+    }
+    const auditEnvelope = auditInput ?? {
+      eventName: "audit.observability.retention_executed",
+      payload: {
+        action: "observability.retention.executed",
+        decision: "allowed",
+        changedFields: ["activity_events"],
+      },
+      actor: { kind: "system", id: "retention" },
+      executor: { kind: "service", id: "retention" },
+    } as AuditRecordInput;
     this.database.transaction(() => {
       const params: unknown[] = [];
       let where = "1=1";
@@ -172,6 +194,8 @@ export class RetentionService {
         .prepare(`DELETE FROM activity_events WHERE ${where} AND significance = 'routine'`)
         .run(...params);
       deleted = result.changes;
+      // 4) 删除与 Audit 同一事务（fail-closed）：审计未被接受 → 抛错 → 删除回滚
+      assertDurableAudit(this.audit!.appendStrict(auditEnvelope), "retention 删除");
     })();
     // diagnostic 文件清理（7/30 天规则；独立于 activity 事务）
     let logFilesDeleted: string[] = [];

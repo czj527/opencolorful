@@ -19,6 +19,7 @@ import { SessionSummaryStore } from "../../src/storage/memory/summary-store.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
 import { MemoryAgentResolver } from "../../src/runtime/memory/resolver.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -59,6 +60,7 @@ function createApp() {
   });
   const application = new ProposalApplication({
     database, proposalStore, factStore, eventStore, journalStore, batchStore, watermarkStore, policy,
+    audit: new AuditRecorder({ database, producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" } }),
   });
   const resolver = new MemoryAgentResolver({
     batchStore, journalStore, factStore, eventStore, recallStore, proposalStore, watermarkStore, summaryStore,

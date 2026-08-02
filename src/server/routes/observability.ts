@@ -39,6 +39,8 @@ export interface ObservabilityRouteDeps {
   readonly getHealth: () => ObservabilityHealth | undefined;
   /** observability 偏好读写（GET/PUT /api/preferences/observability） */
   readonly preferencesStore?: import("../../config/preferences-store.js").PreferencesStore;
+  /** 评审 P0（第三轮）：retention 删除与 Audit 同事务（fail-closed） */
+  readonly audit?: import("../../observability/audit-recorder.js").AuditRecorder;
 }
 
 const STREAM_POLL_MS = 1_000;
@@ -84,9 +86,9 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     processType: "server", bootId: "retention",
     budgetBytes: obsPrefs.emergencySpoolBudgetBytes,
   });
-  const retention = new RetentionService(deps.database, retentionLogger, retentionSpool);
-  /** retention 默认天数：routine 保留期（偏好，缺省 180） */
-  const defaultRetentionDays = obsPrefs.activityRetentionDays.routine;
+  const retention = new RetentionService(deps.database, retentionLogger, retentionSpool, deps.audit);
+  /** retention 默认天数：routine 保留期（偏好，缺省 180；PUT 偏好后同步更新） */
+  let defaultRetentionDays = obsPrefs.activityRetentionDays.routine;
 
   // ─── Activity 查询 ─────────────────────────────────────────────
 
@@ -273,10 +275,18 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
   // ─── diagnostic tail ───────────────────────────────────────────
 
   app.get("/api/observability/diagnostic/tail", (context) => {
+    // 评审 P1（第三轮）：进程名白名单 + resolve 后仍在日志根目录内（防路径穿越/符号链接逃逸）
     const processName = context.req.query("process") ?? "server";
+    if (!/^[a-z0-9_-]{1,32}$/i.test(processName)) {
+      return context.json({ code: "INVALID_INPUT", message: "进程名不合法" }, 400);
+    }
     const fileKind = context.req.query("file") === "debug" ? "debug" : "main";
     const lines = parseOptionalInt(context.req.query("lines") ?? undefined, 200, 1_000);
-    const dir = path.join(deps.paths.logs, "runtime", processName);
+    const logsRoot = path.resolve(deps.paths.logs);
+    const dir = path.resolve(path.join(logsRoot, "runtime", processName));
+    if (dir !== path.join(logsRoot, "runtime", processName) || !dir.startsWith(logsRoot + path.sep)) {
+      return context.json({ code: "INVALID_INPUT", message: "路径越界" }, 400);
+    }
     if (!fs.existsSync(dir)) {
       return context.json({ process: processName, file: fileKind, lines: 0, totalBytes: 0, tail: [] });
     }
@@ -342,7 +352,18 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     const days = typeof body.days === "number" && Number.isInteger(body.days) && body.days > 0 && body.days <= 365
       ? body.days
       : defaultRetentionDays;
-    const result = retention.runRetention(days);
+    // 评审 P0（第三轮）：删除与 Audit 同一事务（fail-closed）——
+    // runRetention 内部在聚合/删除的事务里落 audit；审计未被接受 → 删除回滚并 500
+    const result = retention.runRetention(days, {
+      eventName: "audit.observability.retention_executed",
+      payload: {
+        action: "observability.retention.executed",
+        decision: "allowed",
+        changedFields: ["activity_events"],
+      },
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "service", id: "agent-server" },
+    });
     // 运维动作本身进入 audit（计划 §九：日志清理与 ledger reset 本身进入 Audit）
     // 清理本身进入 Audit（auditMirror：audit.storage.retention_run）
     instrument.activity({
@@ -409,8 +430,20 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
       try {
         const result = deps.preferencesStore!.update({ observability: body as never });
-        instrument.info("preferences.observability.updated", "observability 偏好已更新");
-        return context.json(result.observability ?? {});
+        // 评审 P1（第三轮）：偏好更新立即应用到当前运行时（logger/spool 无需重启）；
+        // retention 路由的 logger/spool 与默认天数同步重配
+        const prefs = result.observability ?? defaultObservabilityPreferences();
+        instrument.applyObservabilityPreferences(prefs);
+        retentionLogger.applyOptions({
+          minLevel: prefs.diagnosticLevel,
+          diskBudgetBytes: prefs.diagnosticDiskBudgetBytes,
+          debugRetentionDays: prefs.diagnosticRetentionDays.debug,
+          mainRetentionDays: prefs.diagnosticRetentionDays.main,
+        });
+        retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
+        defaultRetentionDays = prefs.activityRetentionDays.routine;
+        instrument.info("preferences.observability.updated", "observability 偏好已更新并应用到当前运行时");
+        return context.json(prefs);
       } catch (error) {
         return context.json({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "偏好更新失败" }, 400);
       }

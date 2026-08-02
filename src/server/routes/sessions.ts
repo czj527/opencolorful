@@ -11,6 +11,7 @@ import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PreferencesStore } from "../../config/preferences-store.js";
 import type { AgentStore } from "../../config/agent-store.js";
+import { instrument } from "../../observability/instrument.js";
 
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -211,10 +212,14 @@ export function registerSessionRoutes(
       if (promptService?.invalidate(sessionId) === "busy") {
         return context.json(createApiError("CONFLICT", "Session 正在运行，暂时不能修改设置"), 409);
       }
-      // 评审 P0-1：工作目录变更属 fail-closed 清单——索引修改与 Audit 同一
-      // SQLite 事务（runAuditedTransaction），Audit 无法持久化则整体回滚。
+      // 评审 P0（第三轮）：工作目录变更属 fail-closed 清单——索引修改与 Audit 同一
+      // SQLite 事务（runAuditedTransaction），Audit 无法持久化则整体回滚；
+      // 审计未配置同样拒绝（不再静默放行）。
       // 纯工具模式/思维级别等非高风险字段不走审计事务。
-      if (audit !== undefined && cwdChanged) {
+      if (cwdChanged) {
+        if (audit === undefined) {
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，工作目录修改被拒绝"), 503);
+        }
         try {
           audit.runAuditedTransaction(
             {
@@ -245,6 +250,17 @@ export function registerSessionRoutes(
           ...(requestedCwd !== undefined ? { workspaceCwd: requestedCwd } : {}),
           ...(typeof body.workspaceConfirmed === "boolean" ? { workspaceConfirmed: body.workspaceConfirmed } : {}),
           ...(typeof body.thinkingLevel === "string" ? { thinkingLevel: body.thinkingLevel } : {}),
+        });
+      }
+      // 评审 P1（第三轮）：工作目录变更进 Activity 时间线（audit 已 fail-closed 在前）
+      if (cwdChanged) {
+        instrument.activity({
+          eventName: "session.workspace.bound",
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "session", id: sessionId },
+          scope: { sessionId },
+          payload: { summaryCode: "session_workspace_bound" },
         });
       }
       return context.json(sessionService.getView(sessionId));

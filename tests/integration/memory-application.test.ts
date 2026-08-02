@@ -15,6 +15,7 @@ import { MemoryProposalStore } from "../../src/storage/memory/proposal-store.js"
 import { MemoryBatchStore } from "../../src/storage/memory/batch-store.js";
 import { MemoryWatermarkStore } from "../../src/storage/memory/recovery-store.js";
 import { MemoryEventStore } from "../../src/storage/memory/event-store.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
@@ -62,6 +63,11 @@ function makeApplier(database: Database.Database) {
     INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
     VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
   `).run(crypto.randomUUID());
+  // 评审 P0（第三轮）：记忆审批/遗忘/强度与事实修改同事务严格审计（fail-closed）
+  const audit = new AuditRecorder({
+    database,
+    producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+  });
   const application = new ProposalApplication({
     database,
     proposalStore,
@@ -71,6 +77,7 @@ function makeApplier(database: Database.Database) {
     batchStore,
     watermarkStore,
     policy,
+    audit,
   });
   return { factStore, eventStore, journalStore, recallStore, proposalStore, policy, application };
 }

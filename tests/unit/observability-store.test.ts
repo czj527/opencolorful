@@ -77,6 +77,8 @@ function makeEnvelope(overrides: Partial<ActivityEnvelope> = {}): ActivityEnvelo
     eventVersion: 1,
     eventId: `evt-${Math.random().toString(16).slice(2, 10)}`,
     eventName: "system.started",
+    // 评审 P1（第三轮）：spool 导入重新校验 lifecycle status（system.started 终态）
+    status: "completed",
     occurredAt: "2026-01-01T00:00:00.000Z",
     recordedAt: "2026-01-01T00:00:00.000Z",
     level: "info",
@@ -554,6 +556,52 @@ describe("Phase 11 复审修复（评审 P0-3 / P1-9 复现级测试）", () => 
     });
     expect(result.kind).toBe("rejected");
     if (result.kind === "rejected") expect(result.reason).toContain("payload");
+    db.close();
+  });
+});
+
+describe("Phase 11 第三轮复审：spool 导入重新执行目录校验（P1-3 复现级测试）", () => {
+  it("篡改 lifecycle status（终态事件改成 denied）→ quarantine，不落库", () => {
+    const directory = makeTempDir("t11-spoolstatus-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    // system.started 是终态事件（terminalStatuses 只有 completed）——被篡改为 denied
+    const tampered = makeEnvelope({ status: "denied" as never });
+    expect(recorder.importEnvelope(tampered)).toEqual({ ok: false, error: "quarantine" });
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number };
+    expect(rows.n).toBe(0);
+    db.close();
+  });
+
+  it("伪造 significance（notable 事件声称 milestone）→ quarantine", () => {
+    const directory = makeTempDir("t11-spoolsignificance-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const tampered = makeEnvelope({ significance: "milestone" as never });
+    expect(recorder.importEnvelope(tampered)).toEqual({ ok: false, error: "quarantine" });
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number };
+    expect(rows.n).toBe(0);
+    db.close();
+  });
+
+  it("payload 被篡改（塞入额外字段/缺字段）→ quarantine，不绕过 payloadSchema", () => {
+    const directory = makeTempDir("t11-spoolpayload-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const tampered = makeEnvelope({ payload: { summaryCode: "system_started", smuggled: "x" } as never });
+    expect(recorder.importEnvelope(tampered)).toEqual({ ok: false, error: "quarantine" });
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number };
+    expect(rows.n).toBe(0);
+    db.close();
+  });
+
+  it("合法 spool 行仍可导入（回归：校验不误伤正常数据）", () => {
+    const directory = makeTempDir("t11-spoolok-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    expect(recorder.importEnvelope(makeEnvelope())).toEqual({ ok: true });
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number };
+    expect(rows.n).toBe(1);
     db.close();
   });
 });

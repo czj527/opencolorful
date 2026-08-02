@@ -85,6 +85,14 @@ class Instrument {
   }
 
   /**
+   * 评审 P1（第三轮）：observability 偏好 PUT 后应用到当前运行时的
+   * logger/spool（无需重启），供路由层调用。
+   */
+  applyObservabilityPreferences(prefs: import("../contracts/preferences.js").ObservabilityPreferences): void {
+    this.context?.applyPreferences(prefs);
+  }
+
+  /**
    * fail-closed 审计（评审 P0-1）：严格路径，任何失败直接抛出。
    * 可观测性未初始化时同样抛错（绝不静默放行高风险修改）。
    */
