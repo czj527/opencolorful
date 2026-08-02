@@ -284,6 +284,18 @@ export class DiagnosticLogger {
     } catch { /* 保留清理失败不递归告警 */ }
   }
 
+  /** 列出日志目录内 JSONL 文件名与字节数（retention 预览用） */
+  measureDiskFiles(): Array<{ name: string; bytes: number }> {
+    try {
+      if (!fs.existsSync(this.logsRoot)) return [];
+      return fs.readdirSync(this.logsRoot)
+        .filter((name) => name.endsWith(".jsonl"))
+        .map((name) => ({ name, bytes: fs.statSync(path.join(this.logsRoot, name)).size }));
+    } catch {
+      return [];
+    }
+  }
+
   measureDisk(): DiskUsage {
     let totalBytes = 0;
     let debugBytes = 0;

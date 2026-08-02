@@ -79,6 +79,11 @@ class Instrument {
     return this.context?.getHealth();
   }
 
+  /** audit ledger reset（显式确认后调用；旧 epoch 清理 + reset 记录） */
+  resetAuditLedger(input: { actor: { kind: "user"; id: string }; reason: string; targetCount?: number }): { newEpoch: number; deleted: number } | undefined {
+    return this.context?.audit.resetLedger(input);
+  }
+
   // ─── 基础透传（未 init 时 no-op / 独立兜底） ──────────────────
 
   activity(input: ActivityRecordInput): ActivityAcceptResult | undefined {

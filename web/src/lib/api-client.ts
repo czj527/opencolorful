@@ -340,8 +340,12 @@ export class ApiClient {
     );
   }
 
-  // T9 实现生成诊断包；当前未实现时后端返回 404/501，调用方捕获 ApiClientError.status 处理。
-  async createObservabilityExport(): Promise<{ status: string }> {
+  async createObservabilityExport(): Promise<{ path: string; manifest: { generatedAt: string; rawPayloadIncluded: boolean; factSourcesIncluded: boolean; rawLogsIncluded: boolean; includedSections: string[] } }> {
     return this.request("POST", "/api/observability/export");
+  }
+
+  /** audit ledger reset：必须显式 confirm: true */
+  async resetObservabilityAuditLedger(reason: string): Promise<{ newEpoch: number; deleted: number }> {
+    return this.request("POST", "/api/observability/audit/reset", { confirm: true, reason });
   }
 }

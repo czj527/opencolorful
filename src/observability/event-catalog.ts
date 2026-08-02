@@ -57,6 +57,8 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "storage.repair.failed", eventVersion: 1, channel: "activity", category: "storage", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...notable }),
       entry({ eventName: "storage.corruption.detected", eventVersion: 1, channel: "activity", category: "storage", defaultLevel: "error", lifecycleRole: "point", ...notable }),
       entry({ eventName: "storage.write.failed", eventVersion: 1, channel: "activity", category: "storage", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...notable }),
+      entry({ eventName: "storage.retention.run.completed", eventVersion: 1, channel: "activity", category: "storage", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...notable, auditMirror: "audit.storage.retention_run" }),
+      entry({ eventName: "storage.export.completed", eventVersion: 1, channel: "activity", category: "storage", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...notable, auditMirror: "audit.storage.export" }),
 
       // ── Agent 与 Session ──
       entry({ eventName: "agent.created", eventVersion: 1, channel: "activity", category: "agent", defaultLevel: "info", lifecycleRole: "point", significance: "milestone" }),
@@ -202,6 +204,8 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "audit.observability.retention_executed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "point", significance: "notable" }),
       entry({ eventName: "audit.observability.export_created", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "point", significance: "notable" }),
       entry({ eventName: "audit.observability.ledger_reset", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "point", significance: "milestone" }),
+      entry({ eventName: "audit.storage.retention_run", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "point", significance: "notable" }),
+      entry({ eventName: "audit.storage.export", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "point", significance: "notable" }),
     ] as EventCatalogEntry[]
   ).map((item) => [item.eventName, item] as const),
 );

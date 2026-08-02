@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import type { ApiClient } from "../../lib/api-client.js";
 import type { AuditRow } from "../../lib/types.js";
 import { Badge, Button, EmptyState, Select, Spinner } from "../../components/ui/index.js";
@@ -67,6 +67,26 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
     void load(null);
   }, [load]);
 
+  const [resetting, setResetting] = useState(false);
+  const [resetState, setResetState] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+
+  const handleReset = useCallback(() => {
+    if (!window.confirm("确认重置当前 ledger epoch？旧 epoch 的全部审计记录将被删除并留下 reset 记录（不可恢复）。")) return;
+    void (async () => {
+      setResetting(true);
+      setResetState(null);
+      try {
+        const result = await api.resetObservabilityAuditLedger("Web 运维显式重置");
+        setResetState({ kind: "ok", message: `已重置：epoch ${result.newEpoch}，删除 ${result.deleted} 条` });
+        await load(null);
+      } catch (cause) {
+        setResetState({ kind: "error", message: cause instanceof Error ? cause.message : "重置失败" });
+      } finally {
+        setResetting(false);
+      }
+    })();
+  }, [api, load]);
+
   return (
     <section className={styles.tabPane} aria-label="安全审计">
       <div className={styles.filterBar}>
@@ -78,6 +98,22 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
           </Select>
         </label>
         <span className={styles.muted}>审计账本只读，无编辑或删除入口。</span>
+        {auditEpoch !== null && (
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={resetting}
+            onClick={handleReset}
+            data-testid="audit-reset-button"
+          >
+            <AlertTriangle size={14} /> 重置账本
+          </Button>
+        )}
+        {resetState !== null && (
+          <span className={resetState.kind === "error" ? styles.inlineError : styles.okNote} role="status" data-testid="audit-reset-status">
+            {resetState.message}
+          </span>
+        )}
       </div>
 
       {error !== null && (

@@ -224,6 +224,122 @@ describe("T6 operator SSE（重连不重不漏 / gap / spool import 高水位）
   });
 });
 
+describe("T9 retention / audit reset / export 端点", () => {
+  function seedOldRows(db: ReturnType<typeof openMetadataDatabase>, recordedAt: string): void {
+    db.prepare(
+      `INSERT INTO activity_events
+        (event_id, schema_version, event_version, recorded_at, occurred_at, event_name, category,
+         level, status, significance, actor_kind, actor_id, executor_kind, executor_id,
+         trace_id, span_id, producer_component, producer_process_type, boot_id, search_text, payload_json)
+       VALUES (?, 1, 1, ?, ?, 'turn.completed', 'turn', 'info', 'completed', 'routine',
+         'system', 'u', 'service', 'u', 'trace-1', 'span-1', 'unit-test', 'server', 'boot', 'turn.completed', '{}')`,
+    )
+      .run(`evt-${Math.random().toString(16).slice(2, 10)}`, recordedAt, recordedAt);
+  }
+
+  it("retention preview 只读 + run 幂等（删除前聚合、audit 不动）", async () => {
+    const { db, paths } = makeFixture();
+    seedOldRows(db, "2026-01-01T00:00:00.000Z");
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+    });
+    const base = "http://127.0.0.1";
+    const preview = await (await app.request(`${base}/api/observability/retention/preview`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ days: 30 }),
+    })).json() as { activityRows: number };
+    expect(preview.activityRows).toBe(1);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number }).n).toBe(1); // preview 只读
+    const run = await (await app.request(`${base}/api/observability/retention/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ days: 30 }),
+    })).json() as { aggregated: number; deleted: number };
+    expect(run.deleted).toBe(1);
+    expect(run.aggregated).toBe(1);
+    // 聚合已落 metrics；audit 不动；剩余 activity 只有 run 端点自身的镜像事件
+    expect((db.prepare("SELECT COUNT(*) AS n FROM activity_daily_metrics").get() as { n: number }).n).toBe(1);
+    const remaining = db.prepare("SELECT event_name FROM activity_events").all() as Array<{ event_name: string }>;
+    expect(remaining).toEqual([{ event_name: "storage.retention.run.completed" }]);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'audit.storage.retention_run'").get() as { n: number }).n).toBe(1);
+    // 幂等：重复执行一致
+    const again = await (await app.request(`${base}/api/observability/retention/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ days: 30 }),
+    })).json() as { deleted: number };
+    expect(again.deleted).toBe(0);
+  });
+
+  it("audit reset 需要显式 confirm；确认后 epoch+1 且旧记录清理（reset 记录 + audit 镜像）", async () => {
+    const { db, paths } = makeFixture();
+    // 先造一条 audit（镜像一条 activity 即可触发）
+    instrument.activity({
+      eventName: "sandbox.path.denied",
+      status: "denied",
+      operationId: `sb-${Date.now()}`,
+      actor: { kind: "agent", id: "a1" },
+      executor: { kind: "agent", id: "a1" },
+      scope: { ownerAgentId: "a1" },
+      payload: { summaryCode: "sandbox_path_denied", attributes: { operation: "read", level: "BLOCKED" } },
+    });
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+    });
+    const base = "http://127.0.0.1";
+    // 无 confirm → 400
+    const noConfirm = await app.request(`${base}/api/observability/audit/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "测试" }),
+    });
+    expect(noConfirm.status).toBe(400);
+    // 显式确认 → 成功
+    const reset = await (await app.request(`${base}/api/observability/audit/reset`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: true, reason: "测试重置" }),
+    })).json() as { newEpoch: number; deleted: number };
+    expect(reset.newEpoch).toBe(2);
+    expect(reset.deleted).toBe(1);
+    const rows = db.prepare("SELECT action, ledger_epoch FROM audit_events").all() as Array<{ action: string; ledger_epoch: number }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ action: "audit.ledger_reset", ledger_epoch: 2 });
+  });
+
+  it("export 生成 bundle：manifest 隐私标志、路径防穿越（不含用户输入）", async () => {
+    const { db, paths } = makeFixture();
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+    });
+    const response = await app.request("http://127.0.0.1/api/observability/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ traceId: "any-trace" }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as { path: string; manifest: { rawPayloadIncluded: boolean; factSourcesIncluded: boolean; rawLogsIncluded: boolean; includedSections: string[] } };
+    expect(fs.existsSync(body.path)).toBe(true);
+    expect(body.path).toContain(path.join("logs", "runtime", "exports"));
+    expect(body.manifest).toMatchObject({ rawPayloadIncluded: false, factSourcesIncluded: false, rawLogsIncluded: false });
+    // 导出镜像进入 audit
+    expect((db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'audit.storage.export'").get() as { n: number }).n).toBe(1);
+  });
+});
+
 describe("T6 client-events 安全矩阵", () => {
   async function post(app: ReturnType<typeof createServerApp>["app"], body: unknown, headers: Record<string, string> = {}) {
     return app.request("http://127.0.0.1/api/observability/client-events", {

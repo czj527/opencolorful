@@ -21,14 +21,18 @@ const EXPORT_PARTS: Array<{ readonly name: string; readonly description: string 
 
 export function ExportView({ api, health }: ExportViewProps) {
   const [busy, setBusy] = useState(false);
-  const [state, setState] = useState<{ kind: "pending" | "ok" | "error"; message: string } | null>(null);
+  const [state, setState] = useState<{ kind: "pending" | "ok" | "error"; message: string; detail?: string } | null>(null);
 
   const handleExport = useCallback(async () => {
     setBusy(true);
     setState(null);
     try {
-      await api.createObservabilityExport();
-      setState({ kind: "ok", message: "导出已生成，请查看导出目录。" });
+      const result = await api.createObservabilityExport();
+      setState({
+        kind: "ok",
+        message: "诊断包已生成（二次脱敏 + privacy manifest）",
+        detail: `输出：${result.path}；rawPayload=${result.manifest.rawPayloadIncluded} factSources=${result.manifest.factSourcesIncluded} rawLogs=${result.manifest.rawLogsIncluded}；sections：${result.manifest.includedSections.join(", ")}`,
+      });
     } catch (cause) {
       const status = typeof cause === "object" && cause !== null && "status" in cause
         ? (cause as ApiClientError).status
@@ -63,9 +67,10 @@ export function ExportView({ api, health }: ExportViewProps) {
           <Button size="sm" loading={busy} onClick={() => void handleExport()}><Download size={14} /> 生成导出</Button>
         </div>
         {state !== null && (
-          <p className={state.kind === "pending" ? styles.pendingNote : state.kind === "ok" ? styles.okNote : styles.inlineError} role="status">
-            {state.message}
-          </p>
+          <div className={state.kind === "pending" ? styles.pendingNote : state.kind === "ok" ? styles.okNote : styles.inlineError} role="status">
+            <p>{state.message}</p>
+            {state.detail !== undefined && <p className={styles.muted} data-testid="export-detail">{state.detail}</p>}
+          </div>
         )}
       </Card>
 

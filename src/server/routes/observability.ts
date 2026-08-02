@@ -5,9 +5,15 @@ import { streamSSE } from "hono/streaming";
 
 import type Database from "better-sqlite3";
 import type { RuntimePaths } from "../../config/paths.js";
+import { PLATFORM_VERSION } from "../../index.js";
 import type { ObservabilityHealth } from "../../observability/observability-context.js";
 import { ObservabilityQuery, type PageCursor } from "../../observability/observability-query.js";
+import { RetentionService } from "../../observability/retention.js";
+import { buildSupportBundle } from "../../observability/support-bundle.js";
 import { getStreamWatermark, setStreamWatermark } from "../../observability/stream-watermark.js";
+import { DiagnosticLogger } from "../../observability/diagnostic-logger.js";
+import { EmergencySpool } from "../../observability/emergency-spool.js";
+import { CURRENT_SCHEMA_VERSION } from "../../storage/migrations.js";
 import { instrument } from "../../observability/instrument.js";
 import {
   CLIENT_EVENT_MAX_BODY_BYTES,
@@ -30,6 +36,8 @@ export interface ObservabilityRouteDeps {
   readonly database: Database.Database;
   readonly paths: RuntimePaths;
   readonly getHealth: () => ObservabilityHealth | undefined;
+  /** observability 偏好读写（GET/PUT /api/preferences/observability） */
+  readonly preferencesStore?: import("../../config/preferences-store.js").PreferencesStore;
 }
 
 const STREAM_POLL_MS = 1_000;
@@ -55,6 +63,19 @@ function parseOptionalInt(value: string | undefined, fallback: number, max: numb
 export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteDeps): void {
   const query = new ObservabilityQuery(deps.database);
   const limiter = new ClientEventRateLimiter();
+  // retention/export 用的 logger/spool 只做文件级操作（与进程内实例同目录）
+  const retentionLogger = new DiagnosticLogger({
+    logsRoot: path.join(deps.paths.logs, "runtime", "server"),
+    producer: {
+      component: "retention", processType: "server", processId: "0",
+      bootId: "retention", appVersion: PLATFORM_VERSION, hostPlatform: process.platform,
+    },
+  });
+  const retentionSpool = new EmergencySpool({
+    spoolRoot: path.join(deps.paths.logs, "emergency"),
+    processType: "server", bootId: "retention",
+  });
+  const retention = new RetentionService(deps.database, retentionLogger, retentionSpool);
 
   // ─── Activity 查询 ─────────────────────────────────────────────
 
@@ -244,6 +265,98 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       tail,
     });
   });
+
+  // ─── T9：retention / audit reset / export / preferences ───────────
+
+  app.post("/api/observability/retention/preview", async (context) => {
+    let body: { days?: unknown };
+    try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+    const days = typeof body.days === "number" && Number.isInteger(body.days) && body.days > 0 && body.days <= 365
+      ? body.days
+      : 30;
+    return context.json(retention.previewRetention(days));
+  });
+
+  app.post("/api/observability/retention/run", async (context) => {
+    let body: { days?: unknown };
+    try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+    const days = typeof body.days === "number" && Number.isInteger(body.days) && body.days > 0 && body.days <= 365
+      ? body.days
+      : 30;
+    const result = retention.runRetention(days);
+    // 运维动作本身进入 audit（计划 §九：日志清理与 ledger reset 本身进入 Audit）
+    // 清理本身进入 Audit（auditMirror：audit.storage.retention_run）
+    instrument.activity({
+      eventName: "storage.retention.run.completed",
+      status: "completed",
+      operationId: `retention-${days}-${Date.now()}`,
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "service", id: "agent-server" },
+      payload: {
+        summaryCode: "storage_retention_run_completed",
+        attributes: { days, aggregated: result.aggregated, deleted: result.deleted },
+      },
+    });
+    return context.json(result);
+  });
+
+  app.post("/api/observability/audit/reset", async (context) => {
+    let body: { confirm?: unknown; reason?: unknown };
+    try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+    if (body.confirm !== true) {
+      return context.json({ code: "CONFIRM_REQUIRED", message: "必须显式 confirm: true" }, 400);
+    }
+    const reason = typeof body.reason === "string" && body.reason.trim() !== "" ? body.reason.slice(0, 256) : "手动重置";
+    // 预览当前 epoch 记录数（显式确认前的最后一眼）
+    const epoch = instrument.getHealth()?.auditEpoch ?? 1;
+    const targetCount = (deps.database.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE ledger_epoch = ?").get(epoch) as { n: number }).n;
+    const result = instrument.resetAuditLedger({ actor: { kind: "user", id: "web" }, reason, targetCount });
+    if (result === undefined) return context.json({ code: "UNAVAILABLE", message: "可观测性未初始化" }, 503);
+    return context.json(result);
+  });
+
+  app.post("/api/observability/export", async (context) => {
+    let body: { traceId?: unknown } = {};
+    try { body = await context.req.json(); } catch { /* 空 body 也可导出 */ }
+    const traceId = typeof body.traceId === "string" && body.traceId.trim() !== "" ? body.traceId.trim().slice(0, 64) : undefined;
+    const result = buildSupportBundle({
+      paths: deps.paths,
+      appVersion: PLATFORM_VERSION,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      database: deps.database,
+      query,
+      health: deps.getHealth(),
+      ...(traceId !== undefined ? { traceId } : {}),
+    });
+    // 导出本身进入 Audit（auditMirror：audit.storage.export）
+    instrument.activity({
+      eventName: "storage.export.completed",
+      status: "completed",
+      operationId: `export-${Date.now()}`,
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "service", id: "agent-server" },
+      payload: { summaryCode: "storage_export_completed" },
+    });
+    return context.json({ path: result.path, manifest: result.manifest });
+  });
+
+  if (deps.preferencesStore !== undefined) {
+    app.get("/api/preferences/observability", (context) => {
+      const prefs = deps.preferencesStore!.get().observability;
+      return context.json(prefs ?? {});
+    });
+    app.put("/api/preferences/observability", async (context) => {
+      let body: unknown;
+      try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+      try {
+        const result = deps.preferencesStore!.update({ observability: body as never });
+        instrument.info("preferences.observability.updated", "observability 偏好已更新");
+        return context.json(result.observability ?? {});
+      } catch (error) {
+        return context.json({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "偏好更新失败" }, 400);
+      }
+    });
+  }
 
   // ─── 受限 client-events ────────────────────────────────────────
 
