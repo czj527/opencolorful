@@ -286,7 +286,7 @@ describe("T3 reconcile（文件操作）与 startupRecovery", () => {
   it("startupRecovery：reconcile 旧 boot + 幂等导入 spool + 记录当前 bootId", () => {
     const directory = makeTempDir("t3-recovery-");
     const { context, db } = makeContext(directory);
-    db.prepare("INSERT OR REPLACE INTO observability_state (key, value) VALUES ('observability.last_boot_id', 'old-boot')").run();
+    db.prepare("INSERT OR REPLACE INTO observability_state (key, value) VALUES ('observability.last_boot_id.server', 'old-boot')").run();
     insertRunningRow(db, "old-boot", "processing", "2026-01-01T00:00:00.000Z");
     // 手工构造 spool 段（上一进程遗留）
     const spoolRoot = path.join(directory, "spool");
@@ -299,7 +299,7 @@ describe("T3 reconcile（文件操作）与 startupRecovery", () => {
     expect(result.spool.imported).toBe(1);
     expect(result.spool.quarantined).toBe(0);
     expect((db.prepare("SELECT COUNT(*) AS n FROM activity_events WHERE event_id = 'evt-spooled-1'").get() as { n: number }).n).toBe(1);
-    const state = db.prepare("SELECT value FROM observability_state WHERE key = 'observability.last_boot_id'").get() as { value: string };
+    const state = db.prepare("SELECT value FROM observability_state WHERE key = 'observability.last_boot_id.server'").get() as { value: string };
     expect(state.value).toBe(producer.bootId);
     // 再次调用：无新动作（幂等）
     const again = context.startupRecovery();
