@@ -18,6 +18,8 @@ import { EventReplayStore } from "./event-replay-store.js";
 import { PlatformEventMapper } from "./event-mapper.js";
 import { type AbortResult, ExecutionRegistry } from "./execution-registry.js";
 import { mapProviderError } from "./provider-errors.js";
+import { instrument, type LifecycleHandle } from "../observability/instrument.js";
+import type { TraceContext } from "../contracts/observability.js";
 
 export interface SessionRuntimeOptions {
   readonly sessionId: string;
@@ -26,6 +28,8 @@ export interface SessionRuntimeOptions {
   readonly authPath: string;
   readonly providerId?: string;
   readonly modelId?: string;
+  /** 归属 Agent（ownerAgentId 语义，永久 Agent 身份） */
+  readonly agentId?: string;
   // faux 模式（测试用）
   readonly faux?: {
     readonly response: string;
@@ -66,6 +70,16 @@ export class SessionRuntime {
   private controlMapper: PlatformEventMapper | undefined;
   private readonly unsubscribe: () => void;
   private readonly toolPolicy: ToolPolicy;
+  private readonly agentId: string | undefined;
+  private readonly providerId: string | undefined;
+  private readonly modelId: string | undefined;
+  /** 当前 turn 的埋点句柄（平台边界自动 started/terminal） */
+  private turn: LifecycleHandle | undefined;
+  /** 当前进行中的模型调用（同一会话串行，同时只有一个） */
+  private activeModelCall: LifecycleHandle | undefined;
+  private modelCallSeq = 0;
+  /** toolCallId → toolName（tool_end 事件不含 toolName，需要从 tool_start 记账） */
+  private readonly toolNames = new Map<string, string>();
 
   private constructor(
     readonly sessionId: string,
@@ -73,10 +87,15 @@ export class SessionRuntime {
     private readonly publish: (event: PlatformEventEnvelope) => void,
     private readonly replayStore: EventReplayStore | undefined,
     toolPolicy: ToolPolicy,
+    options: SessionRuntimeOptions,
     private readonly onDispose?: () => void,
   ) {
     this.toolPolicy = toolPolicy;
+    this.agentId = options.agentId;
+    this.providerId = options.resolveProviderId ?? options.providerId;
+    this.modelId = options.resolveModelId ?? options.modelId;
     this.unsubscribe = agent.subscribe((event) => {
+      this.observePiEvent(event);
       const mapper = this.mapper ?? this.resolveControlMapper(event);
       if (!mapper) return;
       for (const mapped of mapper.map(event)) this.emit(mapped);
@@ -178,6 +197,7 @@ export class SessionRuntime {
       options.publish,
       options.replayStore,
       toolPolicy,
+      options,
       options.onDispose,
     );
   }
@@ -199,8 +219,39 @@ export class SessionRuntime {
       { once: true },
     );
 
-    void this.runPrompt(text, started.streamId, mapper);
-    return { streamId: started.streamId, completed: started.completed };
+    // Phase 11：turn 埋点（trace 贯穿模型/工具事件）+ started/terminal 平台自动产生
+    const turnId = started.streamId;
+    const trace: TraceContext = {
+      traceId: instrument.newTraceId(),
+      spanId: instrument.newSpanId(),
+      operationId: turnId,
+    };
+    const scope = this.agentId !== undefined
+      ? { ownerAgentId: this.agentId, sessionId: this.sessionId }
+      : { sessionId: this.sessionId };
+    this.turn = instrument.startLifecycle({
+      startEventName: "turn.started",
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "agent", id: this.agentId ?? "main-agent" },
+      target: { kind: "turn", id: turnId },
+      scope,
+      operationId: turnId,
+      trace,
+      terminals: {
+        completed: "turn.completed",
+        failed: "turn.failed",
+        cancelled: "turn.cancelled",
+        interrupted: "turn.interrupted",
+      },
+      ...(this.providerId !== undefined || this.modelId !== undefined
+        ? { startPayload: { attributes: { providerId: this.providerId ?? null, modelId: this.modelId ?? null } } }
+        : {}),
+    });
+
+    return instrument.runWithTrace({ trace }, () => {
+      void this.runPrompt(text, started.streamId, mapper, controller);
+      return { streamId: started.streamId, completed: started.completed };
+    });
   }
 
   abort(streamId: string): AbortResult {
@@ -242,16 +293,113 @@ export class SessionRuntime {
     text: string,
     streamId: string,
     mapper: PlatformEventMapper,
+    controller: AbortController,
   ): Promise<void> {
     try {
       await this.agent.prompt(text);
+      this.turn?.complete();
     } catch (error) {
+      if (controller.signal.aborted) {
+        this.turn?.cancel("aborted");
+      } else {
+        this.turn?.fail(error instanceof Error ? error : String(error));
+      }
       const apiError = mapProviderError(error);
       this.emit(mapper.error(apiError.message, apiError.code, apiError.retryable));
     } finally {
+      this.activeModelCall = undefined;
+      this.turn = undefined;
       this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);
       if (this.mapper === mapper) this.mapper = undefined;
+    }
+  }
+
+  /**
+   * Phase 11 模型/工具调用埋点（PiAgentEvent 观测点）。
+   * 只记录语义摘要：模型调用按 message 边界、工具按 toolCallId；
+   * 绝不记录 tool result / message 内容（可能含文件正文）。
+   */
+  private observePiEvent(event: PiAgentEvent): void {
+    if (event.type === "message_start" && event.role === "assistant") {
+      this.activeModelCall?.complete(); // 防御：串行模型调用不应重叠
+      this.modelCallSeq += 1;
+      this.activeModelCall = instrument.startLifecycle({
+        startEventName: "model.call.started",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "agent", id: this.agentId ?? "main-agent" },
+        ...(this.providerId !== undefined ? { target: { kind: "provider", id: this.providerId } } : {}),
+        ...(this.agentId !== undefined
+          ? { scope: { ownerAgentId: this.agentId, sessionId: this.sessionId } }
+          : { scope: { sessionId: this.sessionId } }),
+        operationId: `model-${this.sessionId}-${this.modelCallSeq}`,
+        terminals: {
+          completed: "model.call.completed",
+          failed: "model.call.failed",
+          cancelled: "model.call.cancelled",
+        },
+        ...(this.modelId !== undefined ? { startPayload: { attributes: { modelId: this.modelId } } } : {}),
+      });
+      return;
+    }
+    if (event.type === "message_end" && event.role === "assistant") {
+      this.activeModelCall?.complete();
+      this.activeModelCall = undefined;
+      return;
+    }
+    if (event.type === "tool_start") {
+      this.toolNames.set(event.toolCallId, event.toolName);
+      instrument.startLifecycle({
+        startEventName: "tool.call.started",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "agent", id: this.agentId ?? "main-agent" },
+        target: { kind: "tool", id: event.toolName },
+        ...(this.agentId !== undefined
+          ? { scope: { ownerAgentId: this.agentId, sessionId: this.sessionId, toolCallId: event.toolCallId } }
+          : { scope: { sessionId: this.sessionId, toolCallId: event.toolCallId } }),
+        operationId: `tool-${this.sessionId}-${event.toolCallId}`,
+        terminals: {
+          completed: "tool.call.completed",
+          failed: "tool.call.failed",
+          cancelled: "tool.call.cancelled",
+          denied: "tool.call.denied",
+        },
+        startPayload: { attributes: { toolName: event.toolName } },
+      });
+      return;
+    }
+    if (event.type === "tool_end") {
+      const operationId = `tool-${this.sessionId}-${event.toolCallId}`;
+      const toolName = this.toolNames.get(event.toolCallId) ?? "unknown";
+      this.toolNames.delete(event.toolCallId);
+      const scope = this.agentId !== undefined
+        ? { ownerAgentId: this.agentId, sessionId: this.sessionId, toolCallId: event.toolCallId }
+        : { sessionId: this.sessionId, toolCallId: event.toolCallId };
+      // result 可能含文件正文：只记录 isError 布尔，绝不落盘 result
+      if (event.isError) {
+        instrument.activity({
+          eventName: "tool.call.failed",
+          status: "failed",
+          operationId,
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "agent", id: this.agentId ?? "main-agent" },
+          target: { kind: "tool", id: toolName },
+          scope,
+          payload: { summaryCode: "tool_call_failed", attributes: { isError: true } },
+        });
+      } else {
+        instrument.activity({
+          eventName: "tool.call.completed",
+          status: "completed",
+          operationId,
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "agent", id: this.agentId ?? "main-agent" },
+          target: { kind: "tool", id: toolName },
+          scope,
+          payload: { summaryCode: "tool_call_completed" },
+        });
+      }
+      return;
     }
   }
 }

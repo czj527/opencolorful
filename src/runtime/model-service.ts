@@ -7,6 +7,7 @@ import {
   type PiModelSummary,
   type PiResolvedModel,
 } from "../pi-sdk/index.js";
+import { instrument } from "../observability/instrument.js";
 
 export interface ProviderView extends ProviderSetting {
   readonly credentialConfigured: boolean;
@@ -53,6 +54,10 @@ export class ModelService {
     });
     if (apiKey !== undefined) {
       await this.runtime.setApiKey(setting.providerId, apiKey);
+      // 凭据变更属 notable + audit 镜像（不记录 apiKey 本身）
+      instrument.providerCredentialChanged(setting.providerId);
+    } else {
+      instrument.providerConfigured(setting.providerId);
     }
     return {
       ...setting,

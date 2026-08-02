@@ -64,6 +64,11 @@ export class ObservabilityContext {
   private readonly producer: ProducerContext;
   private recovery = { interrupted: 0, spoolImported: 0 };
 
+  /** 当前进程 producer 身份（instrument 等调用方读取） */
+  getProducer(): ProducerContext {
+    return this.producer;
+  }
+
   constructor(options: ObservabilityContextOptions) {
     this.database = options.database;
     this.producer = options.producer;
@@ -129,23 +134,25 @@ export class ObservabilityContext {
   }
 
   /**
-   * 启动恢复（server 每次启动调用一次）：
-   * 1. 把 state 中记录的上一 boot 遗留 running/processing 补为 interrupted（>24h 窗口，避免误伤共享库的其他存活进程）；
+   * 启动恢复（server/supervisor 各自进程启动时调用一次）：
+   * 1. 把 state 中记录的上一 boot（同 processType）遗留 running/processing 补为 interrupted
+   *    （>24h 窗口，避免误伤共享库的其他存活进程）；
    * 2. 幂等导入本进程遗留的应急 spool；
    * 3. 记录当前 bootId，供下次启动恢复。
    */
   startupRecovery(): StartupRecoveryResult {
     const olderThanIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const lastBootKey = `observability.last_boot_id.${this.producer.processType}`;
     const prev = this.database
-      .prepare("SELECT value FROM observability_state WHERE key = 'observability.last_boot_id'")
-      .get() as { value: string } | undefined;
+      .prepare("SELECT value FROM observability_state WHERE key = ?")
+      .get(lastBootKey) as { value: string } | undefined;
     const interrupted = prev !== undefined && prev.value !== this.producer.bootId
       ? this.activity.reconcileRunning(prev.value, olderThanIso)
       : 0;
     const spool = this.importSpool();
     this.database
-      .prepare("INSERT OR REPLACE INTO observability_state (key, value) VALUES ('observability.last_boot_id', ?)")
-      .run(this.producer.bootId);
+      .prepare("INSERT OR REPLACE INTO observability_state (key, value) VALUES (?, ?)")
+      .run(lastBootKey, this.producer.bootId);
     this.recovery = { interrupted, spoolImported: spool.imported };
     return { interrupted, spool };
   }

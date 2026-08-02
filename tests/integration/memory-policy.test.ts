@@ -267,13 +267,13 @@ describe("MemoryPolicy", () => {
     expect(result.reason).toContain("新的用户意图");
 
     // 提案生成前已存在的 intent（createdAt 早于提案）→ 放行：
-    // 提案 createdAt 设为晚于第一个 intent（真实 now ≈ 2026-08-01T21:xx）的 08-02
+    // intent 的 createdAt 是真实 now，提案用相对时间 now+60s 保证恒晚于 intent
     const older = policy.check(makeProposal({
       type: "strength_change",
       targetId: String(fact.id),
       payload: { retentionStrength: 60 },
       previousState: { retentionStrength: 50 },
-      createdAt: "2026-08-02T00:00:00Z",
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
     }));
     expect(older.approved).toBe(true);
   });

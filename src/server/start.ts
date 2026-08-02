@@ -41,6 +41,9 @@ import {
   writeRuntimeState,
 } from "./runtime-state.js";
 import { ClientRegistry } from "./ws/client-registry.js";
+import { ObservabilityContext } from "../observability/observability-context.js";
+import { instrument } from "../observability/instrument.js";
+import { createBootId } from "../observability/trace-context.js";
 
 export interface StartServerOptions {
   readonly host: string;
@@ -90,7 +93,7 @@ export async function startForegroundServer(options: StartServerOptions): Promis
     });
 
     productionResources = options.appOptions === undefined
-      ? await buildProductionResources(options.paths)
+      ? await buildProductionResources(options.paths, options.version)
       : undefined;
     const appOptions = options.appOptions ?? productionResources!.appOptions;
     const { app, nodeWebSocket } = createServerApp({
@@ -129,6 +132,8 @@ export async function startForegroundServer(options: StartServerOptions): Promis
       updatedAt: new Date().toISOString(),
     });
 
+    instrument.systemStarted({ durationMs: Date.now() - startedAt });
+
     let stopped = false;
     return {
       host: options.host,
@@ -138,11 +143,13 @@ export async function startForegroundServer(options: StartServerOptions): Promis
           return;
         }
         stopped = true;
+        instrument.systemStopping();
         try {
           appOptions.wsRegistry?.closeAll();
           await closeServer(server!);
         } finally {
           try {
+            instrument.systemStopped();
             productionResources?.dispose();
           } finally {
             markServerStopped(options.paths);
@@ -154,6 +161,11 @@ export async function startForegroundServer(options: StartServerOptions): Promis
   } catch (error) {
     if (server !== undefined) await closeServer(server).catch(() => {});
     try {
+      // 崩溃前尽力落盘（buildProductionResources 已 init instrument）
+      if (instrument.isEnabled()) {
+        instrument.systemCrashed(error instanceof Error ? error : String(error));
+        instrument.flush();
+      }
       productionResources?.dispose();
     } finally {
       markServerStopped(options.paths);
@@ -163,9 +175,51 @@ export async function startForegroundServer(options: StartServerOptions): Promis
   }
 }
 
-async function buildProductionResources(paths: RuntimePaths): Promise<ProductionResources> {
-  const database = openMetadataDatabase(paths.database);
+async function buildProductionResources(paths: RuntimePaths, version: string): Promise<ProductionResources> {
+  let dbMigrationReport: { from: number; to: number } | undefined;
+  const database = openMetadataDatabase(paths.database, (report) => {
+    dbMigrationReport = report;
+  });
   try {
+    // ── Phase 11：可观测性上下文（migration 之后、业务资源之前）──
+    const observability = new ObservabilityContext({
+      database,
+      producer: {
+        component: "agent-server",
+        processType: "server",
+        processId: String(process.pid),
+        bootId: createBootId(version),
+        appVersion: version,
+        hostPlatform: process.platform,
+      },
+      logsRoot: path.join(paths.logs, "runtime", "server"),
+      spoolRoot: path.join(paths.logs, "emergency"),
+    });
+    instrument.init(observability);
+    const recovery = observability.startupRecovery();
+    observability.logger.enforceRetention();
+    instrument.systemStarting({ durationMs: 0 });
+    if (recovery.interrupted > 0 || recovery.spool.imported > 0) {
+      instrument.activity({
+        eventName: "system.recovery.completed",
+        status: "completed",
+        operationId: `recovery-${observability.getProducer().bootId}`,
+        actor: { kind: "system", id: "agent-server" },
+        executor: { kind: "service", id: "agent-server" },
+        payload: {
+          summaryCode: "system_recovery_completed",
+          attributes: {
+            interrupted: recovery.interrupted,
+            spoolImported: recovery.spool.imported,
+            quarantined: recovery.spool.quarantined,
+          },
+        },
+      });
+    }
+    instrument.storageDatabaseOpened();
+    if (dbMigrationReport !== undefined) {
+      instrument.storageMigrationCompleted(dbMigrationReport.from, dbMigrationReport.to);
+    }
     const sessionIndex = new SessionIndex(database);
     const providerStore = new ProviderStore(paths.providerSettings);
     const modelService = await ModelService.create(paths, providerStore);
@@ -183,10 +237,10 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
     const migrationReport = agentStore.migrate();
     if (migrationReport.failed > 0) {
       for (const failure of migrationReport.failures) {
-        console.error(
-          `[agent-migrate] ${failure.agentId} @ ${failure.stage}: ${failure.error}`,
-        );
+        instrument.agentMigrationFailed(failure.agentId, failure.error);
       }
+    } else {
+      instrument.agentMigrationCompleted("all");
     }
     const promptService = new PromptService();
     const folderPicker = createFolderPicker();
@@ -355,10 +409,16 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();
+        // Phase 11：日志 flush 必须在 DB 关闭之前（activity 已写完，logger 落盘）
+        instrument.flush();
         database.close();
       },
     };
   } catch (error) {
+    if (instrument.isEnabled()) {
+      instrument.systemCrashed(error instanceof Error ? error : String(error));
+      instrument.flush();
+    }
     database.close();
     throw error;
   }

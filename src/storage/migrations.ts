@@ -2,7 +2,12 @@ import type Database from "better-sqlite3";
 
 export const CURRENT_SCHEMA_VERSION = 8;
 
-export function applyMigrations(database: Database.Database): void {
+/** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
+export interface MigrationObserver {
+  (report: { from: number; to: number }): void;
+}
+
+export function applyMigrations(database: Database.Database, observer?: MigrationObserver): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER NOT NULL
@@ -479,5 +484,9 @@ export function applyMigrations(database: Database.Database): void {
 
   if (current > CURRENT_SCHEMA_VERSION) {
     throw new Error(`不支持的 metadata schema 版本: ${current}`);
+  }
+
+  if (current < CURRENT_SCHEMA_VERSION) {
+    observer?.({ from: current, to: CURRENT_SCHEMA_VERSION });
   }
 }
