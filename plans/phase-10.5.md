@@ -358,3 +358,30 @@ T8 质量门 + browser-use 验收（主 Agent）
 - `cd web && npx tsc --noEmit` + `npx vitest run`（29 文件 / 333 测试，连续 6 轮无 flake）
 - `cd web && npm run build`（vite 产物）
 - `cd web && npx playwright test tests/e2e/`（45/45，含 phase-10.5-memory 4 例 × 5 轮稳定）
+
+### 第四轮外部复审修复（2026-08-02，commit 3b9deb1）
+
+reviewer 结论："Phase 10.5 本轮仍然暂不通过…保持 e89548c 冻结，完成上述修复并补复现级测试后再提交下一轮复审"。
+e89548c 保持冻结，8 项问题在 `phase-10.5-memory-agent` 新增 commit 修复后并入 `phase-11-logging`。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | `memory-tools.ts` 的 remember/forget 写 `actor=main_agent`，而 `checkWatermark` 只认 `user` → 水位线对 pi-sdk 意图失效 | 同时认 user/main_agent；`listByAgent` 传 `{limit:1_000_000}` 全量扫描（原默认 50 条截断会漏检更早意图）；merge/supersede 检查全部目标事实（原只看第一个） |
+| 2 | P1 | supersede/merge 版本冲突只比较 fact+status，漏掉 updatedAt 变化（如被提强） | previousState 增加 `revision: updatedAt`，策略比较 revision；merge snapshot 同步带 revision |
+| 3 | P1 | `rollbackRun` 对 event forget 调用 `restoreFact(id(eventId))` → `事实不存在: NaN`；`findCreatedFact` 受 50 条限制 | 按 targetType 分流（event → `updateStatus(active)`）；create_fact 回滚优先用 applyRun 持久化的 `payload.createdFactId`（校验归属后回落旧路径） |
+| 4 | P1 | daily/weekly 两个到期任务闭包都 spread tick 时捕获的旧 state → 后写覆盖先写 | 闭包内 upsert 前重新读取 `schedulerStore.get(agentId)` |
+| 5 | P1 | `isAgentIdle` 只读进程内 lastActivity，重启后误判空闲 | 纳入持久化 `SessionView.updatedAt`（`max(inProcess, persisted)`） |
+| 6 | P1 | provisional（未定稿 micro-seal）批次可直接作为晋升永久证据 | medium→permanent 晋升拒绝引用非 sealed/applied 批次 |
+| 7a | P1 | `retentionThresholds` 无排序验证，`{90,10,5}` 可通过 | `isValidRetentionThresholds`（mediumDown<mediumUp<permanentUp），per-Agent/全局/Agent PUT 三处接线 |
+| 7b | P1 | `injectBudgetChars` 未接线，messages 注入永远用默认预算 | `memorySettingsResolver`（per-Agent→全局→默认）传入 `buildMemoryInjectionBlock`；顺带修复 `SessionRuntime.systemPrompt` 声明后从未赋值的潜在 bug |
+| 8 | P2 | sse-replay.test.ts 直用 `os.tmpdir()`（与并行测试/Phase 11 v8 DB 冲突）；Playwright 并行 freePort TOCTOU（并行 42/45 vs 串行 45/45） | 测试改 mkdtemp；`web/playwright.config.ts` 强制 `workers:1` 消除端口争用 |
+
+**复现级测试 14 个**（每个 P0/P1 至少一个定向 reproduction）：
+`memory-policy.test.ts` +6（main_agent 水位线 / >50 条截断 / merge 多目标 / supersede revision / merge revision / 晋升批次状态）、
+`memory-application.test.ts` +2（event forget 回滚 / createdFactId 定位）、
+`memory-scheduler.test.ts` +2（双窗口状态合并 / 重启持久化空闲门）、
+`memory-admin-api.test.ts` +2（阈值乱序 400 ×2 端点）、
+`memory-injection-wiring.test.ts` +2（预算接线 + 默认对照）。
+
+**合并后质量门（branch `phase-10.5-memory-agent` @ 16ef47a）**：
+tsc ✓ check:pi-imports ✓ build ✓ 756 server tests ✓（含 Phase 11 可观测性）348 web tests ✓ web build ✓。
