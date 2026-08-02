@@ -1130,3 +1130,27 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 - server unit/integration：+73（contract 9、runtime 16、store 18、instrument 12、query 8、extension-port 8、retention 5、server 集成 3+9）
 - web：+13 单测 + 7 e2e
 - 全量：742（server）+ 348（web）+ 52（e2e）
+
+### 第二轮外部复审修复（2026-08-02，commit 89e1181）
+
+reviewer 结论："Phase 11 暂不通过…4 个 P0、7 个 P1、1 个 P2…先闭环后再进行第二轮复审和合并"。
+12 项问题全部修复，每个 P0/P1 配复现级回归测试（新增 24 个）。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | `runAuditedTransaction` 无生产调用方——沙箱/工作区/凭据修改在审计不可持久化时仍成功 | appendStrict 公开 + instrument 透传；agents 设置写后审计失败回滚返 503；Session cwd 变更与 Audit 同事务；ModelService 凭据审计先行（auth 文件无法回滚） |
+| 2 | P0 | 结构化字符串不脱敏，`Authorization: Bearer sk-proj-…` 原样进 payload_json/spool | normalizeSafeValue 字符串先 redactText 再截断；normalizeSafeObject 第二遍整树脱敏（纵深） |
+| 3 | P0 | spool 只读当前 bootId，崩溃遗留永不可恢复 | importInto/pendingSegments 按 processType 读全部段（含旧 bootId） |
+| 4 | P0 | retention 删除 notable/milestone（agent.created/deleted 不可逆丢失） | 删除加 `significance='routine'`；聚合仍含全部 |
+| 5 | P1 | 水位 `>` 开区间——cutoff 当天数据永远漏掉；dailyMetrics 只读未删除行 | 水位 `>=`；dailyMetrics = activity_daily_metrics + watermark 后实时行 |
+| 6 | P1 | runWithTrace 复制祖父 parentSpanId；traceTree 的 Map 覆盖丢子树 | parentSpanId=父级 spanId；traceTree 按 spanId 合并 started/terminal |
+| 7 | P1 | observability 偏好未接入运行时；retention 路由另建默认 logger；Web 无偏好表单 | start.ts 先读偏好再建 Context（级别/文件大小/磁盘预算/保留/spool 预算）；retention 默认天数=routine 保留期；LogsSection 新增偏好表单 |
+| 8 | P1 | applyBudget `totalBytes -= 0`——超预算删光全部文件 | 删除后按实际字节扣减（3×700B、1500B 预算只删最旧 1 个） |
+| 9 | P1 | 目录无 payloadSchema；status 不校验 terminalStatuses；重复 started 入库 | 目录固定 payloadSchema（activity/audit 按通道）；Recorder 校验生命周期状态；同 operationId 未收尾重复 started 拒绝；补注册 turn.skipped |
+| 10 | P1 | carrier 无防伪——插件自行构造有效时间范围即被接受 | 签发登记一次性随机令牌（绑定 pluginId+trace 身份），回传校验并单次消费 |
+| 11 | P1 | errorGroups OR 无括号绕过过滤；SSE 不读 Last-Event-ID；stale 游标无 reset；audit 每批首行无条件 reset；Web 实时不应用筛选 | OR 加括号；Last-Event-ID 优先；游标早于 minId（含清空）发 reset；reset 仅 epoch 变化；实时跟随按 applied 过滤 |
+| 12 | P2 | diagnostic tail 全量 readFileSync | 只读尾部 512KB（open+seek），行/字节双上限 |
+
+**复现级测试 24 个**：observability-failclosed 4、retention 3、query 3、runtime 3、store 4、extension-port 2、observability-api 4、web logs 1。
+
+**质量门（commit 89e1181）**：tsc ✓ check:pi-imports ✓ build ✓ 779 server tests ✓（78 文件）web tsc ✓ 349 web tests ✓ web build ✓ Playwright 52/52 ✓。
