@@ -74,6 +74,11 @@ class Instrument {
     this.context?.flush();
   }
 
+  /** 聚合 health（writer/spool/磁盘/ledger epoch；未初始化返回 undefined） */
+  getHealth(): ReturnType<ObservabilityContext["getHealth"]> | undefined {
+    return this.context?.getHealth();
+  }
+
   // ─── 基础透传（未 init 时 no-op / 独立兜底） ──────────────────
 
   activity(input: ActivityRecordInput): ActivityAcceptResult | undefined {

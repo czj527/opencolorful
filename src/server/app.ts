@@ -24,6 +24,7 @@ import { registerSandboxRoutes } from "./routes/sandbox.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerAgentEventRoutes } from "./routes/agent-events.js";
+import { registerObservabilityRoutes } from "./routes/observability.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -149,6 +150,13 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {
     registerEventRoutes(app, options.replayStore, options.promptService, options.sessionService);
+  }
+  if (options.database !== undefined && options.paths !== undefined) {
+    registerObservabilityRoutes(app, {
+      database: options.database,
+      paths: options.paths,
+      getHealth: () => instrument.getHealth(),
+    });
   }
 
   // WebSocket 路由
