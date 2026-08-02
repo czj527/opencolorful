@@ -108,9 +108,26 @@ class Instrument {
     return this.context === undefined ? callback() : this.context.runWithTrace(input, callback);
   }
 
-  /** 后台任务：新根 trace（不继承调用方 ALS），避免跨会话 trace 污染 */
+  /**
+   * 后台任务：新根 trace（不继承调用方 ALS），避免跨会话 trace 污染；
+   * linkedTraceIds 提供来源时写入规范化 trace link（source=来源, target=新 trace,
+   * relation=spawned），供 linked graph 逆向还原。
+   */
   runAsBackground<T>(input: { linkedTraceIds?: readonly string[]; operationId?: string }, callback: () => T): T {
-    return this.context === undefined ? callback() : this.context.runAsBackground(input, callback);
+    if (this.context === undefined) return callback();
+    const traceId = this.context.newTraceId();
+    const trace: TraceContext = {
+      traceId,
+      spanId: this.context.newSpanId(),
+      ...(input.operationId !== undefined ? { operationId: input.operationId } : {}),
+      ...(input.linkedTraceIds !== undefined ? { linkedTraceIds: [...input.linkedTraceIds] } : {}),
+    };
+    if (input.linkedTraceIds !== undefined) {
+      for (const linked of input.linkedTraceIds) {
+        this.context.recordTraceLink(linked, traceId, "spawned");
+      }
+    }
+    return this.context.runWithTrace({ trace }, callback);
   }
 
   currentTrace(): TraceContext | undefined {

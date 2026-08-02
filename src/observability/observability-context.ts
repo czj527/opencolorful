@@ -168,6 +168,18 @@ export class ObservabilityContext {
     });
   }
 
+  /** 规范化 trace link（observability_trace_links；如后台任务 spawn 关系） */
+  recordTraceLink(sourceTraceId: string, targetTraceId: string, relation: string): void {
+    if (sourceTraceId === targetTraceId) return;
+    try {
+      this.database
+        .prepare(
+          "INSERT OR IGNORE INTO observability_trace_links (source_trace_id, target_trace_id, relation, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(sourceTraceId, targetTraceId, relation.slice(0, 64), new Date().toISOString());
+    } catch { /* link 记录失败不影响业务 */ }
+  }
+
   /** 同步 flush 诊断日志（进程退出/测试收尾时调用） */
   flush(): void {
     this.logger.flushSync();
