@@ -13,6 +13,7 @@ import { RetentionService } from "../../observability/retention.js";
 import { buildSupportBundle } from "../../observability/support-bundle.js";
 import { getStreamWatermark, setStreamWatermark } from "../../observability/stream-watermark.js";
 import { DiagnosticLogger } from "../../observability/diagnostic-logger.js";
+import { assertDurableAudit } from "../../observability/audit-recorder.js";
 import { EmergencySpool } from "../../observability/emergency-spool.js";
 import { CURRENT_SCHEMA_VERSION } from "../../storage/migrations.js";
 import { instrument } from "../../observability/instrument.js";
@@ -287,6 +288,15 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     if (dir !== path.join(logsRoot, "runtime", processName) || !dir.startsWith(logsRoot + path.sep)) {
       return context.json({ code: "INVALID_INPUT", message: "路径越界" }, 400);
     }
+    // 评审 P1（第四轮）：字符串级 resolve 检查挡不住 Junction/符号链接——
+    // 目录与最终文件分别做 realpath，真实路径必须仍在日志根内（防读外部文件）
+    let logsRootReal: string;
+    try { logsRootReal = fs.realpathSync(logsRoot); } catch { logsRootReal = logsRoot; }
+    let dirReal: string;
+    try { dirReal = fs.realpathSync(dir); } catch { dirReal = dir; }
+    if (dirReal !== logsRootReal && !dirReal.startsWith(logsRootReal + path.sep)) {
+      return context.json({ code: "INVALID_INPUT", message: "路径越界" }, 400);
+    }
     if (!fs.existsSync(dir)) {
       return context.json({ process: processName, file: fileKind, lines: 0, totalBytes: 0, tail: [] });
     }
@@ -301,6 +311,12 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     }
     const fileName = files[0]!;
     const filePath = path.join(dir, fileName);
+    // 单文件符号链接同样可能逃逸（目录合法但文件指向外部）
+    let fileReal: string;
+    try { fileReal = fs.realpathSync(filePath); } catch { fileReal = path.resolve(filePath); }
+    if (fileReal !== logsRootReal && !fileReal.startsWith(logsRootReal + path.sep)) {
+      return context.json({ code: "INVALID_INPUT", message: "路径越界" }, 400);
+    }
     // 评审 P2-12：大日志文件不全量加载——只读文件尾部 TAIL_READ_BYTES 字节
     // （500KB 上限足够覆盖默认 1000 行 × 平均行长的场景）
     const TAIL_READ_BYTES = 512 * 1024;
@@ -428,6 +444,25 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     app.put("/api/preferences/observability", async (context) => {
       let body: unknown;
       try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+      // 评审 P1（第四轮）：偏好修改影响证据保留策略本身（级别/保留期/预算），
+      // 必须留下 durable Activity + 严格 Audit——audit 未配置或被拒 → fail-closed 拒绝
+      if (deps.audit === undefined) {
+        return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
+      }
+      try {
+        assertDurableAudit(deps.audit.appendStrict({
+          eventName: "audit.observability.preferences_changed",
+          payload: {
+            action: "observability.preferences.changed",
+            decision: "allowed",
+            changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
+          },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+        }), "可观测性偏好变更");
+      } catch {
+        return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
+      }
       try {
         const result = deps.preferencesStore!.update({ observability: body as never });
         // 评审 P1（第三轮）：偏好更新立即应用到当前运行时（logger/spool 无需重启）；
@@ -442,6 +477,13 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
         });
         retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
         defaultRetentionDays = prefs.activityRetentionDays.routine;
+        // durable Activity 证据（audit 已 fail-closed 在前；auditMirror 同库）
+        instrument.activity({
+          eventName: "observability.preferences.changed",
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          payload: { summaryCode: "observability_preferences_changed" },
+        });
         instrument.info("preferences.observability.updated", "observability 偏好已更新并应用到当前运行时");
         return context.json(prefs);
       } catch (error) {

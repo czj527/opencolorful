@@ -160,6 +160,25 @@ export class AuditRecorder {
     return { kind: "accepted", eventId: envelope.eventId, rowId: row.id };
   }
 
+  /**
+   * 评审 P1（第四轮）：一次操作的多条 Audit 必须原子——全部放进同一 SQLite
+   * 事务，任一 rejected 则整体回滚。防止"第一条 accepted、第二条 rejected"
+   * 时账本永久保留一条声称已发生（实际已回滚）变更的记录。
+   */
+  appendStrictMany(inputs: readonly AuditRecordInput[]): AuditAcceptResult[] {
+    if (inputs.length === 0) return [];
+    const transaction = this.deps.database.transaction(() => {
+      const results = inputs.map((input) => this.appendStrict(input));
+      for (const result of results) {
+        if (result.kind === "rejected") {
+          throw new Error(`审计记录未被接受：${result.reason}`);
+        }
+      }
+      return results;
+    });
+    return transaction();
+  }
+
   /** 应急导入：spool 行幂等写入 SQLite（eventId UNIQUE）；坏行/未知事件 quarantine */
   importEnvelope(line: unknown): { ok: boolean; error?: string } {
     if (!Value.Check(AuditEnvelopeSchema, line)) return { ok: false, error: "quarantine" };

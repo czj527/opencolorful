@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import crypto from "node:crypto";
 import path from "node:path";
 
 import { createApiError } from "../../contracts/api-error.js";
@@ -11,6 +12,7 @@ import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PreferencesStore } from "../../config/preferences-store.js";
 import type { AgentStore } from "../../config/agent-store.js";
+import { assertDurableAudit } from "../../observability/audit-recorder.js";
 import { instrument } from "../../observability/instrument.js";
 
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -83,9 +85,33 @@ export function registerSessionRoutes(
       }
     }
 
+    // 评审 P0（第四轮）：Session 创建即绑定工作目录（index 恒写入 workspaceCwd），
+    // 与 settings PUT 的 cwd 变更同属 fail-closed 清单——审计先行：
+    // 未配置或被拒（rejected）→ 拒绝创建，不落盘任何会话文件/索引行。
+    // 预生成 id 使审计记录携带精确 target（审计先于创建，无半成品会话）。
+    const sessionId = crypto.randomUUID();
+    if (audit === undefined) {
+      return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，会话创建被拒绝"), 503);
+    }
+    try {
+      assertDurableAudit(audit.appendStrict({
+        eventName: "audit.session.workspace_bound",
+        payload: {
+          action: "session.workspace.bound",
+          decision: "allowed",
+          changedFields: ["workspaceCwd"],
+        },
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "session", id: sessionId },
+      }), "Session 工作区绑定");
+    } catch {
+      return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，会话创建被拒绝"), 503);
+    }
+
     const session = agentId !== undefined
-      ? sessionService.create({ title: body.title, cwd: body.cwd, agentId })
-      : sessionService.create({ title: body.title, cwd: body.cwd });
+      ? sessionService.create({ id: sessionId, title: body.title, cwd: body.cwd, agentId })
+      : sessionService.create({ id: sessionId, title: body.title, cwd: body.cwd });
 
     // 合并设置：请求显式字段优先，缺失字段回退到全局偏好默认值。
     const preferences = preferencesStore?.get();
@@ -115,6 +141,15 @@ export function registerSessionRoutes(
     if (Object.keys(updates).length > 0) {
       sessionService.updateSettings(session.id, updates);
     }
+    // 工作区绑定证据（audit 已 fail-closed 在前）
+    instrument.activity({
+      eventName: "session.workspace.bound",
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "service", id: "agent-server" },
+      target: { kind: "session", id: sessionId },
+      scope: { sessionId },
+      payload: { summaryCode: "session_workspace_bound" },
+    });
 
     // 应用全局默认模型：仅当请求未指定模型、全局默认可用且可 resolve 时。
     const view = sessionService.getView(session.id);

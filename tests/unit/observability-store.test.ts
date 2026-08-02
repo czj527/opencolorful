@@ -605,3 +605,32 @@ describe("Phase 11 第三轮复审：spool 导入重新执行目录校验（P1-3
     db.close();
   });
 });
+
+describe("Phase 11 第四轮复审：appendStrictMany 单事务原子（P1-3 复现级测试）", () => {
+  it("任一条被拒 → 全部回滚：第一条 accepted 也不残留（原实现逐条 append 会留下孤儿账本行）", () => {
+    const directory = makeTempDir("t11-manyaudit-");
+    const db = openDb(directory);
+    const audit = new AuditRecorder({ database: db, producer });
+    expect(() => audit.appendStrictMany([
+      makeAuditInput(), // 合法：若逐条写入会 accepted
+      { ...makeAuditInput(), eventName: "audit.unknown.event" }, // 未注册 → rejected
+    ])).toThrow(/审计记录未被接受/);
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM audit_events").get() as { n: number };
+    expect(rows.n).toBe(0);
+    db.close();
+  });
+
+  it("全部合法 → 一次事务内全部落账", () => {
+    const directory = makeTempDir("t11-manyaudit-ok-");
+    const db = openDb(directory);
+    const audit = new AuditRecorder({ database: db, producer });
+    const results = audit.appendStrictMany([
+      makeAuditInput(),
+      makeAuditInput({ eventName: "audit.sandbox.policy_changed", payload: { action: "sandbox.policy.changed", decision: "allowed" } }),
+    ]);
+    expect(results.every((result) => result.kind === "accepted" || result.kind === "accepted-idempotent")).toBe(true);
+    const rows = db.prepare("SELECT action FROM audit_events ORDER BY id").all() as Array<{ action: string }>;
+    expect(rows.map((row) => row.action)).toEqual(["agent.deleted", "sandbox.policy.changed"]);
+    db.close();
+  });
+});

@@ -14,6 +14,8 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { startForegroundServer } from "../../src/server/start.js";
 import { TuiApiClient } from "../../src/tui/api-client.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { instrument } from "../../src/observability/instrument.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -22,6 +24,18 @@ afterEach(() => {
     fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   }
 });
+
+
+function makeObservability(database: ReturnType<typeof openMetadataDatabase>, paths: ReturnType<typeof getRuntimePaths>) {
+  const observability = new ObservabilityContext({
+    database,
+    producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot-tui", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
+    logsRoot: path.join(paths.logs, "runtime", "server"),
+    spoolRoot: path.join(paths.logs, "emergency"),
+  });
+  instrument.init(observability);
+  return observability;
+}
 
 describe("TUI smoke test", () => {
   it("interacts with server API end to end via TuiApiClient", async () => {
@@ -34,12 +48,13 @@ describe("TUI smoke test", () => {
     const sessionIndex = new SessionIndex(database);
     const sessionService = new SessionService(paths, sessionIndex);
 
+    const observability = makeObservability(database, paths);
     const server = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,
       paths,
       version: PLATFORM_VERSION,
-      appOptions: { promptService, replayStore, sessionService },
+      appOptions: { promptService, replayStore, sessionService, audit: observability.audit },
     });
 
     try {
@@ -97,6 +112,7 @@ describe("TUI smoke test", () => {
       runtime.dispose();
     } finally {
       await server.stop();
+      instrument.reset();
       database.close();
     }
   });
@@ -111,12 +127,13 @@ describe("TUI smoke test", () => {
     const sessionIndex = new SessionIndex(database);
     const sessionService = new SessionService(paths, sessionIndex);
 
+    const observability = makeObservability(database, paths);
     const server = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,
       paths,
       version: PLATFORM_VERSION,
-      appOptions: { promptService, replayStore, sessionService },
+      appOptions: { promptService, replayStore, sessionService, audit: observability.audit },
     });
 
     try {
@@ -146,6 +163,7 @@ describe("TUI smoke test", () => {
       runtime.dispose();
     } finally {
       await server.stop();
+      instrument.reset();
       database.close();
     }
   });

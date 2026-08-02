@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
-import { assertDurableAudit } from "../../observability/audit-recorder.js";
+import { type AuditRecordInput } from "../../observability/audit-recorder.js";
 import { instrument } from "../../observability/instrument.js";
 import { BASE_COLOR_TEMPLATES } from "../../contracts/base-color-templates.js";
 import type { SandboxCapabilities } from "../../contracts/sandbox.js";
@@ -134,6 +134,40 @@ export function registerAgentRoutes(
             return context.json(createApiError("INVALID_INPUT", "sandbox.protectedPaths 必须是字符串数组"), 400);
           }
           sandbox.protectedPaths = sb.protectedPaths as string[];
+        }
+      }
+
+      // 评审 P0（第四轮）：创建入口不得绕过工作区/沙箱 fail-closed 审计——
+      // 请求提供 defaultCwd 或 sandbox 即属高风险（与 settings PUT 同一清单），
+      // 审计先行：未配置或被拒（rejected）→ 拒绝创建，不落盘任何配置
+      const auditInputs: AuditRecordInput[] = [];
+      if (defaultCwd !== undefined) {
+        auditInputs.push({
+          eventName: "audit.agent.workspace_changed",
+          payload: { action: "agent.workspace.changed", decision: "allowed", changedFields: ["defaultCwd"] },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "agent", id: agentId },
+        });
+      }
+      if (sandbox !== undefined) {
+        auditInputs.push({
+          eventName: "audit.sandbox.policy_changed",
+          payload: { action: "sandbox.policy.changed", decision: "allowed", changedFields: ["sandbox.workspaceAccess", "sandbox.extraReadPaths", "sandbox.protectedPaths"] },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "agent", id: agentId },
+        });
+      }
+      if (auditInputs.length > 0) {
+        if (audit === undefined) {
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
+        }
+        try {
+          // 多条审计单事务原子写入：任一 rejected → 全部回滚 → 拒绝创建
+          audit.appendStrictMany(auditInputs);
+        } catch {
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
         }
       }
 
@@ -400,31 +434,32 @@ export function registerAgentRoutes(
       // 落盘后强制 durable audit（严格路径，失败即回滚并拒绝操作）
       const previousSettings = agentStore.load(agentId).settings;
       agentStore.saveSettings(agentId, patch);
-      const auditChanges: Array<{
-        eventName: string;
-        action: string;
-        changedFields: string[];
-      }> = [];
+      const auditInputs: AuditRecordInput[] = [];
       if (patch.defaultCwd !== undefined) {
-        auditChanges.push({ eventName: "audit.agent.workspace_changed", action: "agent.workspace.changed", changedFields: ["defaultCwd"] });
+        auditInputs.push({
+          eventName: "audit.agent.workspace_changed",
+          payload: { action: "agent.workspace.changed", decision: "allowed", changedFields: ["defaultCwd"] },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "agent", id: agentId },
+        });
       }
       if (patch.sandbox !== undefined) {
-        auditChanges.push({ eventName: "audit.sandbox.policy_changed", action: "sandbox.policy.changed", changedFields: ["sandbox.workspaceAccess", "sandbox.extraReadPaths", "sandbox.protectedPaths"] });
+        auditInputs.push({
+          eventName: "audit.sandbox.policy_changed",
+          payload: { action: "sandbox.policy.changed", decision: "allowed", changedFields: ["sandbox.workspaceAccess", "sandbox.extraReadPaths", "sandbox.protectedPaths"] },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "agent", id: agentId },
+        });
       }
-      if (auditChanges.length > 0) {
+      if (auditInputs.length > 0) {
         try {
           // 评审 P0（第三轮）：audit 未配置同样拒绝执行（fail-closed 由构造保证不了，这里显式检查）；
-          // 只接受 accepted/accepted-idempotent，rejected 一律抛错 → 回滚
+          // 评审 P1（第四轮）：多条审计单事务原子写入——任一 rejected 全部回滚，
+          // 不再出现"第一条 accepted 已落账、设置却回滚"的账本谎言
           if (audit === undefined) throw new Error("可观测性未初始化，高风险修改拒绝执行");
-          for (const change of auditChanges) {
-            assertDurableAudit(audit.appendStrict({
-              eventName: change.eventName,
-              payload: { action: change.action, decision: "allowed", changedFields: change.changedFields },
-              actor: { kind: "user", id: "web" },
-              executor: { kind: "service", id: "agent-server" },
-              target: { kind: "agent", id: agentId },
-            }), "Agent 设置变更");
-          }
+          audit.appendStrictMany(auditInputs);
         } catch {
           // fail-closed：Audit 无法持久化 → 回滚设置并拒绝操作
           try { agentStore.saveSettings(agentId, previousSettings); } catch { /* 回滚失败也拒绝 */ }

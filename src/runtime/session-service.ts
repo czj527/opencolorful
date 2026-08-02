@@ -16,6 +16,11 @@ export interface CreateSessionRequest {
   readonly title: string;
   readonly cwd: string;
   readonly agentId?: string;
+  /**
+   * 评审 P0（第四轮）：允许调用方预生成 id——HTTP 创建路径需要"审计先行"
+   * （fail-closed），在落盘前先以精确 target 写入严格审计。
+   */
+  readonly id?: string;
 }
 
 export interface SessionView extends Omit<SessionMetadata, "model" | "provider"> {
@@ -35,7 +40,7 @@ export class SessionService {
   ) {}
 
 create(request: CreateSessionRequest): PiSessionHandle {
-    const id = crypto.randomUUID();
+    const id = request.id ?? crypto.randomUUID();
     // 有 Agent：Session 存入 agents/<id>/sessions/。无 Agent：原有全局 sessions/
     const sessionDir = request.agentId !== undefined
       ? path.join(this.paths.agents, request.agentId, "sessions")

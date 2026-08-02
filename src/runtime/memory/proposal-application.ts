@@ -140,6 +140,10 @@ export class ProposalApplication {
           if (proposal.payload.mergedFactId !== undefined) this.deps.factStore.markSuppressed(id(proposal.payload.mergedFactId));
         }
         this.deps.proposalStore.markStatus(proposal.id, "reverted");
+        // 评审 P0（第四轮）：回滚同样是长期记忆状态变更——与 applyRun 同一
+        // fail-closed 契约：proposal_reverted + 抑制证据与回滚同一 SQLite 事务，
+        // 审计未配置/未被接受 → 抛错 → 整个回滚事务回滚（不留已改但无审计的记忆）
+        this.recordStrictRollbackAudit(proposal);
         // 回滚留痕（actor=system），与「反向 mutation journal」契约一致
         this.deps.journalStore.appendSystemIntent({
           id: `rollback:${proposal.id}`,
@@ -226,7 +230,85 @@ export class ProposalApplication {
         scope,
         target: factTarget(supersededId) ?? { kind: "memory_fact", id: "unknown" },
       }), "记忆取代");
+    } else if (proposal.type === "merge") {
+      // 评审 P1（第四轮）：merge 抑制多个源事实——每个被抑制事实单独留
+      // 严格审计（只记 id，不记正文），与事实修改同一事务
+      for (const factId of (proposal.payload.factIds as unknown[] ?? []).map(id)) {
+        assertDurableAudit(this.deps.audit.appendStrict({
+          eventName: "audit.memory.fact_suppressed",
+          payload: { action: "memory.fact.suppressed", decision: "allowed", changedFields: ["status"] },
+          actor,
+          executor: actor,
+          scope,
+          target: { kind: "memory_fact", id: String(factId) },
+        }), "记忆合并抑制");
+      }
     }
+  }
+
+  /**
+   * 评审 P0（第四轮）：回滚严格审计（fail-closed）。与回滚同一 SQLite 事务——
+   * audit 未配置/未被接受 → 抛错 → 整体回滚。回滚本身记 proposal_reverted；
+   * 回滚产生的 suppression（创建/投影回滚、supersede/merge 新事实回滚）
+   * 逐事实记 audit.memory.fact_suppressed + Activity 证据（只记 id）。
+   */
+  private recordStrictRollbackAudit(proposal: MemoryMutationProposal): void {
+    if (this.deps.audit === undefined) {
+      throw new Error("可观测性未初始化，记忆回滚拒绝执行");
+    }
+    const scope = { ownerAgentId: proposal.agentId };
+    const actor = { kind: "system" as const, id: "memory_agent" };
+    const factTarget = (idValue: string | number | undefined): ResourceRef | undefined =>
+      idValue === undefined ? undefined : { kind: "memory_fact" as const, id: String(idValue) };
+    const target = factTarget(proposal.targetId);
+    // 回滚本身（每个被回滚提案一条）
+    assertDurableAudit(this.deps.audit.appendStrict({
+      eventName: "audit.memory.proposal_reverted",
+      payload: { action: "memory.proposal.reverted", decision: "allowed", changedFields: ["status", "proposal_status"] },
+      actor,
+      executor: actor,
+      scope,
+      ...(target !== undefined ? { target } : {}),
+    }), "记忆回滚");
+    // 抑制证据：回滚产生 suppression 的事实（只记 id）
+    const suppressedIds: string[] = [];
+    if (proposal.type === "create_fact" || proposal.type === "longterm_projection") {
+      const createdId = typeof proposal.payload.createdFactId === "number"
+        ? proposal.payload.createdFactId
+        : proposal.targetId;
+      if (createdId !== undefined) suppressedIds.push(String(createdId));
+    } else if (proposal.type === "supersede") {
+      if (proposal.payload.newFactId !== undefined) suppressedIds.push(String(proposal.payload.newFactId));
+    } else if (proposal.type === "merge") {
+      if (proposal.payload.mergedFactId !== undefined) suppressedIds.push(String(proposal.payload.mergedFactId));
+    }
+    for (const factId of suppressedIds) {
+      assertDurableAudit(this.deps.audit.appendStrict({
+        eventName: "audit.memory.fact_suppressed",
+        payload: { action: "memory.fact.suppressed", decision: "allowed", changedFields: ["status"] },
+        actor,
+        executor: actor,
+        scope,
+        target: { kind: "memory_fact", id: factId },
+      }), "回滚抑制证据");
+      instrument.activity({
+        eventName: "memory.fact.suppressed",
+        actor: { kind: "memory_agent", id: proposal.agentId },
+        executor: { kind: "memory_agent", id: proposal.agentId },
+        scope,
+        target: { kind: "memory_fact", id: factId },
+        payload: { summaryCode: "memory_fact_suppressed", attributes: { factId, reason: "proposal_reverted" } },
+      });
+    }
+    // 回滚 Activity 证据
+    instrument.activity({
+      eventName: "memory.proposal.reverted",
+      actor: { kind: "memory_agent", id: proposal.agentId },
+      executor: { kind: "memory_agent", id: proposal.agentId },
+      scope,
+      target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: String(proposal.id) },
+      payload: { summaryCode: "memory_proposal_reverted", attributes: { type: proposal.type, runId: proposal.runId } },
+    });
   }
 
   /**
@@ -288,6 +370,19 @@ export class ProposalApplication {
           },
         },
       });
+    } else if (proposal.type === "merge") {
+      // 评审 P1（第四轮）：merge 抑制多个源事实——每个被抑制事实单独
+      // Activity 证据（只记 id，不记正文）
+      for (const factId of (proposal.payload.factIds as unknown[] ?? []).map(id)) {
+        instrument.activity({
+          eventName: "memory.fact.suppressed",
+          actor: { kind: "memory_agent", id: proposal.agentId },
+          executor: { kind: "memory_agent", id: proposal.agentId },
+          scope,
+          target: { kind: "memory_fact", id: String(factId) },
+          payload: { summaryCode: "memory_fact_suppressed", attributes: { factId: String(factId), reason: "merged" } },
+        });
+      }
     }
   }
 

@@ -13,6 +13,8 @@ import { ProviderStore } from "../../src/config/provider-store.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { ModelService } from "../../src/runtime/model-service.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
 import { MemoryBatchStore } from "../../src/storage/memory/batch-store.js";
 import { MemoryEventStore } from "../../src/storage/memory/event-store.js";
@@ -254,5 +256,284 @@ describe("Phase 11 第三轮复审（评审 P0 复现级测试）", () => {
       }],
     })).toThrow(/可观测性未初始化/);
     expect(factStore.listByAgent("a1").some((fact) => fact.fact === "无审计事实")).toBe(false);
+  });
+});
+describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
+  const rejectingAuditStub = () => ({
+    appendStrict: () => ({ kind: "rejected", eventName: "audit.agent.workspace_changed", reason: "ledger 版本不符" }),
+    appendStrictMany: () => { throw new Error("审计记录未被接受：ledger 版本不符"); },
+  }) as unknown as AuditRecorder;
+
+  it("P0-1a：Agent 创建带 defaultCwd+sandbox，audit 拒绝 → 503 且完全不落盘（原实现 201+落盘+audit 0 条）", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: rejectingAuditStub(),
+    });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "高风险创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(response.status).toBe(503);
+    expect(ctx.agentStore.list()).toHaveLength(1);
+    expect(ctx.agentStore.list().some((agent) => agent.identity.name === "高风险创建")).toBe(false);
+  });
+
+  it("P0-1a：Agent 创建带 defaultCwd+sandbox，audit 未配置 → 503", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "高风险创建2", baseColor: {}, sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(response.status).toBe(503);
+    expect(ctx.agentStore.list()).toHaveLength(1);
+    expect(ctx.agentStore.list().some((agent) => agent.identity.name === "高风险创建2")).toBe(false);
+  });
+
+  it("P0-1a：纯身份创建（无工作区/沙箱字段）不受影响 → 201", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "普通创建", baseColor: {} }),
+    });
+    expect(response.status).toBe(201);
+  });
+
+  it("P0-1b：Session 创建 audit 未配置 → 503 且无会话落盘（原实现 201）", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "无审计会话创建", cwd: process.cwd() }),
+    });
+    expect(response.status).toBe(503);
+    expect(ctx.sessionService.list()).toHaveLength(0);
+  });
+
+  it("P0-1b：Session 创建 audit 拒绝 → 503", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: {
+        appendStrict: () => ({ kind: "rejected", eventName: "audit.session.workspace_bound", reason: "ledger 版本不符" }),
+      } as unknown as AuditRecorder,
+    });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "拒绝审计会话", cwd: process.cwd() }),
+    });
+    expect(response.status).toBe(503);
+    expect(ctx.sessionService.list()).toHaveLength(0);
+  });
+
+  it("P1-3：settings PUT 一次改 defaultCwd+protectedPaths → 200 且两条审计同事务落账", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/agents/a1/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultCwd: "C:\\work", protectedPaths: ["secrets/"] }),
+    });
+    expect(response.status).toBe(200);
+    const rows = ctx.database.prepare(
+      "SELECT action FROM audit_events ORDER BY id",
+    ).all() as Array<{ action: string }>;
+    expect(rows.map((row) => row.action)).toEqual(["agent.workspace.changed", "sandbox.policy.changed"]);
+    const settings = ctx.agentStore.getSettings("a1");
+    expect(settings.defaultCwd).toBe("C:\\work");
+    expect(settings.sandbox?.protectedPaths).toContain("secrets/");
+  });
+
+  it("P0-2：rollbackRun 在 audit 未配置时抛错且事实/提案状态不变（原实现静默回滚+audit 0 条）", () => {
+    const ctx = createContext();
+    ctx.database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+    `).run("recall-rollback");
+    const factStore = new MemoryFactStore(ctx.database);
+    const proposalStore = new MemoryProposalStore(ctx.database);
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      eventStore: new MemoryEventStore(ctx.database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    const applierWithAudit = new ProposalApplication({
+      database: ctx.database,
+      proposalStore,
+      factStore,
+      eventStore: new MemoryEventStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      watermarkStore: new MemoryWatermarkStore(ctx.database),
+      policy,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
+    const createdProposal = {
+      id: "p-rollback-1", agentId: "a1", runId: "run-rollback", type: "create_fact" as const,
+      targetType: "fact" as const, payload: { fact: "待回滚事实" },
+      evidenceRefs: ["session:s1"], reason: "测试", confidence: 0.9, status: "pending" as const,
+      createdAt: "2026-08-01T00:00:00Z",
+    };
+    applierWithAudit.applyRun({ agentId: "a1", runId: "run-rollback", proposals: [createdProposal] });
+    expect(factStore.listByAgent("a1").some((fact) => fact.status === "active")).toBe(true);
+    const auditCountBefore = (ctx.database.prepare("SELECT COUNT(*) AS n FROM audit_events").get() as { n: number }).n;
+
+    const applierWithoutAudit = new ProposalApplication({
+      database: ctx.database,
+      proposalStore,
+      factStore,
+      eventStore: new MemoryEventStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      watermarkStore: new MemoryWatermarkStore(ctx.database),
+      policy,
+    });
+    expect(() => applierWithoutAudit.rollbackRun({ agentId: "a1", runId: "run-rollback" })).toThrow(/可观测性未初始化/);
+    expect(factStore.listByAgent("a1").some((fact) => fact.status === "active")).toBe(true);
+    expect(proposalStore.getById("p-rollback-1")?.status).toBe("applied");
+    const auditCountAfter = (ctx.database.prepare("SELECT COUNT(*) AS n FROM audit_events").get() as { n: number }).n;
+    expect(auditCountAfter).toBe(auditCountBefore);
+  });
+
+  it("P0-2：带 audit 回滚成功 → proposal_reverted + fact_suppressed 审计落账，事实 suppressed", () => {
+    const ctx = createContext();
+    const observability = new ObservabilityContext({
+      database: ctx.database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      logsRoot: path.join(ctx.dir, "logs"),
+      spoolRoot: path.join(ctx.dir, "spool"),
+    });
+    instrument.init(observability);
+    try {
+      ctx.database.prepare(`
+        INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+        VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+      `).run("recall-rollback2");
+      const factStore = new MemoryFactStore(ctx.database);
+      const proposalStore = new MemoryProposalStore(ctx.database);
+      const policy = new MemoryPolicy({
+        factStore,
+        recallStore: new MemoryRecallStore(ctx.database),
+        journalStore: new MemoryJournalStore(ctx.database),
+        batchStore: new MemoryBatchStore(ctx.database),
+        eventStore: new MemoryEventStore(ctx.database),
+        settingsResolver: () => defaultMemoryAgentSettings(),
+      });
+      const audit = new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      });
+      const applier = new ProposalApplication({
+        database: ctx.database,
+        proposalStore,
+        factStore,
+        eventStore: new MemoryEventStore(ctx.database),
+        journalStore: new MemoryJournalStore(ctx.database),
+        batchStore: new MemoryBatchStore(ctx.database),
+        watermarkStore: new MemoryWatermarkStore(ctx.database),
+        policy,
+        audit,
+      });
+      const createdProposal = {
+        id: "p-rollback-2", agentId: "a1", runId: "run-rollback2", type: "create_fact" as const,
+        targetType: "fact" as const, payload: { fact: "待回滚事实2" },
+        evidenceRefs: ["session:s1"], reason: "测试", confidence: 0.9, status: "pending" as const,
+        createdAt: "2026-08-01T00:00:00Z",
+      };
+      applier.applyRun({ agentId: "a1", runId: "run-rollback2", proposals: [createdProposal] });
+      applier.rollbackRun({ agentId: "a1", runId: "run-rollback2" });
+      // 事实被抑制（listByAgent 排除 suppressed，直接查库）
+      const statusRow = ctx.database.prepare("SELECT status FROM memory_facts WHERE fact = ?").get("待回滚事实2") as { status: string };
+      expect(statusRow.status).toBe("suppressed");
+      const actions = (ctx.database.prepare("SELECT action FROM audit_events ORDER BY id").all() as Array<{ action: string }>).map((row) => row.action);
+      expect(actions).toContain("memory.proposal.reverted");
+      expect(actions).toContain("memory.fact.suppressed");
+    } finally {
+      instrument.reset();
+    }
+  });
+
+  it("P1-6：merge 抑制的每个源事实都有 memory.fact.suppressed Activity + 严格 Audit", () => {
+    const ctx = createContext();
+    const observability = new ObservabilityContext({
+      database: ctx.database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      logsRoot: path.join(ctx.dir, "logs"),
+      spoolRoot: path.join(ctx.dir, "spool"),
+    });
+    instrument.init(observability);
+    try {
+      ctx.database.prepare(`
+        INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+        VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+      `).run("recall-merge");
+      const factStore = new MemoryFactStore(ctx.database);
+      const f1 = factStore.createFact({ agentId: "a1", fact: "源事实一", tags: [], source: "agent_approved", sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 40 });
+      const f2 = factStore.createFact({ agentId: "a1", fact: "源事实二", tags: [], source: "agent_approved", sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 40 });
+      const proposalStore = new MemoryProposalStore(ctx.database);
+      const policy = new MemoryPolicy({
+        factStore,
+        recallStore: new MemoryRecallStore(ctx.database),
+        journalStore: new MemoryJournalStore(ctx.database),
+        batchStore: new MemoryBatchStore(ctx.database),
+        eventStore: new MemoryEventStore(ctx.database),
+        settingsResolver: () => defaultMemoryAgentSettings(),
+      });
+      const audit = new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      });
+      const applier = new ProposalApplication({
+        database: ctx.database,
+        proposalStore,
+        factStore,
+        eventStore: new MemoryEventStore(ctx.database),
+        journalStore: new MemoryJournalStore(ctx.database),
+        batchStore: new MemoryBatchStore(ctx.database),
+        watermarkStore: new MemoryWatermarkStore(ctx.database),
+        policy,
+        audit,
+      });
+      const mergeProposal = {
+        id: "p-merge-1", agentId: "a1", runId: "run-merge", type: "merge" as const,
+        targetType: "fact" as const, payload: { factIds: [f1.id, f2.id], mergedFact: "合并事实" },
+        evidenceRefs: ["session:s1"], reason: "合并测试", confidence: 0.9, status: "pending" as const,
+        previousState: { facts: [f1, f2].map((fact) => ({ id: fact.id, fact: fact.fact, status: fact.status, revision: fact.updatedAt })) },
+        createdAt: "2026-08-01T00:00:00Z",
+      };
+      applier.applyRun({ agentId: "a1", runId: "run-merge", proposals: [mergeProposal] });
+      // 两个源事实都被取代/抑制（mergeFacts 置 superseded）
+      const suppressedCount = (ctx.database.prepare("SELECT COUNT(*) AS n FROM memory_facts WHERE status IN ('superseded', 'suppressed')").get() as { n: number }).n;
+      expect(suppressedCount).toBe(2);
+      const auditActions = (ctx.database.prepare("SELECT action FROM audit_events WHERE action = 'memory.fact.suppressed'").all() as Array<{ action: string }>);
+      expect(auditActions).toHaveLength(2);
+      const activityRows = ctx.database.prepare("SELECT event_name FROM activity_events WHERE event_name = 'memory.fact.suppressed'").all() as Array<{ event_name: string }>;
+      expect(activityRows).toHaveLength(2);
+    } finally {
+      instrument.reset();
+    }
   });
 });

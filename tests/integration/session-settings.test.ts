@@ -291,7 +291,13 @@ describe("session settings", () => {
       sessionHandle: session,
     });
     promptService.register(runtime);
-    const { app } = createServerApp({ sessionService: ctx.service, promptService });
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      promptService,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),    });
 
     const response = await app.request(
       `http://local/api/sessions/${session.id}/settings`,
@@ -316,7 +322,10 @@ describe("session settings", () => {
       sessionService: ctx.service,
       promptService,
       paths: ctx.paths,
-    });
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -420,7 +429,10 @@ describe("session settings", () => {
     const { app } = createServerApp({
       sessionService: ctx.service,
       preferencesStore,
-    });
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),    });
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -446,7 +458,10 @@ describe("session settings", () => {
     const { app } = createServerApp({
       sessionService: ctx.service,
       preferencesStore,
-    });
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),    });
 
     // 创建一个 session 并显式设置 thinkingLevel=low
     const created = await app.request("http://local/api/sessions", {

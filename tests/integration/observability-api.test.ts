@@ -599,6 +599,10 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
   it("偏好更新立即应用到当前运行时：PUT 后 logger 丢弃低于新级别的行（无需重启）", async () => {
     const { directory, paths, db, context } = makeFixture();
     const preferencesStore = new PreferencesStore(paths.preferences);
+    const audit = new AuditRecorder({
+      database: db,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
+    });
     const { app } = createServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
@@ -606,6 +610,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
       paths,
       database: db,
       preferencesStore,
+      audit,
     });
     const logDir = path.join(paths.logs, "runtime", "server");
     // 文件名规则：<date>_<bootId>_<segment>.jsonl（bootId 来自测试 producer）
@@ -673,4 +678,109 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
     await app.request(`http://127.0.0.1/api/agents/${created.identity.id}/archive`, { method: "POST" });
     expect(events()).toContain("agent.archived");
   });
+
+  it("P1-4：Junction 目录逃逸 → 400（realpath 包含性检查，字符串 resolve 挡不住）", async () => {
+    const { directory, paths } = makeFixture();
+    // 外部目录 + 哨兵文件
+    const outsideDir = path.join(directory, "outside");
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.writeFileSync(path.join(outsideDir, "OUTSIDE_SENTINEL.jsonl"), JSON.stringify({ leaked: true }) + "\n");
+    // 日志根下的 runtime/linked 用 Junction 指向外部
+    const linkedDir = path.join(paths.logs, "runtime", "linked");
+    fs.mkdirSync(path.dirname(linkedDir), { recursive: true });
+    let junctionOk = true;
+    try {
+      fs.symlinkSync(outsideDir, linkedDir, "junction");
+    } catch {
+      junctionOk = false; // 环境不支持 junction → 跳过（非回归）
+    }
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: openDatabases[openDatabases.length - 1]!,
+    });
+    if (!junctionOk) return;
+    const response = await app.request(`http://127.0.0.1/api/observability/diagnostic/tail?process=linked`);
+    expect(response.status).toBe(400);
+    const body = await response.json() as { code: string };
+    expect(body.code).toBe("INVALID_INPUT");
+  });
+
+  it("P1-4：目录内单文件符号链接逃逸 → 400", async () => {
+    const { paths } = makeFixture();
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "t6-outside-file-"));
+    fs.writeFileSync(path.join(outsideDir, "LEAK.jsonl"), JSON.stringify({ leaked: true }) + "\n");
+    const logDir = path.join(paths.logs, "runtime", "server");
+    fs.mkdirSync(logDir, { recursive: true });
+    let symlinkOk = true;
+    try {
+      fs.symlinkSync(path.join(outsideDir, "LEAK.jsonl"), path.join(logDir, "2026-08-01_boot_0.jsonl"));
+    } catch {
+      symlinkOk = false;
+    }
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: openDatabases[openDatabases.length - 1]!,
+    });
+    if (!symlinkOk) return;
+    const response = await app.request(`http://127.0.0.1/api/observability/diagnostic/tail?lines=3`);
+    expect(response.status).toBe(400);
+    const body = await response.json() as { code: string };
+    expect(body.code).toBe("INVALID_INPUT");
+  });
+
+  it("P1-5：偏好 PUT 留下 durable Activity + 严格 Audit（audit 配置时 200）", async () => {
+    const { paths, db } = makeFixture();
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    const audit = new AuditRecorder({
+      database: db,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+      preferencesStore,
+      audit,
+    });
+    const response = await app.request(`http://127.0.0.1/api/preferences/observability`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...defaultObservabilityPreferences(), diagnosticLevel: "warn" }),
+    });
+    expect(response.status).toBe(200);
+    const auditRows = db.prepare("SELECT action FROM audit_events WHERE action = 'observability.preferences.changed'").all() as Array<{ action: string }>;
+    expect(auditRows.length).toBeGreaterThanOrEqual(1);
+    const activityRows = db.prepare("SELECT event_name FROM activity_events WHERE event_name = 'observability.preferences.changed'").all() as Array<{ event_name: string }>;
+    expect(activityRows.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("P1-5：偏好 PUT 在 audit 未配置时 fail-closed → 503 且设置未保存", async () => {
+    const { paths, db } = makeFixture();
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths,
+      database: db,
+      preferencesStore,
+    });
+    const response = await app.request(`http://127.0.0.1/api/preferences/observability`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...defaultObservabilityPreferences(), diagnosticLevel: "error" }),
+    });
+    expect(response.status).toBe(503);
+    const saved = preferencesStore.get().observability;
+    expect(saved?.diagnosticLevel).not.toBe("error");
+  });
+
 });

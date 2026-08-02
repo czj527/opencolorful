@@ -1,6 +1,6 @@
 # Phase 11：完整日志系统与统一可观测性
 
-**状态：已实现（2026-08-02 第三轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
+**状态：已实现（2026-08-02 第四轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
 **基线：** `main`（Phase 10.5 验收点之后）
 **架构权威：** [docs/logging-architecture.md](../docs/logging-architecture.md)
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 11
@@ -1171,3 +1171,21 @@ reviewer 结论："第二轮修复仍未通过验收…先修复 3 个 P0，并�
 | 7 | P1 | Agent create/name/base-color/archive 无 activity 埋点；偏好更新不作用于当前运行时 | 上述操作补 `agent.created`/`agent.settings.changed`/`agent.base_color.changed`/`agent.archived`；preferences PUT 现调用 `instrument.applyObservabilityPreferences` + retention logger/spool `applyOptions/setBudgetBytes` 即时生效（无需重启） |
 
 **复现级测试 16 个**：observability-failclosed +5（rejected 返回值/audit 未配置 → 503+回滚 ×3、凭据 rejected 不写盘、记忆审批未配置回滚）、retention +4（audit 未配置拒绝删除、rejected 回滚、preview 与 run 同范围、可配置保留期生效）、observability-api +3（tail 穿越 8 变体 400、偏好即时生效、Agent 活动埋点）、store +4（spool 篡改 status/significance/payload → quarantine + 合法行回归）。
+
+### 第四轮外部复审修复（2026-08-02，本提交）
+
+reviewer 结论："第三轮仍未通过…核心问题集中在创建路径和反向操作仍能绕过审计"。
+2 个 P0 + 4 个 P1 全部修复，每个均配复现级回归测试（新增 15 个）。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | 创建入口绕过 fail-closed：Agent 创建直接持久化 defaultCwd/sandbox、Session 创建直接绑定工作目录，均无严格审计（"修改"改成"创建时指定"即绕过） | Agent 创建携带 defaultCwd/sandbox 时审计先行（appendStrictMany，未配置/rejected → 503 且不落盘）；Session 创建每次即绑定工作区 → 审计先行（预生成 id 携带精确 target），未配置/rejected → 503 且无会话文件/索引行落盘 |
+| 2 | P0 | `rollbackRun()` 无审计：恢复强度/恢复遗忘/抑制新事实/标记 reverted 全部绕过严格审计 | 新增 `recordStrictRollbackAudit()`：audit 未配置抛错（fail-closed）；`audit.memory.proposal_reverted`（新目录事件）+ 回滚产生的 suppression 逐事实 `audit.memory.fact_suppressed` 与回滚同一 SQLite 事务，失败整体回滚；Activity 证据 `memory.proposal.reverted`/`memory.fact.suppressed` |
+| 3 | P1 | Agent 设置一次请求多条 Audit 非原子：第一条 accepted、第二条 rejected → 账本永久保留一条已回滚变更 | 新增 `AuditRecorder.appendStrictMany()`：多条审计单事务原子写入，任一 rejected 全部回滚；agents settings PUT 与创建路径均接入 |
+| 4 | P1 | diagnostic tail 可经 Junction/符号链接读取日志目录外文件（仅字符串 resolve 检查） | 目录与最终文件分别 `realpathSync` 后做包含性检查，真实路径逃逸 → 400 |
+| 5 | P1 | 可观测性偏好修改只写 diagnostic info，`observability.preferences.changed` 无生产调用方 | preferences PUT 先严格审计 `audit.observability.preferences_changed`（未配置/rejected → 503 且设置不保存），再写 durable Activity `observability.preferences.changed` |
+| 6 | P1 | `memory.fact.suppressed` 契约未接入：merge 抑制多个源事实只记通用 proposal_approved | merge 对每个被抑制源事实单独记 Activity `memory.fact.suppressed` + 严格审计 `audit.memory.fact_suppressed`（只记 id）；回滚创建事实产生的 suppression 同样覆盖 |
+
+**复现级测试 15 个**：observability-failclosed +9（创建审计先行 ×5、多条审计成功路径、rollbackRun 未配置抛错+状态不变、带审计回滚落账、merge 逐事实证据）、observability-store +2（appendStrictMany 原子回滚/全量落账）、observability-api +4（Junction 逃逸 400、单文件符号链接逃逸 400、偏好 PUT 落 Activity+Audit、偏好 PUT 无审计 503）。
+
+**波及修复**：Session 创建审计先行导致 session-agent-binding/session-settings/tui-smoke 等 4 个测试文件注入 AuditRecorder（tui-smoke 的 startForegroundServer 传 appOptions 时跳过 buildProductionResources，改为显式构造 ObservabilityContext 并接线 audit）。
