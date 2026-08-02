@@ -158,7 +158,13 @@ export function registerMemoryRoutes(
     if (admin === undefined || typeof runId !== "string" || runId.trim() === "") {
       return context.json(createApiError("INVALID_INPUT", "缺少 run 参数或记忆 Agent 未启用"), 400);
     }
-    const result = admin.application.rollbackRun({ agentId, runId });
+    // 评审 P1（第五轮）：回滚责任语义——用户操作路由传入真实 actor，
+    // executor 使用实际执行服务（agent-server）；changedFields 由
+    // ProposalApplication 按提案类型生成
+    const result = admin.application.rollbackRun(
+      { agentId, runId },
+      { actor: { kind: "user", id: "web" }, executor: { kind: "service", id: "agent-server" } },
+    );
     return context.json({ agentId, runId, applied: result.applied.length, failed: result.failed.length });
   });
 

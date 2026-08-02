@@ -445,13 +445,15 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       let body: unknown;
       try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
       // 评审 P1（第四轮）：偏好修改影响证据保留策略本身（级别/保留期/预算），
-      // 必须留下 durable Activity + 严格 Audit——audit 未配置或被拒 → fail-closed 拒绝
+      // 必须留下 durable Activity + 严格 Audit——audit 未配置或被拒 → fail-closed 拒绝。
+      // 评审 P1（第五轮）：文件修改采用「audit started → 原子写入 → audit terminal」
+      // 模型（docs/logging-architecture.md §6.5）——写盘失败必须留下 failed 终态。
       if (deps.audit === undefined) {
         return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
       }
       try {
         assertDurableAudit(deps.audit.appendStrict({
-          eventName: "audit.observability.preferences_changed",
+          eventName: "audit.observability.preferences_change.started",
           payload: {
             action: "observability.preferences.changed",
             decision: "allowed",
@@ -477,6 +479,17 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
         });
         retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
         defaultRetentionDays = prefs.activityRetentionDays.routine;
+        // 领域写入成功 → completed 终态（原 allowed 记录）
+        assertDurableAudit(deps.audit.appendStrict({
+          eventName: "audit.observability.preferences_changed",
+          payload: {
+            action: "observability.preferences.changed",
+            decision: "allowed",
+            changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
+          },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+        }), "可观测性偏好变更");
         // durable Activity 证据（audit 已 fail-closed 在前；auditMirror 同库）
         instrument.activity({
           eventName: "observability.preferences.changed",
@@ -487,6 +500,20 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
         instrument.info("preferences.observability.updated", "observability 偏好已更新并应用到当前运行时");
         return context.json(prefs);
       } catch (error) {
+        // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
+        try {
+          deps.audit!.appendStrict({
+            eventName: "audit.observability.preferences_change.failed",
+            payload: {
+              action: "observability.preferences.changed",
+              decision: "denied",
+              reasonCode: (error instanceof Error ? error.message : String(error)).slice(0, 64),
+              changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
+            },
+            actor: { kind: "user", id: "web" },
+            executor: { kind: "service", id: "agent-server" },
+          });
+        } catch { /* 终态尽力而为 */ }
         return context.json({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "偏好更新失败" }, 400);
       }
     });

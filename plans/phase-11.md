@@ -1,6 +1,6 @@
 # Phase 11：完整日志系统与统一可观测性
 
-**状态：已实现（2026-08-02 第四轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
+**状态：已实现（2026-08-02 第五轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
 **基线：** `main`（Phase 10.5 验收点之后）
 **架构权威：** [docs/logging-architecture.md](../docs/logging-architecture.md)
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 11
@@ -1189,3 +1189,19 @@ reviewer 结论："第三轮仍未通过…核心问题集中在创建路径和�
 **复现级测试 15 个**：observability-failclosed +9（创建审计先行 ×5、多条审计成功路径、rollbackRun 未配置抛错+状态不变、带审计回滚落账、merge 逐事实证据）、observability-store +2（appendStrictMany 原子回滚/全量落账）、observability-api +4（Junction 逃逸 400、单文件符号链接逃逸 400、偏好 PUT 落 Activity+Audit、偏好 PUT 无审计 503）。
 
 **波及修复**：Session 创建审计先行导致 session-agent-binding/session-settings/tui-smoke 等 4 个测试文件注入 AuditRecorder（tui-smoke 的 startForegroundServer 传 appOptions 时跳过 buildProductionResources，改为显式构造 ObservabilityContext 并接线 audit）。
+
+### 第五轮外部复审修复（2026-08-02，本提交）
+
+reviewer 结论："第四轮已消除安全绕过型 P0，但审计账本还不能被视为完全可信"。
+3 个 P1 + 1 个 P2 全部修复，每个均配复现级回归测试（新增 6 个）。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P1 | 审计先行为最终失败的操作留下虚假 `allowed` 记录（409/500/400 后账本仍声称成功）——与上一轮"设置已回滚但第一条 Audit 仍存在"同类失真 | 文件修改全面接入架构文档模型（docs/logging-architecture.md §6.5「audit started → 原子写入 → audit terminal」）：Agent 创建/设置、Session 创建、偏好修改均先写 `*.started`（fail-closed），领域写入成功写 completed（allowed），失败写 `*.failed`（decision=denied + reasonCode）——失败操作绝无 allowed 成功记录 |
+| 2 | P1 | Agent/Session Audit 缺 scope：`owner_agent_id`/`session_id` 为 NULL，按归属过滤查不到 | Agent 审计补 `scope.ownerAgentId`；Session 审计补 `scope.sessionId`（创建与 settings PUT 两处）；真实查询测试验证 queryAudit 按归属/会话命中 |
+| 3 | P1 | 用户触发记忆回滚被错误归责：固定 actor/executor=system/memory_agent，changedFields 固定 status | `rollbackRun` 接受调用方传入的 actor/executor（用户路由传 user/web + service/agent-server）；changedFields 按提案类型生成——强度回滚记 `retentionStrength`、遗忘回滚记 `status`、取代回滚记 `status/valid_until`，不再固定 status |
+| 4 | P2 | 文档过早勾选完成 | 状态保持"待复审验收"；本轮修复完成后勾选与实现一致，并记录本轮修复 |
+
+**复现级测试 6 个**（observability-failclosed）：Agent 创建冲突 409 → started×2+failed×2 无 allowed 成功记录；Session 持久化失败 500 → started+failed；偏好写盘失败 400 → started+failed；Agent audit ownerAgentId 归属查询命中；Session audit sessionId 查询命中；用户强度回滚 → actor=user/web、changedFields 含 retentionStrength。
+
+**波及**：settings PUT 的审计断言更新为三阶段（started×2 + completed×2）；记忆回滚测试经内存态构造，无需改调用方（identity 可选参数）。

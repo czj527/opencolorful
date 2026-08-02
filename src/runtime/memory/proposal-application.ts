@@ -104,7 +104,10 @@ export class ProposalApplication {
     return result;
   }
 
-  rollbackRun(input: { agentId: string; runId: string }): ApplicationResult {
+  rollbackRun(
+    input: { agentId: string; runId: string },
+    identity?: { actor?: import("../../contracts/observability.js").ActorRef; executor?: import("../../contracts/observability.js").ExecutorRef },
+  ): ApplicationResult {
     const result: ApplicationResult = { applied: [], rejected: [], failed: [] };
     const transaction = this.deps.database.transaction(() => {
       for (const proposal of this.deps.proposalStore.listAppliedByRun(input.runId).filter((item) => item.agentId === input.agentId).reverse()) {
@@ -143,7 +146,10 @@ export class ProposalApplication {
         // 评审 P0（第四轮）：回滚同样是长期记忆状态变更——与 applyRun 同一
         // fail-closed 契约：proposal_reverted + 抑制证据与回滚同一 SQLite 事务，
         // 审计未配置/未被接受 → 抛错 → 整个回滚事务回滚（不留已改但无审计的记忆）
-        this.recordStrictRollbackAudit(proposal);
+        // 评审 P1（第五轮）：责任语义——由调用方（用户操作路由）传入真实 actor，
+        // executor 使用实际执行服务；changedFields 按提案类型生成（如强度回滚
+        // 记录 retentionStrength 而非 status）
+        this.recordStrictRollbackAudit(proposal, identity?.actor, identity?.executor);
         // 回滚留痕（actor=system），与「反向 mutation journal」契约一致
         this.deps.journalStore.appendSystemIntent({
           id: `rollback:${proposal.id}`,
@@ -251,22 +257,31 @@ export class ProposalApplication {
    * audit 未配置/未被接受 → 抛错 → 整体回滚。回滚本身记 proposal_reverted；
    * 回滚产生的 suppression（创建/投影回滚、supersede/merge 新事实回滚）
    * 逐事实记 audit.memory.fact_suppressed + Activity 证据（只记 id）。
+   * 评审 P1（第五轮）：actor/executor 由调用方传入（用户操作路由），
+   * changedFields 按提案类型生成——强度回滚记录 retentionStrength，
+   * 遗忘回滚记录 status，取代回滚记录 status/valid_until，不再固定 status。
    */
-  private recordStrictRollbackAudit(proposal: MemoryMutationProposal): void {
+  private recordStrictRollbackAudit(
+    proposal: MemoryMutationProposal,
+    actorOverride?: import("../../contracts/observability.js").ActorRef,
+    executorOverride?: import("../../contracts/observability.js").ExecutorRef,
+  ): void {
     if (this.deps.audit === undefined) {
       throw new Error("可观测性未初始化，记忆回滚拒绝执行");
     }
     const scope = { ownerAgentId: proposal.agentId };
-    const actor = { kind: "system" as const, id: "memory_agent" };
+    const actor = actorOverride ?? { kind: "system" as const, id: "memory_agent" };
+    const executor = executorOverride ?? { kind: "service" as const, id: "memory_agent" };
     const factTarget = (idValue: string | number | undefined): ResourceRef | undefined =>
       idValue === undefined ? undefined : { kind: "memory_fact" as const, id: String(idValue) };
     const target = factTarget(proposal.targetId);
+    const changedFields = this.rollbackChangedFields(proposal);
     // 回滚本身（每个被回滚提案一条）
     assertDurableAudit(this.deps.audit.appendStrict({
       eventName: "audit.memory.proposal_reverted",
-      payload: { action: "memory.proposal.reverted", decision: "allowed", changedFields: ["status", "proposal_status"] },
+      payload: { action: "memory.proposal.reverted", decision: "allowed", changedFields },
       actor,
-      executor: actor,
+      executor,
       scope,
       ...(target !== undefined ? { target } : {}),
     }), "记忆回滚");
@@ -287,14 +302,14 @@ export class ProposalApplication {
         eventName: "audit.memory.fact_suppressed",
         payload: { action: "memory.fact.suppressed", decision: "allowed", changedFields: ["status"] },
         actor,
-        executor: actor,
+        executor,
         scope,
         target: { kind: "memory_fact", id: factId },
       }), "回滚抑制证据");
       instrument.activity({
         eventName: "memory.fact.suppressed",
-        actor: { kind: "memory_agent", id: proposal.agentId },
-        executor: { kind: "memory_agent", id: proposal.agentId },
+        actor,
+        executor,
         scope,
         target: { kind: "memory_fact", id: factId },
         payload: { summaryCode: "memory_fact_suppressed", attributes: { factId, reason: "proposal_reverted" } },
@@ -303,12 +318,21 @@ export class ProposalApplication {
     // 回滚 Activity 证据
     instrument.activity({
       eventName: "memory.proposal.reverted",
-      actor: { kind: "memory_agent", id: proposal.agentId },
-      executor: { kind: "memory_agent", id: proposal.agentId },
+      actor,
+      executor,
       scope,
       target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: String(proposal.id) },
       payload: { summaryCode: "memory_proposal_reverted", attributes: { type: proposal.type, runId: proposal.runId } },
     });
+  }
+
+  /** 评审 P1（第五轮）：回滚的实际修改字段按提案类型生成 */
+  private rollbackChangedFields(proposal: MemoryMutationProposal): string[] {
+    if (proposal.type === "strength_change") return ["retentionStrength"];
+    if (proposal.type === "forget") return ["status"];
+    if (proposal.type === "supersede") return ["status", "valid_until"];
+    if (proposal.type === "merge") return ["status"];
+    return ["status"]; // create_fact / longterm_projection：抑制新事实
   }
 
   /**

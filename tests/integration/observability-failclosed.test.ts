@@ -14,6 +14,8 @@ import { SessionService } from "../../src/runtime/session-service.js";
 import { ModelService } from "../../src/runtime/model-service.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { ObservabilityQuery } from "../../src/observability/observability-query.js";
+import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
 import { MemoryBatchStore } from "../../src/storage/memory/batch-store.js";
@@ -355,7 +357,11 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
     const rows = ctx.database.prepare(
       "SELECT action FROM audit_events ORDER BY id",
     ).all() as Array<{ action: string }>;
-    expect(rows.map((row) => row.action)).toEqual(["agent.workspace.changed", "sandbox.policy.changed"]);
+    // 三阶段模型（第五轮）：started ×2 → completed ×2（allowed 终态）
+    expect(rows.map((row) => row.action)).toEqual([
+      "agent.workspace.changed", "sandbox.policy.changed",
+      "agent.workspace.changed", "sandbox.policy.changed",
+    ]);
     const settings = ctx.agentStore.getSettings("a1");
     expect(settings.defaultCwd).toBe("C:\\work");
     expect(settings.sandbox?.protectedPaths).toContain("secrets/");
@@ -535,5 +541,220 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
     } finally {
       instrument.reset();
     }
+  });
+});
+
+describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
+  it("P1-1：Agent 创建冲突（409）→ started+failed 终态，绝无 allowed 成功记录（原实现留下两条 allowed）", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "a1", name: "冲突创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(response.status).toBe(409);
+    const rows = ctx.database.prepare(
+      "SELECT action, decision, reason_code FROM audit_events ORDER BY id",
+    ).all() as Array<{ action: string; decision: string; reason_code: string | null }>;
+    expect(rows).toEqual([
+      { action: "agent.workspace.changed", decision: "allowed", reason_code: null },
+      { action: "sandbox.policy.changed", decision: "allowed", reason_code: null },
+      { action: "agent.workspace.changed", decision: "denied", reason_code: expect.stringMatching(/已存在|already/i) },
+      { action: "sandbox.policy.changed", decision: "denied", reason_code: expect.stringMatching(/已存在|already/i) },
+    ]);
+  });
+
+  it("P1-1：Session 创建持久化失败（500）→ started+failed 终态，无 allowed 成功记录", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const failingService = ctx.sessionService as unknown as { create: () => never };
+    const originalCreate = failingService.create;
+    failingService.create = () => { throw new Error("disk full"); };
+    try {
+      const { app } = createServerApp({
+        agentStore: ctx.agentStore,
+        sessionService: ctx.sessionService,
+        audit,
+      });
+      const response = await app.request(`http://x/api/sessions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "失败会话", cwd: process.cwd() }),
+      });
+      expect(response.status).toBe(500);
+      const rows = ctx.database.prepare(
+        "SELECT action, decision, reason_code FROM audit_events ORDER BY id",
+      ).all() as Array<{ action: string; decision: string; reason_code: string | null }>;
+      expect(rows).toEqual([
+        { action: "session.workspace.bound", decision: "allowed", reason_code: null },
+        { action: "session.workspace.bound", decision: "denied", reason_code: expect.stringContaining("disk full") },
+      ]);
+      expect(ctx.sessionService.list()).toHaveLength(0);
+    } finally {
+      failingService.create = originalCreate;
+    }
+  });
+
+  it("P1-1：偏好写盘失败（400）→ started+failed 终态，无 allowed 成功记录", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    const failingStore = preferencesStore as unknown as { update: () => never };
+    const originalUpdate = failingStore.update;
+    failingStore.update = () => { throw new Error("disk full"); };
+    try {
+      const { app } = createServerApp({
+        agentStore: ctx.agentStore,
+        sessionService: ctx.sessionService,
+        audit,
+        preferencesStore,
+        paths: ctx.paths,
+        database: ctx.database,
+      });
+      const response = await app.request(`http://x/api/preferences/observability`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ diagnosticLevel: "warn" }),
+      });
+      expect(response.status).toBe(400);
+      const rows = ctx.database.prepare(
+        "SELECT action, decision, reason_code FROM audit_events ORDER BY id",
+      ).all() as Array<{ action: string; decision: string; reason_code: string | null }>;
+      expect(rows).toEqual([
+        { action: "observability.preferences.changed", decision: "allowed", reason_code: null },
+        { action: "observability.preferences.changed", decision: "denied", reason_code: expect.stringContaining("disk full") },
+      ]);
+    } finally {
+      failingStore.update = originalUpdate;
+    }
+  });
+
+  it("P1-2：Agent 审计带 ownerAgentId scope → 按归属查询可命中（原实现 NULL）", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "scope 测试", baseColor: {}, sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(response.status).toBe(201);
+    const created = await response.json() as { identity: { id: string } };
+    const scoped = ctx.database.prepare(
+      "SELECT COUNT(*) AS n FROM audit_events WHERE owner_agent_id = ? AND action IN ('agent.workspace.changed', 'sandbox.policy.changed')",
+    ).get(created.identity.id) as { n: number };
+    expect(scoped.n).toBeGreaterThanOrEqual(1);
+    const query = new ObservabilityQuery(ctx.database);
+    const page = query.queryAudit({ ownerAgentId: created.identity.id }, null, 50);
+    expect(page.items.length).toBeGreaterThanOrEqual(1);
+    expect(page.items.every((row) => row.ownerAgentId === created.identity.id)).toBe(true);
+  });
+
+  it("P1-2：Session 审计带 sessionId scope → 按会话查询可命中（原实现 NULL）", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "scope 会话", cwd: process.cwd() }),
+    });
+    expect(response.status).toBe(201);
+    const session = await response.json() as { id: string };
+    const scoped = ctx.database.prepare(
+      "SELECT COUNT(*) AS n FROM audit_events WHERE session_id = ? AND action = 'session.workspace.bound'",
+    ).get(session.id) as { n: number };
+    expect(scoped.n).toBeGreaterThanOrEqual(1);
+    const query = new ObservabilityQuery(ctx.database);
+    const page = query.queryAudit({ sessionId: session.id }, null, 50);
+    expect(page.items.length).toBeGreaterThanOrEqual(1);
+    expect(page.items.every((row) => row.sessionId === session.id)).toBe(true);
+  });
+
+  it("P1-3：用户触发强度回滚 → actor=user/web、executor=service/agent-server、changedFields 含 retentionStrength", () => {
+    const ctx = createContext();
+    ctx.database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+    `).run("recall-r5");
+    const factStore = new MemoryFactStore(ctx.database);
+    const fact = factStore.createFact({ agentId: "a1", fact: "强度回滚事实", tags: [], source: "agent_approved", sourceRefs: ["session:s1"], confidence: 0.9, retentionStrength: 40 });
+    const proposalStore = new MemoryProposalStore(ctx.database);
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      eventStore: new MemoryEventStore(ctx.database),
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+    });
+    const applier = new ProposalApplication({
+      database: ctx.database,
+      proposalStore,
+      factStore,
+      eventStore: new MemoryEventStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      watermarkStore: new MemoryWatermarkStore(ctx.database),
+      policy,
+      audit,
+    });
+    const strengthProposal = {
+      id: "p-r5-strength", agentId: "a1", runId: "run-r5", type: "strength_change" as const,
+      targetType: "fact" as const, targetId: String(fact.id), payload: { retentionStrength: 50 },
+      evidenceRefs: ["session:s1"], reason: "提强", confidence: 0.9, status: "pending" as const,
+      previousState: { retention: 40 },
+      createdAt: "2026-08-01T00:00:00Z",
+    };
+    applier.applyRun({ agentId: "a1", runId: "run-r5", proposals: [strengthProposal] });
+    expect(factStore.getById(fact.id)?.retentionStrength).toBe(50);
+    applier.rollbackRun(
+      { agentId: "a1", runId: "run-r5" },
+      { actor: { kind: "user", id: "web" }, executor: { kind: "service", id: "agent-server" } },
+    );
+    expect(factStore.getById(fact.id)?.retentionStrength).toBe(40);
+    const row = ctx.database.prepare(
+      "SELECT actor_kind, actor_id, executor_kind, executor_id, changed_fields_json FROM audit_events WHERE action = 'memory.proposal.reverted'",
+    ).get() as { actor_kind: string; actor_id: string; executor_kind: string; executor_id: string; changed_fields_json: string };
+    expect(row.actor_kind).toBe("user");
+    expect(row.actor_id).toBe("web");
+    expect(row.executor_kind).toBe("service");
+    expect(row.executor_id).toBe("agent-server");
+    const changedFields = JSON.parse(row.changed_fields_json) as string[];
+    expect(changedFields).toContain("retentionStrength");
+    expect(changedFields).not.toContain("status");
   });
 });

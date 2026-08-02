@@ -138,8 +138,10 @@ export function registerAgentRoutes(
       }
 
       // 评审 P0（第四轮）：创建入口不得绕过工作区/沙箱 fail-closed 审计——
-      // 请求提供 defaultCwd 或 sandbox 即属高风险（与 settings PUT 同一清单），
-      // 审计先行：未配置或被拒（rejected）→ 拒绝创建，不落盘任何配置
+      // 请求提供 defaultCwd 或 sandbox 即属高风险（与 settings PUT 同一清单）。
+      // 评审 P1（第五轮）：文件修改采用「audit started → 原子写入 → audit terminal」
+      // 模型（docs/logging-architecture.md §6.5）——领域写入失败必须留下明确的
+      // failed 终态（decision=denied + reasonCode），不得留下单条 allowed 成功记录。
       const auditInputs: AuditRecordInput[] = [];
       if (defaultCwd !== undefined) {
         auditInputs.push({
@@ -148,6 +150,7 @@ export function registerAgentRoutes(
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "agent", id: agentId },
+          scope: { ownerAgentId: agentId },
         });
       }
       if (sandbox !== undefined) {
@@ -157,27 +160,74 @@ export function registerAgentRoutes(
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "agent", id: agentId },
+          scope: { ownerAgentId: agentId },
         });
       }
       if (auditInputs.length > 0) {
         if (audit === undefined) {
           return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
         }
+        const startedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+          ...input,
+          eventName: input.eventName === "audit.agent.workspace_changed"
+            ? "audit.agent.workspace_change.started"
+            : "audit.sandbox.policy_change.started",
+        }));
         try {
-          // 多条审计单事务原子写入：任一 rejected → 全部回滚 → 拒绝创建
-          audit.appendStrictMany(auditInputs);
+          // 审计先行（started 原子）：任一 rejected → 全部回滚 → 拒绝创建
+          audit.appendStrictMany(startedInputs);
         } catch {
           return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
         }
+        try {
+          agentStore.create({
+            id: agentId,
+            name: body.name.trim(),
+            baseColor: baseColorInput,
+            ...(defaultCwd !== undefined ? { defaultCwd } : {}),
+            ...(sandbox ? { sandbox } : {}),
+          });
+        } catch (error) {
+          // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
+          const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+            ...input,
+            eventName: input.eventName === "audit.agent.workspace_changed"
+              ? "audit.agent.workspace_change.failed"
+              : "audit.sandbox.policy_change.failed",
+            payload: {
+              action: input.payload.action,
+              decision: "denied" as const,
+              reasonCode: (error instanceof Error ? error.message : String(error)).slice(0, 64),
+              changedFields: input.payload.changedFields ?? [],
+            },
+          }));
+          try { audit.appendStrictMany(failedInputs); } catch { /* 终态尽力而为 */ }
+          throw error;
+        }
+        // 领域写入成功 → completed 终态（原 allowed 记录）
+        try {
+          audit.appendStrictMany(auditInputs);
+        } catch {
+          // 终态无法确认：记 failed 终态（fail-closed 报告，不伪装成功）并拒绝确认
+          try {
+            const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+              ...input,
+              eventName: input.eventName === "audit.agent.workspace_changed"
+                ? "audit.agent.workspace_change.failed"
+                : "audit.sandbox.policy_change.failed",
+              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: "audit_terminal_write_failed", changedFields: input.payload.changedFields ?? [] },
+            }));
+            audit.appendStrictMany(failedInputs);
+          } catch { /* 终态尽力而为 */ }
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
+        }
+      } else {
+        agentStore.create({
+          id: agentId,
+          name: body.name.trim(),
+          baseColor: baseColorInput,
+        });
       }
-
-      agentStore.create({
-        id: agentId,
-        name: body.name.trim(),
-        baseColor: baseColorInput,
-        ...(defaultCwd !== undefined ? { defaultCwd } : {}),
-        ...(sandbox ? { sandbox } : {}),
-      });
       // 评审 P1（第三轮）：Agent 创建进 Activity 时间线（milestone）
       instrument.activity({
         eventName: "agent.created",
@@ -431,9 +481,10 @@ export function registerAgentRoutes(
       }
       const agentId = context.req.param("id");
       // 评审 P0-1：沙箱策略/工作目录变更属 fail-closed 清单——
-      // 落盘后强制 durable audit（严格路径，失败即回滚并拒绝操作）
+      // 评审 P1（第五轮）：文件修改采用「audit started → 原子写入 → audit terminal」
+      // 模型（docs/logging-architecture.md §6.5）——started 先行（fail-closed），
+      // 领域写入成功记 completed（allowed），失败回滚并记 failed（denied）终态。
       const previousSettings = agentStore.load(agentId).settings;
-      agentStore.saveSettings(agentId, patch);
       const auditInputs: AuditRecordInput[] = [];
       if (patch.defaultCwd !== undefined) {
         auditInputs.push({
@@ -442,6 +493,7 @@ export function registerAgentRoutes(
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "agent", id: agentId },
+          scope: { ownerAgentId: agentId },
         });
       }
       if (patch.sandbox !== undefined) {
@@ -451,20 +503,61 @@ export function registerAgentRoutes(
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "agent", id: agentId },
+          scope: { ownerAgentId: agentId },
         });
       }
       if (auditInputs.length > 0) {
         try {
           // 评审 P0（第三轮）：audit 未配置同样拒绝执行（fail-closed 由构造保证不了，这里显式检查）；
-          // 评审 P1（第四轮）：多条审计单事务原子写入——任一 rejected 全部回滚，
-          // 不再出现"第一条 accepted 已落账、设置却回滚"的账本谎言
+          // 评审 P1（第四轮）：多条审计单事务原子写入——任一 rejected 全部回滚
           if (audit === undefined) throw new Error("可观测性未初始化，高风险修改拒绝执行");
-          audit.appendStrictMany(auditInputs);
+          const startedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+            ...input,
+            eventName: input.eventName === "audit.agent.workspace_changed"
+              ? "audit.agent.workspace_change.started"
+              : "audit.sandbox.policy_change.started",
+          }));
+          audit.appendStrictMany(startedInputs);
         } catch {
-          // fail-closed：Audit 无法持久化 → 回滚设置并拒绝操作
-          try { agentStore.saveSettings(agentId, previousSettings); } catch { /* 回滚失败也拒绝 */ }
+          // fail-closed：Audit 无法持久化 → 拒绝操作（设置尚未写入）
           return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险修改被拒绝"), 503);
         }
+        try {
+          agentStore.saveSettings(agentId, patch);
+        } catch (error) {
+          // 领域写入失败 → failed 终态（尽力而为）并拒绝操作
+          try {
+            const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+              ...input,
+              eventName: input.eventName === "audit.agent.workspace_changed"
+                ? "audit.agent.workspace_change.failed"
+                : "audit.sandbox.policy_change.failed",
+              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: (error instanceof Error ? error.message : String(error)).slice(0, 64), changedFields: input.payload.changedFields ?? [] },
+            }));
+            audit!.appendStrictMany(failedInputs);
+          } catch { /* 终态尽力而为 */ }
+          throw error;
+        }
+        try {
+          // 领域写入成功 → completed 终态
+          audit.appendStrictMany(auditInputs);
+        } catch {
+          // 终态无法确认：回滚设置 + 记 failed 终态（fail-closed 报告）
+          try { agentStore.saveSettings(agentId, previousSettings); } catch { /* 回滚失败也拒绝 */ }
+          try {
+            const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
+              ...input,
+              eventName: input.eventName === "audit.agent.workspace_changed"
+                ? "audit.agent.workspace_change.failed"
+                : "audit.sandbox.policy_change.failed",
+              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: "audit_terminal_write_failed", changedFields: input.payload.changedFields ?? [] },
+            }));
+            audit.appendStrictMany(failedInputs);
+          } catch { /* 终态尽力而为 */ }
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险修改被拒绝"), 503);
+        }
+      } else {
+        agentStore.saveSettings(agentId, patch);
       }
       // 评审 P1（第三轮）：设置变更进 Activity 时间线（audit fail-closed 已在前）
       instrument.activity({
