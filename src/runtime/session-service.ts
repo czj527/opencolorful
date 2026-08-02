@@ -10,6 +10,7 @@ import {
   type PiSessionHandle,
 } from "../pi-sdk/index.js";
 import type { SessionIndex, SessionMetadata } from "../storage/session-index.js";
+import { instrument } from "../observability/instrument.js";
 
 export interface CreateSessionRequest {
   readonly title: string;
@@ -52,6 +53,7 @@ create(request: CreateSessionRequest): PiSessionHandle {
       agentId: request.agentId ?? null,
     });
     this.active.set(id, session);
+    instrument.sessionCreated(id, request.agentId);
     return session;
   }
 
@@ -83,6 +85,7 @@ create(request: CreateSessionRequest): PiSessionHandle {
     const session = openPersistentSession(metadata.sessionPath, sessionDir);
     if (session.id !== id) throw new Error("Session 文件身份与索引不一致");
     this.active.set(id, session);
+    instrument.sessionOpened(id, metadata.agentId ?? undefined);
     return session;
   }
 
@@ -104,6 +107,7 @@ create(request: CreateSessionRequest): PiSessionHandle {
     } catch {
       // 封存触发失败不阻塞归档本身
     }
+    instrument.sessionArchived(id, archived.agentId ?? undefined);
     return { ...archived, messages: current.messages, messageEntries: current.messageEntries, model: current.model };
   }
 

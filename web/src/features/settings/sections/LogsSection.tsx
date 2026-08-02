@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LogTail } from "../../../lib/types.js";
 import { Button } from "../../../components/ui/index.js";
 import { Select, TextField } from "../../../components/ui/index.js";
+import { navigateToLogs } from "../../../app/page-router.js";
 import styles from "./LogsSection.module.css";
 
 export interface LogsSectionProps {
@@ -72,6 +73,15 @@ export function LogsSection(props: LogsSectionProps) {
 
   return (
     <>
+      <div className={styles.entryRow}>
+        <span data-testid="open-logs-page">
+          <Button size="sm" onClick={navigateToLogs}>
+            打开完整日志工作页 →
+          </Button>
+        </span>
+        <span className={styles.entryHint}>查看活动时间线、错误分组、安全审计、性能指标与诊断导出。</span>
+      </div>
+
       <div className={styles.toolbar}>
         <Select
           value={level}

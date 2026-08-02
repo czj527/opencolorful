@@ -12,6 +12,7 @@ import type { AgentStore } from "../config/agent-store.js";
 import type { FolderPicker } from "../platform/folder-picker.js";
 import type { UsageStore } from "../storage/usage-store.js";
 import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { instrument } from "../observability/instrument.js";
 import { registerDirectoryRoutes } from "./routes/directories.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
@@ -24,6 +25,7 @@ import { registerSandboxRoutes } from "./routes/sandbox.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerAgentEventRoutes } from "./routes/agent-events.js";
+import { registerObservabilityRoutes } from "./routes/observability.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -60,6 +62,35 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   const pid = options.pid ?? process.pid;
   const startedAt = options.startedAt ?? Date.now();
   const app = new Hono();
+
+  // Phase 11 API 埋点中间件：请求计时 → diagnostic（debug）；5xx/异常 → api.request.failed。
+  // 不记录请求体/响应体；跳过 WS 与 SSE 长连接（计时无意义）。
+  app.use("*", async (context, next) => {
+    const method = context.req.method;
+    const url = new URL(context.req.url);
+    const accept = context.req.header("accept") ?? "";
+    const isStreaming = accept.includes("text/event-stream");
+    if (url.pathname === "/ws" || isStreaming || url.pathname === "/api/health") {
+      return next();
+    }
+    const startedAt = Date.now();
+    try {
+      await next();
+      const durationMs = Date.now() - startedAt;
+      instrument.debug("api.request", `${method} ${url.pathname}`, {
+        method,
+        path: url.pathname,
+        status: context.res.status,
+        durationMs,
+      });
+      if (context.res.status >= 500) {
+        instrument.apiRequestFailed(method, url.pathname, context.res.status, `HTTP ${context.res.status}`);
+      }
+    } catch (error) {
+      instrument.apiRequestFailed(method, url.pathname, 500, error instanceof Error ? error : String(error));
+      throw error;
+    }
+  });
 
   const nodeWebSocket = createNodeWebSocket({ app });
 
@@ -133,6 +164,13 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.replayStore !== undefined && options.promptService !== undefined) {
     registerEventRoutes(app, options.replayStore, options.promptService, options.sessionService);
   }
+  if (options.database !== undefined && options.paths !== undefined) {
+    registerObservabilityRoutes(app, {
+      database: options.database,
+      paths: options.paths,
+      getHealth: () => instrument.getHealth(),
+    });
+  }
 
   // WebSocket 路由
   const wsRegistry = options.wsRegistry;
@@ -142,6 +180,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     app.get("/ws", nodeWebSocket.upgradeWebSocket(() => ({
       onOpen(_evt, ws) {
         const clientId = `ws-${crypto.randomUUID()}`;
+        instrument.wsConnected(clientId);
         const handler = new SessionHandler(
           ws,
           clientId,
@@ -168,6 +207,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
 
         ws.raw?.addEventListener("close", () => {
           unsubscribe();
+          instrument.wsDisconnected(clientId);
           handler.handleClose();
         });
       },

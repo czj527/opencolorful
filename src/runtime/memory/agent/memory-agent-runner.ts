@@ -8,6 +8,7 @@ import { MemoryRecallStore } from "../../../storage/memory/recall-store.js";
 import { memoryAgentToolMap, validateToolArgs, type MemoryToolContext } from "./memory-agent-tools.js";
 import { MEMORY_AGENT_SYSTEM_PROMPT, buildMemoryAgentPrompt, parseAgentReply } from "./memory-agent-prompts.js";
 import { writeMemoryRunReport } from "./run-report.js";
+import { instrument } from "../../../observability/instrument.js";
 export interface MemoryAgentDeps {
   agentId: string;
   batchStore: MemoryBatchStore;
@@ -45,6 +46,17 @@ export class MemoryAgentRunner {
     const proposals: MemoryMutationProposal[] = [];
     const batches = this.deps.batchStore.listPendingBatches(this.deps.agentId);
     const batchIds = batches.map((b) => b.id);
+    // Phase 11 T5：批次进入处理（不含记忆正文，只记 id）
+    for (const batch of batches) {
+      instrument.activity({
+        eventName: "memory.batch.processing",
+        actor: { kind: "scheduler", id: "memory-scheduler" },
+        executor: { kind: "memory_agent", id: this.deps.agentId },
+        scope: { ownerAgentId: this.deps.agentId, ...(batch.sessionId !== undefined ? { sessionId: batch.sessionId } : {}) },
+        target: { kind: "memory_batch", id: batch.id },
+        payload: { summaryCode: "memory_batch_processing" },
+      });
+    }
     const history: string[] = [];
     const limits = { maxIterations: 8, maxTokens: 8000, maxMinutes: 10, ...this.deps.limits };
     let iterations = 0;
@@ -161,6 +173,29 @@ export class MemoryAgentRunner {
       inputSnapshot,
       ...(write.error !== undefined ? { reportError: write.error } : {}),
     };
+    // Phase 11 T5：批次终态（completed/failed/deferred，按 run 结果统一判定）
+    const terminalName = status === "completed"
+      ? "memory.batch.completed"
+      : status === "failed"
+        ? "memory.batch.failed"
+        : "memory.batch.deferred";
+    const terminalCode = status === "completed"
+      ? "memory_batch_completed"
+      : status === "failed"
+        ? "memory_batch_failed"
+        : "memory_batch_deferred";
+    for (const batchId of batchIds) {
+      instrument.activity({
+        eventName: terminalName,
+        status: status === "completed" ? "completed" : status === "failed" ? "failed" : "deferred",
+        operationId: `batch-${this.deps.agentId}-${batchId}-${runId}`,
+        actor: { kind: "scheduler", id: "memory-scheduler" },
+        executor: { kind: "memory_agent", id: this.deps.agentId },
+        scope: { ownerAgentId: this.deps.agentId },
+        target: { kind: "memory_batch", id: batchId },
+        payload: { summaryCode: terminalCode, ...(reason ? { attributes: { reason: reason.slice(0, 200) } } : {}) },
+      });
+    }
     return result;
   }
 }

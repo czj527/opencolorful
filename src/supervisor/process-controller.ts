@@ -6,6 +6,7 @@ import type { RuntimePaths } from "../config/paths.js";
 import { readRuntimeState, isProcessRunning } from "../server/runtime-state.js";
 import { filterLogLines, type LogQuery, type LogTail } from "./log-filter.js";
 import type { AgentServerStatus, SupervisorState } from "./types.js";
+import { instrument } from "../observability/instrument.js";
 
 export interface ProcessControllerOptions {
   readonly paths: RuntimePaths;
@@ -138,6 +139,11 @@ export class ProcessController {
         this.child = null;
       }
       this.lifecycleStatus = this.lifecycleStatus === "stopping" ? "stopped" : "error";
+      // 意外退出（非主动 stop）→ health degraded（agent server 崩溃的唯一外部观测点）
+      if (this.lifecycleStatus === "error") {
+        instrument.healthDegraded("Agent Server 进程意外退出");
+        instrument.error("supervisor.agent_server.exited", "Agent Server 进程意外退出");
+      }
       this.updateAgentServerStatus(this.lifecycleStatus);
     });
 
@@ -152,6 +158,7 @@ export class ProcessController {
         this.child = null;
       }
       this.lifecycleStatus = "error";
+      instrument.healthDegraded(error instanceof Error ? error : String(error));
       this.updateAgentServerStatus("error");
       throw error;
     }
@@ -167,6 +174,7 @@ export class ProcessController {
       updatedAt: new Date().toISOString(),
     });
     this.lifecycleStatus = "online";
+    instrument.healthRecovered({ attributes: { agentServerPort: this.agentServerPort } });
 
     return { pid, port: this.agentServerPort };
   }

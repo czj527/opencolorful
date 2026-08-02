@@ -267,7 +267,7 @@ describe("MemoryPolicy", () => {
     expect(result.reason).toContain("新的用户意图");
 
     // 提案生成前已存在的 intent（createdAt 早于提案）→ 放行：
-    // 提案 createdAt 设为晚于第一个 intent（appendIntent 用真实 now，需相对时钟）的 60 秒后
+    // intent 的 createdAt 是真实 now，提案用相对时间 now+60s 保证恒晚于 intent
     const older = policy.check(makeProposal({
       type: "strength_change",
       targetId: String(fact.id),

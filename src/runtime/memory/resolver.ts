@@ -27,6 +27,7 @@ import type { MemoryProposalStore } from "../../storage/memory/proposal-store.js
 import type { MemoryRecallStore } from "../../storage/memory/recall-store.js";
 import type { MemoryWatermarkStore } from "../../storage/memory/recovery-store.js";
 import type { SessionSummaryStore } from "../../storage/memory/summary-store.js";
+import { instrument } from "../../observability/instrument.js";
 import { ProposalApplication } from "./proposal-application.js";
 import { MemoryAgentRunner } from "./agent/memory-agent-runner.js";
 import { nextAgentStreamSequence } from "./recall-service.js";
@@ -92,10 +93,48 @@ export class MemoryAgentResolver {
   /**
    * 运行一次整理（每日窗口/每周复核/手动 deep-dive 共用）。
    * weekly=true 时附带低置信度/跨日期聚合的额外复核提示。
+   *
+   * Phase 11 T5：后台新根 trace（不继承调度触发方的 ALS），
+   * 全部 proposal/strength/batch Activity 事件同 trace。
    */
   async runMaintenance(agentId: string, opts: { weekly?: boolean } = {}): Promise<MaintenanceOutcome> {
-    const runId = `run_${crypto.randomUUID()}`;
-    const startedAt = this.now().toISOString();
+    return instrument.runAsBackground({ operationId: `mem-agent-${agentId}-${this.now().getTime()}` }, async () => {
+      const runId = `run_${crypto.randomUUID()}`;
+      const startedAt = this.now().toISOString();
+      const lifecycle = instrument.startLifecycle({
+        startEventName: "memory.agent.started",
+        actor: { kind: "scheduler", id: "memory-scheduler" },
+        executor: { kind: "memory_agent", id: agentId },
+        scope: { ownerAgentId: agentId },
+        operationId: runId,
+        terminals: {
+          completed: "memory.agent.completed",
+          deferred: "memory.agent.deferred",
+          failed: "memory.agent.failed",
+          interrupted: "memory.agent.interrupted",
+        },
+        startPayload: { attributes: { weekly: opts.weekly === true } },
+      });
+      const outcome = await this.runMaintenanceInner(agentId, opts, runId, startedAt);
+      if (outcome.status === "deferred") {
+        lifecycle.deferred(outcome.reason ?? "预算或模型不可用");
+      } else if (outcome.status === "failed") {
+        lifecycle.fail(outcome.reason ?? "整理失败");
+      } else {
+        lifecycle.complete({
+          attributes: { applied: outcome.applied, rejected: outcome.rejected },
+        });
+      }
+      return outcome;
+    });
+  }
+
+  private async runMaintenanceInner(
+    agentId: string,
+    opts: { weekly?: boolean },
+    runId: string,
+    startedAt: string,
+  ): Promise<MaintenanceOutcome> {
     const emit = (status: MemoryRunStatus, phase?: string, reason?: string) => {
       agentEnvelope(agentId, null, `memory.agent.${status}` as PlatformEventEnvelope["type"], {
         runId,

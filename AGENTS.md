@@ -22,7 +22,7 @@
 |---|---|---|
 | `docs/positioning-and-roadmap.md` | **核心理念与开发路线权威**（定位/三层架构/Phase 8-14/差异化） | 必读，理解项目是什么 |
 | `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/日志 Electron 时机/流程评估） | 必读，理解边界与选型 |
-| `docs/logging-architecture.md` | **Phase 11 日志架构草案**（三通道、trace、持久化、扩展接入、隐私与保留） | 评审或开发日志/插件/subagent 时读 |
+| `docs/logging-architecture.md` | **Phase 11 日志架构权威**（三通道、trace、持久化、扩展接入、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
 | `docs/architecture.md` | 架构说明（Phase 0-3 平台层技术栈/模块边界/事件协议） | 改平台层时读 |
 | `docs/development.md` | 开发流程规范（角色/并行/质量门）——部分已被本文件简化 | 改流程前读 |
 | `docs/product.md` | 产品说明（旧定位，部分已过时，以 positioning-and-roadmap.md 为准） | 参考历史 |
@@ -31,7 +31,7 @@
 | `plans/phase-09.md` | Phase 9 实施计划与验收记录 | 了解历史 |
 | `plans/phase-10.md` | Phase 10 实施计划、评审修复与验收记录 | 了解历史 |
 | `plans/phase-10.5.md` | Phase 10.5 记忆 Agent 与后台整理计划 | 进入记忆 Agent 阶段时读 |
-| `plans/phase-11.md` | Phase 11 完整日志系统计划草案 | 评审或实现统一可观测性时读 |
+| `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已评审定稿，待开发） | 实现或验收统一可观测性时读 |
 
 ## 参考仓库
 

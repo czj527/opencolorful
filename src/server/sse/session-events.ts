@@ -4,6 +4,7 @@ import type { Context } from "hono";
 import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PlatformEventEnvelope } from "../../contracts/events.js";
+import { instrument } from "../../observability/instrument.js";
 
 interface ReplayCursor {
   readonly streamId?: string;
@@ -95,6 +96,7 @@ export async function createSessionEventStream(
         enqueue(event);
       }
     });
+    instrument.sseConnected(sessionId);
 
     const sessionStreams = cursor.streamId === undefined
       ? replayStore.listSessionStreams(sessionId)
@@ -139,6 +141,7 @@ export async function createSessionEventStream(
     } finally {
       replaying = false;
       unsubscribe();
+      instrument.sseDisconnected(sessionId);
     }
   });
 }
