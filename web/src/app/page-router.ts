@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type PageRoute = "workspace" | "settings" | "memory" | "session-new" | "agent-new" | "agent-edit";
+export type PageRoute = "workspace" | "settings" | "memory" | "session-new" | "agent-new" | "agent-edit" | "logs";
 
 interface AgentFormHistoryState extends Record<string, unknown> {
   readonly __agentFormEntry?: boolean;
@@ -43,6 +43,7 @@ export function routeFromPathname(pathname: string): PageRoute {
   if (clean === undefined || clean === "" || clean === "/") return "workspace";
   if (clean === "/settings" || clean.startsWith("/settings/")) return "settings";
   if (clean === "/memory" || clean.startsWith("/memory/")) return "memory";
+  if (clean === "/logs" || clean.startsWith("/logs/")) return "logs";
   if (clean === "/new" || clean.startsWith("/new/")) return "session-new";
   if (clean === "/agents/new" || clean.startsWith("/agents/new/")) return "agent-new";
   if (clean.startsWith("/agents/")) return "agent-edit";
@@ -86,6 +87,12 @@ export function usePageRoute(): PageRoute {
 export function navigateToSettings(): void {
   if (typeof window === "undefined") return;
   history.pushState({}, "", "/settings");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function navigateToLogs(): void {
+  if (typeof window === "undefined") return;
+  history.pushState({}, "", "/logs");
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

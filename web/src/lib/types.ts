@@ -302,3 +302,178 @@ export interface PickDirectoryResult {
   readonly path: string | null;
   readonly cancelled: boolean;
 }
+
+// --- Observability（Phase 11，对齐 src/observability/observability-query.ts）---
+
+export interface ObservabilityDiskUsage {
+  readonly totalBytes: number;
+  readonly debugBytes: number;
+  readonly mainBytes: number;
+}
+
+// GET /api/observability/health 响应（不可用时 503 {status:"unavailable"}）
+export interface ObservabilityHealthResponse {
+  readonly status: "ok" | "unavailable";
+  readonly logger: {
+    readonly dropped: number;
+    readonly failed: number;
+    readonly degraded: boolean;
+    readonly disk: ObservabilityDiskUsage;
+  };
+  readonly spool: {
+    readonly failedWrites: number;
+    readonly pendingSegments: number;
+    readonly totalBytes: number;
+  };
+  readonly auditEpoch: number;
+  readonly recovery: {
+    readonly lastInterrupted: number;
+    readonly lastSpoolImported: number;
+  };
+}
+
+export interface ActivityRow {
+  readonly id: number;
+  readonly eventId: string;
+  readonly recordedAt: string;
+  readonly occurredAt: string;
+  readonly eventName: string;
+  readonly category: string;
+  readonly level: string;
+  readonly status: string | null;
+  readonly significance: string | null;
+  readonly actorKind: string;
+  readonly actorId: string;
+  readonly executorKind: string;
+  readonly executorId: string;
+  readonly targetKind: string | null;
+  readonly targetId: string | null;
+  readonly ownerAgentId: string | null;
+  readonly sessionId: string | null;
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly parentSpanId: string | null;
+  readonly operationId: string | null;
+  readonly durationMs: number | null;
+  readonly errorCode: string | null;
+  readonly retryable: number;
+  readonly producerComponent: string;
+  readonly producerProcessType: string;
+  readonly payloadJson: string;
+}
+
+// GET /api/observability/activity 查询过滤参数（全部可选，缺省不过滤）
+export interface ActivityQuery {
+  readonly from?: string;
+  readonly to?: string;
+  readonly ownerAgentId?: string;
+  readonly sessionId?: string;
+  readonly eventName?: string;
+  readonly category?: string;
+  readonly level?: string;
+  readonly status?: string;
+  readonly significance?: string;
+  readonly component?: string;
+  readonly errorCode?: string;
+  readonly traceId?: string;
+  readonly operationId?: string;
+  readonly search?: string;
+}
+
+// GET /api/observability/audit 查询过滤参数
+export interface AuditQuery {
+  readonly epoch?: number;
+  readonly action?: string;
+  readonly decision?: string;
+  readonly ownerAgentId?: string;
+  readonly sessionId?: string;
+  readonly traceId?: string;
+}
+
+// GET /api/observability/activity 响应
+export interface ActivityPage {
+  readonly items: readonly ActivityRow[];
+  readonly nextCursor: string | null;
+}
+
+export interface AuditRow {
+  readonly id: number;
+  readonly eventId: string;
+  readonly ledgerEpoch: number;
+  readonly recordedAt: string;
+  readonly action: string;
+  readonly decision: string;
+  readonly reasonCode: string | null;
+  readonly actorKind: string;
+  readonly actorId: string;
+  readonly ownerAgentId: string | null;
+  readonly sessionId: string | null;
+  readonly traceId: string;
+  readonly payloadJson: string;
+}
+
+// GET /api/observability/audit 响应
+export interface AuditPage {
+  readonly items: readonly AuditRow[];
+  readonly nextCursor: string | null;
+}
+
+export interface ErrorGroup {
+  readonly eventName: string;
+  readonly errorCode: string | null;
+  readonly count: number;
+  readonly lastRecordedAt: string;
+}
+
+export interface DailyMetric {
+  readonly date: string;
+  readonly eventCount: number;
+  readonly errorCount: number;
+  readonly failedCount: number;
+  readonly degradedCount: number;
+  readonly byLevel: Record<string, number>;
+}
+
+export interface TraceSpan {
+  readonly id: number;
+  readonly spanId: string;
+  readonly parentSpanId: string | null;
+  readonly eventName: string;
+  readonly status: string | null;
+  readonly recordedAt: string;
+  readonly durationMs: number | null;
+  readonly operationId: string | null;
+  readonly children: readonly TraceSpan[];
+}
+
+export interface LinkedGraphNode {
+  readonly traceId: string;
+  readonly relation: string;
+  readonly direction: "forward" | "reverse";
+}
+
+export interface LinkedGraph {
+  readonly rootTraceId: string;
+  readonly nodes: readonly LinkedGraphNode[];
+  readonly truncated: boolean;
+  readonly maxDepth: number;
+  readonly maxNodes: number;
+}
+
+// GET /api/observability/traces/:traceId?linked=1 响应
+export interface TraceResponse {
+  readonly trace: {
+    readonly root: TraceSpan | null;
+    readonly total: number;
+  };
+  readonly linked?: LinkedGraph;
+}
+
+// GET /api/observability/diagnostic/tail 响应
+export interface DiagnosticTail {
+  readonly process: string;
+  readonly file: string;
+  readonly lines: number;
+  readonly totalBytes: number;
+  readonly tail: readonly string[];
+}

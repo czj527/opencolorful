@@ -5,6 +5,20 @@
   flex-wrap: wrap;
 }
 
+.entryRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-12);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.entryHint {
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
 .levelSelect {
   flex: 0 0 auto;
 }

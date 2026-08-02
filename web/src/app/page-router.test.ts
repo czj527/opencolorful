@@ -18,6 +18,18 @@ describe("routeFromPathname", () => {
     expect(routeFromPathname("/settings#layout")).toBe<PageRoute>("settings");
   });
 
+  it("routes /logs to logs", () => {
+    expect(routeFromPathname("/logs")).toBe<PageRoute>("logs");
+    expect(routeFromPathname("/logs/")).toBe<PageRoute>("logs");
+    expect(routeFromPathname("/logs/activity?from=2026-08-01")).toBe<PageRoute>("logs");
+    expect(routeFromPathname("/logs#activity")).toBe<PageRoute>("logs");
+  });
+
+  it("routes nested logs paths to logs", () => {
+    expect(routeFromPathname("/logs/errors")).toBe<PageRoute>("logs");
+    expect(routeFromPathname("/logs/audit")).toBe<PageRoute>("logs");
+  });
+
   it("falls back to workspace for unknown paths", () => {
     expect(routeFromPathname("/unknown/deep/path")).toBe<PageRoute>("workspace");
     expect(routeFromPathname("/sessions/abc")).toBe<PageRoute>("workspace");
