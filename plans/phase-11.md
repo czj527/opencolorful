@@ -1078,4 +1078,55 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 
 ## 实施记录
 
-（评审通过并进入开发后回填）
+分支：`phase-11-logging`（基于 `phase-10.5-memory-agent`，Phase 10.5 不合并）
+
+| Task | 提交 | 内容摘要 |
+|---|---|---|
+| T1 | 37bd8d4 | 契约（三通道 Envelope/payload/SafeValue）、事件目录（~150 事件 + auditMirror）、migration v8（activity/audit/trace_links/daily_metrics/state）、preferences v2 + observability 段、CJK n-gram 抽取 |
+| T2 | f0aba8c | ALS trace 上下文、SafeValue 脱敏（secret/Bearer/Cookie/URL 凭据/PII/路径）、双 JSONL DiagnosticLogger（10MB 轮转/折叠/500MB 预算/7-30 天保留） |
+| T3 | 7b32296 | ActivityRecorder（durable-on-accept/eventId 幂等/唯一终态/reconcile）、AuditRecorder（同库事务 fail-closed/ledger reset）、EmergencySpool（分段/预算/quarantine/幂等导入）、ObservabilityContext（startupRecovery/health） |
+| T4 | d06ab69+26c2338 | Instrument 门面接线：system/storage/session/turn/model/tool/api/SSE/WS 埋点、turn trace 贯穿、API 计时中间件、supervisor 进程 context |
+| T5 | efe0126 | sandbox denial JSONL → Activity+Audit（路径/命令不落盘）、记忆链路（summary/compile/recall/batch/scheduler/proposal/strength/fact 事件 + 后台 trace + audit 证据） |
+| T6 | 7abcd03 | ObservabilityQuery（cursor 分页/FTS/错误分组/trace tree/linked graph/日指标）、operator SSE（表 id cursor + 高水位交接 + gap/reset）、受限 client-events（Origin/Content-Type/大小/schema/双层限速） |
+| T7 | 882d338 | Web /logs 六视图工作页（活动/错误/审计/性能/原始日志/导出）+ live follow + 八类状态 + Settings 入口 |
+| T8 | 50cc94f | 冻结 ExtensionObservabilityPort（routine 固定/平台盖章/速率限制/只读 trace carrier）、后台任务规范化 trace link、plugin.crashed |
+| T9 | b72f43e | 幂等 retention（聚合→watermark→删除同事务）、preview/run、audit reset 显式确认、support bundle（二次脱敏 + privacy manifest + 防穿越）、preferences 端点 |
+| T10 | （本提交） | 全量质量门 + browser-use 真实验收 + 回写 |
+
+### 质量门结果（T10 最终轮）
+
+- `npx tsc --noEmit -p tsconfig.json` / `npx tsc -p tsconfig.build.json`：0
+- `npx vitest run`：76 files / 742 tests 全绿（含 T1-T9 全部新增测试）
+- `node scripts/verify-pi-sdk-imports.mjs`：0（仅 src/pi-sdk 可导入 @earendil-works/pi-*）
+- web：tsc 0、vitest 348 全绿、生产构建 0
+- Playwright e2e：52/52（含 7 个 /logs 用例）；已知端口抢占 flake（workspace server-start 用例并行时偶发，隔离重跑通过，非回归）
+- `git diff --check`：0
+
+### browser-use 真实验收（隔离 OPENCOLORFUL_HOME，supervisor :4399 + agent server :4310）
+
+- /logs 六 tab 全部渲染；活动表含真实行（system.started 33ms、supervisor.health.recovered、agent.migration.completed）
+- 详情面板：actor/executor/target/session/errorCode/retryable/traceId/operationId/生产者 + 脱敏 payload；trace 树 8 span + linked graph（无关联提示）
+- 实时跟随开关、过滤栏（事件名/类别/级别/状态/Session/Agent/搜索/时间范围）可用
+- 原始日志：加载真实 JSONL 尾部（行数/字节元信息）；**验收发现并修复 main 文件过滤 bug**（`.debug.jsonl` 误匹配 main filter）
+- 诊断导出：真实生成 bundle（manifest privacy 三标志 false、无 payloadJson/summaryCode/凭据，文件级验证通过），export 事件 + audit 镜像落库
+- 安全审计：epoch 过滤 + 只读 + 空状态；性能：按日聚合柱状
+- 移动端 390px：scrollWidth=clientWidth，无横向溢出
+- Settings 日志与诊断 section →「打开完整日志工作页 →」→ 跳转 /logs ✓
+- 清理：supervisor/agent server 已停止，临时 HOME 已删除
+
+### 已知偏差
+
+1. **audit 镜像 decision 固定 allowed**：insertAuditMirror 的 decision 恒为 'allowed'（镜像语义=事件发生证据，denied 语义由 activity 行 status 表达）。
+2. **migration 失败链路**：迁移失败时 DB 不可用，无持久化通道可写 storage.migration.failed——由进程退出码 + supervisor 侧 health.degraded + 下次启动 recovery 表达（T4 起代码注释说明）。
+3. **layer_changed 保持 transport-only**：memory.recall/agent.layer_changed 不进 Activity（目录无注册项，instrument 会拒绝）。
+4. **spool 布局**：`logs/emergency/<channel>-<processType>-<bootId>-<seg>.jsonl` 平铺（计划写子目录，channel 已编码在文件名，功能等价）。
+5. **诊断预算前端展示**：服务端未下发预算字段，前端用与服务端一致的 500MB 常量计算 80% 阈值。
+6. **runRetention 的 logBytesFreed 精确性**：按文件级统计（enforceRetention 删除前后文件差异）。
+7. **e2e 端口抢占 flake**：并行 worker 的 freePort TOCTOU 导致 server-start 类用例偶发失败（隔离重跑通过），属既有测试基建问题。
+8. **tool.approval.*** 暂无发射方**：平台无交互式工具审批流，拒绝语义由 sandbox deny + tool.call.denied 表达（目录已注册备用）。
+
+### 测试数量统计（Phase 11 新增）
+
+- server unit/integration：+73（contract 9、runtime 16、store 18、instrument 12、query 8、extension-port 8、retention 5、server 集成 3+9）
+- web：+13 单测 + 7 e2e
+- 全量：742（server）+ 348（web）+ 52（e2e）

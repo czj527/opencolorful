@@ -244,9 +244,10 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     if (!fs.existsSync(dir)) {
       return context.json({ process: processName, file: fileKind, lines: 0, totalBytes: 0, tail: [] });
     }
-    const suffix = fileKind === "debug" ? ".debug.jsonl" : ".jsonl";
     const files = fs.readdirSync(dir)
-      .filter((name) => name.endsWith(suffix))
+      .filter((name) => fileKind === "debug"
+        ? name.endsWith(".debug.jsonl")
+        : name.endsWith(".jsonl") && !name.endsWith(".debug.jsonl"))
       .sort()
       .reverse();
     if (files.length === 0) {
