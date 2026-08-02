@@ -50,6 +50,8 @@ type ActivityInput = ActivityRecordInput & { operationId: string };
 function makeActivityInput(overrides: Partial<ActivityInput> = {}): ActivityInput {
   return {
     eventName: "system.starting",
+    // 评审 P1-9：started 生命周期事件必须带 status=started（目录校验）
+    status: "started",
     payload: { summaryCode: "system_starting" },
     actor: { kind: "system", id: "unit-test" },
     executor: { kind: "service", id: "unit-test" },
@@ -397,6 +399,8 @@ describe("T3 AuditRecorder：同库回滚与 ledger reset", () => {
     const recorder = new ActivityRecorder({ database: db, producer });
     const result = recorder.append({
       eventName: "agent.deleted",
+      // 评审 P1-9：terminal 生命周期事件必须带目录允许的终态 status
+      status: "completed",
       payload: { summaryCode: "agent_deleted", resultRef: "agent-1" },
       actor: { kind: "user", id: "tester" },
       executor: { kind: "service", id: "unit-test" },
@@ -459,6 +463,97 @@ describe("T3 ObservabilityContext：health 聚合", () => {
     expect(started.kind).toBe("accepted");
     expect(operation.complete().kind).toBe("accepted");
     expect((db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number }).n).toBe(2);
+    db.close();
+  });
+});
+
+describe("Phase 11 复审修复（评审 P0-3 / P1-9 复现级测试）", () => {
+  it("P0-3：spool 导入读取旧 bootId 段（新进程必然新 bootId——崩溃遗留必须可恢复）", () => {
+    const directory = makeTempDir("t11-oldboot-");
+    const db = openDb(directory);
+    // 上一进程（old-boot）崩溃遗留的 spool 段
+    const spoolRoot = path.join(directory, "spool");
+    fs.mkdirSync(spoolRoot, { recursive: true });
+    const envelope = {
+      schemaVersion: 1, eventVersion: 1, eventId: "evt-old-boot", eventName: "system.started",
+      occurredAt: "2026-08-01T00:00:00.000Z", recordedAt: "2026-08-01T00:00:00.000Z", level: "info",
+      actor: { kind: "system", id: "u" }, executor: { kind: "service", id: "s" }, scope: {},
+      trace: { traceId: "t", spanId: "s" }, producer, channel: "activity",
+      payload: { summaryCode: "system_started" }, status: "completed", significance: "notable",
+    };
+    fs.writeFileSync(path.join(spoolRoot, "activity-server-old-boot-0.jsonl"), `${JSON.stringify(envelope)}\n`, "utf8");
+    // 新进程（new-boot）实例：importInto 必须导入 old-boot 段
+    const spool = new EmergencySpool({ spoolRoot, processType: "server", bootId: "new-boot" });
+    expect(spool.pendingSegments()).toBe(1);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const result = spool.importInto((line) => recorder.importEnvelope(line));
+    expect(result.imported).toBe(1);
+    expect(result.segments[0]?.ok).toBe(true);
+    // 旧段已删除（不再留在磁盘上不可见）
+    expect(fs.readdirSync(spoolRoot).filter((name) => name.endsWith(".jsonl"))).toHaveLength(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number }).n).toBe(1);
+    db.close();
+  });
+
+  it("P1-9：terminal 事件带目录不允许的 status（system.started+denied）→ 拒绝", () => {
+    const directory = makeTempDir("t11-status-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const result = recorder.append({
+      eventName: "system.started",
+      status: "denied",
+      payload: { summaryCode: "system_started" },
+      actor: { kind: "system", id: "u" },
+      executor: { kind: "service", id: "s" },
+    });
+    expect(result.kind).toBe("rejected");
+    if (result.kind === "rejected") expect(result.reason).toContain("status");
+    db.close();
+  });
+
+  it("P1-9：同 operationId 未收尾前重复 started（两个 turn.started）→ 拒绝", () => {
+    const directory = makeTempDir("t11-doublestart-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const opId = `op-double-${Math.random().toString(16).slice(2, 8)}`;
+    const first = recorder.append({
+      eventName: "turn.started", status: "started", operationId: opId,
+      payload: { summaryCode: "turn_started" }, actor: { kind: "user", id: "u" }, executor: { kind: "agent", id: "a" },
+    });
+    expect(first.kind).toBe("accepted");
+    const second = recorder.append({
+      eventName: "turn.started", status: "started", operationId: opId,
+      payload: { summaryCode: "turn_started" }, actor: { kind: "user", id: "u" }, executor: { kind: "agent", id: "a" },
+    });
+    expect(second.kind).toBe("rejected");
+    // 收尾后重试允许（重试语义不受影响）
+    const terminal = recorder.append({
+      eventName: "turn.completed", status: "completed", operationId: opId,
+      payload: { summaryCode: "turn_completed" }, actor: { kind: "user", id: "u" }, executor: { kind: "agent", id: "a" },
+    });
+    expect(terminal.kind).toBe("accepted");
+    const retry = recorder.append({
+      eventName: "turn.started", status: "started", operationId: opId,
+      payload: { summaryCode: "turn_started" }, actor: { kind: "user", id: "u" }, executor: { kind: "agent", id: "a" },
+    });
+    expect(retry.kind).toBe("accepted");
+    db.close();
+  });
+
+  it("P1-9：payload 不符合目录 schema（activity 事件塞 audit payload）→ 拒绝", () => {
+    const directory = makeTempDir("t11-payloadschema-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const result = recorder.append({
+      eventName: "system.started",
+      status: "completed",
+      // audit payload 形状：action/decision 不在 ActivityPayloadSchema 内
+      payload: { action: "agent.deleted", decision: "allowed" } as never,
+      actor: { kind: "system", id: "u" },
+      executor: { kind: "service", id: "s" },
+    });
+    expect(result.kind).toBe("rejected");
+    if (result.kind === "rejected") expect(result.reason).toContain("payload");
     db.close();
   });
 });

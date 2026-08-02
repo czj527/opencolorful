@@ -26,6 +26,7 @@ export function registerAgentRoutes(
   app: Hono,
   agentStore: AgentStore,
   sessionService?: SessionService,
+  audit?: import("../../observability/audit-recorder.js").AuditRecorder,
 ): void {
   app.get("/api/agents", (context) => {
     try {
@@ -364,8 +365,40 @@ export function registerAgentRoutes(
       if (Object.keys(patch).length === 0) {
         return context.json(createApiError("INVALID_INPUT", "没有可更新的字段"), 400);
       }
-      agentStore.saveSettings(context.req.param("id"), patch);
-      return context.json(agentStore.load(context.req.param("id")));
+      const agentId = context.req.param("id");
+      // 评审 P0-1：沙箱策略/工作目录变更属 fail-closed 清单——
+      // 落盘后强制 durable audit（严格路径，失败即回滚并拒绝操作）
+      const previousSettings = agentStore.load(agentId).settings;
+      agentStore.saveSettings(agentId, patch);
+      const auditChanges: Array<{
+        eventName: string;
+        action: string;
+        changedFields: string[];
+      }> = [];
+      if (patch.defaultCwd !== undefined) {
+        auditChanges.push({ eventName: "audit.agent.workspace_changed", action: "agent.workspace.changed", changedFields: ["defaultCwd"] });
+      }
+      if (patch.sandbox !== undefined) {
+        auditChanges.push({ eventName: "audit.sandbox.policy_changed", action: "sandbox.policy.changed", changedFields: ["sandbox.workspaceAccess", "sandbox.extraReadPaths", "sandbox.protectedPaths"] });
+      }
+      if (auditChanges.length > 0 && audit !== undefined) {
+        try {
+          for (const change of auditChanges) {
+            audit.appendStrict({
+              eventName: change.eventName,
+              payload: { action: change.action, decision: "allowed", changedFields: change.changedFields },
+              actor: { kind: "user", id: "web" },
+              executor: { kind: "service", id: "agent-server" },
+              target: { kind: "agent", id: agentId },
+            });
+          }
+        } catch {
+          // fail-closed：Audit 无法持久化 → 回滚设置并拒绝操作
+          try { agentStore.saveSettings(agentId, previousSettings); } catch { /* 回滚失败也拒绝 */ }
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险修改被拒绝"), 503);
+        }
+      }
+      return context.json(agentStore.load(agentId));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Agent 不存在"), 404);
     }

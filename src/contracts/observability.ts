@@ -442,6 +442,12 @@ export interface EventCatalogEntry {
   readonly significance: ObservabilitySignificance;
   readonly lifecycleRole: LifecycleRole;
   readonly terminalStatuses?: readonly ActivityStatus[];
+  /**
+   * payload schema（评审 P1-9）：目录固定每事件的 payload 形状，
+   * Recorder 校验不通过即拒绝——调用方不能靠通用 Envelope 蒙混。
+   * activity 事件默认 ActivityPayloadSchema；audit 事件默认 AuditPayloadSchema。
+   */
+  readonly payloadSchema: TSchema;
   /** 同名事件镜像为 Audit（§6.3） */
   readonly auditMirror?: string;
   readonly securitySummary: SecuritySummaryPolicy;

@@ -92,10 +92,11 @@ export interface TraceSpan {
   readonly id: number;
   readonly spanId: string;
   readonly parentSpanId: string | null;
-  readonly eventName: string;
-  readonly status: string | null;
+  /** 合并后的事件名（started 行在前；有终态行时取终态事件名） */
+  eventName: string;
+  status: string | null;
   readonly recordedAt: string;
-  readonly durationMs: number | null;
+  durationMs: number | null;
   readonly operationId: string | null;
   readonly children: TraceSpan[];
 }
@@ -301,6 +302,12 @@ export class ObservabilityQuery {
 
   // ─── trace tree / linked graph ────────────────────────────────
 
+  /**
+   * trace tree（评审 P1-6）：lifecycle 的 started 与 terminal 共享同一 spanId，
+   * 原实现 Map<spanId, row> 后写覆盖先写——terminal 行会清空已挂好的子 span，
+   * 真实 Turn 树只剩根节点。修复：按 spanId 合并，started 作节点基底，
+   * terminal 行把 status/eventName/durationMs 合并进同一节点。
+   */
   traceTree(traceId: string): TraceTreeResult {
     const rows = this.database
       .prepare(
@@ -315,6 +322,16 @@ export class ObservabilityQuery {
     if (rows.length === 0) return { root: null, total: 0 };
     const bySpanId = new Map<string, TraceSpan>();
     for (const row of rows) {
+      const existing = bySpanId.get(row.spanId);
+      if (existing !== undefined) {
+        // 同 span 的 started+terminal 行：终态语义覆盖 started 的占位字段
+        if (row.status !== "started") {
+          existing.eventName = row.eventName;
+          existing.status = row.status;
+          existing.durationMs = row.durationMs;
+        }
+        continue;
+      }
       bySpanId.set(row.spanId, { ...row, children: [] });
     }
     const roots: TraceSpan[] = [];
@@ -379,7 +396,9 @@ export class ObservabilityQuery {
   // ─── 错误分组 / 派生指标 ──────────────────────────────────────
 
   errorGroups(filter: { since?: string; eventName?: string; limit?: number } = {}): ErrorGroup[] {
-    const where: string[] = ["level IN ('error', 'fatal') OR status IN ('failed', 'denied')"];
+    // 评审 P1-11：条件组必须加括号，否则 AND 优先级会让旧 error/fatal
+    // 绕过 since/eventName 过滤
+    const where: string[] = ["(level IN ('error', 'fatal') OR status IN ('failed', 'denied'))"];
     const params: unknown[] = [];
     if (filter.since !== undefined) { where.push("recorded_at >= ?"); params.push(filter.since); }
     if (filter.eventName !== undefined) { where.push("event_name = ?"); params.push(filter.eventName); }
@@ -393,30 +412,69 @@ export class ObservabilityQuery {
       .all(...params, limit) as ErrorGroup[];
   }
 
+  /**
+   * 派生指标（评审 P1-5）：retention 把已聚合的 Activity 落 activity_daily_metrics
+   * 后删除——此处必须读聚合表，而不是只读尚未删除的 activity_events。
+   * 口径：聚合表（watermark 之前全部已聚合）+ 实时表（watermark 之后未聚合，
+   * 按 watermark 日期分界避免与聚合表重复计数；从未跑过 retention 时全部走实时表）。
+   */
   dailyMetrics(filter: { since?: string; ownerAgentId?: string; days?: number } = {}): DailyMetric[] {
     const days = Math.min(Math.max(1, Math.floor(filter.days ?? 30)), 365);
     const since = filter.since ?? new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
-    const where: string[] = ["recorded_at >= ?"];
-    const params: unknown[] = [since];
-    if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
-    const rows = this.database
+    const sinceDate = since.slice(0, 10);
+    const watermark = (this.database
+      .prepare("SELECT value FROM observability_state WHERE key = 'observability.retention.watermark'")
+      .get() as { value: string } | undefined)?.value ?? "";
+    const byDate = new Map<string, MutableDailyMetric>();
+    const mergeRow = (date: string, level: string, status: string | null, count: number): void => {
+      const metric = byDate.get(date) ?? {
+        date, eventCount: 0, errorCount: 0, failedCount: 0, degradedCount: 0, byLevel: {},
+      };
+      metric.eventCount += count;
+      metric.byLevel[level] = (metric.byLevel[level] ?? 0) + count;
+      if (level === "error" || level === "fatal") metric.errorCount += count;
+      if (status === "failed") metric.failedCount += count;
+      if (status === "degraded") metric.degradedCount += count;
+      byDate.set(date, metric);
+    };
+    // 1) 聚合表（retention 已落库的部分）
+    const aggParams: unknown[] = [sinceDate];
+    let aggWhere = "metric_date >= ?";
+    if (filter.ownerAgentId !== undefined) {
+      aggWhere += " AND owner_agent_id = ?";
+      aggParams.push(filter.ownerAgentId);
+    }
+    const aggRows = this.database
+      .prepare(
+        `SELECT metric_date AS date, value_json AS valueJson FROM activity_daily_metrics
+         WHERE ${aggWhere}`,
+      )
+      .all(...aggParams) as Array<{ date: string; valueJson: string }>;
+    for (const row of aggRows) {
+      const value = JSON.parse(row.valueJson) as { count?: unknown; level?: unknown; status?: unknown };
+      const count = typeof value.count === "number" ? value.count : 0;
+      mergeRow(row.date, typeof value.level === "string" ? value.level : "info", typeof value.status === "string" ? value.status : null, count);
+    }
+    // 2) 实时表（watermark 之后未聚合；无 watermark 时全量）
+    const liveParams: unknown[] = [since];
+    const liveWhere: string[] = ["recorded_at >= ?"];
+    if (watermark !== "" && watermark > sinceDate) {
+      liveWhere.push("substr(recorded_at, 1, 10) >= ?");
+      liveParams.push(watermark);
+    }
+    if (filter.ownerAgentId !== undefined) {
+      liveWhere.push("owner_agent_id = ?");
+      liveParams.push(filter.ownerAgentId);
+    }
+    const liveRows = this.database
       .prepare(
         `SELECT substr(recorded_at, 1, 10) AS date, level, status, COUNT(*) AS count
-         FROM activity_events WHERE ${where.join(" AND ")}
+         FROM activity_events WHERE ${liveWhere.join(" AND ")}
          GROUP BY substr(recorded_at, 1, 10), level, status`,
       )
-      .all(...params) as Array<{ date: string; level: string; status: string | null; count: number }>;
-    const byDate = new Map<string, MutableDailyMetric>();
-    for (const row of rows) {
-      const metric = byDate.get(row.date) ?? {
-        date: row.date, eventCount: 0, errorCount: 0, failedCount: 0, degradedCount: 0, byLevel: {},
-      };
-      metric.eventCount += row.count;
-      metric.byLevel[row.level] = (metric.byLevel[row.level] ?? 0) + row.count;
-      if (row.level === "error" || row.level === "fatal") metric.errorCount += row.count;
-      if (row.status === "failed") metric.failedCount += row.count;
-      if (row.status === "degraded") metric.degradedCount += row.count;
-      byDate.set(row.date, metric);
+      .all(...liveParams) as Array<{ date: string; level: string; status: string | null; count: number }>;
+    for (const row of liveRows) {
+      mergeRow(row.date, row.level, row.status, row.count);
     }
     return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
   }

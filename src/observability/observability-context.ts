@@ -37,6 +37,13 @@ export interface ObservabilityContextOptions {
   readonly producer: ProducerContext;
   readonly logsRoot: string;
   readonly spoolRoot: string;
+  /**
+   * 偏好覆盖（评审 P1-7）：diagnostic 级别/文件大小/磁盘预算/保留天数
+   * 与 spool 预算均来自 observability 偏好（PreferencesStore），
+   * 不再使用硬编码默认值。
+   */
+  readonly logger?: Partial<import("./diagnostic-logger.js").DiagnosticLoggerOptions>;
+  readonly spoolBudgetBytes?: number;
   readonly now?: () => Date;
 }
 
@@ -75,12 +82,19 @@ export class ObservabilityContext {
     this.logger = new DiagnosticLogger({
       logsRoot: options.logsRoot,
       producer: options.producer,
+      // 评审 P1-7：偏好优先，缺省回退平台默认
+      ...(options.logger?.minLevel !== undefined ? { minLevel: options.logger.minLevel } : {}),
+      ...(options.logger?.fileSizeBytes !== undefined ? { fileSizeBytes: options.logger.fileSizeBytes } : {}),
+      ...(options.logger?.diskBudgetBytes !== undefined ? { diskBudgetBytes: options.logger.diskBudgetBytes } : {}),
+      ...(options.logger?.debugRetentionDays !== undefined ? { debugRetentionDays: options.logger.debugRetentionDays } : {}),
+      ...(options.logger?.mainRetentionDays !== undefined ? { mainRetentionDays: options.logger.mainRetentionDays } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
     });
     this.spool = new EmergencySpool({
       spoolRoot: options.spoolRoot,
       processType: options.producer.processType,
       bootId: options.producer.bootId,
+      ...(options.spoolBudgetBytes !== undefined ? { budgetBytes: options.spoolBudgetBytes } : {}),
       ...(options.now !== undefined ? { now: options.now } : {}),
     });
     // spool 适配器：EmergencySpool.write 同步完成，成败立即可知（fail-closed 语义）

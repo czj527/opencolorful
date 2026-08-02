@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProducerContext } from "../../src/contracts/observability.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { ObservabilityQuery } from "../../src/observability/observability-query.js";
+import { currentTrace, runWithTrace } from "../../src/observability/trace-context.js";
 import { getStreamWatermark, setStreamWatermark } from "../../src/observability/stream-watermark.js";
 
 // ═══════════════════════════════════════════════════════════════
@@ -204,5 +205,63 @@ describe("T6 trace tree 与 linked graph", () => {
     expect(query.listActivityAfterId(id, 10)).toHaveLength(0);
     const id2 = insertActivity(db, { event_name: "system.stopped" }); // 模拟 spool 导入新行
     expect(query.listActivityAfterId(id, 10).map((row) => row.id)).toEqual([id2]);
+  });
+});
+
+describe("Phase 11 复审修复（评审 P1-6 / P1-11 复现级测试）", () => {
+  it("P1-6：真实 lifecycle 四条事件（turn started/terminal + model started/terminal）→ trace 树完整（模型调用不丢失）", () => {
+    const { db } = makeDb();
+    const traceId = "trace-real-turn";
+    const turnSpan = "span-turn-1";
+    const modelSpan = "span-model-1";
+    // 按真实 instrument 顺序：turn.started → model.call.started → model.call.completed → turn.completed
+    // started 与 terminal 共享同一 spanId；model 的 parentSpanId = turn 的 spanId
+    insertActivity(db, { event_id: "e1", event_name: "turn.started", status: "started", trace_id: traceId, span_id: turnSpan, parent_span_id: null, recorded_at: "2026-08-01T00:00:00.000Z" });
+    insertActivity(db, { event_id: "e2", event_name: "model.call.started", status: "started", trace_id: traceId, span_id: modelSpan, parent_span_id: turnSpan, recorded_at: "2026-08-01T00:00:01.000Z" });
+    insertActivity(db, { event_id: "e3", event_name: "model.call.completed", status: "completed", trace_id: traceId, span_id: modelSpan, parent_span_id: turnSpan, duration_ms: 120, recorded_at: "2026-08-01T00:00:03.000Z" });
+    insertActivity(db, { event_id: "e4", event_name: "turn.completed", status: "completed", trace_id: traceId, span_id: turnSpan, parent_span_id: null, duration_ms: 500, recorded_at: "2026-08-01T00:00:04.000Z" });
+
+    const query = new ObservabilityQuery(db);
+    const tree = query.traceTree(traceId);
+    expect(tree.total).toBe(4);
+    expect(tree.root).not.toBeNull();
+    // 根节点：started+terminal 合并为 turn（终态语义覆盖）
+    expect(tree.root?.eventName).toBe("turn.completed");
+    expect(tree.root?.status).toBe("completed");
+    expect(tree.root?.durationMs).toBe(500);
+    // 模型调用作为子 span 必须存在（原实现 terminal 覆盖 started 时丢失 children）
+    expect(tree.root?.children).toHaveLength(1);
+    const model = tree.root?.children[0];
+    expect(model?.eventName).toBe("model.call.completed");
+    expect(model?.status).toBe("completed");
+    expect(model?.durationMs).toBe(120);
+  });
+
+  it("P1-6：runWithTrace 子 span 的 parentSpanId 是父级 spanId（原实现复制祖父级）", () => {
+    // 直接验证 trace-context：内层 runWithTrace 的 span 的 parentSpanId === 外层上下文 spanId
+    let outerSpanId: string | undefined;
+    let innerParentSpanId: string | undefined;
+    runWithTrace({ trace: { traceId: "t", spanId: "parent-span" } }, () => {
+      outerSpanId = currentTrace()?.spanId;
+      innerParentSpanId = runWithTrace({}, () => currentTrace()?.parentSpanId);
+    });
+    expect(innerParentSpanId).toBe(outerSpanId); // 子 span 必须指向父级 spanId
+  });
+
+  it("P1-11：errorGroups 的 OR 条件组加括号——旧 error/fatal 不再绕过 since/eventName 过滤", () => {
+    const { db } = makeDb();
+    // 旧 error（早于 since）与被过滤的 eventName
+    insertActivity(db, { event_id: "old-1", event_name: "turn.failed", level: "error", status: "failed", recorded_at: "2026-01-01T00:00:00.000Z" });
+    insertActivity(db, { event_id: "new-1", event_name: "turn.failed", level: "error", status: "failed", recorded_at: "2026-08-01T00:00:00.000Z" });
+    insertActivity(db, { event_id: "new-2", event_name: "model.call.failed", level: "error", status: "failed", recorded_at: "2026-08-01T00:00:01.000Z" });
+    const query = new ObservabilityQuery(db);
+    const groups = query.errorGroups({ since: "2026-07-01T00:00:00.000Z" });
+    // 旧行（2026-01-01）不得出现
+    expect(groups.some((group) => group.eventName === "turn.failed" && group.count === 2)).toBe(false);
+    const turnGroup = groups.find((group) => group.eventName === "turn.failed");
+    expect(turnGroup?.count).toBe(1);
+    // eventName 过滤同样生效
+    const modelOnly = query.errorGroups({ since: "2026-07-01T00:00:00.000Z", eventName: "model.call.failed" });
+    expect(modelOnly.map((group) => group.eventName)).toEqual(["model.call.failed"]);
   });
 });

@@ -57,23 +57,31 @@ export class EmergencySpool {
 
   getFailedWriteCount(): number { return this.failedWrites; }
 
-  /** 当前进程的待导入 segment 数 */
+  /** 当前进程的待导入 segment 数（含上一进程崩溃遗留的同 processType 段） */
   pendingSegments(): number {
     try {
       if (!fs.existsSync(this.spoolRoot)) return 0;
-      return fs.readdirSync(this.spoolRoot)
-        .filter((name) => name.endsWith(".jsonl") && name.includes(`${this.processType}-${this.bootId}-`))
-        .length;
+      return this.segmentFiles().length;
     } catch {
       return 0;
     }
   }
 
+  /**
+   * 本 processType 的全部 JSONL 段文件（不区分 bootId）。
+   * 评审 P0-3：新进程必然生成新 bootId——按 bootId 过滤会让上一次崩溃
+   * 留下的 spool 永远无法导入（文件留在磁盘却不可见）。
+   */
+  private segmentFiles(): string[] {
+    return fs.readdirSync(this.spoolRoot)
+      .filter((name) => name.endsWith(".jsonl") && name.includes(`${this.processType}-`))
+      .sort();
+  }
+
   totalBytes(): number {
     try {
       if (!fs.existsSync(this.spoolRoot)) return 0;
-      return fs.readdirSync(this.spoolRoot)
-        .filter((name) => name.endsWith(".jsonl"))
+      return this.segmentFiles()
         .reduce((sum, name) => sum + fs.statSync(path.join(this.spoolRoot, name)).size, 0);
     } catch {
       return 0;
@@ -108,14 +116,15 @@ export class EmergencySpool {
   /**
    * 幂等导入全部待导入 segment（按文件内顺序逐行校验；坏行 quarantine；
    * 全部成功（含已 quarantine 的坏行）后原子删除 segment）。
+   *
+   * 评审 P0-3：读取本 processType 的全部段文件（含旧 bootId）——
+   * 新进程的 bootId 与上一进程必然不同，只读当前 bootId 等于永远不恢复崩溃遗留。
    */
   importInto(insert: (line: unknown) => { ok: boolean; error?: string }): SpoolImportResult {
     const result: SpoolImportResult = { imported: 0, quarantined: 0, failed: 0, segments: [] };
     try {
       if (!fs.existsSync(this.spoolRoot)) return result;
-      const files = fs.readdirSync(this.spoolRoot)
-        .filter((name) => name.endsWith(".jsonl") && name.includes(`${this.processType}-${this.bootId}-`))
-        .sort();
+      const files = this.segmentFiles();
       for (const name of files) {
         const filePath = path.join(this.spoolRoot, name);
         const lines = fs.readFileSync(filePath, "utf8").split("\n").filter((line) => line.trim().length > 0);

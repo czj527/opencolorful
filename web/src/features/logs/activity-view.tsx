@@ -63,6 +63,26 @@ function buildQuery(draft: DraftFilter): ActivityQuery {
   return filter;
 }
 
+/**
+ * 评审 P1-11：实时跟随必须应用当前活动筛选——SSE 流是全局的，
+ * 客户端按 applied 过滤后再进入列表，否则筛选条件下 live 行会混入。
+ */
+function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean {
+  if (filter.eventName !== undefined && row.eventName !== filter.eventName) return false;
+  if (filter.category !== undefined && row.category !== filter.category) return false;
+  if (filter.level !== undefined && row.level !== filter.level) return false;
+  if (filter.status !== undefined && row.status !== filter.status) return false;
+  if (filter.sessionId !== undefined && row.sessionId !== filter.sessionId) return false;
+  if (filter.ownerAgentId !== undefined && row.ownerAgentId !== filter.ownerAgentId) return false;
+  if (filter.search !== undefined && filter.search.trim() !== "") {
+    const term = filter.search.trim();
+    if (!row.eventName.includes(term) && !row.category.includes(term)) return false;
+  }
+  if (filter.from !== undefined && row.recordedAt < filter.from) return false;
+  if (filter.to !== undefined && row.recordedAt > filter.to) return false;
+  return true;
+}
+
 export function ActivityView({ api }: ActivityViewProps) {
   const [draft, setDraft] = useState<DraftFilter>(EMPTY_DRAFT);
   // 初始 applied 为空过滤（buildQuery 过滤空串），避免把空串参数发给后端导致零匹配
@@ -79,6 +99,12 @@ export function ActivityView({ api }: ActivityViewProps) {
   const [resetNote, setResetNote] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const sinceIdRef = useRef(0);
+  // 评审 P1-11：follow 连接按开启瞬间固定，筛选变化不重建连接——
+  // 用 ref 镜像 applied 供事件处理器读取
+  const appliedRef = useRef(applied);
+  useEffect(() => {
+    appliedRef.current = applied;
+  }, [applied]);
 
   const patchDraft = useCallback(<K extends keyof DraftFilter>(key: K, value: DraftFilter[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -133,6 +159,8 @@ export function ActivityView({ api }: ActivityViewProps) {
       try {
         const row = JSON.parse((event as MessageEvent).data) as ActivityRow;
         if (typeof row.id !== "number") return;
+        // 评审 P1-11：live 行必须匹配当前 applied 筛选（SSE 流为全局流）
+        if (!matchesAppliedFilter(row, appliedRef.current)) return;
         sinceIdRef.current = Math.max(sinceIdRef.current, row.id);
         setItems((current) => {
           if (current.some((existing) => existing.id === row.id)) return current;

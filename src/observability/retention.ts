@@ -77,7 +77,8 @@ export class RetentionService {
     const scope = (where: string): { where: string; params: unknown[] } => {
       const params: unknown[] = [];
       if (watermark !== "") {
-        where += " AND substr(recorded_at, 1, 10) > ?";
+        // 评审 P1-5：水位用 >=（前一次 cutoff 当天的数据不得永远落在开区间外）
+        where += " AND substr(recorded_at, 1, 10) >= ?";
         params.push(watermark);
       }
       where += " AND substr(recorded_at, 1, 10) < ?";
@@ -132,7 +133,8 @@ export class RetentionService {
       const params: unknown[] = [];
       let where = "1=1";
       if (watermark !== "") {
-        where += " AND substr(recorded_at, 1, 10) > ?";
+        // 评审 P1-5：闭区间（>= watermark），避免前一次 cutoff 当天的数据永远漏掉
+        where += " AND substr(recorded_at, 1, 10) >= ?";
         params.push(watermark);
       }
       where += " AND substr(recorded_at, 1, 10) < ?";
@@ -164,8 +166,11 @@ export class RetentionService {
       }
       // 2) 写 watermark（当前 cutoff 之前已全部聚合）
       this.setWatermark(cutoff);
-      // 3) 删除已聚合 Activity（Audit 不参与）
-      const result = this.database.prepare(`DELETE FROM activity_events WHERE ${where}`).run(...params);
+      // 3) 删除已聚合 Activity（评审 P0-4：只删 routine；notable/milestone
+      //    承诺长期保留——agent.created/agent.deleted 等不可被 retention 抹掉）
+      const result = this.database
+        .prepare(`DELETE FROM activity_events WHERE ${where} AND significance = 'routine'`)
+        .run(...params);
       deleted = result.changes;
     })();
     // diagnostic 文件清理（7/30 天规则；独立于 activity 事务）

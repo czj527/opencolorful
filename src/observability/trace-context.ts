@@ -30,6 +30,8 @@ export function newSpanId(): string {
 /**
  * 在当前上下文中运行 callback，自动携带 trace。
  * 未提供 trace 时从外层继承（子 span）；无外层则新建根 trace。
+ * 评审 P1-6：子 span 的 parentSpanId 必须是父级 spanId（原实现错误地
+ * 复制了祖父级 parentSpanId，导致真实 Turn 产生的 trace 拼不成树）。
  */
 export function runWithTrace<T>(input: { trace?: TraceContext; parentSpanId?: string }, callback: () => T): T {
   const parent = input.trace ?? storage.getStore();
@@ -37,7 +39,7 @@ export function runWithTrace<T>(input: { trace?: TraceContext; parentSpanId?: st
     ? {
         traceId: parent.traceId,
         spanId: newSpanId(),
-        ...(parent.parentSpanId !== undefined ? { parentSpanId: parent.parentSpanId } : {}),
+        parentSpanId: parent.spanId,
         ...(parent.operationId !== undefined ? { operationId: parent.operationId } : {}),
         ...(parent.correlationId !== undefined ? { correlationId: parent.correlationId } : {}),
         ...(parent.linkedTraceIds !== undefined ? { linkedTraceIds: parent.linkedTraceIds } : {}),

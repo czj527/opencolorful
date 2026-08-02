@@ -65,6 +65,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /**
  * 结构化 normalize：把任意值收敛为 SafeValue。
  * - 敏感字段名直接剔除（值不落盘）；
+ * - 字符串一律先 redactText 再截断（评审 P0-2：纯截断会把
+ *   "Authorization: Bearer sk-proj-…" 原样放进 payload_json / spool）；
  * - 深度 > maxDepth、数组 > maxArrayLength、字符串 > maxStringLength 截断并标记 truncated；
  * - 循环引用 → "[Circular]"；
  * - 对象键数量 > maxAttributeCount 时保留前 N 个。
@@ -76,10 +78,12 @@ export function normalizeSafeValue(
 ): SafeValue {
   if (value === null) return null;
   switch (typeof value) {
-    case "string":
-      return value.length > OBSERVABILITY_ATTRIBUTE_LIMITS.maxStringLength
-        ? `${value.slice(0, OBSERVABILITY_ATTRIBUTE_LIMITS.maxStringLength)}…(truncated)`
-        : value;
+    case "string": {
+      const redacted = redactText(value);
+      return redacted.length > OBSERVABILITY_ATTRIBUTE_LIMITS.maxStringLength
+        ? `${redacted.slice(0, OBSERVABILITY_ATTRIBUTE_LIMITS.maxStringLength)}…(truncated)`
+        : redacted;
+    }
     case "number":
       return Number.isFinite(value) ? value : null;
     case "boolean":
@@ -114,12 +118,29 @@ export function normalizeSafeValue(
   }
 }
 
+/** 对已 normalize 的 SafeValue 树做第二遍文本脱敏（评审 P0-2：纵深防御，防漏网） */
+function redactSafeValue(value: SafeValue, depth = 0): SafeValue {
+  if (typeof value === "string") return redactText(value);
+  if (Array.isArray(value)) {
+    if (depth >= OBSERVABILITY_ATTRIBUTE_LIMITS.maxDepth) return value;
+    return value.map((item) => redactSafeValue(item, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    const result: Record<string, SafeValue> = {};
+    for (const [key, item] of Object.entries(value)) {
+      result[key] = redactSafeValue(item, depth + 1);
+    }
+    return result;
+  }
+  return value;
+}
+
 /**
- * 深度清洗对象（用于 payload/attributes）：整体 redact 后 normalize，
- * 并保证最终 JSON 体积 ≤ maxPayloadBytes。
+ * 深度清洗对象（用于 payload/attributes）：normalize 后对整棵树做第二遍
+ * 文本脱敏（红色兜底），并保证最终 JSON 体积 ≤ maxPayloadBytes。
  */
 export function normalizeSafeObject(value: unknown): { value: SafeValue; truncated: boolean } {
-  const normalized = normalizeSafeValue(value);
+  const normalized = redactSafeValue(normalizeSafeValue(value));
   let serialized: string;
   try {
     serialized = JSON.stringify(normalized);

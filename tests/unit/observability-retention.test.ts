@@ -201,3 +201,75 @@ describe("T9 support bundle", () => {
     expect(failed.some((row) => row.eventName === "model.call.failed")).toBe(true);
   });
 });
+
+describe("Phase 11 复审修复（评审 P0-4 / P1-5 复现级测试）", () => {
+  function insertWithSignificance(
+    db: ReturnType<typeof openMetadataDatabase>,
+    recordedAt: string,
+    significance: "routine" | "notable" | "milestone",
+    eventName: string,
+  ): void {
+    db.prepare(
+      `INSERT INTO activity_events
+        (event_id, schema_version, event_version, recorded_at, occurred_at, event_name, category,
+         level, status, significance, actor_kind, actor_id, executor_kind, executor_id,
+         trace_id, span_id, producer_component, producer_process_type, boot_id, search_text, payload_json)
+       VALUES (?, 1, 1, ?, ?, ?, 'agent', 'info', 'completed', ?,
+         'system', 'u', 'service', 'u', 'trace-1', 'span-1', 'unit-test', 'server', 'boot', ?, '{"summaryCode":"x"}')`,
+    )
+      .run(`evt-${Math.random().toString(16).slice(2, 10)}`, recordedAt, recordedAt, eventName, significance, eventName);
+  }
+
+  it("P0-4：同日期 routine/notable/milestone 三行，retention 只删 routine（notable/milestone 承诺长期保留）", () => {
+    const { db, retention } = makeFixture();
+    insertWithSignificance(db, "2026-01-01T00:00:00.000Z", "routine", "turn.completed");
+    insertWithSignificance(db, "2026-01-01T01:00:00.000Z", "notable", "provider.configured");
+    insertWithSignificance(db, "2026-01-01T02:00:00.000Z", "milestone", "agent.created");
+
+    const result = retention.runRetention(30);
+    expect(result.deleted).toBe(1); // 只删 routine
+    const remaining = db.prepare("SELECT event_name, significance FROM activity_events ORDER BY id").all() as Array<{ event_name: string; significance: string }>;
+    expect(remaining.map((row) => row.significance).sort()).toEqual(["milestone", "notable"]);
+    // notable/milestone 也进聚合（指标完整），但行本身保留
+    const metrics = db.prepare("SELECT SUM(json_extract(value_json, '$.count')) AS total FROM activity_daily_metrics").get() as { total: number };
+    expect(metrics.total).toBe(3);
+  });
+
+  it("P1-5：水位闭区间——watermark 当天新增的行在下一次 cutoff 推进时被聚合，不会永远落在开区间外", () => {
+    const { db, retention } = makeFixture();
+    // 第一次 retention：watermark = cutoff（2026-07-03 左右）
+    insertOldActivity(db, "2026-01-01T00:00:00.000Z", "turn.completed");
+    const first = retention.runRetention(30);
+    expect(first.deleted).toBe(1);
+    const watermark = retention.getWatermark();
+    expect(watermark).not.toBe("");
+    // watermark 当天新增一条（模拟 cutoff 日晚上产生的数据）
+    insertOldActivity(db, `${watermark}T12:00:00.000Z`, "turn.completed");
+    // cutoff 推进一天后再次 retention：watermark 当天的行必须被聚合+删除
+    const second = retention.runRetention(29);
+    expect(second.aggregated).toBe(1);
+    expect(second.deleted).toBe(1);
+    expect(activityCount(db)).toBe(0);
+  });
+
+  it("P1-5：dailyMetrics 读取 activity_daily_metrics（聚合结果不再因行删除而丢失）", () => {
+    const { db, retention } = makeFixture();
+    insertOldActivity(db, "2026-01-01T00:00:00.000Z", "turn.completed");
+    insertOldActivity(db, "2026-01-01T01:00:00.000Z", "turn.failed", "info", "failed");
+    retention.runRetention(30);
+    // 行已删除，但指标必须仍可读
+    expect(activityCount(db)).toBe(0);
+    const query = new ObservabilityQuery(db);
+    const metrics = query.dailyMetrics({ since: "2026-01-01T00:00:00.000Z" });
+    const jan1 = metrics.find((metric) => metric.date === "2026-01-01");
+    expect(jan1).toBeDefined();
+    expect(jan1?.eventCount).toBe(2);
+    // turn.failed（status=failed，测试 seed 用 level=info）计入 failedCount
+    expect(jan1?.failedCount).toBe(1);
+    // 实时部分（watermark 之后未聚合行）也计入：不丢新数据
+    insertOldActivity(db, new Date().toISOString(), "turn.completed");
+    const withLive = query.dailyMetrics({ days: 30 });
+    const today = new Date().toISOString().slice(0, 10);
+    expect(withLive.find((metric) => metric.date === today)?.eventCount).toBe(1);
+  });
+});

@@ -50,3 +50,51 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ── Phase 11 可观测性偏好（评审 P1-7） ─────────────────────── */
+.prefsFieldset {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--space-12) var(--space-16);
+  margin: 0 0 var(--space-16);
+}
+
+.prefsFieldset legend {
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+  padding: 0 var(--space-4);
+}
+
+.prefsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-12);
+}
+
+.prefsItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.prefsItem input[type="number"] {
+  width: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--input-bg, transparent);
+  color: var(--text-primary);
+}
+
+.prefsActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.savedNote {
+  font-size: var(--fs-ui);
+  color: var(--success, #3fb950);
+}

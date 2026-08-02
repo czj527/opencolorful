@@ -7,8 +7,11 @@ import { serve, type ServerType } from "@hono/node-server";
 
 import type { ProducerContext } from "../../src/contracts/observability.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
+import { PreferencesStore } from "../../src/config/preferences-store.js";
+import { defaultObservabilityPreferences } from "../../src/contracts/preferences.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { getCatalogEntry } from "../../src/observability/event-catalog.js";
 import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
 import { PLATFORM_VERSION } from "../../src/index.js";
@@ -56,11 +59,19 @@ function makeFixture() {
 }
 
 function activityInput(eventName: string, patch: Record<string, unknown> = {}): import("../../src/observability/activity-recorder.js").ActivityRecordInput {
+  // 评审 P1-9：status 由目录生命周期推导（terminal → 目录第一个终态；started → started）
+  const entry = getCatalogEntry(eventName);
+  const catalogStatus = entry?.lifecycleRole === "terminal"
+    ? (entry.terminalStatuses?.[0] ?? "completed")
+    : entry?.lifecycleRole === "started"
+      ? "started"
+      : undefined;
   return {
     eventName,
     payload: { summaryCode: eventName.replace(/\./g, "_"), ...patch },
     actor: { kind: "system" as const, id: "unit-test" },
     executor: { kind: "service" as const, id: "unit-test" },
+    ...(catalogStatus !== undefined ? { status: catalogStatus } : {}),
   };
 }
 
@@ -442,5 +453,111 @@ describe("T6 client-events 安全矩阵", () => {
     expect(lastStatus).toBe(429);
     const count = (db.prepare("SELECT COUNT(*) AS n FROM activity_events").get() as { n: number }).n;
     expect(count).toBe(60);
+  });
+});
+
+describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）", () => {
+  it("P2-12：diagnostic tail 只读文件尾部（>512KB 文件不全量加载）", async () => {
+    const { directory, paths } = makeFixture();
+    const runtimeDir = path.join(paths.logs, "runtime", "server");
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    // 构造 >512KB 的主日志文件（每行 200B × 5000 行 = 1MB）
+    const file = path.join(runtimeDir, `2026-08-02_boot-tail_0.jsonl`);
+    const lines: string[] = [];
+    for (let i = 0; i < 5000; i += 1) lines.push(JSON.stringify({ seq: i, padding: "p".repeat(180) }));
+    fs.writeFileSync(file, `${lines.join("\n")}\n`, "utf8");
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: getRuntimePaths({ OPENCOLORFUL_HOME: directory }),
+      database: openDatabases[openDatabases.length - 1]!,
+    });
+    const response = await app.request(`http://127.0.0.1/api/observability/diagnostic/tail?lines=5`);
+    const body = await response.json() as { lines: number; totalBytes: number; tail: string[] };
+    expect(body.lines).toBe(5);
+    expect(body.totalBytes).toBeGreaterThan(512 * 1024);
+    // 尾部行是文件最后的内容（seq 4999…）
+    expect(JSON.parse(body.tail[body.tail.length - 1]!)).toMatchObject({ seq: 4999 });
+    expect(JSON.parse(body.tail[0]!)).toMatchObject({ seq: 4995 });
+  });
+
+  it("P1-11：SSE 优先读 Last-Event-ID 头（重连语义），旧数据行补发", async () => {
+    const { db } = makeFixture();
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: getRuntimePaths({ OPENCOLORFUL_HOME: temporaryDirectories[0]! }),
+      database: db,
+    });
+    const r1 = instrument.activity(activityInput("system.started"))!;
+    const r2 = instrument.activity(activityInput("turn.completed"))!;
+    const ids = [r1, r2].map((r) => (r.kind === "accepted" ? r.rowId : -1));
+    // Last-Event-ID = 第一条 → 只补发第二条
+    const response = await app.request(`http://127.0.0.1/api/observability/activity/stream`, {
+      headers: { "last-event-id": String(ids[0]!) },
+    });
+    const events = await readSseEvents(response, 1);
+    expect((events[0]!.data as { id: number }).id).toBe(ids[1]);
+  });
+
+  it("P1-11：activity 游标早于 retention 删除的最小 id → 发送 reset 控制事件", async () => {
+    const { db } = makeFixture();
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: getRuntimePaths({ OPENCOLORFUL_HOME: temporaryDirectories[0]! }),
+      database: db,
+    });
+    const r1 = instrument.activity(activityInput("system.started"))!;
+    const r2 = instrument.activity(activityInput("turn.completed"))!;
+    const ids = [r1, r2].map((r) => (r.kind === "accepted" ? r.rowId : -1));
+    // retention 删除最小行 → 游标（=第一条）早于最小可用 id
+    db.prepare("DELETE FROM activity_events WHERE id = ?").run(ids[0]!);
+    const response = await app.request(`http://127.0.0.1/api/observability/activity/stream?sinceId=${ids[0]!}`);
+    const events = await readSseEvents(response, 1, 3_000);
+    expect(events[0]!.event).toBe("reset");
+    const data = events[0]!.data as { minAvailableId: number; reason: string };
+    expect(data.reason).toBe("retention");
+    // reset 告知新的最小可用 id（= 剩余行的最小 id），客户端据此清空局部投影重查
+    expect(data.minAvailableId).toBe(ids[1]);
+  });
+
+  it("P1-7：retention 默认天数来自 observability 偏好（routine 保留期）", async () => {
+    const { directory, paths, db } = makeFixture();
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    preferencesStore.update({
+      observability: {
+        ...defaultObservabilityPreferences(),
+        activityRetentionDays: { routine: 7, notable: 730 },
+      },
+    } as never);
+    const { app } = createServerApp({
+      version: PLATFORM_VERSION,
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: getRuntimePaths({ OPENCOLORFUL_HOME: directory }),
+      database: db,
+      preferencesStore,
+    });
+    // 8 天前的行：默认 30 天会保留，偏好 7 天会删除
+    const past = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO activity_events
+        (event_id, schema_version, event_version, recorded_at, occurred_at, event_name, category,
+         level, status, significance, actor_kind, actor_id, executor_kind, executor_id,
+         trace_id, span_id, producer_component, producer_process_type, boot_id, search_text, payload_json)
+       VALUES ('evt-8d', 1, 1, ?, ?, 'turn.completed', 'turn', 'info', 'completed', 'routine',
+         'system', 'u', 'service', 'u', 't', 's', 'unit-test', 'server', 'boot', 'turn.completed', '{}')`,
+    ).run(past, past);
+    const response = await app.request(`http://127.0.0.1/api/observability/retention/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const result = await response.json() as { deleted: number };
+    expect(result.deleted).toBe(1);
   });
 });

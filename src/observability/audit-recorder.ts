@@ -79,14 +79,22 @@ export class AuditRecorder {
     }
   }
 
-  /** 严格路径：任何失败直接抛出（绝不 spool）；供同库事务内部使用 */
-  private appendStrict(input: AuditRecordInput): AuditAcceptResult {
+  /**
+   * 严格路径：任何失败直接抛出（绝不 spool）。
+   * 评审 P0-1：公开给 fail-closed 调用方——文件/外部高风险修改先写后审计，
+   * 审计失败即回滚；审计先行方（凭据）在写入前调用本方法，失败即拒绝操作。
+   */
+  appendStrict(input: AuditRecordInput): AuditAcceptResult {
     const entry = getCatalogEntry(input.eventName);
     if (entry === undefined) {
       return { kind: "rejected", eventName: input.eventName, reason: "事件未注册或版本不符" };
     }
     if (entry.channel !== "audit") {
       return { kind: "rejected", eventName: input.eventName, reason: "事件不属于 audit 通道" };
+    }
+    // 评审 P1-9：payload 必须符合目录固定的 schema
+    if (!Value.Check(entry.payloadSchema, input.payload)) {
+      return { kind: "rejected", eventName: input.eventName, reason: "payload 不符合目录 schema" };
     }
     const envelope = this.buildEnvelope(input);
     if (!Value.Check(AuditEnvelopeSchema, envelope)) {

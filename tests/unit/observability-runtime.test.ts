@@ -20,6 +20,8 @@ import {
   isSensitiveKey,
 } from "../../src/observability/safe-value.js";
 import { DiagnosticLogger, type DiskUsage } from "../../src/observability/diagnostic-logger.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
 import type { ProducerContext } from "../../src/contracts/observability.js";
 
 const temporaryDirectories: string[] = [];
@@ -120,7 +122,9 @@ describe("SafeValue normalize 与脱敏", () => {
     const limited = normalizeSafeValue(deep);
     expect(JSON.stringify(limited)).toContain("depth-limited");
 
-    const long = normalizeSafeValue({ text: "x".repeat(5000) });
+    // 评审 P0-2：字符串先脱敏再截断——"x"*5000 是 base64-like 会被整体替换为占位符，
+    // 长度限额测试必须用不可脱敏文本（CJK 不匹配任何 redact 模式）
+    const long = normalizeSafeValue({ text: "好".repeat(5000) });
     expect(JSON.stringify(long)).toContain("truncated");
 
     const circular: Record<string, unknown> = { name: "loop" };
@@ -142,8 +146,9 @@ describe("SafeValue normalize 与脱敏", () => {
   });
 
   it("normalizeSafeObject 超限标记 payload-too-large", () => {
+    // 用 CJK 文本：ASCII 长串会被 redact 收缩为占位符，无法触发体积上限
     const fields: Record<string, string> = {};
-    for (let i = 0; i < 32; i += 1) fields[`f${i}`] = "y".repeat(2_000);
+    for (let i = 0; i < 32; i += 1) fields[`f${i}`] = "哦".repeat(2_000);
     const result = normalizeSafeObject(fields);
     expect(result.truncated).toBe(true);
     expect(JSON.stringify(result.value)).toContain("payload-too-large");
@@ -263,5 +268,77 @@ describe("DiagnosticLogger", () => {
     } finally {
       fs.chmodSync(dir, 0o700);
     }
+  });
+});
+
+describe("Phase 11 复审修复（评审 P0-2 / P1-7 / P1-8 复现级测试）", () => {
+  it("P0-2：结构化字符串必须脱敏——Authorization/Bearer/sk- 不进入 payload", () => {
+    const raw = "Authorization: Bearer secret sk-proj-abcdef123456";
+    const normalized = normalizeSafeValue({ header: raw });
+    const json = JSON.stringify(normalized);
+    expect(json).not.toContain("sk-proj-abcdef123456");
+    expect(json).not.toContain("Bearer secret");
+    expect(json).toContain("[AUTH_HEADER]");
+    // normalizeSafeObject 第二遍同样生效（纵深防御）
+    const object = normalizeSafeObject({ message: "header " + raw + " cookie=abc123" });
+    const objectJson = JSON.stringify(object.value);
+    expect(objectJson).not.toContain("sk-proj-abcdef123456");
+    expect(objectJson).not.toContain("abc123");
+  });
+
+  it("P1-7：ObservabilityContext 偏好——minLevel 过滤 + spool 预算生效", () => {
+    const dir = makeTempDir();
+    const db = openMetadataDatabase(path.join(dir, "metadata.db"));
+    const context = new ObservabilityContext({
+      database: db,
+      producer,
+      logsRoot: path.join(dir, "logs"),
+      spoolRoot: path.join(dir, "spool"),
+      logger: { minLevel: "warn" },
+      spoolBudgetBytes: 1024,
+    });
+    // minLevel=warn：trace/debug/info 不落盘
+    context.logger.trace("t", "trace-msg");
+    context.logger.info("i", "info-msg");
+    context.logger.warn("w", "warn-msg");
+    context.logger.flushSync();
+    const files = fs.readdirSync(path.join(dir, "logs")).filter((name) => name.endsWith(".jsonl"));
+    expect(files.length).toBeGreaterThan(0);
+    const content = files.map((name) => fs.readFileSync(path.join(dir, "logs", name), "utf8")).join("");
+    expect(content).not.toContain("trace-msg");
+    expect(content).not.toContain("info-msg");
+    expect(content).toContain("warn-msg");
+    // spool 预算 1024B：先占满 900B，再写 300B 行 → 超限被拒（fail-closed 出口）
+    fs.mkdirSync(path.join(dir, "spool"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "spool", "audit-server-boot-0.jsonl"), "x".repeat(900), "utf8");
+    const spoolResult = context.spool.write("audit", {
+      schemaVersion: 1, eventVersion: 1, eventId: "evt-big", eventName: "audit.agent.deleted",
+      occurredAt: new Date().toISOString(), recordedAt: new Date().toISOString(), level: "warn",
+      actor: { kind: "user", id: "u" }, executor: { kind: "service", id: "s" }, scope: {},
+      trace: { traceId: "t", spanId: "s" }, producer, channel: "audit",
+      payload: { action: "agent.deleted", decision: "allowed" },
+    });
+    expect(spoolResult.ok).toBe(false);
+    db.close();
+  });
+
+  it("P1-8：磁盘预算删除后从总量扣减——3×500B 文件 + logger 文件 ≈ 2028B、预算 1800B 只删最旧 1 个", () => {
+    const dir = makeTempDir();
+    const logger = new DiagnosticLogger({ logsRoot: dir, producer, diskBudgetBytes: 1800 });
+    // 三个 500B 的主文件 + logger 自身文件（~530B）≈ 2030B；
+    // 预算 1800B：删最旧 1 个后 ≈1530 ≤ 1800 即停止——修复前会删光全部 3 个
+    for (let i = 0; i < 3; i += 1) {
+      const file = path.join(dir, `seed${i}.jsonl`);
+      fs.writeFileSync(file, "x".repeat(500), "utf8");
+      const mtime = new Date(Date.now() - (3 - i) * 60_000);
+      fs.utimesSync(file, mtime, mtime);
+    }
+    logger.info("budget.test", "触发预算执行");
+    logger.flushSync();
+    const seeds = fs.readdirSync(dir).filter((name) => name.startsWith("seed"));
+    // 只删最旧 1 个 seed，其余保留——修复前会删光全部 3 个
+    expect(seeds.length).toBe(2);
+    expect(seeds.some((name) => name === "seed0.jsonl")).toBe(false);
+    expect(seeds.some((name) => name === "seed1.jsonl")).toBe(true);
   });
 });

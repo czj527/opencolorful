@@ -6,6 +6,7 @@ import { streamSSE } from "hono/streaming";
 import type Database from "better-sqlite3";
 import type { RuntimePaths } from "../../config/paths.js";
 import { PLATFORM_VERSION } from "../../index.js";
+import { defaultObservabilityPreferences, type ObservabilityPreferences } from "../../contracts/preferences.js";
 import type { ObservabilityHealth } from "../../observability/observability-context.js";
 import { ObservabilityQuery, type PageCursor } from "../../observability/observability-query.js";
 import { RetentionService } from "../../observability/retention.js";
@@ -63,19 +64,29 @@ function parseOptionalInt(value: string | undefined, fallback: number, max: numb
 export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteDeps): void {
   const query = new ObservabilityQuery(deps.database);
   const limiter = new ClientEventRateLimiter();
-  // retention/export 用的 logger/spool 只做文件级操作（与进程内实例同目录）
+  // 评审 P1-7：retention 用到的 logger/spool 也读 observability 偏好
+  // （级别/文件大小/磁盘预算/保留期/spool 预算），不再另建一套默认值
+  const obsPrefs: ObservabilityPreferences = deps.preferencesStore?.get().observability
+    ?? defaultObservabilityPreferences();
   const retentionLogger = new DiagnosticLogger({
     logsRoot: path.join(deps.paths.logs, "runtime", "server"),
     producer: {
       component: "retention", processType: "server", processId: "0",
       bootId: "retention", appVersion: PLATFORM_VERSION, hostPlatform: process.platform,
     },
+    fileSizeBytes: obsPrefs.diagnosticFileSizeBytes,
+    diskBudgetBytes: obsPrefs.diagnosticDiskBudgetBytes,
+    debugRetentionDays: obsPrefs.diagnosticRetentionDays.debug,
+    mainRetentionDays: obsPrefs.diagnosticRetentionDays.main,
   });
   const retentionSpool = new EmergencySpool({
     spoolRoot: path.join(deps.paths.logs, "emergency"),
     processType: "server", bootId: "retention",
+    budgetBytes: obsPrefs.emergencySpoolBudgetBytes,
   });
   const retention = new RetentionService(deps.database, retentionLogger, retentionSpool);
+  /** retention 默认天数：routine 保留期（偏好，缺省 180） */
+  const defaultRetentionDays = obsPrefs.activityRetentionDays.routine;
 
   // ─── Activity 查询 ─────────────────────────────────────────────
 
@@ -109,30 +120,55 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
 
   const registerStream = (channel: "activity" | "audit"): void => {
     app.get(`/api/observability/${channel}/stream`, (context) => {
+      // 评审 P1-11：重连优先读 Last-Event-ID 头（SSE 标准语义），
+      // 再回退 sinceId 查询参数；都不存在时用持久化高水位交接
+      const lastEventId = context.req.header("last-event-id");
+      const hasLastEventId = lastEventId !== undefined && /^\d+$/.test(lastEventId.trim());
       const sinceRaw = context.req.query("sinceId");
       const hasSince = sinceRaw !== undefined && /^\d+$/.test(sinceRaw);
-      let cursor = hasSince ? Number(sinceRaw) : getStreamWatermark(deps.database, channel);
+      let cursor = hasLastEventId ? Number(lastEventId!.trim())
+        : hasSince ? Number(sinceRaw)
+          : getStreamWatermark(deps.database, channel);
       return streamSSE(context, async (stream) => {
         const abortSignal = context.req.raw.signal;
         let aborted = false;
         const onAbort = (): void => { aborted = true; };
         abortSignal.addEventListener("abort", onAbort, { once: true });
 
+        // 评审 P1-11：cursor 早于当前最小可用 id（retention 删除 / ledger reset 清空旧 epoch）
+        // 时发送 reset 控制事件并重置到 minId-1（不重不漏地继续），而不是静默跳过
+        let epochSeen = 0;
         const poll = async (): Promise<boolean> => {
+          const minId = (deps.database
+            .prepare(`SELECT COALESCE(MIN(id), 0) AS minId FROM ${channel}_events`)
+            .get() as { minId: number }).minId;
+          // 评审 P1-11：游标早于最小可用 id（含表被清空 minId=0）→ reset
+          if (cursor > 0 && (minId === 0 || cursor < minId)) {
+            const reason = channel === "activity" ? "retention" : "ledger reset";
+            await stream.writeSSE({
+              event: "reset",
+              data: JSON.stringify({
+                minAvailableId: minId,
+                ...(channel === "audit" ? { currentLedgerEpoch: instrument.getHealth()?.auditEpoch ?? 1 } : {}),
+                reason,
+              }),
+            });
+            cursor = minId - 1;
+          }
           // 允许 gap：retention 删除的行直接跳过；epoch reset 发 reset 控制事件
           const rows = channel === "activity"
             ? query.listActivityAfterId(cursor, STREAM_BATCH)
             : query.listAuditAfterId(cursor, STREAM_BATCH);
           if (rows.length === 0) return true;
-          let epochSent = false;
           for (const row of rows) {
             if (aborted) return false;
             if (channel === "audit") {
               const epoch = (row as { ledgerEpoch: number }).ledgerEpoch;
-              if (!epochSent) {
+              // 评审 P1-11：reset 只在 epoch 实际变化时发送（原实现每批首行无条件发送）
+              if (epochSeen !== 0 && epoch !== epochSeen) {
                 await stream.writeSSE({ event: "reset", data: JSON.stringify({ epoch, reason: "ledger epoch" }) });
-                epochSent = true;
               }
+              epochSeen = epoch;
             }
             await stream.writeSSE({
               id: String(row.id),
@@ -255,14 +291,34 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     }
     const fileName = files[0]!;
     const filePath = path.join(dir, fileName);
-    const raw = fs.readFileSync(filePath, "utf8");
-    const allLines = raw.split("\n").filter((line) => line.trim() !== "");
+    // 评审 P2-12：大日志文件不全量加载——只读文件尾部 TAIL_READ_BYTES 字节
+    // （500KB 上限足够覆盖默认 1000 行 × 平均行长的场景）
+    const TAIL_READ_BYTES = 512 * 1024;
+    const size = fs.statSync(filePath).size;
+    const totalBytes = size;
+    let content: string;
+    if (size <= TAIL_READ_BYTES) {
+      content = fs.readFileSync(filePath, "utf8");
+    } else {
+      const fd = fs.openSync(filePath, "r");
+      try {
+        const buffer = Buffer.alloc(TAIL_READ_BYTES);
+        const bytes = fs.readSync(fd, buffer, 0, TAIL_READ_BYTES, size - TAIL_READ_BYTES);
+        content = buffer.subarray(0, bytes).toString("utf8");
+        // 丢掉被截断的半行（从第一个换行开始）
+        const firstBreak = content.indexOf("\n");
+        if (firstBreak >= 0) content = content.slice(firstBreak + 1);
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    const allLines = content.split("\n").filter((line) => line.trim() !== "");
     const tail = allLines.slice(-lines).slice(-500); // 行数与字节双上限
     return context.json({
       process: processName,
       file: fileName,
       lines: tail.length,
-      totalBytes: Buffer.byteLength(raw, "utf8"),
+      totalBytes,
       tail,
     });
   });
@@ -272,18 +328,20 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
   app.post("/api/observability/retention/preview", async (context) => {
     let body: { days?: unknown };
     try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+    // 评审 P1-7：默认天数来自偏好 routine 保留期（缺省 180），不再硬编码 30
     const days = typeof body.days === "number" && Number.isInteger(body.days) && body.days > 0 && body.days <= 365
       ? body.days
-      : 30;
+      : defaultRetentionDays;
     return context.json(retention.previewRetention(days));
   });
 
   app.post("/api/observability/retention/run", async (context) => {
     let body: { days?: unknown };
     try { body = await context.req.json(); } catch { return context.json({ code: "BAD_REQUEST", message: "需要 JSON body" }, 400); }
+    // 评审 P1-7：默认天数来自偏好 routine 保留期（缺省 180），不再硬编码 30
     const days = typeof body.days === "number" && Number.isInteger(body.days) && body.days > 0 && body.days <= 365
       ? body.days
-      : 30;
+      : defaultRetentionDays;
     const result = retention.runRetention(days);
     // 运维动作本身进入 audit（计划 §九：日志清理与 ledger reset 本身进入 Audit）
     // 清理本身进入 Audit（auditMirror：audit.storage.retention_run）

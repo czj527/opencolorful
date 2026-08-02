@@ -21,6 +21,7 @@ import { MemoryJournalStore } from "../storage/memory/journal-store.js";
 import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../runtime/memory/proposal-application.js";
 import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { defaultObservabilityPreferences } from "../contracts/preferences.js";
 import { MemoryRecallStore } from "../storage/memory/recall-store.js";
 import { ActivationUpdater } from "../runtime/memory/activation-updater.js";
 import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
@@ -181,6 +182,10 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     dbMigrationReport = report;
   });
   try {
+    // 评审 P1-7：偏好必须先于 ObservabilityContext 读取——
+    // 日志级别/文件大小/磁盘预算/保留期/spool 预算全部来自 observability 偏好
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    const observabilityPrefs = preferencesStore.get().observability ?? defaultObservabilityPreferences();
     // ── Phase 11：可观测性上下文（migration 之后、业务资源之前）──
     const observability = new ObservabilityContext({
       database,
@@ -194,6 +199,14 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       },
       logsRoot: path.join(paths.logs, "runtime", "server"),
       spoolRoot: path.join(paths.logs, "emergency"),
+      logger: {
+        minLevel: observabilityPrefs.diagnosticLevel,
+        fileSizeBytes: observabilityPrefs.diagnosticFileSizeBytes,
+        diskBudgetBytes: observabilityPrefs.diagnosticDiskBudgetBytes,
+        debugRetentionDays: observabilityPrefs.diagnosticRetentionDays.debug,
+        mainRetentionDays: observabilityPrefs.diagnosticRetentionDays.main,
+      },
+      spoolBudgetBytes: observabilityPrefs.emergencySpoolBudgetBytes,
     });
     instrument.init(observability);
     const recovery = observability.startupRecovery();
@@ -222,7 +235,8 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     }
     const sessionIndex = new SessionIndex(database);
     const providerStore = new ProviderStore(paths.providerSettings);
-    const modelService = await ModelService.create(paths, providerStore);
+    // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）
+    const modelService = await ModelService.create(paths, providerStore, observability.audit);
     // 记忆 ticker 在 sessionService 之后创建，archive 钩子用可变引用延迟接线
     let memoryTicker: MemoryTicker | undefined;
     const sessionService = new SessionService(
@@ -230,7 +244,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       sessionIndex,
       (sessionId) => memoryTicker?.onSessionArchived(sessionId),
     );
-    const preferencesStore = new PreferencesStore(paths.preferences);
+    // preferencesStore 已在可观测性初始化前创建（评审 P1-7）
     const agentStore = new AgentStore(paths.agents);
     // 启动时迁移旧 Agent 数据（去 type、profile.json→base-color.json、补 innerSetting）
     // 幂等、可恢复、单 agent 失败不阻塞其他
@@ -391,6 +405,8 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         wsPromptService: promptService,
         wsReplayStore: replayStore,
         database,
+        // 评审 P0-1：fail-closed 审计接入路由（沙箱策略/工作区/凭据）
+        audit: observability.audit,
         memoryFlushHook: (agentId) => memoryTicker?.requestFlush(agentId),
         memoryAdmin: {
           resolver: memoryAgentResolver,

@@ -1,6 +1,7 @@
 import type { ActivityPayload, TraceContext } from "../contracts/observability.js";
 import { getCatalogEntry } from "./event-catalog.js";
 import { normalizeSafeObject } from "./safe-value.js";
+import crypto from "node:crypto";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 T8：ExtensionObservabilityPort（冻结端口，plans/phase-11.md §八）
@@ -15,6 +16,9 @@ import { normalizeSafeObject } from "./safe-value.js";
 //   在输入类型上不存在，运行时传入的额外属性也不被读取；
 // - IPC 返回的 trace carrier 必须由本端口签发、未过期且 pluginId 匹配，
 //   否则事件回退到当前 ALS/no-trace；
+// - 评审 P1-10：carrier 防伪造——签发时登记随机令牌（进程内注册表），
+//   回传时校验令牌与绑定（pluginId/traceId/spanId 全等）并单次消费；
+//   插件自行构造"时间范围有效"的 carrier 因无登记令牌而被拒绝；
 // - 每插件滑动窗口速率限制（manifest.eventsPerMinute，默认 30/min）。
 // ═══════════════════════════════════════════════════════════════
 
@@ -24,8 +28,30 @@ export interface TraceCarrier {
   readonly spanId: string;
   readonly operationId?: string;
   readonly pluginId: string;
+  /** 平台登记的一次性随机令牌（评审 P1-10：防伪造/防重放） */
+  readonly token: string;
   readonly issuedAt: number;
   readonly expiresAt: number;
+}
+
+interface IssuedCarrier {
+  readonly pluginId: string;
+  readonly traceId: string;
+  readonly spanId: string;
+  readonly operationId?: string;
+  readonly expiresAt: number;
+}
+
+/**
+ * 进程内 carrier 注册表（跨端口共享）：traceCarrier() 签发时登记，
+ * activity(input.carrier) 校验并单次消费。令牌随机生成，插件无法预测/伪造。
+ */
+const carrierRegistry = new Map<string, IssuedCarrier>();
+
+function purgeExpiredCarriers(nowMs: number): void {
+  for (const [token, issued] of carrierRegistry) {
+    if (issued.expiresAt < nowMs) carrierRegistry.delete(token);
+  }
 }
 
 export interface ExtensionManifest {
@@ -110,12 +136,19 @@ export function createExtensionObservabilityPort(options: {
   const validateCarrier = (carrier: TraceCarrier | undefined): TraceContext | undefined => {
     if (carrier === undefined) return undefined;
     const current = now();
-    if (carrier.pluginId !== options.manifest.pluginId) return undefined; // 非本插件签发
-    if (current < carrier.issuedAt || current > carrier.expiresAt) return undefined; // 过期/未生效
+    // 评审 P1-10：必须有平台登记的令牌且单次消费（防伪造/防重放）；
+    // 令牌绑定 pluginId + trace 身份，全等才有效
+    const issued = carrierRegistry.get(carrier.token);
+    if (issued === undefined) return undefined; // 未登记/已消费：伪造或重放
+    if (issued.pluginId !== options.manifest.pluginId) return undefined; // 非本插件签发
+    if (issued.traceId !== carrier.traceId || issued.spanId !== carrier.spanId) return undefined; // 令牌与 trace 绑定
+    if (carrier.pluginId !== issued.pluginId) return undefined;
+    if (current < carrier.issuedAt || current > carrier.expiresAt || current > issued.expiresAt) return undefined; // 过期/未生效
+    carrierRegistry.delete(carrier.token); // 单次消费
     return {
-      traceId: carrier.traceId,
-      spanId: carrier.spanId,
-      ...(carrier.operationId !== undefined ? { operationId: carrier.operationId } : {}),
+      traceId: issued.traceId,
+      spanId: issued.spanId,
+      ...(issued.operationId !== undefined ? { operationId: issued.operationId } : {}),
     };
   };
 
@@ -136,6 +169,13 @@ export function createExtensionObservabilityPort(options: {
       if (entry.producerPolicy !== "extension-allowed") return { kind: "rejected", reason: "事件仅限平台产生" };
       if (entry.channel !== "activity") return { kind: "rejected", reason: "扩展不能直接产生 Audit" };
       if (rateLimited()) return { kind: "rejected", reason: "超过每插件速率限制" };
+      // 评审 P1-9：扩展输入没有 status 字段——生命周期状态由平台按目录补全
+      // （terminal 事件取目录第一个终态，started 事件固定 started，point 不带状态）
+      const catalogStatus = entry.lifecycleRole === "terminal"
+        ? (entry.terminalStatuses?.[0] ?? "completed")
+        : entry.lifecycleRole === "started"
+          ? "started"
+          : undefined;
       // 平台重新盖章：扩展提交的 actor/scope/trace/producer/level/significance 一律忽略
       const carrierTrace = validateCarrier(input.carrier);
       // attributes 经平台 normalize（敏感键剔除、深度/长度有界）
@@ -153,6 +193,7 @@ export function createExtensionObservabilityPort(options: {
         actor: { kind: "plugin", id: options.manifest.pluginId },
         executor: { kind: "plugin", id: options.manifest.pluginId },
         scope: { pluginId: options.manifest.pluginId },
+        ...(catalogStatus !== undefined ? { status: catalogStatus } : {}),
         ...(carrierTrace !== undefined
           ? { trace: carrierTrace }
           : {}),
@@ -169,14 +210,25 @@ export function createExtensionObservabilityPort(options: {
       if (closed) return undefined;
       const trace = options.instrument.currentTrace();
       const current = now();
-      return {
+      purgeExpiredCarriers(current);
+      const token = crypto.randomBytes(16).toString("hex");
+      const carrier: TraceCarrier = {
         traceId: trace?.traceId ?? options.instrument.newTraceId(),
         spanId: trace?.spanId ?? options.instrument.newSpanId(),
         ...(trace?.operationId !== undefined ? { operationId: trace.operationId } : {}),
         pluginId: options.manifest.pluginId,
+        token,
         issuedAt: current,
         expiresAt: current + CARRIER_TTL_MS,
       };
+      carrierRegistry.set(token, {
+        pluginId: carrier.pluginId,
+        traceId: carrier.traceId,
+        spanId: carrier.spanId,
+        ...(carrier.operationId !== undefined ? { operationId: carrier.operationId } : {}),
+        expiresAt: carrier.expiresAt,
+      });
+      return carrier;
     },
 
     close() {

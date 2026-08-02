@@ -455,3 +455,67 @@ describe("LogsPage health 徽标", () => {
     expect(await screen.findByText("健康不可用")).toBeTruthy();
   });
 });
+
+describe("LogsPage 复审修复（评审 P1-11 复现级测试）", () => {
+  it("实时跟随应用当前活动筛选：不匹配 live 行不进列表，匹配行 prepend", async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+      readonly url: string;
+      private readonly handlers = new Map<string, Array<(event: { data: string | undefined }) => void>>();
+      constructor(url: string) {
+        this.url = url;
+        FakeEventSource.instances.push(this);
+      }
+      addEventListener(type: string, handler: (event: { data: string | undefined }) => void): void {
+        const list = this.handlers.get(type) ?? [];
+        list.push(handler);
+        this.handlers.set(type, list);
+      }
+      emit(type: string, data?: string): void {
+        for (const handler of this.handlers.get(type) ?? []) handler({ data });
+      }
+      close(): void { this.closed = true; }
+      closed = false;
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    // 应用筛选：事件名 = system.started
+    fireEvent.change(screen.getByLabelText("事件名过滤"), { target: { value: "system.started" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用过滤" }));
+    // 等待过滤后的 reload 完成（items 先清空再回填），避免异步 fetch 覆盖 live prepend
+    await screen.findByText("system.started");
+
+    fireEvent.click(screen.getByLabelText("实时跟随"));
+    const source = FakeEventSource.instances.at(-1);
+    expect(source).toBeDefined();
+
+    // live 行不匹配筛选（turn.completed）→ 不进列表
+    source!.emit("activity", JSON.stringify(activityRow({
+      id: 2,
+      eventId: "evt-2",
+      eventName: "turn.completed",
+      recordedAt: "2026-08-01T10:00:01.000Z",
+    })));
+    expect(screen.queryByText("turn.completed")).toBeNull();
+
+    // live 行匹配筛选（system.started）→ prepend
+    source!.emit("activity", JSON.stringify(activityRow({
+      id: 3,
+      eventId: "evt-3",
+      recordedAt: "2026-08-01T10:00:02.000Z",
+    })));
+    // 等待匹配行进入列表（避免与既有行同文本导致断言提前通过）
+    await screen.findByTestId("activity-row-3");
+    const rows = screen.getAllByTestId(/^activity-row-/);
+    expect(rows[0]?.getAttribute("data-testid")).toBe("activity-row-3");
+
+    fireEvent.click(screen.getByLabelText("实时跟随"));
+    vi.unstubAllGlobals();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+});

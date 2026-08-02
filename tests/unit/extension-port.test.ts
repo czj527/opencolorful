@@ -177,6 +177,8 @@ describe("T8 trace 继承与后台 trace link", () => {
     const parent = instrument.runWithTrace({ trace: { traceId: "trace-parent", spanId: "span-parent" } }, () => {
       instrument.activity({
         eventName: "system.started",
+        // 评审 P1-9：terminal 事件必须带目录允许的终态 status
+        status: "completed",
         actor: { kind: "system", id: "u" },
         executor: { kind: "service", id: "u" },
         payload: { summaryCode: "x" },
@@ -184,6 +186,7 @@ describe("T8 trace 继承与后台 trace link", () => {
       // fake subagent：在相同 ALS 域内执行（模拟 subagent 继承父 trace）
       instrument.activity({
         eventName: "turn.completed",
+        status: "completed",
         actor: { kind: "subagent", id: "sub-1" },
         executor: { kind: "subagent", id: "sub-1" },
         payload: { summaryCode: "y" },
@@ -221,5 +224,46 @@ describe("T8 trace 继承与后台 trace link", () => {
     const port = makePort();
     port.diagnostic("info", "ping", "pong", { attempt: 1 });
     expect(allActivity(db)).toHaveLength(0);
+  });
+});
+
+describe("Phase 11 复审修复（评审 P1-10 复现级测试）", () => {
+  it("伪造 carrier（有效时间范围、无平台登记令牌）→ 拒绝盖章，trace 回退 ALS", () => {
+    const { db } = makeFixture();
+    const port = makePort();
+    const now = Date.now();
+    // 插件自行构造"时间范围有效"的 carrier（原实现会接受）
+    const forged: TraceCarrier = {
+      traceId: "forged-trace", spanId: "forged-span",
+      pluginId: "plugin-demo",
+      token: "forged-token-1234567890abcdef",
+      issuedAt: now - 1000,
+      expiresAt: now + 29_000,
+    };
+    const result = port.activity({
+      eventName: "client.unhandled_error", summaryCode: "x",
+      carrier: forged,
+    });
+    expect(result.kind).toBe("accepted");
+    const row = allActivity(db)[0]!;
+    // 伪造 trace 未被接受：trace 回退为平台 ALS（no-trace 或当前上下文）
+    expect(row["trace_id"]).not.toBe("forged-trace");
+  });
+
+  it("签发 carrier 有效且单次消费：第二次重放同一 carrier → 回退 no-trace", () => {
+    const { db } = makeFixture();
+    const port = makePort();
+    const carrier = port.traceCarrier();
+    expect(carrier).toBeDefined();
+    if (carrier === undefined) return;
+    const first = port.activity({ eventName: "client.unhandled_error", summaryCode: "a", carrier });
+    expect(first.kind).toBe("accepted");
+    const firstRow = allActivity(db)[0]!;
+    expect(firstRow["trace_id"]).toBe(carrier.traceId);
+    // 重放同一 carrier（令牌已消费）→ 回退，不沿用 carrier trace
+    const second = port.activity({ eventName: "client.unhandled_error", summaryCode: "b", carrier });
+    expect(second.kind).toBe("accepted");
+    const secondRow = allActivity(db)[1]!;
+    expect(secondRow["trace_id"]).not.toBe(carrier.traceId);
   });
 });

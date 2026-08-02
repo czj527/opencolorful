@@ -172,12 +172,12 @@ describe("T4 Instrument：lifecycle 平台自动 started/terminal", () => {
     });
     degraded.degraded("quota");
     const skipped = instrument.startLifecycle({
-      startEventName: "tool.call.started", actor: { kind: "user", id: "web" }, executor: { kind: "agent", id: "a" },
-      operationId: "op-skipped", terminals: { skipped: "tool.call.denied" },
+      startEventName: "turn.started", actor: { kind: "user", id: "web" }, executor: { kind: "agent", id: "a" },
+      operationId: "op-skipped", terminals: { skipped: "turn.skipped" },
     });
     skipped.skipped("policy");
     const names = db.prepare("SELECT event_name FROM activity_events WHERE status IN ('cancelled','interrupted','degraded','skipped')").all() as Array<{ event_name: string }>;
-    expect(names.map((row) => row.event_name).sort()).toEqual(["memory.summary.degraded", "tool.call.denied", "turn.cancelled", "turn.interrupted"]);
+    expect(names.map((row) => row.event_name).sort()).toEqual(["memory.summary.degraded", "turn.cancelled", "turn.interrupted", "turn.skipped"]);
   });
 });
 

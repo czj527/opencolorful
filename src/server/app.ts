@@ -46,6 +46,8 @@ export interface ServerAppOptions {
   readonly wsPromptService?: PromptService;
   readonly wsReplayStore?: EventReplayStore;
   readonly database?: import("better-sqlite3").Database;
+  /** Phase 11 fail-closed 审计（沙箱/工作区/凭据等高风险修改，评审 P0-1） */
+  readonly audit?: import("../observability/audit-recorder.js").AuditRecorder;
   /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
@@ -111,7 +113,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
     registerSettingsRoutes(app, options.preferencesStore, options.modelService);
   }
   if (options.agentStore !== undefined) {
-    registerAgentRoutes(app, options.agentStore, options.sessionService);
+    registerAgentRoutes(app, options.agentStore, options.sessionService, options.audit);
   }
   if (options.agentStore !== undefined && options.paths !== undefined) {
     registerSandboxRoutes(app, options.agentStore, options.paths);
@@ -136,6 +138,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       options.promptService,
       options.preferencesStore,
       options.agentStore,
+      options.audit,
     );
   }
   if (options.promptService !== undefined) {
@@ -169,6 +172,8 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       database: options.database,
       paths: options.paths,
       getHealth: () => instrument.getHealth(),
+      // 评审 P1-7：observability 偏好（retention 默认天数/logger 参数）接入路由
+      ...(options.preferencesStore !== undefined ? { preferencesStore: options.preferencesStore } : {}),
     });
   }
 

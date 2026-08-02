@@ -477,3 +477,13 @@ export interface DiagnosticTail {
   readonly totalBytes: number;
   readonly tail: readonly string[];
 }
+
+// Phase 11 可观测性偏好（评审 P1-7）：GET/PUT /api/preferences/observability
+export interface ObservabilityPreferences {
+  readonly diagnosticLevel: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
+  readonly diagnosticRetentionDays: { readonly debug: number; readonly main: number };
+  readonly diagnosticFileSizeBytes: number;
+  readonly diagnosticDiskBudgetBytes: number;
+  readonly activityRetentionDays: { readonly routine: number; readonly notable: number };
+  readonly emergencySpoolBudgetBytes: number;
+}

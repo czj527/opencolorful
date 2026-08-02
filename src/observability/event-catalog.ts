@@ -1,4 +1,5 @@
 import type { EventCatalogEntry } from "../contracts/observability.js";
+import { ActivityPayloadSchema, AuditPayloadSchema } from "../contracts/observability.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 事件目录（plans/phase-11.md §6）
@@ -6,6 +7,10 @@ import type { EventCatalogEntry } from "../contracts/observability.js";
 // 注册表是唯一权威：每个 durable event 只有一条注册记录；
 // Recorder 按 eventName+eventVersion 查目录，调用方不能覆盖
 // channel/defaultLevel/significance；未注册事件默认拒绝。
+//
+// 评审 P1-9：目录固定每事件的 payload schema——activity 事件默认
+// ActivityPayloadSchema，audit 事件默认 AuditPayloadSchema；
+// 需要更强约束的事件在此显式覆盖（如凭证/沙箱事件要求 attributes）。
 //
 // significance 冻结（§6.5）：
 // - milestone：永久 Agent 生命周期边界（agent.created/agent.deleted），仅平台内置；
@@ -18,10 +23,11 @@ import type { EventCatalogEntry } from "../contracts/observability.js";
 const routine = { significance: "routine", producerPolicy: "platform-only" } as const;
 const notable = { significance: "notable", producerPolicy: "platform-only" } as const;
 
-function entry(input: Omit<EventCatalogEntry, "producerPolicy" | "securitySummary"> & { producerPolicy?: EventCatalogEntry["producerPolicy"]; securitySummary?: EventCatalogEntry["securitySummary"] }): EventCatalogEntry {
+function entry(input: Omit<EventCatalogEntry, "producerPolicy" | "securitySummary" | "payloadSchema"> & { producerPolicy?: EventCatalogEntry["producerPolicy"]; securitySummary?: EventCatalogEntry["securitySummary"]; payloadSchema?: EventCatalogEntry["payloadSchema"] }): EventCatalogEntry {
   return {
     producerPolicy: "platform-only",
     securitySummary: "exclude",
+    payloadSchema: input.channel === "audit" ? AuditPayloadSchema : ActivityPayloadSchema,
     ...input,
   };
 }
@@ -85,11 +91,12 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "session.recovery.failed", eventVersion: 1, channel: "activity", category: "session", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...notable }),
 
       // ── Turn、模型与 Provider ──
-      entry({ eventName: "turn.started", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "info", lifecycleRole: "started", terminalStatuses: ["completed", "failed", "cancelled", "interrupted"], ...routine }),
+      entry({ eventName: "turn.started", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "info", lifecycleRole: "started", terminalStatuses: ["completed", "failed", "cancelled", "interrupted", "skipped"], ...routine }),
       entry({ eventName: "turn.completed", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...routine }),
       entry({ eventName: "turn.failed", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...routine }),
       entry({ eventName: "turn.cancelled", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["cancelled"], ...routine }),
       entry({ eventName: "turn.interrupted", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "warn", lifecycleRole: "terminal", terminalStatuses: ["interrupted"], ...routine }),
+      entry({ eventName: "turn.skipped", eventVersion: 1, channel: "activity", category: "turn", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["skipped"], ...routine }),
 
       entry({ eventName: "model.call.started", eventVersion: 1, channel: "activity", category: "model", defaultLevel: "info", lifecycleRole: "started", terminalStatuses: ["completed", "failed", "cancelled", "interrupted"], ...routine }),
       entry({ eventName: "model.call.completed", eventVersion: 1, channel: "activity", category: "model", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed", "degraded"], ...routine }),

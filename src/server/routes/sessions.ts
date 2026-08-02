@@ -21,6 +21,7 @@ export function registerSessionRoutes(
   promptService?: PromptService,
   preferencesStore?: PreferencesStore,
   agentStore?: AgentStore,
+  audit?: import("../../observability/audit-recorder.js").AuditRecorder,
 ): void {
   app.get("/api/sessions", (context) => {
     const includeArchived = context.req.query("includeArchived") === "true";
@@ -210,13 +211,43 @@ export function registerSessionRoutes(
       if (promptService?.invalidate(sessionId) === "busy") {
         return context.json(createApiError("CONFLICT", "Session 正在运行，暂时不能修改设置"), 409);
       }
-      const updated = sessionService.updateSettings(sessionId, {
-        ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),
-        ...(requestedCwd !== undefined ? { workspaceCwd: requestedCwd } : {}),
-        ...(typeof body.workspaceConfirmed === "boolean" ? { workspaceConfirmed: body.workspaceConfirmed } : {}),
-        ...(typeof body.thinkingLevel === "string" ? { thinkingLevel: body.thinkingLevel } : {}),
-      });
-      return context.json(updated);
+      // 评审 P0-1：工作目录变更属 fail-closed 清单——索引修改与 Audit 同一
+      // SQLite 事务（runAuditedTransaction），Audit 无法持久化则整体回滚。
+      // 纯工具模式/思维级别等非高风险字段不走审计事务。
+      if (audit !== undefined && cwdChanged) {
+        try {
+          audit.runAuditedTransaction(
+            {
+              eventName: "audit.session.workspace_bound",
+              payload: {
+                action: "session.workspace.bound",
+                decision: "allowed",
+                changedFields: ["workspaceCwd"],
+              },
+              actor: { kind: "user", id: "web" },
+              executor: { kind: "service", id: "agent-server" },
+              target: { kind: "session", id: sessionId },
+            },
+            () => sessionService.updateSettings(sessionId, {
+              ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),
+              ...(requestedCwd !== undefined ? { workspaceCwd: requestedCwd } : {}),
+              ...(typeof body.workspaceConfirmed === "boolean" ? { workspaceConfirmed: body.workspaceConfirmed } : {}),
+              ...(typeof body.thinkingLevel === "string" ? { thinkingLevel: body.thinkingLevel } : {}),
+            }),
+          );
+        } catch {
+          // fail-closed：Audit 无法持久化 → 领域修改回滚并拒绝操作
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，工作目录修改被拒绝"), 503);
+        }
+      } else {
+        sessionService.updateSettings(sessionId, {
+          ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),
+          ...(requestedCwd !== undefined ? { workspaceCwd: requestedCwd } : {}),
+          ...(typeof body.workspaceConfirmed === "boolean" ? { workspaceConfirmed: body.workspaceConfirmed } : {}),
+          ...(typeof body.thinkingLevel === "string" ? { thinkingLevel: body.thinkingLevel } : {}),
+        });
+      }
+      return context.json(sessionService.getView(sessionId));
     } catch {
       return context.json(createApiError("NOT_FOUND", "Session 不存在"), 404);
     }

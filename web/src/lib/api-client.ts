@@ -18,6 +18,7 @@ import type {
   LogTail,
   ModelSummary,
   ObservabilityHealthResponse,
+  ObservabilityPreferences,
   PickDirectoryResult,
   PreferencesDocument,
   PromptResponse,
@@ -347,5 +348,14 @@ export class ApiClient {
   /** audit ledger reset：必须显式 confirm: true */
   async resetObservabilityAuditLedger(reason: string): Promise<{ newEpoch: number; deleted: number }> {
     return this.request("POST", "/api/observability/audit/reset", { confirm: true, reason });
+  }
+
+  /** Phase 11 可观测性偏好（评审 P1-7） */
+  async getObservabilityPreferences(): Promise<ObservabilityPreferences> {
+    return this.request("GET", "/api/preferences/observability");
+  }
+
+  async saveObservabilityPreferences(prefs: ObservabilityPreferences): Promise<ObservabilityPreferences> {
+    return this.request("PUT", "/api/preferences/observability", prefs);
   }
 }

@@ -28,6 +28,8 @@ export interface DiagnosticLoggerOptions {
   readonly debugRetentionDays?: number;
   readonly mainRetentionDays?: number;
   readonly queueSize?: number;
+  /** 最低记录级别（评审 P1-7：observability 偏好 diagnosticLevel 接入点） */
+  readonly minLevel?: ObservabilityLevel;
   readonly now?: () => Date;
 }
 
@@ -48,6 +50,7 @@ export class DiagnosticLogger {
   private readonly debugRetentionDays: number;
   private readonly mainRetentionDays: number;
   private readonly queueSize: number;
+  private readonly minLevelRank: number;
   private readonly now: () => Date;
   private queue: Array<{ line: string; level: ObservabilityLevel; signature: string }> = [];
   private pendingBatch: Array<{ line: string; level: ObservabilityLevel; signature: string }> | null = null;
@@ -66,6 +69,7 @@ export class DiagnosticLogger {
     this.debugRetentionDays = options.debugRetentionDays ?? 7;
     this.mainRetentionDays = options.mainRetentionDays ?? 30;
     this.queueSize = options.queueSize ?? 1024;
+    this.minLevelRank = LEVEL_RANK[options.minLevel ?? "trace"];
     this.now = options.now ?? (() => new Date());
   }
 
@@ -103,6 +107,8 @@ export class DiagnosticLogger {
   }
 
   private enqueue(level: ObservabilityLevel, eventName: string, message: string, attributes?: Record<string, unknown>): void {
+    // 评审 P1-7：低于偏好级别（diagnosticLevel）的记录直接丢弃
+    if (LEVEL_RANK[level] < this.minLevelRank) return;
     const trace = currentTrace();
     const now = this.now();
     let payload: import("../contracts/observability.js").DiagnosticPayload = {
@@ -251,15 +257,20 @@ export class DiagnosticLogger {
         .filter((name) => name.endsWith(".jsonl"))
         .map((name) => ({ name, path: path.join(this.logsRoot, name), mtime: fs.statSync(path.join(this.logsRoot, name)).mtimeMs }))
         .sort((a, b) => a.mtime - b.mtime);
-      for (const file of files) {
-        if (usage.totalBytes <= this.diskBudgetBytes) break;
-        const isDebug = file.name.endsWith(".debug.jsonl");
-        // 先删 debug（可丢弃）；预算仍超再删最旧主文件
-        if (isDebug || files.every((f) => f.name.endsWith(".debug.jsonl") || usage.totalBytes > this.diskBudgetBytes)) {
+      // 评审 P1-8：删除后必须从总量扣减实际字节，否则循环会删光所有文件。
+      // 阶段 1：删最旧 debug（可丢弃）；阶段 2：仍超预算再删最旧主文件。
+      let total = usage.totalBytes;
+      const deleteWhileOver = (debugFirst: boolean): void => {
+        for (const file of files) {
+          if (total <= this.diskBudgetBytes) break;
+          if (file.name.endsWith(".debug.jsonl") !== debugFirst) continue;
+          const size = fs.statSync(file.path).size;
           fs.unlinkSync(file.path);
-          usage.totalBytes -= fs.existsSync(file.path) ? 0 : 0;
+          total -= size;
         }
-      }
+      };
+      deleteWhileOver(true);
+      deleteWhileOver(false);
     } catch { /* 预算统计失败不递归告警 */ }
   }
 

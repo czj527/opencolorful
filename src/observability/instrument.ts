@@ -84,6 +84,28 @@ class Instrument {
     return this.context?.audit.resetLedger(input);
   }
 
+  /**
+   * fail-closed 审计（评审 P0-1）：严格路径，任何失败直接抛出。
+   * 可观测性未初始化时同样抛错（绝不静默放行高风险修改）。
+   */
+  auditStrict(input: import("./audit-recorder.js").AuditRecordInput): import("./audit-recorder.js").AuditAcceptResult {
+    if (this.context === undefined) {
+      throw new Error("可观测性未初始化，高风险操作拒绝执行");
+    }
+    return this.context.audit.appendStrict(input);
+  }
+
+  /** 同库高风险修改 + Audit 同一事务（评审 P0-1：生产调用方接入点） */
+  runAuditedTransaction<T>(
+    input: import("./audit-recorder.js").AuditRecordInput,
+    domainFn: () => T,
+  ): { result: T; audit: import("./audit-recorder.js").AuditAcceptResult } {
+    if (this.context === undefined) {
+      throw new Error("可观测性未初始化，高风险操作拒绝执行");
+    }
+    return this.context.audit.runAuditedTransaction(input, domainFn);
+  }
+
   // ─── 基础透传（未 init 时 no-op / 独立兜底） ──────────────────
 
   activity(input: ActivityRecordInput): ActivityAcceptResult | undefined {
