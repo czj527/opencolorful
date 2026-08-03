@@ -148,11 +148,21 @@ export function registerSessionRoutes(
         sessionService.updateSettings(session.id, updates);
       }
     } catch (error) {
-      // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
+      // create 后的任一步失败都必须移除刚创建的精确 Session 文件和索引。
+      let compensated = false;
+      try {
+        sessionService.remove(sessionId);
+        compensated = !sessionService.list({ includeArchived: true }).some((item) => item.id === sessionId);
+      } catch { /* failed 终态会如实记录补偿失败 */ }
       try {
         audit.appendStrict({
           eventName: "audit.session.workspace_bind.failed",
-          payload: { action: "session.workspace.bound", decision: "denied", reasonCode: (error instanceof Error ? error.message : String(error)).slice(0, 64), changedFields: ["workspaceCwd"] },
+          payload: {
+            action: "session.workspace.bound",
+            decision: "denied",
+            reasonCode: compensated ? (error instanceof Error ? error.message : String(error)).slice(0, 64) : "compensation_failed",
+            changedFields: ["workspaceCwd"],
+          },
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "session", id: sessionId },
@@ -160,7 +170,13 @@ export function registerSessionRoutes(
           trace: opTrace,
         });
       } catch { /* 终态尽力而为 */ }
-      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "会话创建失败"), 500);
+      return context.json(
+        createApiError(
+          "INTERNAL_ERROR",
+          compensated ? (error instanceof Error ? error.message : "会话创建失败") : "会话创建失败，且补偿验证失败",
+        ),
+        500,
+      );
     }
     try {
       // 领域写入成功 → completed 终态（原 allowed 记录）

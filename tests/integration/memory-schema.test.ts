@@ -294,8 +294,8 @@ describe("migration v7（记忆 Agent 审批与优先级）", () => {
   });
 });
 
-describe("migration v8（Phase 11 可观测性）", () => {
-  it("v7 数据库升级到 v8：保留 Phase 10.5 数据且新增可观测性表", () => {
+describe("migration v8/v9（Phase 11 可观测性）", () => {
+  it("v7 数据库升级到当前版本：保留 Phase 10.5 数据且新增可观测性表", () => {
     const { paths, database } = createDatabase();
     // 构造 v7 数据（记忆提案 + 事实）
     const factId = Number(database.prepare(
@@ -306,10 +306,10 @@ describe("migration v8（Phase 11 可观测性）", () => {
       VALUES ('p1', 'a1', 'run-1', 'create_fact', '{"fact":"v7 事实"}', '["session:s1"]', '测试', 0.9, 'applied', '2026-07-31T00:00:00Z')
     `).run();
     // 把 schema_version 拉回 7，模拟 v7 现场升级
-    database.prepare("UPDATE schema_version SET version = 7 WHERE version = 8").run();
+    database.prepare("UPDATE schema_version SET version = 7").run();
     database.close();
 
-    // 重新打开 → 触发升级到 v8
+    // 重新打开 → 触发升级到当前版本
     const reopened = openMetadataDatabase(paths.database);
     const version = reopened.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").pluck().get() as number;
     expect(version).toBe(CURRENT_SCHEMA_VERSION);
@@ -326,6 +326,43 @@ describe("migration v8（Phase 11 可观测性）", () => {
     // ledger epoch 默认 1
     const epoch = reopened.prepare("SELECT value FROM observability_state WHERE key = 'audit.ledger_epoch'").pluck().get() as string;
     expect(epoch).toBe("1");
+    reopened.close();
+  });
+
+  it("v8 数据库升级到 v9：新增 event_name 列与生命周期索引", () => {
+    const { paths, database } = createDatabase();
+    database.exec(`
+      DROP INDEX IF EXISTS idx_audit_event_name;
+      DROP INDEX IF EXISTS idx_audit_operation;
+      ALTER TABLE audit_events DROP COLUMN event_name;
+      UPDATE schema_version SET version = 8;
+    `);
+    database.close();
+
+    const reopened = openMetadataDatabase(paths.database);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(9);
+    const columns = reopened.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
+    expect(columns.some((column) => column.name === "event_name")).toBe(true);
+    const indexes = reopened.prepare("PRAGMA index_list(audit_events)").all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining(["idx_audit_event_name", "idx_audit_operation"]));
+    reopened.close();
+  });
+
+  it("v9 迁移中断恢复：event_name 已存在但版本仍为 8 时可幂等完成", () => {
+    const { paths, database } = createDatabase();
+    database.exec(`
+      DROP INDEX IF EXISTS idx_audit_event_name;
+      DROP INDEX IF EXISTS idx_audit_operation;
+      UPDATE schema_version SET version = 8;
+    `);
+    database.close();
+
+    const reopened = openMetadataDatabase(paths.database);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(9);
+    const columns = reopened.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
+    expect(columns.filter((column) => column.name === "event_name")).toHaveLength(1);
+    const indexes = reopened.prepare("PRAGMA index_list(audit_events)").all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(expect.arrayContaining(["idx_audit_event_name", "idx_audit_operation"]));
     reopened.close();
   });
 

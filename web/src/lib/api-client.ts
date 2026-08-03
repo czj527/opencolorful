@@ -309,11 +309,13 @@ export class ApiClient {
     const params = new URLSearchParams();
     if (filter !== undefined) {
       if (filter.epoch !== undefined) params.set("epoch", String(filter.epoch));
+      if (filter.eventName !== undefined) params.set("eventName", filter.eventName);
       if (filter.action !== undefined) params.set("action", filter.action);
       if (filter.decision !== undefined) params.set("decision", filter.decision);
       if (filter.ownerAgentId !== undefined) params.set("ownerAgentId", filter.ownerAgentId);
       if (filter.sessionId !== undefined) params.set("sessionId", filter.sessionId);
       if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
+      if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
     }
     if (cursor !== undefined && cursor !== null) params.set("cursor", cursor);
     if (limit !== undefined) params.set("limit", String(limit));

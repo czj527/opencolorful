@@ -39,27 +39,54 @@ export class SessionService {
     private readonly onArchive?: (sessionId: string) => void,
   ) {}
 
-create(request: CreateSessionRequest): PiSessionHandle {
+  create(request: CreateSessionRequest): PiSessionHandle {
     const id = request.id ?? crypto.randomUUID();
     // 有 Agent：Session 存入 agents/<id>/sessions/。无 Agent：原有全局 sessions/
     const sessionDir = request.agentId !== undefined
       ? path.join(this.paths.agents, request.agentId, "sessions")
       : this.paths.sessions;
-    const session = createPersistentSession(request.cwd, sessionDir, id);
-    session.setTitle(request.title.trim() || "未命名会话");
-    session.persist();
-    this.index.create({
-      id,
-      title: request.title.trim() || "未命名会话",
-      sessionPath: session.path,
-      createdAt: new Date().toISOString(),
-      toolMode: "read-only",
-      workspaceCwd: request.cwd,
-      agentId: request.agentId ?? null,
-    });
-    this.active.set(id, session);
-    instrument.sessionCreated(id, request.agentId);
-    return session;
+    let session: PiSessionHandle | undefined;
+    try {
+      session = createPersistentSession(request.cwd, sessionDir, id);
+      session.setTitle(request.title.trim() || "未命名会话");
+      session.persist();
+      this.index.create({
+        id,
+        title: request.title.trim() || "未命名会话",
+        sessionPath: session.path,
+        createdAt: new Date().toISOString(),
+        toolMode: "read-only",
+        workspaceCwd: request.cwd,
+        agentId: request.agentId ?? null,
+      });
+      this.active.set(id, session);
+      instrument.sessionCreated(id, request.agentId);
+      return session;
+    } catch (error) {
+      const compensationErrors: unknown[] = [];
+      this.active.delete(id);
+      try {
+        session?.dispose();
+      } catch (disposeError) {
+        compensationErrors.push(disposeError);
+      }
+      try {
+        if (this.index.get(id) !== undefined) {
+          this.remove(id);
+        } else if (session !== undefined) {
+          this.removeSessionFile(session.path);
+        }
+      } catch (compensationError) {
+        compensationErrors.push(compensationError);
+      }
+      if (compensationErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...compensationErrors],
+          `Session 创建失败，且补偿清理未完成: ${id}`,
+        );
+      }
+      throw error;
+    }
   }
 
   list(options: { readonly includeArchived?: boolean; readonly agentId?: string } = {}): SessionView[] {
@@ -98,19 +125,30 @@ create(request: CreateSessionRequest): PiSessionHandle {
     return this.open(id);
   }
 
-  /**
-   * 评审 P0（第六轮）：审计终态失败时的创建补偿——从索引移除并物理删除
-   * 会话文件（remove 后 list/getView 均不可见）。仅用于创建补偿路径。
-   */
+  /** 审计终态失败时的创建补偿：只删除目标 JSONL，不触碰共享会话目录。 */
   remove(id: string): void {
     const metadata = this.index.get(id);
     if (metadata === undefined) return;
-    this.index.remove(id);
+    const active = this.active.get(id);
+    active?.dispose();
     this.active.delete(id);
-    const sessionDir = path.dirname(metadata.sessionPath);
+    this.removeSessionFile(metadata.sessionPath);
+    this.index.remove(id);
+    if (this.index.get(id) !== undefined) {
+      throw new Error(`Session 补偿后索引仍存在: ${id}`);
+    }
+  }
+
+  private removeSessionFile(sessionPath: string): void {
+    this.assertSessionPath(sessionPath);
     try {
-      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-    } catch { /* 文件删除尽力而为；索引已移除即从活动视图消失 */ }
+      fs.rmSync(sessionPath, { force: true, maxRetries: 5, retryDelay: 20 });
+    } catch (error) {
+      throw new Error(`Session 文件删除失败: ${sessionPath}`, { cause: error });
+    }
+    if (fs.existsSync(sessionPath)) {
+      throw new Error(`Session 补偿后文件仍存在: ${sessionPath}`);
+    }
   }
 
   getView(id: string): SessionView {

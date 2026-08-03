@@ -488,12 +488,17 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
   // 可关联（与路由生成的 operationId 配对），旧行回填为 NULL（无法从
   // action 可靠反推事件名，查询 API 对此兼容）。
   if (current < 9) {
-    database.exec(`
-      ALTER TABLE audit_events ADD COLUMN event_name TEXT;
-      CREATE INDEX IF NOT EXISTS idx_audit_event_name ON audit_events(event_name, recorded_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_audit_operation ON audit_events(operation_id);
-    `);
-    database.prepare("UPDATE schema_version SET version = 9").run();
+    database.transaction(() => {
+      const columns = database.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === "event_name")) {
+        database.exec("ALTER TABLE audit_events ADD COLUMN event_name TEXT");
+      }
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_audit_event_name ON audit_events(event_name, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_operation ON audit_events(operation_id);
+      `);
+      database.prepare("UPDATE schema_version SET version = 9").run();
+    })();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

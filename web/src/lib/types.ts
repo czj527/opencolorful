@@ -383,11 +383,13 @@ export interface ActivityQuery {
 // GET /api/observability/audit 查询过滤参数
 export interface AuditQuery {
   readonly epoch?: number;
+  readonly eventName?: string;
   readonly action?: string;
   readonly decision?: string;
   readonly ownerAgentId?: string;
   readonly sessionId?: string;
   readonly traceId?: string;
+  readonly operationId?: string;
 }
 
 // GET /api/observability/activity 响应
@@ -401,6 +403,7 @@ export interface AuditRow {
   readonly eventId: string;
   readonly ledgerEpoch: number;
   readonly recordedAt: string;
+  readonly eventName: string | null;
   readonly action: string;
   readonly decision: string;
   readonly reasonCode: string | null;
@@ -409,6 +412,7 @@ export interface AuditRow {
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
   readonly traceId: string;
+  readonly operationId: string | null;
   readonly payloadJson: string;
 }
 

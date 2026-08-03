@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type Database from "better-sqlite3";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
@@ -52,6 +52,8 @@ function createContext() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  instrument.reset();
   for (const db of openDatabases.splice(0)) {
     try { db.close(); } catch { /* ignore */ }
   }
@@ -906,6 +908,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P1：event 遗忘回滚 target 为 memory_event（原实现误记为 memory_fact）", () => {
     const ctx = createContext();
+    instrument.init(new ObservabilityContext({
+      database: ctx.database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-r7", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      logsRoot: path.join(ctx.dir, "logs-r7"),
+      spoolRoot: path.join(ctx.dir, "spool-r7"),
+    }));
     ctx.database.prepare(`
       INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
       VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
@@ -960,6 +968,221 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
     ).get() as { target_kind: string | null; target_id: string | null };
     expect(row.target_kind).toBe("memory_event");
     expect(row.target_id).toBe("evt-r6-1");
+    const activities = ctx.database.prepare(
+      "SELECT event_name, target_kind, target_id FROM activity_events WHERE event_name IN ('memory.event.forgotten', 'memory.proposal.reverted') ORDER BY id",
+    ).all() as Array<{ event_name: string; target_kind: string | null; target_id: string | null }>;
+    expect(activities).toEqual([
+      { event_name: "memory.event.forgotten", target_kind: "memory_event", target_id: "evt-r6-1" },
+      { event_name: "memory.proposal.reverted", target_kind: "memory_event", target_id: "evt-r6-1" },
+    ]);
     expect(eventStore.getById("evt-r6-1")?.status).toBe("active");
+  });
+});
+
+describe("Phase 11 第七轮自修复（复现级测试）", () => {
+  const terminalFailingAudit = () => ({
+    appendStrict: (input: { eventName: string }) => {
+      if (input.eventName.includes(".started")) return { kind: "accepted", eventId: "evt", rowId: 1 };
+      throw new Error("ledger full");
+    },
+  }) as unknown as AuditRecorder;
+
+  it("P0：Session remove 只删除目标 JSONL，保留共享目录中的全局与 Agent 会话", () => {
+    const ctx = createContext();
+    try {
+      const globalA = ctx.sessionService.create({ id: "global-a", title: "A", cwd: process.cwd() });
+      const globalB = ctx.sessionService.create({ id: "global-b", title: "B", cwd: process.cwd() });
+      const agentA = ctx.sessionService.create({ id: "agent-a", title: "A", cwd: process.cwd(), agentId: "a1" });
+      const agentB = ctx.sessionService.create({ id: "agent-b", title: "B", cwd: process.cwd(), agentId: "a1" });
+
+      expect(path.dirname(globalA.path)).toBe(path.dirname(globalB.path));
+      expect(path.dirname(agentA.path)).toBe(path.dirname(agentB.path));
+      ctx.sessionService.remove(globalA.id);
+      ctx.sessionService.remove(agentA.id);
+
+      expect(fs.existsSync(globalA.path)).toBe(false);
+      expect(fs.existsSync(agentA.path)).toBe(false);
+      expect(fs.existsSync(globalB.path)).toBe(true);
+      expect(fs.existsSync(agentB.path)).toBe(true);
+      expect(ctx.sessionService.list({ includeArchived: true }).map((item) => item.id).sort()).toEqual(["agent-b", "global-b"]);
+    } finally {
+      ctx.sessionService.closeAll();
+    }
+  });
+
+  it("P0：Session 创建后的设置失败会补偿新会话且不伤及既有会话", async () => {
+    const ctx = createContext();
+    const existing = ctx.sessionService.create({ id: "existing", title: "既有", cwd: process.cwd() });
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    vi.spyOn(ctx.sessionService, "updateSettings").mockImplementation(() => {
+      throw new Error("settings write failed");
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+
+    const response = await app.request("http://x/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "失败会话", cwd: process.cwd(), toolMode: "read-only" }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(fs.existsSync(existing.path)).toBe(true);
+    expect(ctx.sessionService.list({ includeArchived: true }).map((item) => item.id)).toEqual(["existing"]);
+  });
+
+  it("P1：偏好 completed 审计失败时文件与运行时都恢复完整旧配置", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    const previous = preferencesStore.get().observability ?? defaultObservabilityPreferences();
+    const next = { ...previous, diagnosticLevel: "error" as const, emergencySpoolBudgetBytes: previous.emergencySpoolBudgetBytes + 1024 };
+    const applySpy = vi.spyOn(instrument, "applyObservabilityPreferences");
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: terminalFailingAudit(),
+      preferencesStore,
+      paths: ctx.paths,
+      database: ctx.database,
+    });
+
+    const response = await app.request("http://x/api/preferences/observability", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(next),
+    });
+
+    expect(response.status).toBe(503);
+    expect(preferencesStore.get().observability).toEqual(previous);
+    expect(applySpy.mock.calls).toEqual([[next], [previous]]);
+  });
+
+  it("P1：运行时应用失败发生在写盘后时，文件与运行时同样补偿", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    const previous = preferencesStore.get().observability ?? defaultObservabilityPreferences();
+    const next = { ...previous, diagnosticLevel: "warn" as const };
+    const applySpy = vi.spyOn(instrument, "applyObservabilityPreferences")
+      .mockImplementationOnce(() => { throw new Error("runtime apply failed"); })
+      .mockImplementation(() => undefined);
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+      preferencesStore,
+      paths: ctx.paths,
+      database: ctx.database,
+    });
+
+    const response = await app.request("http://x/api/preferences/observability", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(next),
+    });
+
+    expect(response.status).toBe(500);
+    expect(preferencesStore.get().observability).toEqual(previous);
+    expect(applySpy.mock.calls).toEqual([[next], [previous]]);
+  });
+
+  it("P1：Agent 双高风险动作各自拥有唯一 operationId，HTTP 可按生命周期字段过滤", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+      paths: ctx.paths,
+      database: ctx.database,
+    });
+    const createdResponse = await app.request("http://x/api/agents", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "双动作", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as { identity: { id: string } };
+
+    const allResponse = await app.request(`http://x/api/observability/audit?ownerAgentId=${created.identity.id}`);
+    expect(allResponse.status).toBe(200);
+    const all = await allResponse.json() as { items: Array<{ eventName: string; operationId: string | null }> };
+    expect(all.items).toHaveLength(4);
+    const byOperation = new Map<string, string[]>();
+    for (const item of all.items) {
+      expect(item.operationId).not.toBeNull();
+      const names = byOperation.get(item.operationId!) ?? [];
+      names.push(item.eventName);
+      byOperation.set(item.operationId!, names);
+    }
+    expect(byOperation.size).toBe(2);
+    for (const names of byOperation.values()) {
+      expect(names).toHaveLength(2);
+      expect(names.filter((name) => name.endsWith(".started"))).toHaveLength(1);
+      expect(names.filter((name) => !name.endsWith(".started"))).toHaveLength(1);
+    }
+
+    const firstOperation = [...byOperation.keys()][0]!;
+    const operationResponse = await app.request(`http://x/api/observability/audit?operationId=${firstOperation}`);
+    const operationPage = await operationResponse.json() as { items: unknown[] };
+    expect(operationPage.items).toHaveLength(2);
+    const eventName = all.items[0]!.eventName;
+    const eventResponse = await app.request(`http://x/api/observability/audit?eventName=${eventName}`);
+    const eventPage = await eventResponse.json() as { items: Array<{ eventName: string }> };
+    expect(eventPage.items).toHaveLength(1);
+    expect(eventPage.items[0]?.eventName).toBe(eventName);
+    const missingResponse = await app.request("http://x/api/observability/audit?operationId=definitely-missing");
+    const missingPage = await missingResponse.json() as { items: unknown[] };
+    expect(missingPage.items).toHaveLength(0);
+  });
+
+  it("P1：AuditRecorder 对重复生命周期幂等，对冲突 terminal fail-closed", () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const trace = { traceId: "trace-r7", spanId: "span-r7", operationId: "operation-r7" };
+    const base = {
+      actor: { kind: "user" as const, id: "web" },
+      executor: { kind: "service" as const, id: "agent-server" },
+      target: { kind: "agent" as const, id: "a1" },
+      scope: { ownerAgentId: "a1" },
+      trace,
+    };
+    const started = {
+      ...base,
+      eventName: "audit.agent.workspace_change.started",
+      payload: { action: "agent.workspace.changed" as const, decision: "allowed" as const, changedFields: ["defaultCwd"] },
+    };
+    const completed = {
+      ...base,
+      eventName: "audit.agent.workspace_changed",
+      payload: { action: "agent.workspace.changed" as const, decision: "allowed" as const, changedFields: ["defaultCwd"] },
+    };
+    expect(audit.appendStrict(started).kind).toBe("accepted");
+    expect(audit.appendStrict(started).kind).toBe("accepted-idempotent");
+    expect(audit.appendStrict(completed).kind).toBe("accepted");
+    expect(audit.appendStrict(completed).kind).toBe("accepted-idempotent");
+    const conflicting = audit.appendStrict({
+      ...base,
+      eventName: "audit.agent.workspace_change.failed",
+      payload: { action: "agent.workspace.changed", decision: "denied", reasonCode: "conflict", changedFields: ["defaultCwd"] },
+    });
+    expect(conflicting.kind).toBe("rejected");
+    if (conflicting.kind === "rejected") expect(conflicting.reason).toContain("冲突的 terminal");
+    expect((ctx.database.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE operation_id = ?").get(trace.operationId) as { count: number }).count).toBe(2);
   });
 });

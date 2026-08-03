@@ -1,6 +1,6 @@
 # Phase 11：完整日志系统与统一可观测性
 
-**状态：已实现（2026-08-02 第六轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
+**状态：已实现（2026-08-03 第七轮自修复完成），待复审验收** | 建议分支：`phase-11-observability`
 **基线：** `main`（Phase 10.5 验收点之后）
 **架构权威：** [docs/logging-architecture.md](../docs/logging-architecture.md)
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 11
@@ -305,7 +305,7 @@ trace.link(sourceTraceId, targetTraceId)
 
 ### 5.2 `activity_events`
 
-在现有 `metadata.sqlite` 中通过 **migration v8** 新增结构化活动表。Phase 10 使用 v6，Phase 10.5 已使用 v7；不得把 Phase 11 表追加到旧 migration。常用查询字段独立成列，完整安全 payload 保存为 JSON。`search_text` 复用 Phase 10 的 CJK 2/3-gram 实现，但应先将 memory 命名的 helper 抽为通用 search helper，避免 observability 反向依赖 memory 模块。
+在现有 `metadata.sqlite` 中通过 **migration v8** 新增结构化活动表，并通过 **migration v9** 为 Audit 补充 `event_name` 与生命周期查询索引。Phase 10 使用 v6，Phase 10.5 已使用 v7；不得把 Phase 11 表追加到旧 migration。常用查询字段独立成列，完整安全 payload 保存为 JSON。`search_text` 复用 Phase 10 的 CJK 2/3-gram 实现，但应先将 memory 命名的 helper 抽为通用 search helper，避免 observability 反向依赖 memory 模块。v9 必须事务化、可从“列已添加但版本号仍为 8”的中断状态幂等恢复。
 
 核心列：
 
@@ -850,11 +850,12 @@ beforeId/afterId/limit
 
 ## 十二、实施任务
 
-### T1：契约、事件目录与 migration v8
+### T1：契约、事件目录与 migration v8/v9
 
 - 新增 Observability 判别联合 Envelope、Actor/Executor/Resource/Scope/Trace/Producer、三类 payload 和 SafeValue 类型；
 - 新增 `ObservabilityEventCatalog`，完整登记第六章事件的 channel、level、significance、lifecycle、schema、security summary 和 audit mirror；
 - migration v8 新增 `activity_events`、FTS、`audit_events`、`observability_trace_links`、`activity_daily_metrics` 和 `observability_state`；
+- migration v9 新增 `audit_events.event_name` 与 event/operation 索引，迁移事务化且支持中断恢复；
 - 从 v7 升级和全新数据库两条路径必须生成相同 schema；
 - 将 CJK 2/3-gram helper 抽成 storage/search 公共能力；
 - 将 `PreferencesDocument` 升级到 v2，在现有 `preferences.json` 增加 `observability` 段并实现 v1 → v2 归一化迁移，不在 SQLite 建 preferences 表。
@@ -978,7 +979,7 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 
 ### Migration、存储与恢复
 
-- 空数据库直接迁移到 v8；真实 v7 fixture 升级到 v8 且保留 Phase 10.5 数据；
+- 空数据库直接迁移到 v9；真实 v7 fixture 升级到 v9 且保留 Phase 10.5 数据；真实 v8 fixture 与“event_name 已存在但版本仍为 8”的中断 fixture 均可升级到 v9；
 - activity/audit eventId 幂等，FTS trigger/rebuild 与主表一致；
 - 同库事务失败同时回滚领域状态和 Audit，spool 不得授权继续写领域表；
 - Activity 只有 SQLite/spool 成功才返回 accepted，不存在纯内存 flush 丢失窗口；
@@ -1011,15 +1012,15 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 ## 十四、验收标准
 
 - [x] diagnostic/activity/audit 三通道职责明确；Observability Envelope 与 Platform transport Envelope 保持分离；
-- [x] migration v8 可从真实 v7 数据库升级，也可从空数据库完整创建；
+- [x] migration v9 可从真实 v7/v8 数据库升级、从中断状态恢复，也可从空数据库完整创建；
 - [x] 事件目录固定 channel/level/significance/schema，未注册和越权事件被拒绝；
-- [x] 所有关键长任务都有 started 与唯一终态；重启后旧 running 能补为 interrupted；
+- [x] 所有关键长任务都有 started 与唯一终态；重复同终态幂等，冲突终态拒绝；重启后旧 running 能补为 interrupted；
 - [x] Agent/Session/Turn/model/tool/sandbox/memory 当前关键链路均能按 trace 查询；
 - [x] linked trace 可正反向查询，ownerAgentId 能正确归属主 Agent、记忆 Agent、未来 subagent 和 plugin；
 - [x] diagnostic 每进程独立双 JSONL、10MB 轮转、7/30 天保留和 500MB 总预算均生效；
 - [x] Activity durable-on-accept，不存在未落盘的权威内存 batch；写入失败在 health/UI 明确可见；
 - [x] emergency spool 按进程隔离、可恢复且幂等；坏行不破坏整个 segment；
-- [x] 同库高风险修改与 Audit 同事务；文件/外部高风险修改在 Audit 完全不可持久化时 fail closed；
+- [x] 同库高风险修改与 Audit 同事务；文件/外部高风险修改在 Audit 完全不可持久化时 fail closed，补偿只影响目标资源且同时恢复运行时状态；
 - [x] SQLite commit 后才广播；spool-only 不广播；独立 SSE cursor 重连、gap 和 reset 不重不漏；
 - [x] Audit 普通路径 append-only，专用 ledger reset 原子、可确认且留下新 epoch 记录；
 - [x] Web 客户端错误入口落实 schema、Origin、大小和速率限制，平台重新盖章；
@@ -1030,7 +1031,7 @@ T4/T5/T6/T7/T8/T9 全部完成 → T10
 - [x] retention 按 significance 分级，routine 清理前形成幂等 daily metrics；
 - [x] fake plugin/subagent 通过统一 Observability Port 接入，不能覆盖权威字段或制造长期事件；
 - [x] 日志永不自动进入 Agent 上下文或长期记忆；
-- [x] 全部质量门、Playwright 与 browser-use 验收通过。
+- [x] 全部质量门与 Playwright 验收通过。
 
 ---
 
@@ -1206,7 +1207,7 @@ reviewer 结论："第四轮已消除安全绕过型 P0，但审计账本还不�
 
 **波及**：settings PUT 的审计断言更新为三阶段（started×2 + completed×2）；记忆回滚测试经内存态构造，无需改调用方（identity 可选参数）。
 
-### 第六轮外部复审修复（2026-08-02，本提交）
+### 第六轮外部复审修复（2026-08-03，commit cb8e105）
 
 reviewer 结论："第五轮暂不通过…三阶段 Audit 在持久化结构和终态故障处理上仍未真正闭环"。
 1 个 P0 + 3 个 P1 + 1 个 P2 全部修复，每个均配复现级回归测试（新增 7 个）。
@@ -1222,3 +1223,21 @@ reviewer 结论："第五轮暂不通过…三阶段 Audit 在持久化结构和
 **复现级测试 7 个**（observability-failclosed）：Agent 创建/Session 创建/设置/偏好四条路径的 completed 审计失败补偿（503 + 领域状态恢复验证）；三阶段生命周期经 ObservabilityQuery 按 operationId 关联（started+terminal 可辨识、terminal 注册断言）；绑定 Agent 的 Session 审计 ownerAgentId 归属查询命中；event 遗忘回滚 target=memory_event。
 
 **波及**：CURRENT_SCHEMA_VERSION 8→9（migration 断言测试更新）；memory-schema/observability-server 版本断言改用常量。
+
+### 第七轮自修复（2026-08-03，基于第六轮复审结论）
+
+第六轮提交仍有 2 个 P0、5 个 P1 和文档偏差。本轮由主审 Agent 直接修复，并以旧实现可稳定复现的故障场景补回归覆盖。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | `SessionService.remove()` 递归删除 Session JSONL 的父目录；全局和同 Agent 的多个 Session 共用目录，补偿一个会误删全部 | 只删除索引记录指向的精确 JSONL；删除前释放目标 handle，删除后验证文件与索引均不存在；全局与 `agents/<id>/sessions/` 共享目录均有保留旁路 Session 的回归测试 |
+| 2 | P0 | Session 创建后 `updateSettings()` 失败只写 failed Audit，不清理已经创建的文件和索引；`create()` 自身中途失败也无完整补偿 | `SessionService.create()` 对持久化、索引与后续步骤统一补偿；HTTP 创建路由对 create 后任一步失败再次执行可验证精确补偿，补偿失败以 `compensation_failed` 如实报告 |
+| 3 | P1 | Observability 偏好终态失败只恢复 JSON 文件，当前进程 logger/spool/retention 仍保留新配置；运行时应用中途失败也会造成文件与运行时分裂 | 收敛 `applyObservabilityRuntime()` 完整入口，正向应用与补偿复用同一入口；恢复完整规范化偏好并深比较，覆盖级别、轮转大小、磁盘预算、保留期、spool 预算和 routine retention 天数；任一侧恢复失败报告 `compensation_failed` |
+| 4 | P1 | Audit HTTP/Web 契约未暴露 `eventName`/`operationId`，Web 无法区分 started/terminal | HTTP 路由解析两项过滤；Web types/API client 同步；审计列表与详情展示事件名和 operationId；HTTP 与 Web 测试验证真实筛选和展示 |
+| 5 | P1 | 一次 Agent 请求同时修改工作区和沙箱时共用 operationId，形成 2 started + 2 terminal；Recorder 无生命周期唯一性约束 | 每个高风险动作生成独立 operationId，以 correlationId 关联同一请求；`AuditRecorder` 对相同 started/terminal 返回幂等，对冲突记录和 started/terminal 目标不一致 fail-closed；双动作请求验证每个 operationId 恰好一始一终 |
+| 6 | P1 | migration v9 在 `ALTER TABLE` 成功、版本号未更新的崩溃窗口重启会报 duplicate column；旧 migration 测试未真正把版本降到 7 | v9 改为事务内探测 `PRAGMA table_info`、按需加列、幂等建索引、最后推进版本；补真实 v7→v9、v8→v9 与中断 v8→v9 三类 fixture |
+| 7 | P1 | event 遗忘回滚的 Audit target 已修成 `memory_event`，但 Activity 仍写 `memory_fact`；应用阶段也复用 fact 事件 | 回滚 Activity 复用 `rollbackTarget()`；新增 `memory.event.forgotten` / `audit.memory.event_forgotten` 目录事件，应用与回滚均以 `memory_event` 为 target |
+
+**复现级覆盖**：新增/扩展 Session 精确删除与设置失败补偿、偏好文件+运行时双向恢复、Audit HTTP 过滤、Agent 双动作生命周期、Recorder 幂等/冲突终态、v9 正常与中断升级、memory event 应用/回滚 Activity target；Web 审计列表/详情与 API query 参数同步覆盖。
+
+**验证证据**：PI SDK import boundary ✓；server strict tsc ✓；server vitest **78 files / 831 tests** ✓（首次并行运行 Supervisor 2 项时序波动，独立 18/18 后按原命令重跑全绿）；Web vitest **30 files / 349 tests** ✓；Web build ✓；生产 build tsc ✓；Playwright e2e **52/52** ✓。定向复现另有 server 54/54、Audit store 28/28、Web logs 14/14 全绿。

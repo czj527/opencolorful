@@ -64,6 +64,18 @@ export interface AuditRecorderDeps {
   now?: () => Date;
 }
 
+interface AuditLifecycleRow {
+  readonly event_id: string;
+  readonly event_name: string;
+  readonly action: string;
+  readonly decision: string;
+  readonly target_kind: string | null;
+  readonly target_id: string | null;
+  readonly owner_agent_id: string | null;
+  readonly session_id: string | null;
+  readonly payload_json: string;
+}
+
 export class AuditRecorder {
   private readonly now: () => Date;
   private spool: AuditRecorderDeps["spool"];
@@ -107,6 +119,28 @@ export class AuditRecorder {
     // 评审 P1-9：payload 必须符合目录固定的 schema
     if (!Value.Check(entry.payloadSchema, input.payload)) {
       return { kind: "rejected", eventName: input.eventName, reason: "payload 不符合目录 schema" };
+    }
+    const operationId = input.trace?.operationId;
+    if (operationId !== undefined && (entry.lifecycleRole === "started" || entry.lifecycleRole === "terminal")) {
+      const existing = this.findOperationLifecycle(operationId, entry.lifecycleRole);
+      if (existing !== null) {
+        if (this.isSameLifecycleInput(existing, input)) {
+          return { kind: "accepted-idempotent", eventId: existing.event_id };
+        }
+        return {
+          kind: "rejected",
+          eventName: input.eventName,
+          reason: entry.lifecycleRole === "terminal"
+            ? "同一 operationId 已有冲突的 terminal 记录"
+            : "同一 operationId 已有冲突的 started 记录",
+        };
+      }
+      if (entry.lifecycleRole === "terminal") {
+        const started = this.findOperationLifecycle(operationId, "started");
+        if (started !== null && !this.isSameOperationSubject(started, input)) {
+          return { kind: "rejected", eventName: input.eventName, reason: "terminal 与 started 的操作目标不一致" };
+        }
+      }
     }
     const envelope = this.buildEnvelope(input);
     if (!Value.Check(AuditEnvelopeSchema, envelope)) {
@@ -229,6 +263,40 @@ export class AuditRecorder {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "import failed" };
     }
+  }
+
+  private findOperationLifecycle(
+    operationId: string,
+    role: "started" | "terminal",
+  ): AuditLifecycleRow | null {
+    const rows = this.deps.database
+      .prepare(
+        `SELECT event_id, event_name, action, decision, target_kind, target_id, owner_agent_id, session_id, payload_json
+         FROM audit_events
+         WHERE ledger_epoch = ? AND operation_id = ?
+         ORDER BY id ASC`,
+      )
+      .all(this.ledgerEpoch(), operationId) as AuditLifecycleRow[];
+    for (const row of rows) {
+      const entry = getCatalogEntry(row.event_name);
+      if (entry?.lifecycleRole === role) return row;
+    }
+    return null;
+  }
+
+  private isSameLifecycleInput(row: AuditLifecycleRow, input: AuditRecordInput): boolean {
+    return row.event_name === input.eventName
+      && this.isSameOperationSubject(row, input)
+      && row.decision === input.payload.decision
+      && row.payload_json === JSON.stringify(normalizeSafeObject(input.payload).value);
+  }
+
+  private isSameOperationSubject(row: AuditLifecycleRow, input: AuditRecordInput): boolean {
+    return row.action === input.payload.action
+      && row.target_kind === (input.target?.kind ?? null)
+      && row.target_id === (input.target?.id ?? null)
+      && row.owner_agent_id === (input.scope?.ownerAgentId ?? null)
+      && row.session_id === (input.scope?.sessionId ?? null);
   }
 
   private buildEnvelope(input: AuditRecordInput): AuditEnvelope {

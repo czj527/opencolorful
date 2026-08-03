@@ -45,7 +45,7 @@ export interface DiskUsage {
 export class DiagnosticLogger {
   private readonly logsRoot: string;
   private readonly producer: ProducerContext;
-  private readonly fileSizeBytes: number;
+  private fileSizeBytes: number;
   private diskBudgetBytes: number;
   private debugRetentionDays: number;
   private mainRetentionDays: number;
@@ -83,15 +83,17 @@ export class DiagnosticLogger {
 
   /**
    * 评审 P1（第三轮）：偏好更新应用到当前运行时——无需重启即调整
-   * 级别过滤/磁盘预算/保留天数（文件大小轮转阈值沿用构造值，避免轮转中换规则）。
+   * 级别过滤、轮转阈值、磁盘预算与保留天数。
    */
   applyOptions(partial: {
     readonly minLevel?: ObservabilityLevel;
+    readonly fileSizeBytes?: number;
     readonly diskBudgetBytes?: number;
     readonly debugRetentionDays?: number;
     readonly mainRetentionDays?: number;
   }): void {
     if (partial.minLevel !== undefined) this.minLevelRank = LEVEL_RANK[partial.minLevel];
+    if (partial.fileSizeBytes !== undefined) this.fileSizeBytes = partial.fileSizeBytes;
     if (partial.diskBudgetBytes !== undefined) this.diskBudgetBytes = partial.diskBudgetBytes;
     if (partial.debugRetentionDays !== undefined) this.debugRetentionDays = partial.debugRetentionDays;
     if (partial.mainRetentionDays !== undefined) this.mainRetentionDays = partial.mainRetentionDays;

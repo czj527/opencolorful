@@ -136,7 +136,7 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
               <thead>
                 <tr>
                   <th>时间</th>
-                  <th>Action</th>
+                  <th>事件</th>
                   <th>Decision</th>
                   <th className={styles.colActor}>Actor</th>
                   <th className={styles.colEpoch}>Epoch</th>
@@ -151,7 +151,12 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
                     onClick={() => setExpanded(expanded?.id === row.id ? null : row)}
                   >
                     <td className={styles.colTime}>{formatTime(row.recordedAt)}</td>
-                    <td><span className={styles.eventName}>{row.action}</span></td>
+                    <td>
+                      <span className={styles.eventName}>{row.eventName ?? row.action}</span>
+                      {row.eventName !== null && row.eventName !== row.action && (
+                        <div className={styles.muted}>{row.action}</div>
+                      )}
+                    </td>
                     <td>{decisionBadge(row.decision)}</td>
                     <td className={styles.colActor}>{row.actorKind}:{row.actorId}</td>
                     <td className={styles.colEpoch}>{row.ledgerEpoch}</td>
@@ -159,7 +164,7 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
                       <button
                         type="button"
                         className={styles.rowAction}
-                        aria-label={`查看 ${row.action} 审计详情`}
+                        aria-label={`查看 ${row.eventName ?? row.action} 审计详情`}
                         onClick={(event) => {
                           event.stopPropagation();
                           setExpanded(expanded?.id === row.id ? null : row);
@@ -186,11 +191,12 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
       {expanded !== null && (
         <div className={styles.detailPanel} data-testid="audit-detail" role="region" aria-label="审计详情">
           <div className={styles.detailHead}>
-            <h3>{expanded.action} <Badge variant="default">Epoch {expanded.ledgerEpoch}</Badge></h3>
+            <h3>{expanded.eventName ?? expanded.action} <Badge variant="default">Epoch {expanded.ledgerEpoch}</Badge></h3>
             <Button variant="ghost" size="sm" onClick={() => setExpanded(null)}>关闭</Button>
           </div>
           <dl className={styles.detailGrid}>
             <div><dt>记录时间</dt><dd>{formatTime(expanded.recordedAt)}</dd></div>
+            <div><dt>Event</dt><dd>{expanded.eventName ?? "—"}</dd></div>
             <div><dt>Action</dt><dd>{expanded.action}</dd></div>
             <div><dt>Decision</dt><dd>{decisionBadge(expanded.decision)}</dd></div>
             <div><dt>reasonCode</dt><dd>{expanded.reasonCode ?? "—"}</dd></div>
@@ -198,6 +204,7 @@ export function AuditView({ api, auditEpoch }: AuditViewProps) {
             <div><dt>归属 Agent</dt><dd>{expanded.ownerAgentId ?? "—"}</dd></div>
             <div><dt>Session</dt><dd>{expanded.sessionId ?? "—"}</dd></div>
             <div><dt>traceId</dt><dd><code className={styles.codeInline}>{expanded.traceId}</code></dd></div>
+            <div><dt>operationId</dt><dd><code className={styles.codeInline}>{expanded.operationId ?? "—"}</code></dd></div>
             <div><dt>eventId</dt><dd><code className={styles.codeInline}>{expanded.eventId}</code></dd></div>
           </dl>
           <AuditPayloadView row={expanded} showFull={showFullPayload} onToggle={() => setShowFullPayload(!showFullPayload)} />

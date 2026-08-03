@@ -193,7 +193,9 @@ export class ProposalApplication {
     const scope = { ownerAgentId: proposal.agentId };
     const factTarget = (id: string | number | undefined): ResourceRef | undefined =>
       id === undefined ? undefined : { kind: "memory_fact" as const, id: String(id) };
-    const target = factTarget(proposal.targetId);
+    const target = proposal.targetType === "event" && proposal.targetId !== undefined
+      ? { kind: "memory_event" as const, id: String(proposal.targetId) }
+      : factTarget(proposal.targetId);
     const actor = { kind: "memory_agent" as const, id: proposal.agentId };
     // 审批通过本身（每个 applied 提案）
     assertDurableAudit(this.deps.audit.appendStrict({
@@ -226,6 +228,15 @@ export class ProposalApplication {
         scope,
         target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: "unknown" },
       }), "记忆遗忘");
+    } else if (proposal.type === "forget" && proposal.targetType === "event") {
+      assertDurableAudit(this.deps.audit.appendStrict({
+        eventName: "audit.memory.event_forgotten",
+        payload: { action: "memory.event.forgotten", decision: "allowed", changedFields: ["status"] },
+        actor,
+        executor: actor,
+        scope,
+        target: { kind: "memory_event", id: String(proposal.targetId ?? "unknown") },
+      }), "记忆事件遗忘");
     } else if (proposal.type === "supersede") {
       const supersededId = proposal.payload.supersededFactId as string | number | undefined;
       assertDurableAudit(this.deps.audit.appendStrict({
@@ -324,7 +335,7 @@ export class ProposalApplication {
       actor,
       executor,
       scope,
-      target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: String(proposal.id) },
+      target: target ?? { kind: "memory_fact", id: String(proposal.id) },
       payload: { summaryCode: "memory_proposal_reverted", attributes: { type: proposal.type, runId: proposal.runId } },
     });
   }
@@ -375,7 +386,9 @@ export class ProposalApplication {
     const scope = { ownerAgentId: proposal.agentId };
     const factTarget = (id: string | number | undefined): ResourceRef | undefined =>
       id === undefined ? undefined : { kind: "memory_fact" as const, id: String(id) };
-    const approvedTarget = factTarget(proposal.targetId);
+    const approvedTarget = proposal.targetType === "event" && proposal.targetId !== undefined
+      ? { kind: "memory_event" as const, id: String(proposal.targetId) }
+      : factTarget(proposal.targetId);
     instrument.activity({
       eventName: "memory.proposal.approved",
       actor: { kind: "memory_agent", id: proposal.agentId },
@@ -399,6 +412,15 @@ export class ProposalApplication {
             to: Number(proposal.payload.retentionStrength ?? 0),
           },
         },
+      });
+    } else if (proposal.type === "forget" && proposal.targetType === "event") {
+      instrument.activity({
+        eventName: "memory.event.forgotten",
+        actor: { kind: "memory_agent", id: proposal.agentId },
+        executor: { kind: "memory_agent", id: proposal.agentId },
+        scope,
+        target: { kind: "memory_event", id: String(proposal.targetId ?? "unknown") },
+        payload: { summaryCode: "memory_event_forgotten", attributes: { eventId: String(proposal.targetId ?? "") } },
       });
     } else if (proposal.type === "forget") {
       instrument.activity({

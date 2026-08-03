@@ -211,6 +211,7 @@ export class ObservabilityContext {
   applyPreferences(prefs: import("../contracts/preferences.js").ObservabilityPreferences): void {
     this.logger.applyOptions({
       minLevel: prefs.diagnosticLevel,
+      fileSizeBytes: prefs.diagnosticFileSizeBytes,
       diskBudgetBytes: prefs.diagnosticDiskBudgetBytes,
       debugRetentionDays: prefs.diagnosticRetentionDays.debug,
       mainRetentionDays: prefs.diagnosticRetentionDays.main,

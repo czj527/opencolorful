@@ -92,6 +92,38 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
   /** retention 默认天数：routine 保留期（偏好，缺省 180；PUT 偏好后同步更新） */
   let defaultRetentionDays = obsPrefs.activityRetentionDays.routine;
 
+  const applyObservabilityRuntime = (prefs: ObservabilityPreferences): void => {
+    instrument.applyObservabilityPreferences(prefs);
+    retentionLogger.applyOptions({
+      minLevel: prefs.diagnosticLevel,
+      fileSizeBytes: prefs.diagnosticFileSizeBytes,
+      diskBudgetBytes: prefs.diagnosticDiskBudgetBytes,
+      debugRetentionDays: prefs.diagnosticRetentionDays.debug,
+      mainRetentionDays: prefs.diagnosticRetentionDays.main,
+    });
+    retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
+    defaultRetentionDays = prefs.activityRetentionDays.routine;
+  };
+
+  const preferencesEqual = (
+    left: ObservabilityPreferences | undefined,
+    right: ObservabilityPreferences,
+  ): boolean => left !== undefined && JSON.stringify(left) === JSON.stringify(right);
+
+  const restoreObservabilityPreferences = (previous: ObservabilityPreferences): boolean => {
+    let fileRestored = false;
+    let runtimeRestored = false;
+    try {
+      deps.preferencesStore!.update({ observability: previous });
+      fileRestored = preferencesEqual(deps.preferencesStore!.get().observability, previous);
+    } catch { /* 继续尝试恢复运行时，避免两侧同时停留在错误状态 */ }
+    try {
+      applyObservabilityRuntime(previous);
+      runtimeRestored = true;
+    } catch { /* 调用方会以 compensation_failed 如实报告 */ }
+    return fileRestored && runtimeRestored;
+  };
+
   // ─── Activity 查询 ─────────────────────────────────────────────
 
   app.get("/api/observability/activity", (context) => {
@@ -217,8 +249,10 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
     const epoch = parseOptionalInt(context.req.query("epoch") ?? undefined, 0, Number.MAX_SAFE_INTEGER);
     const filter = {
       ...(epoch > 0 ? { epoch } : {}),
+      ...(context.req.query("eventName") !== undefined ? { eventName: context.req.query("eventName")! } : {}),
       ...(context.req.query("action") !== undefined ? { action: context.req.query("action")! } : {}),
       ...(context.req.query("decision") !== undefined ? { decision: context.req.query("decision")! } : {}),
+      ...(context.req.query("operationId") !== undefined ? { operationId: context.req.query("operationId")! } : {}),
       ...(context.req.query("ownerAgentId") !== undefined ? { ownerAgentId: context.req.query("ownerAgentId")! } : {}),
       ...(context.req.query("sessionId") !== undefined ? { sessionId: context.req.query("sessionId")! } : {}),
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
@@ -473,29 +507,23 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
         return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
       }
       let prefs: ObservabilityPreferences;
+      let persisted = false;
       try {
         const result = deps.preferencesStore!.update({ observability: body as never });
-        // 评审 P1（第三轮）：偏好更新立即应用到当前运行时（logger/spool 无需重启）；
-        // retention 路由的 logger/spool 与默认天数同步重配
         prefs = result.observability ?? defaultObservabilityPreferences();
-        instrument.applyObservabilityPreferences(prefs);
-        retentionLogger.applyOptions({
-          minLevel: prefs.diagnosticLevel,
-          diskBudgetBytes: prefs.diagnosticDiskBudgetBytes,
-          debugRetentionDays: prefs.diagnosticRetentionDays.debug,
-          mainRetentionDays: prefs.diagnosticRetentionDays.main,
-        });
-        retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
-        defaultRetentionDays = prefs.activityRetentionDays.routine;
+        persisted = true;
+        applyObservabilityRuntime(prefs);
       } catch (error) {
-        // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
+        const compensated = !persisted || restoreObservabilityPreferences(previousPrefs);
         try {
           deps.audit!.appendStrict({
             eventName: "audit.observability.preferences_change.failed",
             payload: {
               action: "observability.preferences.changed",
               decision: "denied",
-              reasonCode: (error instanceof Error ? error.message : String(error)).slice(0, 64),
+              reasonCode: compensated
+                ? (error instanceof Error ? error.message : String(error)).slice(0, 64)
+                : "compensation_failed",
               changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
             },
             actor: { kind: "user", id: "web" },
@@ -503,7 +531,13 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
             trace: opTrace,
           });
         } catch { /* 终态尽力而为 */ }
-        return context.json({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "偏好更新失败" }, 400);
+        const message = compensated
+          ? (error instanceof Error ? error.message : "偏好更新失败")
+          : "偏好更新失败，且补偿验证失败";
+        return context.json(
+          { code: persisted ? "INTERNAL_ERROR" : "BAD_REQUEST", message },
+          persisted ? 500 : 400,
+        );
       }
       try {
         // 领域写入成功 → completed 终态（原 allowed 记录）
@@ -519,13 +553,7 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
           trace: opTrace,
         }), "可观测性偏好变更");
       } catch {
-        // 评审 P0（第六轮）：终态审计失败必须可靠补偿——恢复旧偏好并验证
-        let compensated = false;
-        try {
-          deps.preferencesStore!.update({ observability: previousPrefs as never });
-          const restored = deps.preferencesStore!.get().observability;
-          compensated = restored?.diagnosticLevel === previousPrefs.diagnosticLevel;
-        } catch { /* 恢复失败：账本只剩 started，不伪装成功 */ }
+        const compensated = restoreObservabilityPreferences(previousPrefs);
         try {
           deps.audit!.appendStrict({
             eventName: "audit.observability.preferences_change.failed",

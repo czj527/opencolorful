@@ -324,6 +324,7 @@ describe("LogsPage 安全审计 tab", () => {
             eventId: "audit-1",
             ledgerEpoch: 3,
             recordedAt: "2026-08-01T08:00:00.000Z",
+            eventName: "audit.sandbox.path_denied",
             action: "sandbox.path.denied",
             decision: "denied",
             reasonCode: "protected",
@@ -332,6 +333,7 @@ describe("LogsPage 安全审计 tab", () => {
             ownerAgentId: "agent-a",
             sessionId: null,
             traceId: "trace-1",
+            operationId: "operation-1",
             payloadJson: JSON.stringify({ action: "sandbox.path.denied", decision: "denied" }),
           },
         ],
@@ -341,6 +343,7 @@ describe("LogsPage 安全审计 tab", () => {
     await screen.findByText(/暂无活动事件/);
 
     fireEvent.click(screen.getByTestId("logs-tab-audit"));
+    expect(await screen.findByText("audit.sandbox.path_denied")).toBeTruthy();
     expect(await screen.findByText("sandbox.path.denied")).toBeTruthy();
     expect(screen.getByText("denied")).toBeTruthy();
     expect(screen.getByText("agent:agent-a")).toBeTruthy();
@@ -356,6 +359,18 @@ describe("LogsPage 安全审计 tab", () => {
       expect(auditRequest).toBeDefined();
       expect(auditRequest).toContain("epoch=3");
     });
+
+    fireEvent.click(screen.getByText("audit.sandbox.path_denied"));
+    expect(await screen.findByTestId("audit-detail")).toBeTruthy();
+    expect(screen.getByText("operation-1")).toBeTruthy();
+
+    await new ApiClient("").queryAudit({
+      eventName: "audit.sandbox.path_denied",
+      operationId: "operation-1",
+    });
+    const lifecycleRequest = mockFetch.mock.calls.map((call) => String(call[0])).at(-1);
+    expect(lifecycleRequest).toContain("eventName=audit.sandbox.path_denied");
+    expect(lifecycleRequest).toContain("operationId=operation-1");
   });
 });
 
