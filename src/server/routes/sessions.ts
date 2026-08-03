@@ -95,13 +95,19 @@ export function registerSessionRoutes(
     if (audit === undefined) {
       return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，会话创建被拒绝"), 503);
     }
+    // 评审 P1（第六轮）：操作级 operationId——started/completed/failed 共享；
+    // 绑定 Agent 的会话审计 scope 同时携带 sessionId + ownerAgentId（按归属可查）
+    const opId = sessionId;
+    const opTrace = { traceId: opId, spanId: opId, operationId: opId };
+    const bindScope = agentId !== undefined ? { sessionId, ownerAgentId: agentId } : { sessionId };
     const startedInput: AuditRecordInput = {
       eventName: "audit.session.workspace_bind.started",
       payload: { action: "session.workspace.bound", decision: "allowed", changedFields: ["workspaceCwd"] },
       actor: { kind: "user", id: "web" },
       executor: { kind: "service", id: "agent-server" },
       target: { kind: "session", id: sessionId },
-      scope: { sessionId },
+      scope: bindScope,
+      trace: opTrace,
     };
     try {
       assertDurableAudit(audit.appendStrict(startedInput), "Session 工作区绑定");
@@ -141,39 +147,6 @@ export function registerSessionRoutes(
       if (Object.keys(updates).length > 0) {
         sessionService.updateSettings(session.id, updates);
       }
-      // 领域写入成功 → completed 终态（原 allowed 记录）
-      assertDurableAudit(audit.appendStrict({
-        eventName: "audit.session.workspace_bound",
-        payload: { action: "session.workspace.bound", decision: "allowed", changedFields: ["workspaceCwd"] },
-        actor: { kind: "user", id: "web" },
-        executor: { kind: "service", id: "agent-server" },
-        target: { kind: "session", id: sessionId },
-        scope: { sessionId },
-      }), "Session 工作区绑定");
-      // 工作区绑定证据（audit 已 fail-closed 在前）
-      instrument.activity({
-        eventName: "session.workspace.bound",
-        actor: { kind: "user", id: "web" },
-        executor: { kind: "service", id: "agent-server" },
-        target: { kind: "session", id: sessionId },
-        scope: { sessionId },
-        payload: { summaryCode: "session_workspace_bound" },
-      });
-
-      // 应用全局默认模型：仅当请求未指定模型、全局默认可用且可 resolve 时。
-      const view = sessionService.getView(session.id);
-      if (preferences?.defaults.model && modelService !== undefined && view.model === null) {
-        const defaultModel = preferences.defaults.model;
-        try {
-          modelService.resolveModel(defaultModel.providerId, defaultModel.modelId);
-          const opened = sessionService.open(session.id);
-          opened.selectModel(defaultModel.providerId, defaultModel.modelId);
-        } catch {
-          // 默认模型不可用时不阻塞创建，留给后续显式选择。
-        }
-      }
-
-      return context.json(sessionService.getView(session.id), 201);
     } catch (error) {
       // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
       try {
@@ -183,11 +156,68 @@ export function registerSessionRoutes(
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
           target: { kind: "session", id: sessionId },
-          scope: { sessionId },
+          scope: bindScope,
+          trace: opTrace,
         });
       } catch { /* 终态尽力而为 */ }
       return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "会话创建失败"), 500);
     }
+    try {
+      // 领域写入成功 → completed 终态（原 allowed 记录）
+      assertDurableAudit(audit.appendStrict({
+        eventName: "audit.session.workspace_bound",
+        payload: { action: "session.workspace.bound", decision: "allowed", changedFields: ["workspaceCwd"] },
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        target: { kind: "session", id: sessionId },
+        scope: bindScope,
+        trace: opTrace,
+      }), "Session 工作区绑定");
+    } catch {
+      // 评审 P0（第六轮）：终态审计失败必须可靠补偿——移除刚创建的会话并验证
+      let compensated = false;
+      try {
+        sessionService.remove(sessionId);
+        compensated = !sessionService.list().some((item) => item.id === sessionId);
+      } catch { /* 补偿失败：账本只剩 started，不伪装成功 */ }
+      try {
+        audit.appendStrict({
+          eventName: "audit.session.workspace_bind.failed",
+          payload: { action: "session.workspace.bound", decision: "denied", reasonCode: compensated ? "audit_terminal_write_failed" : "compensation_failed", changedFields: ["workspaceCwd"] },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          target: { kind: "session", id: sessionId },
+          scope: bindScope,
+          trace: opTrace,
+        });
+      } catch { /* 终态尽力而为 */ }
+      return context.json(createApiError("PROVIDER_UNAVAILABLE", compensated ? "安全审计不可用，会话创建已回滚" : "安全审计不可用，会话创建已回滚但补偿验证失败"), 503);
+    }
+    // 工作区绑定证据（audit 已 fail-closed 在前）
+    instrument.activity({
+      eventName: "session.workspace.bound",
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "service", id: "agent-server" },
+      target: { kind: "session", id: sessionId },
+      scope: bindScope,
+      payload: { summaryCode: "session_workspace_bound" },
+    });
+
+    // 应用全局默认模型：仅当请求未指定模型、全局默认可用且可 resolve 时。
+    const preferences = preferencesStore?.get();
+    const view = sessionService.getView(sessionId);
+    if (preferences?.defaults.model && modelService !== undefined && view.model === null) {
+      const defaultModel = preferences.defaults.model;
+      try {
+        modelService.resolveModel(defaultModel.providerId, defaultModel.modelId);
+        const opened = sessionService.open(sessionId);
+        opened.selectModel(defaultModel.providerId, defaultModel.modelId);
+      } catch {
+        // 默认模型不可用时不阻塞创建，留给后续显式选择。
+      }
+    }
+
+    return context.json(sessionService.getView(sessionId), 201);
   });
 
   app.get("/api/sessions/:id", (context) => {
@@ -250,6 +280,8 @@ export function registerSessionRoutes(
           400,
         );
       }
+      // 评审 P1（第六轮）：绑定 Agent 的会话设置变更 scope 同时携带 sessionId + ownerAgentId
+      const bindScope = current.agentId !== undefined && current.agentId !== null ? { sessionId, ownerAgentId: current.agentId } : { sessionId };
       try {
         parseSessionSettings({
           ...(requestedMode !== undefined ? { toolMode: requestedMode } : {}),
@@ -290,7 +322,8 @@ export function registerSessionRoutes(
               actor: { kind: "user", id: "web" },
               executor: { kind: "service", id: "agent-server" },
               target: { kind: "session", id: sessionId },
-              scope: { sessionId },
+              scope: bindScope,
+              trace: { traceId: sessionId, spanId: sessionId, operationId: sessionId },
             },
             () => sessionService.updateSettings(sessionId, {
               ...(typeof body.toolMode === "string" ? { toolMode: body.toolMode } : {}),

@@ -77,6 +77,7 @@ export interface AuditRow {
   readonly eventId: string;
   readonly ledgerEpoch: number;
   readonly recordedAt: string;
+  readonly eventName: string | null;
   readonly action: string;
   readonly decision: string;
   readonly reasonCode: string | null;
@@ -85,6 +86,7 @@ export interface AuditRow {
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
   readonly traceId: string;
+  readonly operationId: string | null;
   readonly payloadJson: string;
 }
 
@@ -160,10 +162,10 @@ const ACTIVITY_COLUMNS = `
 
 const AUDIT_COLUMNS = `
   id, event_id AS eventId, ledger_epoch AS ledgerEpoch, recorded_at AS recordedAt,
-  action, decision, reason_code AS reasonCode,
+  event_name AS eventName, action, decision, reason_code AS reasonCode,
   actor_kind AS actorKind, actor_id AS actorId,
   owner_agent_id AS ownerAgentId, session_id AS sessionId,
-  trace_id AS traceId, payload_json AS payloadJson`;
+  trace_id AS traceId, operation_id AS operationId, payload_json AS payloadJson`;
 
 const MAX_PAGE_SIZE = 200;
 const MAX_TRACE_NODES = 200;
@@ -257,7 +259,7 @@ export class ObservabilityQuery {
   // ─── Audit cursor 分页 ────────────────────────────────────────
 
   queryAudit(
-    filter: { epoch?: number; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string },
+    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string },
     cursor: PageCursor | null,
     limit = 50,
   ): PagedResult<AuditRow> {
@@ -267,6 +269,8 @@ export class ObservabilityQuery {
     if (filter.epoch !== undefined) { where.push("ledger_epoch = ?"); params.push(filter.epoch); }
     if (filter.action !== undefined) { where.push("action = ?"); params.push(filter.action); }
     if (filter.decision !== undefined) { where.push("decision = ?"); params.push(filter.decision); }
+    if (filter.eventName !== undefined) { where.push("event_name = ?"); params.push(filter.eventName); }
+    if (filter.operationId !== undefined) { where.push("operation_id = ?"); params.push(filter.operationId); }
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
     if (filter.traceId !== undefined) { where.push("trace_id = ?"); params.push(filter.traceId); }

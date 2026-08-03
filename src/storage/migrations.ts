@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -480,6 +480,20 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
       INSERT OR IGNORE INTO observability_state (key, value) VALUES ('audit.ledger_epoch', '1');
     `);
     database.prepare("UPDATE schema_version SET version = 8").run();
+  }
+
+  // v9：评审 P1（第六轮）——审计表保存事件名与生命周期身份。
+  // 三阶段（started/terminal）此前只有 action+decision 可辨识，started 与
+  // completed 记录在查询 API 中完全相同；event_name 列使生命周期可查询、
+  // 可关联（与路由生成的 operationId 配对），旧行回填为 NULL（无法从
+  // action 可靠反推事件名，查询 API 对此兼容）。
+  if (current < 9) {
+    database.exec(`
+      ALTER TABLE audit_events ADD COLUMN event_name TEXT;
+      CREATE INDEX IF NOT EXISTS idx_audit_event_name ON audit_events(event_name, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_operation ON audit_events(operation_id);
+    `);
+    database.prepare("UPDATE schema_version SET version = 9").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

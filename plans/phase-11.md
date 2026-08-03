@@ -1,6 +1,6 @@
 # Phase 11：完整日志系统与统一可观测性
 
-**状态：已实现（2026-08-02 第五轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
+**状态：已实现（2026-08-02 第六轮复审修复完成），待复审验收** | 建议分支：`phase-11-observability`
 **基线：** `main`（Phase 10.5 验收点之后）
 **架构权威：** [docs/logging-architecture.md](../docs/logging-architecture.md)
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 11
@@ -1205,3 +1205,20 @@ reviewer 结论："第四轮已消除安全绕过型 P0，但审计账本还不�
 **复现级测试 6 个**（observability-failclosed）：Agent 创建冲突 409 → started×2+failed×2 无 allowed 成功记录；Session 持久化失败 500 → started+failed；偏好写盘失败 400 → started+failed；Agent audit ownerAgentId 归属查询命中；Session audit sessionId 查询命中；用户强度回滚 → actor=user/web、changedFields 含 retentionStrength。
 
 **波及**：settings PUT 的审计断言更新为三阶段（started×2 + completed×2）；记忆回滚测试经内存态构造，无需改调用方（identity 可选参数）。
+
+### 第六轮外部复审修复（2026-08-02，本提交）
+
+reviewer 结论："第五轮暂不通过…三阶段 Audit 在持久化结构和终态故障处理上仍未真正闭环"。
+1 个 P0 + 3 个 P1 + 1 个 P2 全部修复，每个均配复现级回归测试（新增 7 个）。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | completed Audit 失败后领域修改没有可靠回滚：Agent 创建 503 但 Agent 落盘、Session 500 但保留在索引、偏好 400 但已生效、设置恢复异常被吞 | 为四条文件型高风险路径提供可验证补偿：Agent 创建失败补偿 → `AgentStore.remove()` 物理删除 + list 重读验证；Session 创建失败补偿 → `SessionService.remove()` 索引移除 + 文件删除 + 列表验证；偏好写盘前备份旧值，终态失败恢复并验证 `diagnosticLevel`；设置恢复后对比 `defaultCwd/sandbox` 验证恢复结果。补偿失败如实报告（reasonCode=compensation_failed，响应提示补偿验证失败），绝不伪装成功 |
+| 2 | P1 | 三阶段生命周期在 Audit 数据库不可辨识：INSERT 丢弃 eventName；started/completed 查询结果完全相同；无操作级 operationId；成功事件注册为 point | migration v9：`audit_events` 新增 `event_name` 列（含索引）；`AuditRecorder` 的 appendStrict/importEnvelope/resetLedger 全部保存事件名；四条路由生成操作级 `operationId`（started/completed/failed 共享，session 用会话 id）；成功事件目录注册为 terminal；`ObservabilityQuery` 暴露 `eventName`/`operationId` 并支持过滤——生命周期经查询 API 按 operationId 关联断言 |
+| 3 | P1 | 绑定 Agent 的 Session 审计缺 ownerAgentId：`queryAudit({ownerAgentId})` 找不到工作区绑定 | Session 创建与 settings PUT 在绑定 Agent 时 scope 同时携带 `{ sessionId, ownerAgentId }` |
+| 4 | P1 | 记忆回滚 target 语义错误：event 遗忘回滚被记成 memory_fact；create_fact 回滚因无 targetId 丢失主目标 | `rollbackTarget()` 按提案类型/targetType 分派：event 遗忘 → `memory_event`（TARGET_KINDS 正式新增该 kind）；create_fact → `payload.createdFactId`；supersede → 被取代事实；merge → 合并事实 |
+| 5 | P2 | 计划文档过早完成验收项 | 状态保持"待复审验收"；本轮修复完成后勾选与实现一致，并记录本轮修复 |
+
+**复现级测试 7 个**（observability-failclosed）：Agent 创建/Session 创建/设置/偏好四条路径的 completed 审计失败补偿（503 + 领域状态恢复验证）；三阶段生命周期经 ObservabilityQuery 按 operationId 关联（started+terminal 可辨识、terminal 注册断言）；绑定 Agent 的 Session 审计 ownerAgentId 归属查询命中；event 遗忘回滚 target=memory_event。
+
+**波及**：CURRENT_SCHEMA_VERSION 8→9（migration 断言测试更新）；memory-schema/observability-server 版本断言改用常量。

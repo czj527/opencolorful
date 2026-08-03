@@ -50,7 +50,7 @@ export type ExecutorKind = (typeof EXECUTOR_KINDS)[number];
 
 export const TARGET_KINDS = [
   "platform", "agent", "session", "turn", "tool", "file", "workspace",
-  "memory_fact", "memory_batch", "plugin", "provider", "configuration", "external_resource",
+  "memory_fact", "memory_event", "memory_batch", "plugin", "provider", "configuration", "external_resource",
 ] as const;
 export type TargetKind = (typeof TARGET_KINDS)[number];
 
@@ -93,6 +93,7 @@ export const ResourceRefSchema = Type.Object({
       Type.Literal("file"),
       Type.Literal("workspace"),
       Type.Literal("memory_fact"),
+      Type.Literal("memory_event"),
       Type.Literal("memory_batch"),
       Type.Literal("plugin"),
       Type.Literal("provider"),

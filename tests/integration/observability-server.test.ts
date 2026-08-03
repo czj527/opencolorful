@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PLATFORM_VERSION } from "../../src/index.js";
+import { CURRENT_SCHEMA_VERSION } from "../../src/storage/migrations.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { startForegroundServer, type RunningServer } from "../../src/server/start.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
@@ -72,7 +73,7 @@ describe("T4 server 启动/停止链路埋点", () => {
     expect(String(started["operation_id"])).toMatch(/^boot-/);
     // 干净库迁移 1 → 8
     const migration = rows.find((row) => row.event_name === "storage.migration.completed")!;
-    expect(JSON.parse(String(migration["payload_json"])).attributes).toEqual({ from: 1, to: 8 });
+    expect(JSON.parse(String(migration["payload_json"])).attributes).toEqual({ from: 1, to: CURRENT_SCHEMA_VERSION });
     // boot 阶段序：starting 在 started 前，stopping 在 stopped 前
     expect(names.indexOf("system.starting")).toBeLessThan(names.indexOf("system.started"));
     expect(names.indexOf("system.stopping")).toBeLessThan(names.indexOf("system.stopped"));

@@ -116,12 +116,12 @@ export class AuditRecorder {
       .prepare(
         `INSERT OR IGNORE INTO audit_events
           (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
-           action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
+           event_name, action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
            target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
            policy_version, before_revision, after_revision, changed_fields_json, payload_json)
          VALUES (
            @eventId, @ledgerEpoch, 1, @eventVersion, @recordedAt, @occurredAt,
-           @action, @decision, @reasonCode, @actorKind, @actorId, @executorKind, @executorId,
+           @eventName, @action, @decision, @reasonCode, @actorKind, @actorId, @executorKind, @executorId,
            @targetKind, @targetId, @ownerAgentId, @sessionId, @traceId, @operationId,
            @policyVersion, @beforeRevision, @afterRevision, @changedFieldsJson, @payloadJson
          )`,
@@ -132,6 +132,7 @@ export class AuditRecorder {
         eventVersion: entry.eventVersion,
         recordedAt: envelope.recordedAt,
         occurredAt: envelope.occurredAt,
+        eventName: envelope.eventName,
         action: envelope.payload.action,
         decision: envelope.payload.decision,
         reasonCode: envelope.payload.reasonCode ?? null,
@@ -193,10 +194,10 @@ export class AuditRecorder {
         .prepare(
           `INSERT OR IGNORE INTO audit_events
             (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
-             action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
+             event_name, action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
              target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
              policy_version, before_revision, after_revision, changed_fields_json, payload_json)
-           VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           envelope.eventId,
@@ -204,6 +205,7 @@ export class AuditRecorder {
           entry.eventVersion,
           envelope.recordedAt,
           envelope.occurredAt,
+          envelope.eventName,
           envelope.payload.action,
           envelope.payload.decision,
           envelope.payload.reasonCode ?? null,
@@ -288,9 +290,9 @@ export class AuditRecorder {
         .prepare(
           `INSERT INTO audit_events
             (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
-             action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
+             event_name, action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
              target_kind, target_id, trace_id, payload_json)
-           VALUES (?, ?, 1, 1, ?, ?, 'audit.ledger_reset', 'reset', ?, ?, ?, 'system', 'observability', 'platform', 'observability', 'reset-ledger', ?)`,
+           VALUES (?, ?, 1, 1, ?, ?, 'audit.observability.ledger_reset', 'audit.ledger_reset', 'reset', ?, ?, ?, 'system', 'observability', 'platform', 'observability', 'reset-ledger', ?)`,
         )
         .run(
           crypto.randomUUID(),

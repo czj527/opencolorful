@@ -274,7 +274,10 @@ export class ProposalApplication {
     const executor = executorOverride ?? { kind: "service" as const, id: "memory_agent" };
     const factTarget = (idValue: string | number | undefined): ResourceRef | undefined =>
       idValue === undefined ? undefined : { kind: "memory_fact" as const, id: String(idValue) };
-    const target = factTarget(proposal.targetId);
+    // 评审 P1（第六轮）：target 按提案类型与 targetType 分派——event 遗忘回滚
+    // 必须标记 memory_event（不再是 memory_fact）；create_fact 回滚以创建的
+    // 事实为主目标（payload.createdFactId，而非缺失的 targetId）
+    const target = this.rollbackTarget(proposal);
     const changedFields = this.rollbackChangedFields(proposal);
     // 回滚本身（每个被回滚提案一条）
     assertDurableAudit(this.deps.audit.appendStrict({
@@ -324,6 +327,35 @@ export class ProposalApplication {
       target: factTarget(proposal.targetId) ?? { kind: "memory_fact", id: String(proposal.id) },
       payload: { summaryCode: "memory_proposal_reverted", attributes: { type: proposal.type, runId: proposal.runId } },
     });
+  }
+
+  /**
+   * 评审 P1（第六轮）：回滚主目标按提案类型与 targetType 分派：
+   * - create_fact/longterm_projection → 创建出的事实（payload.createdFactId）
+   * - strength_change/forget(fact)/restore → 目标事实（targetId）
+   * - forget(event) → 目标事件（memory_event kind）
+   * - supersede → 被取代事实（supersededFactId）
+   * - merge → 合并事实（mergedFactId）
+   */
+  private rollbackTarget(proposal: MemoryMutationProposal): ResourceRef | undefined {
+    const factTarget = (idValue: string | number | undefined): ResourceRef | undefined =>
+      idValue === undefined ? undefined : { kind: "memory_fact" as const, id: String(idValue) };
+    if (proposal.type === "create_fact" || proposal.type === "longterm_projection") {
+      const createdId = typeof proposal.payload.createdFactId === "number"
+        ? proposal.payload.createdFactId
+        : proposal.targetId;
+      return factTarget(createdId);
+    }
+    if (proposal.type === "forget" && proposal.targetType === "event") {
+      return proposal.targetId === undefined ? undefined : { kind: "memory_event" as const, id: String(proposal.targetId) };
+    }
+    if (proposal.type === "supersede") {
+      return factTarget(proposal.payload.supersededFactId as string | number | undefined);
+    }
+    if (proposal.type === "merge") {
+      return factTarget(proposal.payload.mergedFactId as string | number | undefined);
+    }
+    return factTarget(proposal.targetId);
   }
 
   /** 评审 P1（第五轮）：回滚的实际修改字段按提案类型生成 */

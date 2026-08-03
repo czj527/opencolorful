@@ -1,4 +1,5 @@
 import path from "node:path";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -451,6 +452,11 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       if (deps.audit === undefined) {
         return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
       }
+      // 评审 P1（第六轮）：操作级 operationId——started/completed/failed 共享
+      const opId = crypto.randomUUID();
+      const opTrace = { traceId: opId, spanId: opId, operationId: opId };
+      // 评审 P0（第六轮）：写盘前备份旧偏好，终态失败时恢复并验证
+      const previousPrefs = deps.preferencesStore!.get().observability ?? defaultObservabilityPreferences();
       try {
         assertDurableAudit(deps.audit.appendStrict({
           eventName: "audit.observability.preferences_change.started",
@@ -461,15 +467,17 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
           },
           actor: { kind: "user", id: "web" },
           executor: { kind: "service", id: "agent-server" },
+          trace: opTrace,
         }), "可观测性偏好变更");
       } catch {
         return context.json({ code: "PROVIDER_UNAVAILABLE", message: "安全审计不可用，偏好修改被拒绝" }, 503 as const);
       }
+      let prefs: ObservabilityPreferences;
       try {
         const result = deps.preferencesStore!.update({ observability: body as never });
         // 评审 P1（第三轮）：偏好更新立即应用到当前运行时（logger/spool 无需重启）；
         // retention 路由的 logger/spool 与默认天数同步重配
-        const prefs = result.observability ?? defaultObservabilityPreferences();
+        prefs = result.observability ?? defaultObservabilityPreferences();
         instrument.applyObservabilityPreferences(prefs);
         retentionLogger.applyOptions({
           minLevel: prefs.diagnosticLevel,
@@ -479,26 +487,6 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
         });
         retentionSpool.setBudgetBytes(prefs.emergencySpoolBudgetBytes);
         defaultRetentionDays = prefs.activityRetentionDays.routine;
-        // 领域写入成功 → completed 终态（原 allowed 记录）
-        assertDurableAudit(deps.audit.appendStrict({
-          eventName: "audit.observability.preferences_changed",
-          payload: {
-            action: "observability.preferences.changed",
-            decision: "allowed",
-            changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
-          },
-          actor: { kind: "user", id: "web" },
-          executor: { kind: "service", id: "agent-server" },
-        }), "可观测性偏好变更");
-        // durable Activity 证据（audit 已 fail-closed 在前；auditMirror 同库）
-        instrument.activity({
-          eventName: "observability.preferences.changed",
-          actor: { kind: "user", id: "web" },
-          executor: { kind: "service", id: "agent-server" },
-          payload: { summaryCode: "observability_preferences_changed" },
-        });
-        instrument.info("preferences.observability.updated", "observability 偏好已更新并应用到当前运行时");
-        return context.json(prefs);
       } catch (error) {
         // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
         try {
@@ -512,10 +500,57 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
             },
             actor: { kind: "user", id: "web" },
             executor: { kind: "service", id: "agent-server" },
+            trace: opTrace,
           });
         } catch { /* 终态尽力而为 */ }
         return context.json({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "偏好更新失败" }, 400);
       }
+      try {
+        // 领域写入成功 → completed 终态（原 allowed 记录）
+        assertDurableAudit(deps.audit.appendStrict({
+          eventName: "audit.observability.preferences_changed",
+          payload: {
+            action: "observability.preferences.changed",
+            decision: "allowed",
+            changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
+          },
+          actor: { kind: "user", id: "web" },
+          executor: { kind: "service", id: "agent-server" },
+          trace: opTrace,
+        }), "可观测性偏好变更");
+      } catch {
+        // 评审 P0（第六轮）：终态审计失败必须可靠补偿——恢复旧偏好并验证
+        let compensated = false;
+        try {
+          deps.preferencesStore!.update({ observability: previousPrefs as never });
+          const restored = deps.preferencesStore!.get().observability;
+          compensated = restored?.diagnosticLevel === previousPrefs.diagnosticLevel;
+        } catch { /* 恢复失败：账本只剩 started，不伪装成功 */ }
+        try {
+          deps.audit!.appendStrict({
+            eventName: "audit.observability.preferences_change.failed",
+            payload: {
+              action: "observability.preferences.changed",
+              decision: "denied",
+              reasonCode: compensated ? "audit_terminal_write_failed" : "compensation_failed",
+              changedFields: ["diagnosticLevel", "diagnosticDiskBudgetBytes", "diagnosticRetentionDays", "emergencySpoolBudgetBytes", "activityRetentionDays"],
+            },
+            actor: { kind: "user", id: "web" },
+            executor: { kind: "service", id: "agent-server" },
+            trace: opTrace,
+          });
+        } catch { /* 终态尽力而为 */ }
+        return context.json({ code: "PROVIDER_UNAVAILABLE", message: compensated ? "安全审计不可用，偏好修改已回滚" : "安全审计不可用，偏好修改已回滚但补偿验证失败" }, 503 as const);
+      }
+      // durable Activity 证据（audit 已 fail-closed 在前；auditMirror 同库）
+      instrument.activity({
+        eventName: "observability.preferences.changed",
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "service", id: "agent-server" },
+        payload: { summaryCode: "observability_preferences_changed" },
+      });
+      instrument.info("preferences.observability.updated", "observability 偏好已更新并应用到当前运行时");
+      return context.json(prefs);
     });
   }
 

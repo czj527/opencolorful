@@ -98,6 +98,21 @@ create(request: CreateSessionRequest): PiSessionHandle {
     return this.open(id);
   }
 
+  /**
+   * 评审 P0（第六轮）：审计终态失败时的创建补偿——从索引移除并物理删除
+   * 会话文件（remove 后 list/getView 均不可见）。仅用于创建补偿路径。
+   */
+  remove(id: string): void {
+    const metadata = this.index.get(id);
+    if (metadata === undefined) return;
+    this.index.remove(id);
+    this.active.delete(id);
+    const sessionDir = path.dirname(metadata.sessionPath);
+    try {
+      fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    } catch { /* 文件删除尽力而为；索引已移除即从活动视图消失 */ }
+  }
+
   getView(id: string): SessionView {
     const metadata = this.index.get(id);
     if (!metadata) throw new Error(`Session 不存在: ${id}`);

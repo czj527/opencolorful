@@ -163,12 +163,17 @@ export function registerAgentRoutes(
           scope: { ownerAgentId: agentId },
         });
       }
+      // 评审 P1（第六轮）：操作级 operationId——started/completed/failed 共享，
+      // 生命周期可从账本按 operation_id 关联（不再依赖插入顺序）
+      const opId = crypto.randomUUID();
+      const opTrace = { traceId: opId, spanId: opId, operationId: opId };
       if (auditInputs.length > 0) {
         if (audit === undefined) {
           return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
         }
         const startedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
           ...input,
+          trace: opTrace,
           eventName: input.eventName === "audit.agent.workspace_changed"
             ? "audit.agent.workspace_change.started"
             : "audit.sandbox.policy_change.started",
@@ -191,6 +196,7 @@ export function registerAgentRoutes(
           // 领域写入失败 → failed 终态（尽力而为），绝不留下 allowed 成功记录
           const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
             ...input,
+            trace: opTrace,
             eventName: input.eventName === "audit.agent.workspace_changed"
               ? "audit.agent.workspace_change.failed"
               : "audit.sandbox.policy_change.failed",
@@ -206,20 +212,28 @@ export function registerAgentRoutes(
         }
         // 领域写入成功 → completed 终态（原 allowed 记录）
         try {
-          audit.appendStrictMany(auditInputs);
+          audit.appendStrictMany(auditInputs.map((input) => ({ ...input, trace: opTrace })));
         } catch {
-          // 终态无法确认：记 failed 终态（fail-closed 报告，不伪装成功）并拒绝确认
+          // 评审 P0（第六轮）：终态审计失败必须可靠补偿——删除刚创建的 Agent
+          // 并验证（fail-closed：账本与实际状态一致，不留下"503 但 Agent 已落盘"）
+          let compensated = false;
+          try {
+            agentStore.remove(agentId);
+            agentStore.list(); // 触发目录重读，验证补偿结果
+            compensated = true;
+          } catch { /* 补偿失败：账本只剩 started，不伪装成功 */ }
           try {
             const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
               ...input,
+              trace: opTrace,
               eventName: input.eventName === "audit.agent.workspace_changed"
                 ? "audit.agent.workspace_change.failed"
                 : "audit.sandbox.policy_change.failed",
-              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: "audit_terminal_write_failed", changedFields: input.payload.changedFields ?? [] },
+              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: compensated ? "audit_terminal_write_failed" : "compensation_failed", changedFields: input.payload.changedFields ?? [] },
             }));
             audit.appendStrictMany(failedInputs);
           } catch { /* 终态尽力而为 */ }
-          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险创建被拒绝"), 503);
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", compensated ? "安全审计不可用，高风险创建已回滚" : "安全审计不可用，高风险创建已回滚但补偿验证失败"), 503);
         }
       } else {
         agentStore.create({
@@ -506,6 +520,9 @@ export function registerAgentRoutes(
           scope: { ownerAgentId: agentId },
         });
       }
+      // 评审 P1（第六轮）：操作级 operationId——started/completed/failed 共享
+      const opId = crypto.randomUUID();
+      const opTrace = { traceId: opId, spanId: opId, operationId: opId };
       if (auditInputs.length > 0) {
         try {
           // 评审 P0（第三轮）：audit 未配置同样拒绝执行（fail-closed 由构造保证不了，这里显式检查）；
@@ -513,6 +530,7 @@ export function registerAgentRoutes(
           if (audit === undefined) throw new Error("可观测性未初始化，高风险修改拒绝执行");
           const startedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
             ...input,
+            trace: opTrace,
             eventName: input.eventName === "audit.agent.workspace_changed"
               ? "audit.agent.workspace_change.started"
               : "audit.sandbox.policy_change.started",
@@ -529,6 +547,7 @@ export function registerAgentRoutes(
           try {
             const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
               ...input,
+              trace: opTrace,
               eventName: input.eventName === "audit.agent.workspace_changed"
                 ? "audit.agent.workspace_change.failed"
                 : "audit.sandbox.policy_change.failed",
@@ -540,21 +559,31 @@ export function registerAgentRoutes(
         }
         try {
           // 领域写入成功 → completed 终态
-          audit.appendStrictMany(auditInputs);
+          audit.appendStrictMany(auditInputs.map((input) => ({ ...input, trace: opTrace })));
         } catch {
-          // 终态无法确认：回滚设置 + 记 failed 终态（fail-closed 报告）
-          try { agentStore.saveSettings(agentId, previousSettings); } catch { /* 回滚失败也拒绝 */ }
+          // 评审 P0（第六轮）：终态审计失败必须可靠补偿——恢复 previousSettings
+          // 并验证恢复结果（不再吞掉恢复异常；恢复失败必须如实报告）
+          let compensated = false;
+          try {
+            agentStore.saveSettings(agentId, previousSettings);
+            const restored = agentStore.getSettings(agentId);
+            const restoredSandbox = "sandbox" in restored ? restored.sandbox : undefined;
+            const previousSandbox = "sandbox" in previousSettings ? previousSettings.sandbox : undefined;
+            compensated = JSON.stringify({ defaultCwd: restored.defaultCwd, sandbox: restoredSandbox })
+              === JSON.stringify({ defaultCwd: previousSettings.defaultCwd, sandbox: previousSandbox });
+          } catch { /* 恢复失败：账本只剩 started，不伪装成功 */ }
           try {
             const failedInputs: AuditRecordInput[] = auditInputs.map((input) => ({
               ...input,
+              trace: opTrace,
               eventName: input.eventName === "audit.agent.workspace_changed"
                 ? "audit.agent.workspace_change.failed"
                 : "audit.sandbox.policy_change.failed",
-              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: "audit_terminal_write_failed", changedFields: input.payload.changedFields ?? [] },
+              payload: { action: input.payload.action, decision: "denied" as const, reasonCode: compensated ? "audit_terminal_write_failed" : "compensation_failed", changedFields: input.payload.changedFields ?? [] },
             }));
             audit.appendStrictMany(failedInputs);
           } catch { /* 终态尽力而为 */ }
-          return context.json(createApiError("PROVIDER_UNAVAILABLE", "安全审计不可用，高风险修改被拒绝"), 503);
+          return context.json(createApiError("PROVIDER_UNAVAILABLE", compensated ? "安全审计不可用，高风险修改已回滚" : "安全审计不可用，高风险修改已回滚但补偿验证失败"), 503);
         }
       } else {
         agentStore.saveSettings(agentId, patch);

@@ -15,6 +15,8 @@ import { ModelService } from "../../src/runtime/model-service.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
 import { ObservabilityQuery } from "../../src/observability/observability-query.js";
+import { getCatalogEntry } from "../../src/observability/event-catalog.js";
+import { defaultObservabilityPreferences } from "../../src/contracts/preferences.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -756,5 +758,208 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
     const changedFields = JSON.parse(row.changed_fields_json) as string[];
     expect(changedFields).toContain("retentionStrength");
     expect(changedFields).not.toContain("status");
+  });
+});
+
+describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
+  // completed 终态审计失败的可注入 stub：started 接受，其余抛错
+  const terminalFailingAudit = () => ({
+    appendStrict: (input: { eventName: string }) => {
+      if (input.eventName.includes(".started")) return { kind: "accepted", eventId: "evt", rowId: 1 };
+      throw new Error("ledger full");
+    },
+    appendStrictMany: (inputs: Array<{ eventName: string }>) => {
+      if (inputs.every((item) => item.eventName.includes(".started"))) return inputs.map(() => ({ kind: "accepted", eventId: "evt", rowId: 1 }));
+      throw new Error("ledger full");
+    },
+  }) as unknown as AuditRecorder;
+
+  it("P0：Agent 创建 completed 审计失败 → 503 + Agent 被补偿删除（原实现 503 但 Agent 落盘）", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: terminalFailingAudit(),
+    });
+    const response = await app.request(`http://x/api/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "补偿创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
+    });
+    expect(response.status).toBe(503);
+    // 补偿验证：刚创建的 Agent 不存在（只剩 fixture 预建的 a1）
+    const agents = ctx.agentStore.list();
+    expect(agents).toHaveLength(1);
+    expect(agents.some((agent) => agent.identity.name === "补偿创建")).toBe(false);
+  });
+
+  it("P0：Session 创建 completed 审计失败 → 503 + Session 被补偿移除（原实现 500 但 Session 保留）", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: terminalFailingAudit(),
+    });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "补偿会话", cwd: process.cwd() }),
+    });
+    expect(response.status).toBe(503);
+    expect(ctx.sessionService.list()).toHaveLength(0);
+  });
+
+  it("P0：Agent 设置 completed 审计失败 → 503 + 设置恢复为原值（原实现 503 但修改仍落盘）", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: terminalFailingAudit(),
+    });
+    const response = await app.request(`http://x/api/agents/a1/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaultCwd: "C:\\work" }),
+    });
+    expect(response.status).toBe(503);
+    const settings = ctx.agentStore.getSettings("a1");
+    expect(settings.defaultCwd).toBeNull();
+  });
+
+  it("P0：偏好修改 completed 审计失败 → 503 + 偏好恢复为原值（原实现 400 但 diagnosticLevel 已改）", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit: terminalFailingAudit(),
+      preferencesStore,
+      paths: ctx.paths,
+      database: ctx.database,
+    });
+    const response = await app.request(`http://x/api/preferences/observability`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...defaultObservabilityPreferences(), diagnosticLevel: "error" }),
+    });
+    expect(response.status).toBe(503);
+    const saved = preferencesStore.get().observability;
+    expect(saved?.diagnosticLevel).not.toBe("error");
+  });
+
+  it("P1：三阶段生命周期可查询——同一 operationId 的 started+terminal 经 ObservabilityQuery 可辨识（不再依赖插入顺序）", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "生命周期会话", cwd: process.cwd() }),
+    });
+    expect(response.status).toBe(201);
+    const session = await response.json() as { id: string };
+    // 按 operationId 关联（sessionId 即操作 id），不依赖行顺序
+    const query = new ObservabilityQuery(ctx.database);
+    const page = query.queryAudit({ operationId: session.id }, null, 50);
+    const eventNames = page.items.map((row) => row.eventName).sort();
+    expect(eventNames).toEqual(["audit.session.workspace_bind.started", "audit.session.workspace_bound"]);
+    expect(page.items.every((row) => row.operationId === session.id)).toBe(true);
+    // 成功事件目录注册为 terminal（生命周期角色可校验）
+    const terminalEntry = getCatalogEntry("audit.session.workspace_bound");
+    expect(terminalEntry?.lifecycleRole).toBe("terminal");
+    expect(getCatalogEntry("audit.session.workspace_bind.started")?.lifecycleRole).toBe("started");
+  });
+
+  it("P1：绑定 Agent 的 Session 审计带 ownerAgentId → 按 Agent 归属查询可命中（原实现 NULL）", async () => {
+    const ctx = createContext();
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    });
+    const { app } = createServerApp({
+      agentStore: ctx.agentStore,
+      sessionService: ctx.sessionService,
+      audit,
+    });
+    const response = await app.request(`http://x/api/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "绑定会话", cwd: process.cwd(), agentId: "a1" }),
+    });
+    expect(response.status).toBe(201);
+    const session = await response.json() as { id: string };
+    const row = ctx.database.prepare(
+      "SELECT owner_agent_id FROM audit_events WHERE session_id = ? AND action = 'session.workspace.bound' ORDER BY id DESC LIMIT 1",
+    ).get(session.id) as { owner_agent_id: string | null };
+    expect(row.owner_agent_id).toBe("a1");
+    const query = new ObservabilityQuery(ctx.database);
+    const page = query.queryAudit({ ownerAgentId: "a1", sessionId: session.id }, null, 50);
+    expect(page.items.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("P1：event 遗忘回滚 target 为 memory_event（原实现误记为 memory_fact）", () => {
+    const ctx = createContext();
+    ctx.database.prepare(`
+      INSERT INTO memory_recalls (agent_id, session_id, recall_id, target_type, target_id, query_hash, layer, source_type, created_at)
+      VALUES ('a1', 's1', ?, 'fact', '0', 'q', 'facts', 'memory_recall', '2026-07-30T10:00:00.000Z')
+    `).run("recall-r6");
+    const eventStore = new MemoryEventStore(ctx.database);
+    const evt = eventStore.insertEvent({
+      id: "evt-r6-1", agentId: "a1", sessionId: "s1", branchRevision: "b1",
+      date: "2026-07-30", startedAt: "2026-07-30T10:00:00Z", endedAt: "2026-07-30T10:30:00Z",
+      summary: "回滚事件", topics: [], searchText: "回滚", messageCount: 3, toolCalls: 0,
+      durationSec: 1800, status: "active",
+    });
+    expect(evt).toBe(true);
+    const factStore = new MemoryFactStore(ctx.database);
+    const proposalStore = new MemoryProposalStore(ctx.database);
+    const policy = new MemoryPolicy({
+      factStore,
+      recallStore: new MemoryRecallStore(ctx.database),
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      eventStore,
+      settingsResolver: () => defaultMemoryAgentSettings(),
+    });
+    const audit = new AuditRecorder({
+      database: ctx.database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+    });
+    const applier = new ProposalApplication({
+      database: ctx.database,
+      proposalStore,
+      factStore,
+      eventStore,
+      journalStore: new MemoryJournalStore(ctx.database),
+      batchStore: new MemoryBatchStore(ctx.database),
+      watermarkStore: new MemoryWatermarkStore(ctx.database),
+      policy,
+      audit,
+    });
+    const forgetEvent = {
+      id: "p-r6-forget", agentId: "a1", runId: "run-r6", type: "forget" as const,
+      targetType: "event" as const, targetId: "evt-r6-1",
+      payload: { targetType: "event", targetId: "evt-r6-1", reason: "过时" },
+      evidenceRefs: ["session:s1"], reason: "过时事件", confidence: 0.9, status: "pending" as const,
+      createdAt: "2026-08-01T00:00:00Z",
+    };
+    applier.applyRun({ agentId: "a1", runId: "run-r6", proposals: [forgetEvent] });
+    applier.rollbackRun(
+      { agentId: "a1", runId: "run-r6" },
+      { actor: { kind: "user", id: "web" }, executor: { kind: "service", id: "agent-server" } },
+    );
+    const row = ctx.database.prepare(
+      "SELECT target_kind, target_id FROM audit_events WHERE action = 'memory.proposal.reverted'",
+    ).get() as { target_kind: string | null; target_id: string | null };
+    expect(row.target_kind).toBe("memory_event");
+    expect(row.target_id).toBe("evt-r6-1");
+    expect(eventStore.getById("evt-r6-1")?.status).toBe("active");
   });
 });

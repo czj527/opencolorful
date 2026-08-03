@@ -237,8 +237,8 @@ describe("migration v7（记忆 Agent 审批与优先级）", () => {
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(8);
-    expect(CURRENT_SCHEMA_VERSION).toBe(8);
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
+    expect(CURRENT_SCHEMA_VERSION).toBe(9);
     const tables = tableNames(database);
     expect(tables).toContain("memory_mutation_proposals");
     expect(tables).toContain("activity_events");
@@ -312,7 +312,7 @@ describe("migration v8（Phase 11 可观测性）", () => {
     // 重新打开 → 触发升级到 v8
     const reopened = openMetadataDatabase(paths.database);
     const version = reopened.prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").pluck().get() as number;
-    expect(version).toBe(8);
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
     // Phase 10.5 数据保留
     const fact = reopened.prepare("SELECT fact FROM memory_facts WHERE id = ?").get(factId) as { fact: string };
     expect(fact.fact).toBe("v7 事实");
