@@ -1,6 +1,8 @@
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 
 import { THINKING_LEVELS, TOOL_MODES, type ThinkingLevel, type ToolMode } from "./session-settings.js";
+import { MemoryAgentSettingsSchema, defaultMemoryAgentSettings, type MemoryAgentSettings } from "./memory.js";
+import { Value } from "typebox/value";
 
 /**
  * 全局偏好文档。Phase 4 起作为新建 Session 的默认值来源和 Web 布局持久化载体。
@@ -10,9 +12,43 @@ import { THINKING_LEVELS, TOOL_MODES, type ThinkingLevel, type ToolMode } from "
  * - 读取时忽略未知字段，写回时只保留合法字段；
  * - 任何 API 响应都不包含凭据。
  */
+/** 可观测性全局默认（Phase 11 §十：级别、保留期、大小上限；diagnostic 磁盘预算 500MB） */
+export const ObservabilityPreferencesSchema = Type.Object(
+  {
+    diagnosticLevel: Type.Union([
+      Type.Literal("trace"), Type.Literal("debug"), Type.Literal("info"),
+      Type.Literal("warn"), Type.Literal("error"), Type.Literal("fatal"),
+    ]),
+    diagnosticRetentionDays: Type.Object({
+      debug: Type.Integer({ minimum: 1, maximum: 60 }),
+      main: Type.Integer({ minimum: 1, maximum: 365 }),
+    }),
+    diagnosticFileSizeBytes: Type.Integer({ minimum: 1_048_576, maximum: 104_857_600 }),
+    diagnosticDiskBudgetBytes: Type.Integer({ minimum: 10_485_760, maximum: 10_737_418_240 }),
+    activityRetentionDays: Type.Object({
+      routine: Type.Integer({ minimum: 7, maximum: 730 }),
+      notable: Type.Integer({ minimum: 30, maximum: 3650 }),
+    }),
+    emergencySpoolBudgetBytes: Type.Integer({ minimum: 1_048_576, maximum: 1_073_741_824 }),
+  },
+  { additionalProperties: false },
+);
+export type ObservabilityPreferences = Static<typeof ObservabilityPreferencesSchema>;
+
+export function defaultObservabilityPreferences(): ObservabilityPreferences {
+  return {
+    diagnosticLevel: "info",
+    diagnosticRetentionDays: { debug: 7, main: 30 },
+    diagnosticFileSizeBytes: 10 * 1024 * 1024,
+    diagnosticDiskBudgetBytes: 500 * 1024 * 1024,
+    activityRetentionDays: { routine: 180, notable: 730 },
+    emergencySpoolBudgetBytes: 128 * 1024 * 1024,
+  };
+}
+
 export const PreferencesDocumentSchema = Type.Object(
   {
-    version: Type.Literal(1),
+    version: Type.Literal(2),
     defaults: Type.Object({
       model: Type.Union([
         Type.Object({ providerId: Type.String(), modelId: Type.String() }),
@@ -39,6 +75,10 @@ export const PreferencesDocumentSchema = Type.Object(
       showThinking: Type.Boolean(),
       timelineVisible: Type.Optional(Type.Boolean()),
     }),
+    // Phase 10.5：全局记忆默认（per-Agent settings.json 的 memory 段可覆盖）
+    memory: Type.Optional(MemoryAgentSettingsSchema),
+    // Phase 11：可观测性全局默认（级别/保留/预算）
+    observability: Type.Optional(ObservabilityPreferencesSchema),
   },
   { additionalProperties: false },
 );
@@ -71,10 +111,12 @@ export interface AppearancePreferences {
 }
 
 export interface PreferencesDocument {
-  readonly version: 1;
+  readonly version: 2;
   readonly defaults: DefaultsPreferences;
   readonly layout: LayoutPreferences;
   readonly appearance: AppearancePreferences;
+  readonly memory?: MemoryAgentSettings;
+  readonly observability?: ObservabilityPreferences;
 }
 
 const LEFT_MIN = 200;
@@ -86,7 +128,7 @@ const REDUCED_MOTION_VALUES = ["system", "on", "off"] as const;
 
 export function defaultPreferences(): PreferencesDocument {
   return {
-    version: 1,
+    version: 2,
     defaults: {
       model: null,
       thinkingLevel: "medium",
@@ -107,6 +149,7 @@ export function defaultPreferences(): PreferencesDocument {
       showThinking: true,
       timelineVisible: true,
     },
+    observability: defaultObservabilityPreferences(),
   };
 }
 
@@ -205,14 +248,39 @@ function normalizeAppearance(value: unknown, fallback: AppearancePreferences): A
  * 把任意（可能来自外部或损坏文件的）输入归一化为合法的偏好文档。
  * 忽略未知字段，对越界值做 clamp 或回退，保证返回值始终满足 schema。
  */
+/**
+ * 把任意（可能来自外部或损坏文件的）输入归一化为合法的偏好文档。
+ * v1 → v2 迁移：补 observability 默认段，其余字段原样归一化；未知字段忽略。
+ */
 export function normalizePreferences(value: unknown): PreferencesDocument {
   const fallback = defaultPreferences();
   if (!isObject(value)) return { ...fallback };
 
+  const memory = normalizeMemorySettings(value.memory);
+  // v1 → v2 迁移：observability 缺失时补默认段（Phase 11 保证新字段始终存在）
+  const observability = normalizeObservabilitySettings(value.observability) ?? { ...defaultObservabilityPreferences() };
   return {
-    version: 1,
+    version: 2,
     defaults: normalizeDefaults(value.defaults, fallback.defaults),
     layout: normalizeLayout(value.layout, fallback.layout),
     appearance: normalizeAppearance(value.appearance, fallback.appearance),
+    ...(memory !== undefined ? { memory } : {}),
+    observability,
   };
+}
+
+/** 可观测性设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */
+function normalizeObservabilitySettings(value: unknown): ObservabilityPreferences | undefined {
+  if (value === undefined) return undefined;
+  return Value.Check(ObservabilityPreferencesSchema, value)
+    ? (value as ObservabilityPreferences)
+    : { ...defaultObservabilityPreferences() };
+}
+
+/** 记忆设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */
+function normalizeMemorySettings(value: unknown): MemoryAgentSettings | undefined {
+  if (value === undefined) return undefined;
+  return Value.Check(MemoryAgentSettingsSchema, value)
+    ? (value as MemoryAgentSettings)
+    : { ...defaultMemoryAgentSettings() };
 }

@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 
 import { SandboxCapabilitiesSchema } from "./sandbox.js";
+import { MemoryAgentSettingsSchema } from "./memory.js";
 
 /**
  * Agent 运行设置。独立于身份与底色，存放可变运行配置。
@@ -22,6 +23,8 @@ export const AgentSettingsV2Schema = Type.Object(
     version: Type.Literal(2),
     defaultCwd: Type.Union([Type.String(), Type.Null()]),
     sandbox: Type.Optional(SandboxCapabilitiesSchema),
+    // Phase 10.5：记忆整理与强度设置（可选；缺失时用全局 preferences.memory 默认）
+    memory: Type.Optional(MemoryAgentSettingsSchema),
     updatedAt: Type.String(),
   },
   { additionalProperties: false },

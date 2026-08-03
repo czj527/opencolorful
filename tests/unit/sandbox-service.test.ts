@@ -5,36 +5,76 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AgentSettingsV2 } from "../../src/contracts/agent-settings.js";
 import { defaultAgentSettings } from "../../src/contracts/agent-settings.js";
-import type {
-  SandboxDeniedPayload,
-  SandboxPreflightDeniedPayload,
-} from "../../src/contracts/sandbox.js";
 import { SandboxService } from "../../src/sandbox/sandbox-service.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { instrument } from "../../src/observability/instrument.js";
+import type { ProducerContext } from "../../src/contracts/observability.js";
 
 const platformHome = path.join(os.homedir(), ".opencolorful");
 const agentHomeDir = path.join(platformHome, "agents", "test-agent-svc");
+
+const producer: ProducerContext = {
+  component: "unit-test",
+  processType: "server",
+  processId: "1",
+  bootId: "boot-test",
+  appVersion: "0.0.0-test",
+  hostPlatform: "win32",
+};
+
+const temporaryDirectories: string[] = [];
+const openDatabases: Array<import("better-sqlite3").Database> = [];
 
 function makeAgent(overrides: Partial<AgentSettingsV2> = {}): AgentSettingsV2 {
   return { ...defaultAgentSettings(), ...overrides };
 }
 
-function tempAuditPath(): string {
-  return path.join(os.tmpdir(), `ocf-test-audit-${Date.now()}.jsonl`);
+function makeContext(): { db: ReturnType<typeof openMetadataDatabase> } {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "t5-sandbox-"));
+  temporaryDirectories.push(directory);
+  const db = openMetadataDatabase(path.join(directory, "metadata.db"));
+  openDatabases.push(db);
+  instrument.init(new ObservabilityContext({
+    database: db,
+    producer,
+    logsRoot: path.join(directory, "logs"),
+    spoolRoot: path.join(directory, "spool"),
+  }));
+  return { db };
 }
+
+function makeService(agentId: string, sessionId?: string): SandboxService {
+  return SandboxService.create({
+    agentSettings: makeAgent({ defaultCwd: path.join(os.homedir(), "projects", "app") }),
+    agentId,
+    agentHomeDir,
+    platformHome,
+    ...(sessionId !== undefined ? { sessionId } : {}),
+  });
+}
+
+afterEach(() => {
+  instrument.reset();
+  for (const db of openDatabases.splice(0)) {
+    try { db.close(); } catch { /* ignore */ }
+  }
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+});
 
 describe("SandboxService", () => {
   // ── 1. create() 为有 defaultCwd 的 Agent 生成有效的 SandboxService ──
   it("create() produces a valid SandboxService for an agent with defaultCwd", () => {
     const cwd = path.join(os.homedir(), "projects", "my-app");
     const agent = makeAgent({ defaultCwd: cwd });
-    const auditPath = tempAuditPath();
 
     const svc = SandboxService.create({
       agentSettings: agent,
       agentId: "agent-1",
       agentHomeDir,
       platformHome,
-      auditLogPath: auditPath,
     });
 
     expect(svc).toBeInstanceOf(SandboxService);
@@ -49,14 +89,12 @@ describe("SandboxService", () => {
   // ── 2. create() 为无 defaultCwd 的 Agent 也能生成（降级处理）────────
   it("create() works for an agent without defaultCwd (degraded)", () => {
     const agent = makeAgent({ defaultCwd: null });
-    const auditPath = tempAuditPath();
 
     const svc = SandboxService.create({
       agentSettings: agent,
       agentId: "agent-2",
       agentHomeDir,
       platformHome,
-      auditLogPath: auditPath,
     });
 
     expect(svc).toBeInstanceOf(SandboxService);
@@ -68,198 +106,110 @@ describe("SandboxService", () => {
     expect(result.allowed).toBe(false);
   });
 
-  // ── 3. logDenied() 写入 auditLogPath 一行 JSON（用临时目录）─────────
-  it("logDenied() appends one JSON line to the audit log", () => {
-    const auditPath = tempAuditPath();
-    const agent = makeAgent({ defaultCwd: path.join(os.homedir(), "projects", "app") });
-    const svc = SandboxService.create({
-      agentSettings: agent,
-      agentId: "agent-3",
-      agentHomeDir,
-      platformHome,
-      auditLogPath: auditPath,
-      sessionId: "session-3",
-    });
+  // ── 3. recordDenied() → sandbox.path.denied Activity + audit 镜像 ──
+  it("recordDenied() writes sandbox.path.denied activity + audit mirror", () => {
+    const { db } = makeContext();
+    const svc = makeService("agent-3", "session-3");
 
-    const payload: SandboxDeniedPayload = {
-      operation: "write",
-      path: "/etc/passwd",
+    svc.recordDenied("write", "/etc/passwd", {
+      allowed: false,
+      canonicalPath: "/etc/passwd",
       level: "READ_ONLY",
       required: "READ_WRITE",
       reason: "Access denied by default policy",
-      agentId: "agent-3",
-    };
+    });
 
-    svc.logDenied(payload);
-
-    // 读取日志文件并验证
-    const content = fs.readFileSync(auditPath, "utf-8").trim();
-    expect(content).toBeTruthy();
-
-    const entry = JSON.parse(content);
-    expect(entry.type).toBe("sandbox.denied");
-    expect(entry.agentId).toBe("agent-3");
-    expect(entry.sessionId).toBe("session-3");
-    expect(entry.eventId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(entry.operation).toBe("write");
-    expect(entry.path).toBeDefined();
-    expect(entry.level).toBe("READ_ONLY");
-    expect(entry.required).toBe("READ_WRITE");
-    expect(entry.reason).toBeDefined();
-    expect(entry.timestamp).toBeDefined();
-    // 应为 ISO 8601 格式
-    expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    const row = db.prepare(
+      "SELECT event_name, status, owner_agent_id, session_id, actor_id, payload_json FROM activity_events WHERE event_name = 'sandbox.path.denied'",
+    ).get() as Record<string, unknown>;
+    expect(row).toBeDefined();
+    expect(row["status"]).toBe("denied");
+    expect(row["owner_agent_id"]).toBe("agent-3");
+    expect(row["session_id"]).toBe("session-3");
+    expect(row["actor_id"]).toBe("agent-3");
+    const payload = JSON.parse(String(row["payload_json"])) as { summaryCode: string; attributes: { operation: string; level: string; required: string } };
+    expect(payload.summaryCode).toBe("sandbox_path_denied");
+    expect(payload.attributes).toMatchObject({ operation: "write", level: "READ_ONLY", required: "READ_WRITE" });
+    // 路径/理由绝不落盘
+    expect(JSON.stringify(row)).not.toContain("/etc/passwd");
+    expect(JSON.stringify(row)).not.toContain("Access denied");
+    // audit 镜像同库
+    const mirror = db.prepare("SELECT action FROM audit_events").get() as { action: string };
+    expect(mirror.action).toBe("audit.sandbox.path_denied");
   });
 
-  // ── 4. logPreflightDenied() 正确写入 ────────────────────────────────
-  it("logPreflightDenied() correctly writes a preflight denial entry", () => {
-    const auditPath = tempAuditPath();
-    const agent = makeAgent();
-    const svc = SandboxService.create({
-      agentSettings: agent,
-      agentId: "agent-4",
-      agentHomeDir,
-      platformHome,
-      auditLogPath: auditPath,
-    });
+  // ── 4. recordPreflightDenied() → sandbox.command.denied + 镜像 ─────
+  it("recordPreflightDenied() writes sandbox.command.denied + audit mirror", () => {
+    const { db } = makeContext();
+    const svc = makeService("agent-4");
 
-    const payload: SandboxPreflightDeniedPayload = {
-      command: "rm -rf /important",
-      pattern: "rm*",
-      agentId: "agent-4",
-    };
+    svc.recordPreflightDenied("rm -rf /important", "rm*");
 
-    svc.logPreflightDenied(payload);
-
-    const content = fs.readFileSync(auditPath, "utf-8").trim();
-    expect(content).toBeTruthy();
-
-    const entry = JSON.parse(content);
-    expect(entry.type).toBe("sandbox.preflight-denied");
-    expect(entry.agentId).toBe("agent-4");
-    expect(entry.command).toBeDefined();
-    expect(entry.pattern).toBeDefined();
-    expect(entry.timestamp).toBeDefined();
-    expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    const row = db.prepare(
+      "SELECT event_name, status, payload_json FROM activity_events WHERE event_name = 'sandbox.command.denied'",
+    ).get() as Record<string, unknown>;
+    expect(row).toBeDefined();
+    expect(row["status"]).toBe("denied");
+    const payload = JSON.parse(String(row["payload_json"])) as { attributes: { pattern: string } };
+    expect(payload.attributes.pattern).toBe("rm*");
+    // 命令内容绝不落盘
+    expect(JSON.stringify(row)).not.toContain("rm -rf");
+    const mirror = db.prepare("SELECT action FROM audit_events").get() as { action: string };
+    expect(mirror.action).toBe("audit.sandbox.command_denied");
   });
 
-  // ── 5. 写入失败不崩溃（父路径是文件）──────────────────────────────
-  it("logDenied() does not throw when write fails", () => {
-    const agent = makeAgent();
-    const blockingFile = tempAuditPath();
-    fs.writeFileSync(blockingFile, "not-a-directory");
-    const invalidPath = path.join(blockingFile, "should-fail.jsonl");
-
-    const svc = SandboxService.create({
-      agentSettings: agent,
-      agentId: "agent-5",
-      agentHomeDir,
-      platformHome,
-      auditLogPath: invalidPath,
-    });
-
-    const payload: SandboxDeniedPayload = {
-      operation: "delete",
-      path: "/etc/shadow",
-      level: "BLOCKED",
-      required: "FULL",
-      reason: "SSH keys directory is blocked",
-      agentId: "agent-5",
-    };
-
-    try {
-      expect(() => svc.logDenied(payload)).not.toThrow();
-    } finally {
-      fs.rmSync(blockingFile, { force: true });
-    }
+  // ── 5. 未初始化 instrument → no-op 不抛错 ──────────────────────────
+  it("denial recording is a no-op without an initialized context", () => {
+    instrument.reset();
+    const svc = makeService("agent-5");
+    expect(() => {
+      svc.recordDenied("delete", "/etc/shadow", {
+        allowed: false,
+        canonicalPath: "/etc/shadow",
+        level: "BLOCKED",
+        required: "FULL",
+        reason: "blocked",
+      });
+      svc.recordPreflightDenied("dangerous", "danger*");
+    }).not.toThrow();
   });
 
-  // ── 6. 多条日志正确追加（不覆盖）────────────────────────────────────
-  it("appends multiple log entries without overwriting", () => {
-    const auditPath = tempAuditPath();
-    const agent = makeAgent({ defaultCwd: path.join(os.homedir(), "projects", "multi") });
-    const svc = SandboxService.create({
-      agentSettings: agent,
-      agentId: "agent-6",
-      agentHomeDir,
-      platformHome,
-      auditLogPath: auditPath,
-    });
+  // ── 6. 多条拒绝正确追加（每条独立操作/事件）────────────────────────
+  it("appends multiple denial events without collapsing", () => {
+    const { db } = makeContext();
+    const svc = makeService("agent-6");
 
-    svc.logDenied({
-      operation: "write",
-      path: "/first",
-      level: "BLOCKED",
-      required: "READ_WRITE",
-      reason: "First denial",
-      agentId: "agent-6",
-    });
+    svc.recordDenied("write", "/first", { allowed: false, canonicalPath: "/first", level: "BLOCKED", required: "READ_WRITE", reason: "First" });
+    svc.recordDenied("read", "/second", { allowed: false, canonicalPath: "/second", level: "BLOCKED", required: "READ_ONLY", reason: "Second" });
+    svc.recordPreflightDenied("dangerous", "danger*");
 
-    svc.logDenied({
-      operation: "read",
-      path: "/second",
-      level: "BLOCKED",
-      required: "READ_ONLY",
-      reason: "Second denial",
-      agentId: "agent-6",
-    });
-
-    svc.logPreflightDenied({
-      command: "dangerous",
-      pattern: "danger*",
-      agentId: "agent-6",
-    });
-
-    const lines = fs.readFileSync(auditPath, "utf-8").trim().split("\n");
-    expect(lines.length).toBe(3);
-
-    const entries = lines.map((line) => JSON.parse(line));
-    expect(entries[0].type).toBe("sandbox.denied");
-    expect(entries[0].reason).toContain("First denial");
-    expect(entries[1].type).toBe("sandbox.denied");
-    expect(entries[1].reason).toContain("Second denial");
-    expect(entries[2].type).toBe("sandbox.preflight-denied");
+    const rows = db.prepare("SELECT event_name FROM activity_events ORDER BY id").all() as Array<{ event_name: string }>;
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "sandbox.path.denied",
+      "sandbox.path.denied",
+      "sandbox.command.denied",
+    ]);
   });
 
-  // ── 7. API Key 敏感信息在日志中脱敏 ─────────────────────────────────
-  it("sanitizes API keys and sensitive data in log entries", () => {
-    const auditPath = tempAuditPath();
-    const agent = makeAgent();
-    const svc = SandboxService.create({
-      agentSettings: agent,
-      agentId: "agent-7",
-      agentHomeDir,
-      platformHome,
-      auditLogPath: auditPath,
-    });
+  // ── 7. 敏感信息（URL/apiKey/Bearer）不入 Activity ──────────────────
+  it("sanitizes API keys and sensitive data (never stored at all)", () => {
+    const { db } = makeContext();
+    const svc = makeService("agent-7");
 
-    // 构造一个包含敏感信息的 payload（模拟恶意路径或理由）
-    svc.logDenied({
-      operation: "read",
-      path: "https://evil.com?api_key=sk-abc123def456ghi789",
+    svc.recordDenied("read", "https://evil.com?api_key=sk-abc123def456ghi789", {
+      allowed: false,
+      canonicalPath: "https://evil.com?api_key=sk-abc123def456ghi789",
       level: "BLOCKED",
       required: "READ_ONLY",
       reason: "Authorization: Bearer secret-token-12345 in request",
-      agentId: "agent-7",
     });
 
-    const content = fs.readFileSync(auditPath, "utf-8").trim();
-    const entry = JSON.parse(content);
-
-    // 整个 URL（含内嵌 API key）被 URL_PATTERN 率先匹配，整体替换为 [URL]
-    expect(entry.path).not.toContain("sk-abc123def456ghi789");
-    expect(entry.path).not.toContain("api_key");
-    expect(entry.path).not.toContain("evil.com");
-    expect(entry.path).toBe("[URL]");
-
-    // Authorization header 应被替换为 [AUTH_HEADER]
-    expect(entry.reason).not.toContain("Bearer secret-token-12345");
-    expect(entry.reason).toContain("[AUTH_HEADER]");
-  });
-
-  // ── cleanup ────────────────────────────────────────────────────────
-  afterEach(() => {
-    // 清理可能遗留的临时文件（不抛异常）
-    // 注意：这无法精确匹配所有测试创建的路径，作为尽力清理
+    const serialized = JSON.stringify(db.prepare("SELECT * FROM activity_events").all());
+    // 敏感内容完全不进入存储（路径/理由/URL 一律剔除）
+    expect(serialized).not.toContain("sk-abc123def456ghi789");
+    expect(serialized).not.toContain("api_key");
+    expect(serialized).not.toContain("evil.com");
+    expect(serialized).not.toContain("Bearer");
+    expect(serialized).not.toContain("secret-token");
   });
 });

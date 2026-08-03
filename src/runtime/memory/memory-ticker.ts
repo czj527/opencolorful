@@ -14,6 +14,7 @@ import type { EventIndexer } from "./event-indexer.js";
 import type { MemoryCompilePipeline } from "./compile-pipeline.js";
 import { getLogicalDate } from "./memory-files.js";
 import { readSessionBranchSnapshot } from "./jsonl-branch-reader.js";
+import { instrument } from "../../observability/instrument.js";
 
 export interface MemoryTickerOptions {
   readonly idleMs?: number;
@@ -39,6 +40,8 @@ export interface MemoryTickerDeps {
   readonly options?: MemoryTickerOptions;
   /** turn.completed 后的去抖窗口；默认 10 轮触发一次 */
   readonly turnsPerSummary?: number;
+  /** per-Agent 记忆设置（settings.turnsPerSummary 优先级高于全局 turnsPerSummary） */
+  readonly settingsResolver?: (agentId: string) => { readonly turnsPerSummary: number };
 }
 
 export type MemoryTickerRunStatus = "updated" | "degraded" | "failed" | "skipped";
@@ -101,7 +104,7 @@ export class MemoryTicker {
     if (!view?.agentId || view.archived) return;
     const count = (this.turnCounts.get(event.sessionId) ?? 0) + 1;
     this.turnCounts.set(event.sessionId, count);
-    const threshold = this.deps.turnsPerSummary ?? 10;
+    const threshold = this.deps.settingsResolver?.(view.agentId).turnsPerSummary ?? this.deps.turnsPerSummary ?? 10;
     if (count % threshold === 0) {
       this.enqueue(view.agentId, event.sessionId, "turn.completed");
     }
@@ -155,6 +158,19 @@ export class MemoryTicker {
   }
 
   private async process(
+    agentId: string,
+    sessionId: string,
+    reason: string,
+    priority = 0,
+  ): Promise<MemoryTickerRunResult> {
+    // Phase 11 T5：后台新根 trace（per-agent tail 可能继承触发方 ALS，必须隔离）
+    return instrument.runAsBackground(
+      { operationId: `ticker-${agentId}-${sessionId}-${Date.now()}` },
+      () => this.processInner(agentId, sessionId, reason, priority),
+    );
+  }
+
+  private async processInner(
     agentId: string,
     sessionId: string,
     reason: string,
@@ -215,6 +231,15 @@ export class MemoryTicker {
         sourceEndEntry: endEntry,
         priority,
       }, "sealed");
+      // Phase 11 T5：批次封存（不含记忆正文，只记 id 与范围）
+      instrument.activity({
+        eventName: "memory.batch.sealed",
+        actor: { kind: "scheduler", id: "memory-ticker" },
+        executor: { kind: "memory_agent", id: agentId },
+        scope: { ownerAgentId: agentId, sessionId },
+        target: { kind: "memory_batch", id: batchId },
+        payload: { summaryCode: "memory_batch_sealed", attributes: { reason: reason.slice(0, 64) } },
+      });
     }
 
     // 每 10 轮/封存后：重新编译 today.md + assemble memory.md（LLM 不可用时

@@ -5,6 +5,7 @@ import type { RuntimePaths } from "../../config/paths.js";
 import type { AgentStore } from "../../config/agent-store.js";
 import { createApiError, type ApiError } from "../../contracts/api-error.js";
 import type { ToolMode } from "../../contracts/session-settings.js";
+import { defaultMemoryAgentSettings, type MemoryAgentSettings } from "../../contracts/memory.js";
 import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
@@ -31,6 +32,12 @@ export interface MessageRoutesOptions {
   readonly modelService?: ModelService;
   readonly agentStore?: AgentStore;
   readonly database?: Database.Database;
+  /**
+   * 记忆设置解析（评审 P1#7b：injectBudgetChars 必须接真实设置）。
+   * 与 start.ts resolveMemorySettings 同一优先级：per-Agent 覆盖 → 全局默认 → 平台默认。
+   * 未提供时按平台默认（buildMemoryInjectionBlock 的默认预算）。
+   */
+  readonly memorySettingsResolver?: (agentId: string) => MemoryAgentSettings;
 }
 
 // ensureRuntime 的失败结果：路由层直接转成对应状态码
@@ -64,12 +71,19 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       parts.push(`相处边界: ${baseColor.innerSetting}`);
     }
 
-    // 记忆注入：在 persona 之后追加
+    // 记忆注入：在 persona 之后追加（预算取自真实记忆设置，评审 P1#7b）
     if (paths && database) {
       const memoryDir = path.join(paths.agents, agentId, "memory");
       const pinnedStore = new PinnedMemoryStore(database);
       const pinned = pinnedStore.listByAgent(agentId);
-      const injection = buildMemoryInjectionBlock({ memoryDir, pinned });
+      const memorySettings = options.memorySettingsResolver !== undefined
+        ? options.memorySettingsResolver(agentId)
+        : defaultMemoryAgentSettings();
+      const injection = buildMemoryInjectionBlock({
+        memoryDir,
+        pinned,
+        budgetChars: memorySettings.injectBudgetChars,
+      });
       if (injection) {
         parts.push(injection.block);
       }
@@ -167,6 +181,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           modelService,
           resolveProviderId: selectedModel.providerId,
           resolveModelId: selectedModel.modelId,
+          ...(view.agentId != null ? { agentId: view.agentId } : {}),
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
@@ -193,6 +208,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           faux: { response: "已收到您的消息", tokensPerSecond: 20 },
           publish: () => {},
           sessionHandle: session,
+          ...(view.agentId != null ? { agentId: view.agentId } : {}),
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),

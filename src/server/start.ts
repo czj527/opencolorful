@@ -14,6 +14,16 @@ import { SessionIndex } from "../storage/session-index.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
+import { MemoryAgentResolver } from "../runtime/memory/resolver.js";
+import { MemoryAgentScheduler } from "../runtime/memory/scheduler.js";
+import { MemoryProposalStore } from "../storage/memory/proposal-store.js";
+import { MemoryJournalStore } from "../storage/memory/journal-store.js";
+import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
+import { ProposalApplication } from "../runtime/memory/proposal-application.js";
+import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { defaultObservabilityPreferences } from "../contracts/preferences.js";
+import { MemoryRecallStore } from "../storage/memory/recall-store.js";
+import { ActivationUpdater } from "../runtime/memory/activation-updater.js";
 import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
 import { EventIndexer } from "../runtime/memory/event-indexer.js";
 import { MemoryCompilePipeline } from "../runtime/memory/compile-pipeline.js";
@@ -22,6 +32,8 @@ import { MemoryBatchStore } from "../storage/memory/batch-store.js";
 import { MemoryDailyStateStore, MemoryWatermarkStore, SchedulerStateStore } from "../storage/memory/recovery-store.js";
 import { SessionSummaryStore } from "../storage/memory/summary-store.js";
 import { MemoryEventStore } from "../storage/memory/event-store.js";
+import { MemoryFactStore } from "../storage/memory/fact-store.js";
+import path from "node:path";
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -30,6 +42,9 @@ import {
   writeRuntimeState,
 } from "./runtime-state.js";
 import { ClientRegistry } from "./ws/client-registry.js";
+import { ObservabilityContext } from "../observability/observability-context.js";
+import { instrument } from "../observability/instrument.js";
+import { createBootId } from "../observability/trace-context.js";
 
 export interface StartServerOptions {
   readonly host: string;
@@ -79,7 +94,7 @@ export async function startForegroundServer(options: StartServerOptions): Promis
     });
 
     productionResources = options.appOptions === undefined
-      ? await buildProductionResources(options.paths)
+      ? await buildProductionResources(options.paths, options.version)
       : undefined;
     const appOptions = options.appOptions ?? productionResources!.appOptions;
     const { app, nodeWebSocket } = createServerApp({
@@ -118,6 +133,8 @@ export async function startForegroundServer(options: StartServerOptions): Promis
       updatedAt: new Date().toISOString(),
     });
 
+    instrument.systemStarted({ durationMs: Date.now() - startedAt });
+
     let stopped = false;
     return {
       host: options.host,
@@ -127,11 +144,13 @@ export async function startForegroundServer(options: StartServerOptions): Promis
           return;
         }
         stopped = true;
+        instrument.systemStopping();
         try {
           appOptions.wsRegistry?.closeAll();
           await closeServer(server!);
         } finally {
           try {
+            instrument.systemStopped();
             productionResources?.dispose();
           } finally {
             markServerStopped(options.paths);
@@ -143,6 +162,11 @@ export async function startForegroundServer(options: StartServerOptions): Promis
   } catch (error) {
     if (server !== undefined) await closeServer(server).catch(() => {});
     try {
+      // 崩溃前尽力落盘（buildProductionResources 已 init instrument）
+      if (instrument.isEnabled()) {
+        instrument.systemCrashed(error instanceof Error ? error : String(error));
+        instrument.flush();
+      }
       productionResources?.dispose();
     } finally {
       markServerStopped(options.paths);
@@ -152,12 +176,67 @@ export async function startForegroundServer(options: StartServerOptions): Promis
   }
 }
 
-async function buildProductionResources(paths: RuntimePaths): Promise<ProductionResources> {
-  const database = openMetadataDatabase(paths.database);
+async function buildProductionResources(paths: RuntimePaths, version: string): Promise<ProductionResources> {
+  let dbMigrationReport: { from: number; to: number } | undefined;
+  const database = openMetadataDatabase(paths.database, (report) => {
+    dbMigrationReport = report;
+  });
   try {
+    // 评审 P1-7：偏好必须先于 ObservabilityContext 读取——
+    // 日志级别/文件大小/磁盘预算/保留期/spool 预算全部来自 observability 偏好
+    const preferencesStore = new PreferencesStore(paths.preferences);
+    const observabilityPrefs = preferencesStore.get().observability ?? defaultObservabilityPreferences();
+    // ── Phase 11：可观测性上下文（migration 之后、业务资源之前）──
+    const observability = new ObservabilityContext({
+      database,
+      producer: {
+        component: "agent-server",
+        processType: "server",
+        processId: String(process.pid),
+        bootId: createBootId(version),
+        appVersion: version,
+        hostPlatform: process.platform,
+      },
+      logsRoot: path.join(paths.logs, "runtime", "server"),
+      spoolRoot: path.join(paths.logs, "emergency"),
+      logger: {
+        minLevel: observabilityPrefs.diagnosticLevel,
+        fileSizeBytes: observabilityPrefs.diagnosticFileSizeBytes,
+        diskBudgetBytes: observabilityPrefs.diagnosticDiskBudgetBytes,
+        debugRetentionDays: observabilityPrefs.diagnosticRetentionDays.debug,
+        mainRetentionDays: observabilityPrefs.diagnosticRetentionDays.main,
+      },
+      spoolBudgetBytes: observabilityPrefs.emergencySpoolBudgetBytes,
+    });
+    instrument.init(observability);
+    const recovery = observability.startupRecovery();
+    observability.logger.enforceRetention();
+    instrument.systemStarting({ durationMs: 0 });
+    if (recovery.interrupted > 0 || recovery.spool.imported > 0) {
+      instrument.activity({
+        eventName: "system.recovery.completed",
+        status: "completed",
+        operationId: `recovery-${observability.getProducer().bootId}`,
+        actor: { kind: "system", id: "agent-server" },
+        executor: { kind: "service", id: "agent-server" },
+        payload: {
+          summaryCode: "system_recovery_completed",
+          attributes: {
+            interrupted: recovery.interrupted,
+            spoolImported: recovery.spool.imported,
+            quarantined: recovery.spool.quarantined,
+          },
+        },
+      });
+    }
+    instrument.storageDatabaseOpened();
+    if (dbMigrationReport !== undefined) {
+      instrument.storageMigrationCompleted(dbMigrationReport.from, dbMigrationReport.to);
+    }
     const sessionIndex = new SessionIndex(database);
     const providerStore = new ProviderStore(paths.providerSettings);
-    const modelService = await ModelService.create(paths, providerStore);
+    // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）
+    const modelService = await ModelService.create(paths, providerStore, observability.audit);
     // 记忆 ticker 在 sessionService 之后创建，archive 钩子用可变引用延迟接线
     let memoryTicker: MemoryTicker | undefined;
     const sessionService = new SessionService(
@@ -165,17 +244,17 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       sessionIndex,
       (sessionId) => memoryTicker?.onSessionArchived(sessionId),
     );
-    const preferencesStore = new PreferencesStore(paths.preferences);
+    // preferencesStore 已在可观测性初始化前创建（评审 P1-7）
     const agentStore = new AgentStore(paths.agents);
     // 启动时迁移旧 Agent 数据（去 type、profile.json→base-color.json、补 innerSetting）
     // 幂等、可恢复、单 agent 失败不阻塞其他
     const migrationReport = agentStore.migrate();
     if (migrationReport.failed > 0) {
       for (const failure of migrationReport.failures) {
-        console.error(
-          `[agent-migrate] ${failure.agentId} @ ${failure.stage}: ${failure.error}`,
-        );
+        instrument.agentMigrationFailed(failure.agentId, failure.error);
       }
+    } else {
+      instrument.agentMigrationCompleted("all");
     }
     const promptService = new PromptService();
     const folderPicker = createFolderPicker();
@@ -190,12 +269,25 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         return null;
       }
     });
-    // 工具型 LLM：取第一个已配置凭据的 Provider 及其第一个模型；
+    // 记忆设置生效链路：per-Agent 覆盖 → 全局默认 → 平台默认（P0-2：生产必须读真实设置）
+    const resolveMemorySettings = (agentId: string) => {
+      const global = preferencesStore.get().memory ?? defaultMemoryAgentSettings();
+      try {
+        const perAgent = agentStore.getSettings(agentId)?.memory;
+        if (perAgent !== undefined) return perAgent;
+      } catch { /* 读取失败用全局默认 */ }
+      return global;
+    };
+    // 工具型 LLM：按记忆设置解析 Provider/模型（utilityProviderId/utilityModel），
+    // 未配置时回退第一个有凭据的 Provider 及其第一个模型；
     // 无凭据/解析失败时抛错 → 各记忆组件走 degraded 路径（不阻塞对话）
-    const completeText = async (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
-      const provider = modelService.listProviders().find((p) => p.credentialConfigured);
+    const completeText = async (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
+      const settings = resolveMemorySettings(agentId);
+      let provider = modelService.listProviders().find((p) => p.credentialConfigured && p.providerId === settings.utilityProviderId);
+      provider = provider ?? modelService.listProviders().find((p) => p.credentialConfigured);
       if (provider === undefined) throw new Error("无可用 Provider 凭据");
-      const model = modelService.listModels().find((m) => m.providerId === provider.providerId);
+      let model = modelService.listModels().find((m) => m.providerId === provider.providerId && m.modelId === settings.utilityModel);
+      model = model ?? modelService.listModels().find((m) => m.providerId === provider.providerId);
       if (model === undefined) throw new Error("Provider 未配置模型");
       const resolved = modelService.resolveModel(provider.providerId, model.modelId);
       return completeUtilityTextForResolved(resolved, {
@@ -207,11 +299,13 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
 
     const summaryStore = new SessionSummaryStore(database);
     const watermarkStore = new MemoryWatermarkStore(database);
+    // 编译/滚动摘要属 agent-agnostic 工具型调用：走全局记忆设置（resolveMemorySettings("") 回退全局/默认）
+    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req);
     const compilePipeline = new MemoryCompilePipeline({
       summaryStore,
       dailyStateStore: new MemoryDailyStateStore(database),
       watermarkStore,
-      completeText,
+      completeText: utilityCompleteText,
     });
     const ticker = new MemoryTicker({
       replayStore,
@@ -222,16 +316,81 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
       batchStore: new MemoryBatchStore(database),
       watermarkStore,
       schedulerStore: new SchedulerStateStore(database),
-      rollingSummary: new RollingSummaryService({ summaryStore, watermarkStore, completeText }),
+      rollingSummary: new RollingSummaryService({ summaryStore, watermarkStore, completeText: utilityCompleteText }),
       eventIndexer: new EventIndexer({
         eventStore: new MemoryEventStore(database),
         watermarkStore,
       }),
       compilePipeline,
       agentsDir: paths.agents,
+      settingsResolver: (agentId) => ({ turnsPerSummary: resolveMemorySettings(agentId).turnsPerSummary }),
     });
     memoryTicker = ticker;
     ticker.start();
+
+    // ── Phase 10.5：记忆 Agent 整理（每日/每周窗口 + 高优先级 micro-seal）──
+    const memoryAgentResolver = new MemoryAgentResolver({
+      batchStore: new MemoryBatchStore(database),
+      journalStore: new MemoryJournalStore(database),
+      factStore: new MemoryFactStore(database),
+      eventStore: new MemoryEventStore(database),
+      recallStore: new MemoryRecallStore(database),
+      proposalStore: new MemoryProposalStore(database),
+      watermarkStore,
+      summaryStore,
+      application: new ProposalApplication({
+        database,
+        proposalStore: new MemoryProposalStore(database),
+        factStore: new MemoryFactStore(database),
+        eventStore: new MemoryEventStore(database),
+        journalStore: new MemoryJournalStore(database),
+        batchStore: new MemoryBatchStore(database),
+        watermarkStore,
+        // 评审 P0（第三轮）：记忆审批/遗忘/强度与事实修改同事务严格审计
+        audit: observability.audit,
+        policy: new MemoryPolicy({
+          factStore: new MemoryFactStore(database),
+          recallStore: new MemoryRecallStore(database),
+          journalStore: new MemoryJournalStore(database),
+          batchStore: new MemoryBatchStore(database),
+          eventStore: new MemoryEventStore(database),
+          settingsResolver: resolveMemorySettings,
+        }),
+      }),
+      settingsResolver: resolveMemorySettings,
+      completeText: async (agentId, req) => completeText(agentId, req),
+      sessionPathResolver: (sessionId) => {
+        const meta = sessionIndex.get(sessionId);
+        if (!meta) throw new Error(`Session 不存在: ${sessionId}`);
+        return meta.sessionPath;
+      },
+      agentsDir: paths.agents,
+      publish: (env) => replayStore.publish(env),
+      activationUpdater: new ActivationUpdater({
+        database,
+        factStore: new MemoryFactStore(database),
+        recallStore: new MemoryRecallStore(database),
+      }),
+      assertSessionReadable: (sessionPath, agentId) => {
+        const resolved = path.resolve(sessionPath);
+        const root = path.resolve(path.join(paths.agents, agentId, "sessions"));
+        if (resolved.startsWith(root + path.sep)) return;
+        throw new Error("Session 路径不在当前 Agent 的会话目录内");
+      },
+    });
+    const memoryAgentScheduler = new MemoryAgentScheduler({
+      replayStore,
+      sessionService,
+      promptService,
+      agentStore,
+      journalStore: new MemoryJournalStore(database),
+      batchStore: new MemoryBatchStore(database),
+      summaryStore,
+      schedulerStore: new SchedulerStateStore(database),
+      settingsResolver: resolveMemorySettings,
+      resolver: memoryAgentResolver,
+    });
+    memoryAgentScheduler.start();
     let disposed = false;
 
     return {
@@ -248,19 +407,36 @@ async function buildProductionResources(paths: RuntimePaths): Promise<Production
         wsPromptService: promptService,
         wsReplayStore: replayStore,
         database,
+        // 评审 P0-1：fail-closed 审计接入路由（沙箱策略/工作区/凭据）
+        audit: observability.audit,
         memoryFlushHook: (agentId) => memoryTicker?.requestFlush(agentId),
+        memoryAdmin: {
+          resolver: memoryAgentResolver,
+          application: memoryAgentResolver.application,
+          preferencesStore,
+          recallStore: new MemoryRecallStore(database),
+          scheduler: memoryAgentScheduler,
+          settingsResolver: resolveMemorySettings,
+        },
       },
       dispose() {
         if (disposed) return;
         disposed = true;
         memoryTicker.stop();
+        memoryAgentScheduler.stop();
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();
+        // Phase 11：日志 flush 必须在 DB 关闭之前（activity 已写完，logger 落盘）
+        instrument.flush();
         database.close();
       },
     };
   } catch (error) {
+    if (instrument.isEnabled()) {
+      instrument.systemCrashed(error instanceof Error ? error : String(error));
+      instrument.flush();
+    }
     database.close();
     throw error;
   }

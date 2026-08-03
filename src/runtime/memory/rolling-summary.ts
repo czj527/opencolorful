@@ -25,6 +25,7 @@ import {
   buildRollingSummaryPrompt,
 } from "./summary-prompts.js";
 import { sanitizeSensitiveText } from "../sanitize.js";
+import { instrument } from "../../observability/instrument.js";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -118,6 +119,39 @@ export class RollingSummaryService {
   }
 
   async maybeSummarize(input: {
+    agentId: string;
+    sessionId: string;
+    sessionPath: string;
+  }): Promise<SummaryRunResult> {
+    // Phase 11 T5：一次摘要 run = 一个 operation（后台 trace 由调用方 runAsBackground 提供）
+    const lifecycle = instrument.startLifecycle({
+      startEventName: "memory.summary.started",
+      actor: { kind: "scheduler", id: "memory-ticker" },
+      executor: { kind: "memory_agent", id: input.agentId },
+      scope: { ownerAgentId: input.agentId, sessionId: input.sessionId },
+      operationId: `summary-${input.agentId}-${input.sessionId}-${crypto.randomUUID().slice(0, 8)}`,
+      terminals: {
+        completed: "memory.summary.completed",
+        degraded: "memory.summary.degraded",
+        failed: "memory.summary.failed",
+      },
+    });
+    const result = await this.maybeSummarizeInner(input);
+    if (result.status === "failed") {
+      lifecycle.fail(result.reason);
+    } else if (result.status === "degraded") {
+      lifecycle.degraded(result.reason);
+    } else {
+      // updated / skipped 均为正常完成（skipped 附原因）
+      lifecycle.complete({
+        ...(result.status === "updated" ? { attributes: { branchRevision: result.branchRevision, messageCount: result.messageCount } } : {}),
+        ...(result.status === "skipped" ? { attributes: { skipped: result.reason } } : {}),
+      });
+    }
+    return result;
+  }
+
+  private async maybeSummarizeInner(input: {
     agentId: string;
     sessionId: string;
     sessionPath: string;

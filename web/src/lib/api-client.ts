@@ -1,15 +1,24 @@
 import type {
   AbortResponse,
+  ActivityPage,
+  ActivityQuery,
   AgentServerDiscovery,
   AgentSettings,
   AgentView,
   ApiError,
+  AuditPage,
+  AuditQuery,
   BaseColor,
   BaseColorTemplate,
+  DailyMetric,
+  DiagnosticTail,
+  ErrorGroup,
   HealthResponse,
   LogQuery,
   LogTail,
   ModelSummary,
+  ObservabilityHealthResponse,
+  ObservabilityPreferences,
   PickDirectoryResult,
   PreferencesDocument,
   PromptResponse,
@@ -17,6 +26,7 @@ import type {
   SessionSettings,
   SessionUsageResponse,
   SessionView,
+  TraceResponse,
   UsageSummaryResponse,
   SupervisorStatusResponse,
 } from "./types.js";
@@ -249,5 +259,105 @@ export class ApiClient {
   // Windows 调原生 FolderBrowserDialog；macOS/Linux 返回 501，前端回退手工输入
   async pickDirectory(): Promise<PickDirectoryResult> {
     return this.request("POST", "/api/directories/pick");
+  }
+
+  // --- Observability（Phase 11 统一可观测性，经 supervisor 代理到 Agent Server）---
+  // 健康摘要。Agent Server 未运行或可观测性未初始化时抛 ApiClientError（502/503）。
+  async getObservabilityHealth(): Promise<ObservabilityHealthResponse> {
+    return this.request("GET", "/api/observability/health");
+  }
+
+  // 活动时间线查询。cursor 为 `${recordedAt}|${id}`，limit 最大 200。
+  async queryActivity(filter?: ActivityQuery, cursor?: string | null, limit?: number): Promise<ActivityPage> {
+    const params = new URLSearchParams();
+    if (filter !== undefined) {
+      if (filter.from !== undefined) params.set("from", filter.from);
+      if (filter.to !== undefined) params.set("to", filter.to);
+      if (filter.ownerAgentId !== undefined) params.set("ownerAgentId", filter.ownerAgentId);
+      if (filter.sessionId !== undefined) params.set("sessionId", filter.sessionId);
+      if (filter.eventName !== undefined) params.set("eventName", filter.eventName);
+      if (filter.category !== undefined) params.set("category", filter.category);
+      if (filter.level !== undefined) params.set("level", filter.level);
+      if (filter.status !== undefined) params.set("status", filter.status);
+      if (filter.significance !== undefined) params.set("significance", filter.significance);
+      if (filter.component !== undefined) params.set("component", filter.component);
+      if (filter.errorCode !== undefined) params.set("errorCode", filter.errorCode);
+      if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
+      if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
+      if (filter.search !== undefined) params.set("search", filter.search);
+    }
+    if (cursor !== undefined && cursor !== null) params.set("cursor", cursor);
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    return this.request("GET", `/api/observability/activity${qs}`);
+  }
+
+  async queryErrorGroups(
+    options?: { since?: string; eventName?: string; limit?: number },
+  ): Promise<{ items: readonly ErrorGroup[] }> {
+    const params = new URLSearchParams();
+    if (options !== undefined) {
+      if (options.since !== undefined) params.set("since", options.since);
+      if (options.eventName !== undefined) params.set("eventName", options.eventName);
+      if (options.limit !== undefined) params.set("limit", String(options.limit));
+    }
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    return this.request("GET", `/api/observability/errors${qs}`);
+  }
+
+  async queryAudit(filter?: AuditQuery, cursor?: string | null, limit?: number): Promise<AuditPage> {
+    const params = new URLSearchParams();
+    if (filter !== undefined) {
+      if (filter.epoch !== undefined) params.set("epoch", String(filter.epoch));
+      if (filter.eventName !== undefined) params.set("eventName", filter.eventName);
+      if (filter.action !== undefined) params.set("action", filter.action);
+      if (filter.decision !== undefined) params.set("decision", filter.decision);
+      if (filter.ownerAgentId !== undefined) params.set("ownerAgentId", filter.ownerAgentId);
+      if (filter.sessionId !== undefined) params.set("sessionId", filter.sessionId);
+      if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
+      if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
+    }
+    if (cursor !== undefined && cursor !== null) params.set("cursor", cursor);
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    return this.request("GET", `/api/observability/audit${qs}`);
+  }
+
+  async queryDailyMetrics(days: number): Promise<{ items: readonly DailyMetric[] }> {
+    return this.request("GET", `/api/observability/metrics?days=${days}`);
+  }
+
+  async getTrace(traceId: string, linked = true): Promise<TraceResponse> {
+    const qs = linked ? "?linked=1" : "";
+    return this.request("GET", `/api/observability/traces/${encodeURIComponent(traceId)}${qs}`);
+  }
+
+  async diagnosticTail(
+    processName: "server" | "supervisor",
+    file: "main" | "debug",
+    lines: number,
+  ): Promise<DiagnosticTail> {
+    return this.request(
+      "GET",
+      `/api/observability/diagnostic/tail?process=${processName}&file=${file}&lines=${lines}`,
+    );
+  }
+
+  async createObservabilityExport(): Promise<{ path: string; manifest: { generatedAt: string; rawPayloadIncluded: boolean; factSourcesIncluded: boolean; rawLogsIncluded: boolean; includedSections: string[] } }> {
+    return this.request("POST", "/api/observability/export");
+  }
+
+  /** audit ledger reset：必须显式 confirm: true */
+  async resetObservabilityAuditLedger(reason: string): Promise<{ newEpoch: number; deleted: number }> {
+    return this.request("POST", "/api/observability/audit/reset", { confirm: true, reason });
+  }
+
+  /** Phase 11 可观测性偏好（评审 P1-7） */
+  async getObservabilityPreferences(): Promise<ObservabilityPreferences> {
+    return this.request("GET", "/api/preferences/observability");
+  }
+
+  async saveObservabilityPreferences(prefs: ObservabilityPreferences): Promise<ObservabilityPreferences> {
+    return this.request("PUT", "/api/preferences/observability", prefs);
   }
 }

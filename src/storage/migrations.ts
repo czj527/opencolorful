@@ -1,8 +1,13 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 9;
 
-export function applyMigrations(database: Database.Database): void {
+/** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
+export interface MigrationObserver {
+  (report: { from: number; to: number }): void;
+}
+
+export function applyMigrations(database: Database.Database, observer?: MigrationObserver): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER NOT NULL
@@ -300,7 +305,207 @@ export function applyMigrations(database: Database.Database): void {
     database.prepare("UPDATE schema_version SET version = 6").run();
   }
 
+  // v7：Phase 10.5 记忆 Agent 审批与高优先级 intent（plans/phase-10.5.md §三/§七）
+  if (current < 7) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS memory_mutation_proposals (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('create_fact','strength_change','supersede','merge','forget','restore','longterm_projection')),
+        target_type TEXT CHECK (target_type IN ('fact','event','session')),
+        target_id TEXT,
+        payload TEXT NOT NULL DEFAULT '{}',
+        previous_state TEXT,
+        evidence_refs TEXT NOT NULL DEFAULT '[]',
+        reason TEXT NOT NULL DEFAULT '',
+        confidence REAL NOT NULL DEFAULT 0 CHECK (confidence BETWEEN 0 AND 1),
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','rejected','applied','reverted')),
+        policy_reason TEXT,
+        created_at TEXT NOT NULL,
+        applied_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_proposals_agent_status ON memory_mutation_proposals(agent_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_proposals_run ON memory_mutation_proposals(run_id);
+
+      -- 高优先级 intent（用户明确 remember/forget）→ turn 后 micro-seal 专项处理
+      ALTER TABLE memory_journal ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_journal_agent_priority ON memory_journal(agent_id, priority, status, created_at);
+    `);
+    database.prepare("UPDATE schema_version SET version = 7").run();
+  }
+
+  // v8：Phase 11 统一可观测性（plans/phase-11.md §5）
+  // activity_events + FTS / audit_events / observability_trace_links /
+  // activity_daily_metrics / observability_state；与 v7 升级、空库新建两条路径同构。
+  if (current < 8) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS activity_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        event_version INTEGER NOT NULL DEFAULT 1,
+        recorded_at TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        event_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        level TEXT NOT NULL CHECK (level IN ('trace','debug','info','warn','error','fatal')),
+        status TEXT CHECK (status IN ('started','processing','completed','degraded','failed','cancelled','denied','deferred','retrying','skipped','interrupted')),
+        significance TEXT NOT NULL CHECK (significance IN ('routine','notable','milestone')),
+        actor_kind TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        executor_kind TEXT NOT NULL,
+        executor_id TEXT NOT NULL,
+        target_kind TEXT,
+        target_id TEXT,
+        owner_agent_id TEXT,
+        session_id TEXT,
+        run_id TEXT,
+        turn_id TEXT,
+        task_id TEXT,
+        subagent_run_id TEXT,
+        tool_call_id TEXT,
+        plugin_id TEXT,
+        trace_id TEXT NOT NULL,
+        span_id TEXT NOT NULL,
+        parent_span_id TEXT,
+        operation_id TEXT,
+        correlation_id TEXT,
+        duration_ms INTEGER,
+        error_code TEXT,
+        retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+        producer_component TEXT NOT NULL,
+        producer_process_type TEXT NOT NULL,
+        boot_id TEXT NOT NULL,
+        search_text TEXT NOT NULL DEFAULT '',
+        payload_json TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE INDEX IF NOT EXISTS idx_activity_recorded_at ON activity_events(recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_agent_time ON activity_events(owner_agent_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_session_time ON activity_events(session_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_trace ON activity_events(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_operation ON activity_events(operation_id);
+      CREATE INDEX IF NOT EXISTS idx_activity_event_time ON activity_events(event_name, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_status_time ON activity_events(status, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_level_time ON activity_events(level, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_significance_time ON activity_events(significance, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_plugin_time ON activity_events(plugin_id, recorded_at DESC);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS activity_events_fts USING fts5(
+        event_name,
+        category,
+        error_code,
+        search_text,
+        content='activity_events',
+        content_rowid='id'
+      );
+      INSERT INTO activity_events_fts(rowid, event_name, category, error_code, search_text)
+        SELECT id, event_name, category, COALESCE(error_code, ''), search_text FROM activity_events;
+      CREATE TRIGGER IF NOT EXISTS activity_events_ai AFTER INSERT ON activity_events BEGIN
+        INSERT INTO activity_events_fts(rowid, event_name, category, error_code, search_text)
+        VALUES (new.id, new.event_name, new.category, COALESCE(new.error_code, ''), new.search_text);
+      END;
+      CREATE TRIGGER IF NOT EXISTS activity_events_ad AFTER DELETE ON activity_events BEGIN
+        INSERT INTO activity_events_fts(activity_events_fts, rowid, event_name, category, error_code, search_text)
+        VALUES ('delete', old.id, old.event_name, old.category, COALESCE(old.error_code, ''), old.search_text);
+      END;
+      CREATE TRIGGER IF NOT EXISTS activity_events_au AFTER UPDATE ON activity_events BEGIN
+        INSERT INTO activity_events_fts(activity_events_fts, rowid, event_name, category, error_code, search_text)
+        VALUES ('delete', old.id, old.event_name, old.category, COALESCE(old.error_code, ''), old.search_text);
+        INSERT INTO activity_events_fts(rowid, event_name, category, error_code, search_text)
+        VALUES (new.id, new.event_name, new.category, COALESCE(new.error_code, ''), new.search_text);
+      END;
+
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE,
+        ledger_epoch INTEGER NOT NULL DEFAULT 1,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        event_version INTEGER NOT NULL DEFAULT 1,
+        recorded_at TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        action TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('allowed','denied','required','deferred','reset')),
+        reason_code TEXT,
+        actor_kind TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        executor_kind TEXT NOT NULL,
+        executor_id TEXT NOT NULL,
+        target_kind TEXT,
+        target_id TEXT,
+        owner_agent_id TEXT,
+        session_id TEXT,
+        trace_id TEXT NOT NULL,
+        operation_id TEXT,
+        policy_version TEXT,
+        before_revision TEXT,
+        after_revision TEXT,
+        changed_fields_json TEXT NOT NULL DEFAULT '[]',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        previous_hash TEXT,
+        record_hash TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_epoch_time ON audit_events(ledger_epoch, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_agent_time ON audit_events(owner_agent_id, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_action_time ON audit_events(action, recorded_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_audit_trace ON audit_events(trace_id);
+
+      CREATE TABLE IF NOT EXISTS observability_trace_links (
+        source_trace_id TEXT NOT NULL,
+        target_trace_id TEXT NOT NULL,
+        relation TEXT NOT NULL,
+        source_event_id TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (source_trace_id, target_trace_id, relation)
+      );
+      CREATE INDEX IF NOT EXISTS idx_trace_links_source ON observability_trace_links(source_trace_id);
+      CREATE INDEX IF NOT EXISTS idx_trace_links_target ON observability_trace_links(target_trace_id);
+
+      CREATE TABLE IF NOT EXISTS activity_daily_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        metric_date TEXT NOT NULL,
+        owner_agent_id TEXT NOT NULL DEFAULT '',
+        metric_kind TEXT NOT NULL,
+        dimension_hash TEXT NOT NULL DEFAULT '',
+        value_json TEXT NOT NULL DEFAULT '{}',
+        updated_at TEXT NOT NULL,
+        UNIQUE (metric_date, owner_agent_id, metric_kind, dimension_hash)
+      );
+
+      CREATE TABLE IF NOT EXISTS observability_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      INSERT OR IGNORE INTO observability_state (key, value) VALUES ('audit.ledger_epoch', '1');
+    `);
+    database.prepare("UPDATE schema_version SET version = 8").run();
+  }
+
+  // v9：评审 P1（第六轮）——审计表保存事件名与生命周期身份。
+  // 三阶段（started/terminal）此前只有 action+decision 可辨识，started 与
+  // completed 记录在查询 API 中完全相同；event_name 列使生命周期可查询、
+  // 可关联（与路由生成的 operationId 配对），旧行回填为 NULL（无法从
+  // action 可靠反推事件名，查询 API 对此兼容）。
+  if (current < 9) {
+    database.transaction(() => {
+      const columns = database.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
+      if (!columns.some((column) => column.name === "event_name")) {
+        database.exec("ALTER TABLE audit_events ADD COLUMN event_name TEXT");
+      }
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_audit_event_name ON audit_events(event_name, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_operation ON audit_events(operation_id);
+      `);
+      database.prepare("UPDATE schema_version SET version = 9").run();
+    })();
+  }
+
   if (current > CURRENT_SCHEMA_VERSION) {
     throw new Error(`不支持的 metadata schema 版本: ${current}`);
+  }
+
+  if (current < CURRENT_SCHEMA_VERSION) {
+    observer?.({ from: current, to: CURRENT_SCHEMA_VERSION });
   }
 }

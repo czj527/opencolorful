@@ -220,8 +220,27 @@ export class AgentStore {
     if (mergedSandbox !== undefined) {
       next.sandbox = mergedSandbox;
     }
+    // 合并 memory 段（Phase 10.5）：patch 显式传入时优先，否则保留已有值
+    if (patch.memory !== undefined) {
+      next.memory = patch.memory;
+    } else if (base.memory !== undefined) {
+      next.memory = base.memory;
+    }
     this.writeSettings(agentId, next);
     return next;
+  }
+
+  /**
+   * 评审 P0（第六轮）：审计终态失败时的创建补偿——物理删除刚创建的 Agent
+   * 目录并验证（remove 后 list/load 均不可见）。仅用于创建补偿路径，
+   * 正常删除语义仍由 archive 表达（软归档，保留可恢复性）。
+   */
+  remove(agentId: string): void {
+    const dir = this.agentDir(agentId);
+    if (!fs.existsSync(dir)) {
+      throw new Error("Agent 不存在");
+    }
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   }
 
   archive(agentId: string): void {

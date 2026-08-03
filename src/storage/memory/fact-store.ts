@@ -6,8 +6,10 @@ import type {
 } from "../../contracts/memory.js";
 import {
   buildMemoryFtsQuery,
+  buildMemorySearchText,
   escapeLikePattern,
   isSingleCjkQuery,
+  normalizeSearchText,
 } from "./cjk-ngram.js";
 
 interface FactRow {
@@ -48,10 +50,19 @@ function mapRow(row: FactRow): MemoryFact {
   };
 }
 
-/**
- * MemoryFactStore：Phase 10 只读。
- * 写入从 Phase 10.5 记忆 Agent 开始；测试需要数据时用 raw SQL INSERT。
- */
+export interface CreateMemoryFactInput {
+  agentId: string;
+  fact: string;
+  tags: readonly string[];
+  factTime?: string;
+  validUntil?: string;
+  source: Extract<MemoryFactSource, "agent_approved" | "user_intent">;
+  sourceRefs: readonly string[];
+  confidence: number;
+  retentionStrength: number;
+  activationStrength?: number;
+}
+
 export class MemoryFactStore {
   constructor(private readonly database: Database.Database) {}
 
@@ -111,6 +122,85 @@ export class MemoryFactStore {
    * FTS5 全文搜索 + CJK 单字 LIKE 降级（对 fact 列）。
    * 默认排除 forgotten/suppressed。
    */
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  createFact(input: CreateMemoryFactInput): MemoryFact {
+    const now = new Date().toISOString();
+    const result = this.database.prepare(`
+      INSERT INTO memory_facts
+        (agent_id, fact, search_text, tags, fact_time, source, source_refs,
+         retention_strength, activation_strength, confidence, valid_until, status,
+         created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+    `).run(
+      input.agentId, input.fact, buildMemorySearchText(input.fact), JSON.stringify(input.tags),
+      input.factTime ?? null, input.source, JSON.stringify(input.sourceRefs),
+      input.retentionStrength, input.activationStrength ?? 0, input.confidence,
+      input.validUntil ?? null, now, now,
+    );
+    return this.getById(Number(result.lastInsertRowid)) as MemoryFact;
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  updateRetention(factId: number, retentionStrength: number, now = new Date()): { previous: number; updated: MemoryFact } {
+    const current = this.getById(factId);
+    if (!current) throw new Error(`事实不存在: ${factId}`);
+    if (current.retentionStrength === retentionStrength) throw new Error(`事实强度未发生变化: ${factId}`);
+    this.database.prepare("UPDATE memory_facts SET retention_strength = ?, updated_at = ? WHERE id = ?")
+      .run(retentionStrength, now.toISOString(), factId);
+    return { previous: current.retentionStrength, updated: this.getById(factId) as MemoryFact };
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  setActivation(factId: number, activationStrength: number): MemoryFact {
+    const result = this.database.prepare("UPDATE memory_facts SET activation_strength = ?, updated_at = ? WHERE id = ?")
+      .run(activationStrength, new Date().toISOString(), factId);
+    if (result.changes !== 1) throw new Error(`事实不存在: ${factId}`);
+    return this.getById(factId) as MemoryFact;
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  supersedeFact(input: { factId: number; newFactId: number; validUntil?: string }): MemoryFact {
+    const old = this.getById(input.factId);
+    if (!old) throw new Error(`事实不存在: ${input.factId}`);
+    const result = this.database.prepare("UPDATE memory_facts SET status = 'superseded', valid_until = ?, updated_at = ? WHERE id = ?")
+      .run(input.validUntil ?? new Date().toISOString(), new Date().toISOString(), input.factId);
+    if (result.changes !== 1) throw new Error(`事实不存在: ${input.factId}`);
+    return this.getById(input.factId) as MemoryFact;
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  markForgotten(factId: number, opts?: { reason?: string }): MemoryFact {
+    return this.setStatus(factId, "forgotten");
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  restoreFact(factId: number): MemoryFact { return this.setStatus(factId, "active"); }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  markSuppressed(factId: number): MemoryFact { return this.setStatus(factId, "suppressed"); }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  mergeFacts(input: { factIds: readonly number[]; mergedFactId: number }): MemoryFact {
+    const now = new Date().toISOString();
+    const placeholders = input.factIds.map(() => "?").join(",");
+    this.database.prepare(`UPDATE memory_facts SET status = 'superseded', source_refs = source_refs, updated_at = ? WHERE id IN (${placeholders})`)
+      .run(now, ...input.factIds);
+    return this.getById(input.mergedFactId) as MemoryFact;
+  }
+
+  /** 仅供 MemoryPolicy 应用路径，不对主 Agent 工具暴露。 */
+  getActiveById(factId: number): MemoryFact | undefined {
+    const row = this.database.prepare("SELECT * FROM memory_facts WHERE id = ? AND status = 'active'").get(factId) as FactRow | undefined;
+    return row ? mapRow(row) : undefined;
+  }
+
+  private setStatus(factId: number, status: MemoryFactStatus): MemoryFact {
+    const result = this.database.prepare("UPDATE memory_facts SET status = ?, updated_at = ? WHERE id = ?")
+      .run(status, new Date().toISOString(), factId);
+    if (result.changes !== 1) throw new Error(`事实不存在: ${factId}`);
+    return this.getById(factId) as MemoryFact;
+  }
+
   searchByFts(
     agentId: string,
     query: string,

@@ -1,0 +1,750 @@
+/* Phase 11 T7 /logs 工作页样式。移动端（<640px）六 tab 横向滚动、表格最小列。 */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: 0 var(--space-20);
+  height: 48px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: var(--space-4) var(--space-12);
+  border-radius: var(--radius-input);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-ui);
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.back:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.healthBar {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.healthBadge {
+  white-space: nowrap;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-12) var(--space-20);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  flex-shrink: 0;
+}
+
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-16);
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-ui);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.tabs button:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.tabs button.tabActive {
+  color: var(--accent);
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+.content {
+  flex: 1;
+  padding: var(--space-20);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.tabPane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+/* ─── 过滤栏 ─────────────────────────────────────────────────── */
+
+.filterBar {
+  display: flex;
+  gap: var(--space-8);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.filterEvent {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.filterId {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.filterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.filterDate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.filterDate input {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  padding: var(--space-4) var(--space-8);
+  font-family: inherit;
+  font-size: var(--fs-caption);
+  color-scheme: dark;
+}
+
+/* ─── follow 行 ──────────────────────────────────────────────── */
+
+.followRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+
+.followBadge {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.resetNote {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-12);
+  border: 1px solid var(--warning, #d9a514);
+  border-radius: var(--radius-input);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--fs-ui);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ─── 状态覆盖 ───────────────────────────────────────────────── */
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-14);
+  background: var(--bg-secondary);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-card);
+  color: var(--danger);
+  font-size: var(--fs-ui);
+  flex-wrap: wrap;
+}
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  padding: var(--space-24) 0;
+  justify-content: center;
+}
+
+.muted {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.inlineError {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--danger);
+}
+
+.warnNote {
+  margin: 0;
+  font-size: var(--fs-ui);
+  color: var(--warning, #d9a514);
+}
+
+.pendingNote {
+  margin: 0;
+  padding: var(--space-10) var(--space-12);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-input);
+  background: var(--bg-secondary);
+  font-size: var(--fs-ui);
+  color: var(--text-secondary);
+}
+
+.okNote {
+  margin: 0;
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  background: var(--bg-secondary);
+  font-size: var(--fs-ui);
+  color: var(--text-primary);
+}
+
+/* ─── 表格 ───────────────────────────────────────────────────── */
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-ui);
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-8) var(--space-10);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.table tbody tr:hover {
+  background: var(--bg-secondary);
+}
+
+.table tbody tr.rowActive {
+  background: var(--bg-secondary);
+}
+
+.eventName {
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.codeInline {
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.colTime {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+}
+
+.rowAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.rowAction:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.loadMoreRow {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-8) 0;
+}
+
+/* ─── 详情面板 ───────────────────────────────────────────────── */
+
+.detailPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  background: var(--bg-secondary);
+}
+
+.detailHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.detailHead h3 {
+  margin: 0;
+  font-size: var(--fs-title);
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.detailGrid > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.detailGrid dt {
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+}
+
+.detailGrid dd {
+  margin: 0;
+  font-size: var(--fs-ui);
+  word-break: break-all;
+}
+
+.payloadBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.payloadHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.payloadPre {
+  margin: 0;
+  padding: var(--space-10) var(--space-12);
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.traceBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+.tracePanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  width: 100%;
+}
+
+.traceTree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.traceNode {
+  display: flex;
+  flex-direction: column;
+}
+
+.traceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-6);
+  border-left: 2px solid var(--border-color);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  font-size: var(--fs-ui);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.traceBars {
+  color: var(--text-secondary);
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+}
+
+.traceName {
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+}
+
+.traceTime {
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+}
+
+.traceDuration {
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+}
+
+.linkedBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.linkedBlock h4 {
+  margin: 0;
+  font-size: var(--fs-ui);
+}
+
+.linkedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.linkedList li {
+  font-size: var(--fs-ui);
+  word-break: break-all;
+}
+
+.samplesBlock {
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  background: var(--bg-secondary);
+}
+
+.samplesBlock h4 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-ui);
+}
+
+.samplesList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.samplesList li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-ui);
+  flex-wrap: wrap;
+}
+
+/* ─── 性能指标 ───────────────────────────────────────────────── */
+
+.metricList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.metricHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+
+.metricBars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-8);
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: 64px 1fr 48px;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-caption);
+}
+
+.barLabel {
+  color: var(--text-secondary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar {
+  height: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.barEvent {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-xs);
+}
+
+.barLevel {
+  height: 100%;
+  background: var(--text-secondary);
+  border-radius: var(--radius-xs);
+}
+
+.barRow b {
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── 原始日志 ───────────────────────────────────────────────── */
+
+.logViewer {
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  min-height: 320px;
+  max-height: 560px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ─── 诊断导出 ───────────────────────────────────────────────── */
+
+.exportCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cardTitle h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-title);
+}
+
+.exportList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.exportList li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--fs-ui);
+}
+
+.exportList li span {
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+}
+
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.healthGrid > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.healthGrid dt {
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+}
+
+.healthGrid dd {
+  margin: 0;
+  font-size: var(--fs-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── 移动端适配（<640px）────────────────────────────────────── */
+
+@media (max-width: 639px) {
+  .header {
+    padding: 0 var(--space-12);
+    gap: var(--space-8);
+    height: 52px;
+    flex-wrap: wrap;
+  }
+
+  .tabs {
+    padding: var(--space-8) var(--space-12);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: var(--space-6);
+  }
+
+  .tabs button {
+    flex: 0 0 auto;
+    padding: var(--space-6) var(--space-12);
+  }
+
+  .content {
+    padding: var(--space-12);
+  }
+
+  /* 表格降级为最小列：隐藏非关键列，避免窄屏横向滚动负担 */
+  .table th.colLevel,
+  .table td.colLevel,
+  .table th.colCategory,
+  .table td.colCategory,
+  .table th.colComponent,
+  .table td.colComponent,
+  .table th.colDuration,
+  .table td.colDuration,
+  .table th.colActor,
+  .table td.colActor,
+  .table th.colEpoch,
+  .table td.colEpoch {
+    display: none;
+  }
+
+  .table th,
+  .table td {
+    padding: var(--space-6) var(--space-8);
+  }
+
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .barRow {
+    grid-template-columns: 48px 1fr 40px;
+  }
+}

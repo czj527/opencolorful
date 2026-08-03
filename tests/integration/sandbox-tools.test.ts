@@ -9,6 +9,10 @@ import { PathGuard } from "../../src/sandbox/path-guard.js";
 import { buildPathGuardPolicy } from "../../src/sandbox/policy.js";
 import { checkBashPreflight } from "../../src/sandbox/preflight.js";
 import { SandboxService } from "../../src/sandbox/sandbox-service.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
+import { instrument } from "../../src/observability/instrument.js";
+import type { ProducerContext } from "../../src/contracts/observability.js";
 import { type AgentSettingsV2 } from "../../src/contracts/agent-settings.js";
 import { defaultSandboxCapabilities } from "../../src/contracts/sandbox.js";
 import { SessionRuntime } from "../../src/runtime/session-runtime.js";
@@ -23,10 +27,32 @@ function tempHome(): string {
 }
 
 afterEach(() => {
+  instrument.reset();
   for (const dir of temporaryDirectories.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const testProducer: ProducerContext = {
+  component: "unit-test",
+  processType: "server",
+  processId: "1",
+  bootId: "boot-test",
+  appVersion: "0.0.0-test",
+  hostPlatform: "win32",
+};
+
+function initInstrument(home: string): ReturnType<typeof openMetadataDatabase> {
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: home });
+  const db = openMetadataDatabase(paths.database);
+  instrument.init(new ObservabilityContext({
+    database: db,
+    producer: testProducer,
+    logsRoot: path.join(paths.logs, "runtime", "server"),
+    spoolRoot: path.join(paths.logs, "emergency"),
+  }));
+  return db;
+}
 
 /** Construct a minimal AgentSettingsV2 for testing. */
 function testAgentSettings(overrides: Partial<AgentSettingsV2> = {}): AgentSettingsV2 {
@@ -284,14 +310,13 @@ describe("Sandbox file-tool interception", () => {
     const paths = getRuntimePaths({ OPENCOLORFUL_HOME: opencolorfulHome });
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "oc-ws-"));
     temporaryDirectories.push(workspace);
-    const auditLogPath = path.join(paths.logs, "security-audit.jsonl");
+    const db = initInstrument(opencolorfulHome);
 
     const service = SandboxService.create({
       agentSettings: testAgentSettings({ defaultCwd: workspace }),
       agentId: "test-agent",
       agentHomeDir: path.join(paths.agents, "test-agent"),
       platformHome: paths.home,
-      auditLogPath,
       workspaceCwd: workspace,
       sessionId: "audit-session",
     });
@@ -312,22 +337,20 @@ describe("Sandbox file-tool interception", () => {
     expect(toolPolicy.checkBashCommand("sudo whoami").allowed).toBe(false);
     toolPolicy.recordBashDenied("echo blocked", "bash-disabled");
 
-    const entries = fs
-      .readFileSync(auditLogPath, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(entries.map((entry) => entry.type)).toEqual([
-      "sandbox.denied",
-      "sandbox.preflight-denied",
-      "sandbox.preflight-denied",
+    const rows = db
+      .prepare("SELECT event_name, owner_agent_id, session_id FROM activity_events ORDER BY id")
+      .all() as Array<{ event_name: string; owner_agent_id: string | null; session_id: string | null }>;
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "sandbox.path.denied",
+      "sandbox.command.denied",
+      "sandbox.command.denied",
     ]);
-    expect(entries.every((entry) => entry.agentId === "test-agent")).toBe(true);
-    expect(entries.every((entry) => entry.sessionId === "audit-session")).toBe(true);
-    expect(entries.every((entry) => typeof entry.eventId === "string")).toBe(true);
+    expect(rows.every((row) => row.owner_agent_id === "test-agent")).toBe(true);
+    expect(rows.every((row) => row.session_id === "audit-session")).toBe(true);
+    db.close();
   });
 
-  it("SessionRuntime wires production sandbox denials to the audit log", async () => {
+  it("SessionRuntime wires production sandbox denials to observability activity", async () => {
     const opencolorfulHome = tempHome();
     const paths = getRuntimePaths({ OPENCOLORFUL_HOME: opencolorfulHome });
     const workspace = tempHome();
@@ -335,6 +358,7 @@ describe("Sandbox file-tool interception", () => {
     const agentHomeDir = path.join(paths.agents, agentId);
     fs.mkdirSync(paths.sessions, { recursive: true });
     fs.mkdirSync(paths.auth, { recursive: true });
+    const db = initInstrument(opencolorfulHome);
 
     const runtime = await SessionRuntime.create({
       sessionId: "runtime-audit-session",
@@ -358,15 +382,18 @@ describe("Sandbox file-tool interception", () => {
           .assertFilePath("read", path.join(paths.auth, "auth.json")),
       ).toThrow("Sandbox denied read operation");
 
-      const auditLogPath = path.join(paths.logs, "security-audit.jsonl");
-      const entry = JSON.parse(
-        fs.readFileSync(auditLogPath, "utf8").trim(),
-      ) as Record<string, unknown>;
-      expect(entry.type).toBe("sandbox.denied");
-      expect(entry.agentId).toBe(agentId);
-      expect(entry.sessionId).toBe("runtime-audit-session");
+      const row = db.prepare(
+        "SELECT event_name, owner_agent_id, session_id FROM activity_events WHERE event_name = 'sandbox.path.denied'",
+      ).get() as { event_name: string; owner_agent_id: string; session_id: string } | undefined;
+      expect(row).toBeDefined();
+      expect(row?.owner_agent_id).toBe(agentId);
+      expect(row?.session_id).toBe("runtime-audit-session");
+      // 拒绝路径（auth.json 绝对路径）绝不落盘
+      const serialized = JSON.stringify(db.prepare("SELECT * FROM activity_events").all());
+      expect(serialized).not.toContain("auth.json");
     } finally {
       runtime.dispose();
+      db.close();
     }
   });
 });

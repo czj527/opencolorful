@@ -311,7 +311,7 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
   if (active === "logs") {
     return (
       <SettingsSection title={meta.title} description={meta.description} testId="settings-section-logs">
-        <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} />
+        <LogsSection getSupervisorLogs={props.onGetSupervisorLogs} api={props.api} />
       </SettingsSection>
     );
   }

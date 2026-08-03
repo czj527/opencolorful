@@ -1,6 +1,6 @@
 # Phase 10.5：记忆 Agent、强度巩固与后台整理
 
-**状态：规划中** | 分支：`phase-10.5-memory-agent`
+**状态：已完成（两轮评审修复后，待合并）** | 分支：`phase-10.5-memory-agent`
 **基线：** `main`（Phase 10 验收点）
 **架构权威：** [docs/memory-architecture.md](../docs/memory-architecture.md)
 **参考：** Hermes `agent/curator.py` 的空闲/间隔调度与受限后台 fork；openhanako 的深层记忆整理机制
@@ -260,22 +260,22 @@ T8 质量门 + browser-use 验收（主 Agent）
 
 ---
 
-## 十、验收标准
+## 十、验收标准（评审闭环后全部达成）
 
-- [ ] 记忆 Agent 只能读取封存批次和白名单来源，不能 shell/网络/写原文/直写长期表；
-- [ ] 每日 03:00 + 空闲 30 分钟 gate 正确；活动时延期，重启按 dirty watermark 恢复；每周复核独立运行；
-- [ ] recall ledger 的跨日期、跨 Session 聚合可用；回想本身不直接提升 retention strength；
-- [ ] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；`memory_recalls` 是事实来源，`memory_facts.activation_strength` 可由 ledger 重建；retention 只能经提案 + MemoryPolicy 审批；
-- [ ] 高优先级用户 intent 在 Session 结束后立即专项处理；长 Session 在 turn 完成后创建 bounded micro-seal（仍经审批，agent 不可用时 pending）；
-- [ ] 短期/中期/永久阈值和迟滞正确；永久不自动衰减；pin 不等于强度 100；
-- [ ] 中期→永久需要多来源、高可信度、无未解决冲突和 MemoryPolicy 审批；
-- [ ] 冲突裁决保留旧事实 `superseded` + `valid_until`，新事实带 provenance；
-- [ ] proposal 版本冲突会拒绝或重新计算；正式变更单事务提交；回滚只撤销当前 run；
-- [ ] 主 Agent 看不到哪些记忆被遗忘；search_memory 默认排除 forgotten/suppressed；
-- [ ] LLM/provider 不可用时 batch pending，不阻塞主 Agent；无未经审批的事实写入；
-- [ ] 运行报告完整、脱敏、可读取；后台状态不污染主 Agent 对话流；
-- [ ] 时间线分别展示 retention/activation 分解，检索仍以相关性为主；
-- [ ] 全部质量门和 browser-use 验收通过。
+- [x] 记忆 Agent 只能读取封存批次和白名单来源，不能 shell/网络/写原文/直写长期表（含跨 Agent 批次/会话/事件/事实隔离，两轮评审定向验证）；
+- [x] 每日 03:00 + 空闲 30 分钟 gate 正确；活动时延期，重启按 dirty watermark 恢复；每周复核独立运行（失败仅设 nextRetryAt，不推进完成日期）；
+- [x] recall ledger 的跨日期、跨 Session 聚合可用（全量账本，不受默认 100 条限制）；回想本身不直接提升 retention strength；
+- [x] activation 由平台在 recall 命中时确定性更新（独立日期封顶/时间衰减），不经 proposal；`memory_recalls` 是事实来源，`memory_facts.activation_strength` 可由 ledger 重建；retention 只能经提案 + MemoryPolicy 审批；
+- [x] 高优先级用户 intent 在 Session 结束后立即专项处理；长 Session 在 turn 完成后创建 bounded micro-seal（仍经审批，agent 不可用时 pending；enabled=false 时全部拦截）；
+- [x] 短期/中期/永久阈值和迟滞正确（mediumDown 迟滞已接入 policy）；永久不自动衰减；pin 不等于强度 100；初始强度由平台确定性计算，模型不可直接指定；
+- [x] 中期→永久需要账本多会话/多日期、高可信度、无未解决冲突和 MemoryPolicy 审批；
+- [x] 冲突裁决保留旧事实 `superseded` + `valid_until`，新事实带 provenance；
+- [x] proposal 版本冲突会拒绝或重新计算（可恢复拒绝保留批次供重算）；正式变更单事务提交（含 watermark/意图结算），中途异常整体回滚；回滚只撤销当前 run；
+- [x] 主 Agent 看不到哪些记忆被遗忘；search_memory 默认排除 forgotten/suppressed；
+- [x] LLM/provider 不可用时 batch pending，不阻塞主 Agent；无未经审批的事实写入；deepDiveMode=script 时零 LLM；
+- [x] 运行报告完整、脱敏、可读取（summary/issues/输入快照落盘）；后台状态不污染主 Agent 对话流；
+- [x] 时间线分别展示 retention/activation 分解，检索仍以相关性为主；
+- [x] 全部质量门和 browser-use 验收通过。
 
 ---
 
@@ -294,4 +294,94 @@ T8 质量门 + browser-use 验收（主 Agent）
 
 ## 实施记录
 
-（实施中回填）
+### 完成情况（2026-08-01，分支 phase-10.5-memory-agent）
+
+| 任务 | 提交 | 说明 |
+|---|---|---|
+| T1 契约 | f7215af | MemoryMutationProposal/settings/strength/run report 契约（TypeBox 显式字面量联合规避 Static+map 的 never 陷阱） |
+| T2 记忆 Agent 核心 | 8cd0358 | headless 多轮 completeText 循环、白名单 9 工具、只提案不直写、预算/迭代/时长熔断、runs 报告（脱敏） |
+| T3 策略与事务 | 8361700 | MemoryPolicy 全规则（版本/层级跳转/中期→永久多证据/永久不衰减/watermark 重检）、单事务应用、反向 journal 回滚 |
+| T5 强度计算 | 4afc70b | computeActivation（14 日封顶 + 时间衰减）、computeRetention（45/35/85 迟滞）、ledger → activation_strength 可重建投影 |
+| T4 调度编排 | 2262f37 | resolver 编排 + 每日空闲/每周 gate + 高优先级 micro-seal（bounded）、dirty watermark 恢复 |
+| T6 API 与设置 | 05d46b0 | deep-dive/rollback/runs/settings/timeline + per-agent/全局设置持久化 |
+| T7 时间线 UI | 3bac9cd | 记忆页：后台整理状态卡（SSE memory.agent.* 状态文案 §8.3）+ 强度时间线双分解 + 整理设置表单 |
+| T8 质量门 + 验收 | （本提交） | 全质量门 + Playwright e2e 45 例（含 phase-10.5-memory 4 例） |
+
+### 评审修复轮（2026-08-01，评审结论：暂不通过 → 已修复 2×P0/4×P1/2×P2）
+
+| 发现 | 等级 | 修复 |
+|---|---|---|
+| 跨 Agent 读写隔离：read_session_entries 不校验批次归属、可传任意 sessionId/范围；policy/application 用全局事实 ID 无归属校验 | P0 | 工具强制 batchId + 批次归属 + 会话/范围限定（子集判定）；assertSessionReadable 收紧到 `agents/<agentId>/sessions/`；policy/application 双处 agentId 归属校验；提案工具 requireOwnFact |
+| 设置未接线：policy/resolver/scheduler 三处固定 defaultMemoryAgentSettings() | P0 | 组合根统一 `resolveMemorySettings`（per-Agent → 全局 → 默认）；enabled=false 拦截定时/高优先级/deep-dive(503)；deepDiveMode script=零 LLM 确定性路径（重建 activation + 报告，不触碰 batch）；completeText 按 utilityProviderId/utilityModel 解析；ticker turnsPerSummary 走 per-Agent 设置 |
+| retention 无生产闭环 | P1 | 新工具 `get_activation_summary`（账本跨日期/跨会话聚合）；证据引用格式+归属校验（session 必须在回忆账本）；晋升会话数改由账本确定性统计（防伪造）；新事实初始强度 computeRetention 确定性计算（remember 意图 ≥70，不再默认 0）；mediumDown 迟滞接入 policy |
+| 单事务异常路径半成品 | P1 | applyRun 不再吞异常：应用期 SQL 错误整体回滚；markdown dirty watermark 与用户 intent 结算移入同一事务；新增真实事务中途异常测试（CHECK 约束违反 → 零提交） |
+| 调度失败重试与 weekly 语义 | P1 | 失败不推进 lastDaily/WeeklyCompletedAt 与 done*Dates，仅设 nextRetryAt；到期 tick 自动重试；weekly:true 透传 runner（prompt 附本周复核模式） |
+| 串行与 batch 结算 | P1 | deep-dive 改经 Scheduler.enqueueDeepDive（per-Agent promise tail 串行）；completed（含无提案/全拒绝）统一结算批次为 applied；outcome.failed 参与状态判定 |
+| 运行报告与强度事件 | P2 | report_run 的 summary/issues 落盘 run.json/REPORT.md（report_run 即结束运行）；输入快照（batch revision/pendingIntents）落盘；memory.strength.changed 由 resolver 在应用后发布 |
+| 健康卡 API/UI 契约错位 | P2 | 页面改读 latestRecallStatus/latestRecallEpisodes/pendingBatches 数组长度 |
+
+专项验收测试：`tests/integration/memory-isolation.test.ts`（6 例，含评审复现的 A/B 场景端到端）+ scheduler 重试/串行/enabled 门 + 事务中途异常 + script 模式 + 确定性强度 + 迟滞 + strength.changed 发布 + report 落盘。
+
+### 第三轮：主 Agent 自审（严格评审视角，2026-08-01）
+
+定向排查未覆盖盲区，修复 3 项并补 5 例测试：
+
+1. **supersede/merge 版本冲突缺失**：previousState 从未与当前事实比对，提案生成后事实被其他运行修改仍会继续应用。
+   修复：policy 比对 `fact 文本 + status`（status 变化如被遗忘/取代即冲突）；merge 工具补充 previousState.facts 快照。
+2. **journal watermark 机制失效**：payload schema 收紧（additionalProperties:false）后模型无法传入 journalWatermark，
+   原校验成为死代码。修复：改为平台侧隐式水位线——以提案 createdAt 为界，之后出现的用户 intent 即拒绝，
+   水位线完全由平台判定，模型不可伪造。
+3. **forget(session) 空操作**：targetType=session 无实现却在 policy 通过、application 标记 applied。
+   修复：policy 明确拒绝"暂不支持对会话目标执行遗忘"。
+
+其余方向复查结论（无需修改）：
+- 跨 Agent 隔离：batch/session/event/fact 四类目标均已三层校验；sessionPathResolver 越权路径被组合根拦截；
+  restore 分支由 check() 顶部的 current.agentId 全局检查覆盖；rollbackRun 按 agentId 过滤
+- schedulerStore.upsert 为 INSERT OR REPLACE 整行替换 → 成功后 nextRetryAt 自动清空，无残留跳过
+- 设置链路：routes GET settings 与 start.ts resolveMemorySettings 实现一致；enabled/deepDiveMode 运行时读取
+- 预算熔断/串行队列/批次结算/报告脱敏/strength.changed 发布：两轮评审已验证
+
+### 实施中修复的关键缺陷
+
+1. **P0（Phase 10 遗留，reviewer 提出）**：MemoryEventPublisher 每次 search_memory 新建实例导致 agent 流序列号重复 —— 改为模块级共享分配器 `nextAgentStreamSequence`，连续/并发/重放场景测试覆盖。
+2. **Agent SSE 事件类型契约缺口**：resolver 已发射 `memory.agent.processing`，但 `src/contracts/events.ts` 与 web `KNOWN_EVENT_TYPES` 均未声明，导致"正在核对记忆/正在合并相近记忆"状态到不了前端 —— 两端契约补齐。
+3. **runId 双轨**：resolver 自生成 runId 与 MemoryAgentRunner 内部生成的不一致，SSE 事件 runId 无法匹配落盘报告 → 前端自动拉取报告 404 —— runner 支持注入 `runId`，全链路（事件/报告/回滚/journal）统一标识。
+4. **rollback/报告定位**：applyRun 自动补建未持久化 proposal、updatePayload 落库生成 id、rollback 反向变更 actor=system。
+5. **e2e 确定性**：记忆页支持 `?agent=` 深链固定目标 Agent（避免多 Agent 时自动选中歧义）；自包含测试模式（worker 轮换/重启下不依赖跨测试状态）。
+
+### 质量门（全部通过）
+
+- `npx tsc --noEmit -p tsconfig.json`（server）
+- `npx vitest run`（server 65 文件 / 620 测试）
+- `node scripts/verify-pi-sdk-imports.mjs`
+- `npx tsc -p tsconfig.build.json`
+- `cd web && npx tsc --noEmit` + `npx vitest run`（29 文件 / 333 测试，连续 6 轮无 flake）
+- `cd web && npm run build`（vite 产物）
+- `cd web && npx playwright test tests/e2e/`（45/45，含 phase-10.5-memory 4 例 × 5 轮稳定）
+
+### 第四轮外部复审修复（2026-08-02，commit 3b9deb1）
+
+reviewer 结论："Phase 10.5 本轮仍然暂不通过…保持 e89548c 冻结，完成上述修复并补复现级测试后再提交下一轮复审"。
+e89548c 保持冻结，8 项问题在 `phase-10.5-memory-agent` 新增 commit 修复后并入 `phase-11-logging`。
+
+| # | 级别 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | P0 | `memory-tools.ts` 的 remember/forget 写 `actor=main_agent`，而 `checkWatermark` 只认 `user` → 水位线对 pi-sdk 意图失效 | 同时认 user/main_agent；`listByAgent` 传 `{limit:1_000_000}` 全量扫描（原默认 50 条截断会漏检更早意图）；merge/supersede 检查全部目标事实（原只看第一个） |
+| 2 | P1 | supersede/merge 版本冲突只比较 fact+status，漏掉 updatedAt 变化（如被提强） | previousState 增加 `revision: updatedAt`，策略比较 revision；merge snapshot 同步带 revision |
+| 3 | P1 | `rollbackRun` 对 event forget 调用 `restoreFact(id(eventId))` → `事实不存在: NaN`；`findCreatedFact` 受 50 条限制 | 按 targetType 分流（event → `updateStatus(active)`）；create_fact 回滚优先用 applyRun 持久化的 `payload.createdFactId`（校验归属后回落旧路径） |
+| 4 | P1 | daily/weekly 两个到期任务闭包都 spread tick 时捕获的旧 state → 后写覆盖先写 | 闭包内 upsert 前重新读取 `schedulerStore.get(agentId)` |
+| 5 | P1 | `isAgentIdle` 只读进程内 lastActivity，重启后误判空闲 | 纳入持久化 `SessionView.updatedAt`（`max(inProcess, persisted)`） |
+| 6 | P1 | provisional（未定稿 micro-seal）批次可直接作为晋升永久证据 | medium→permanent 晋升拒绝引用非 sealed/applied 批次 |
+| 7a | P1 | `retentionThresholds` 无排序验证，`{90,10,5}` 可通过 | `isValidRetentionThresholds`（mediumDown<mediumUp<permanentUp），per-Agent/全局/Agent PUT 三处接线 |
+| 7b | P1 | `injectBudgetChars` 未接线，messages 注入永远用默认预算 | `memorySettingsResolver`（per-Agent→全局→默认）传入 `buildMemoryInjectionBlock`；顺带修复 `SessionRuntime.systemPrompt` 声明后从未赋值的潜在 bug |
+| 8 | P2 | sse-replay.test.ts 直用 `os.tmpdir()`（与并行测试/Phase 11 v8 DB 冲突）；Playwright 并行 freePort TOCTOU（并行 42/45 vs 串行 45/45） | 测试改 mkdtemp；`web/playwright.config.ts` 强制 `workers:1` 消除端口争用 |
+
+**复现级测试 14 个**（每个 P0/P1 至少一个定向 reproduction）：
+`memory-policy.test.ts` +6（main_agent 水位线 / >50 条截断 / merge 多目标 / supersede revision / merge revision / 晋升批次状态）、
+`memory-application.test.ts` +2（event forget 回滚 / createdFactId 定位）、
+`memory-scheduler.test.ts` +2（双窗口状态合并 / 重启持久化空闲门）、
+`memory-admin-api.test.ts` +2（阈值乱序 400 ×2 端点）、
+`memory-injection-wiring.test.ts` +2（预算接线 + 默认对照）。
+
+**合并后质量门（branch `phase-10.5-memory-agent` @ 16ef47a）**：
+tsc ✓ check:pi-imports ✓ build ✓ 756 server tests ✓（含 Phase 11 可观测性）348 web tests ✓ web build ✓。

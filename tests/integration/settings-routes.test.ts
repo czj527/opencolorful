@@ -12,6 +12,7 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { createServerApp } from "../../src/server/app.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -51,8 +52,13 @@ afterEach(() => {
 
 async function createContext() {
   const paths = createPaths();
-  const modelService = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
   const database = openMetadataDatabase(paths.database);
+  // 评审 P0（第三轮）：凭据变更属 fail-closed——测试提供真实审计
+  const audit = new AuditRecorder({
+    database,
+    producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+  });
+  const modelService = await ModelService.create(paths, new ProviderStore(paths.providerSettings), audit);
   const index = new SessionIndex(database);
   const sessionService = new SessionService(paths, index);
   const preferencesStore = new PreferencesStore(paths.preferences);
@@ -72,7 +78,7 @@ describe("preferences routes", () => {
       const resp = await app.request("http://local/api/settings/preferences");
       expect(resp.status).toBe(200);
       const body = (await resp.json()) as { version: number; layout: Record<string, unknown> };
-      expect(body.version).toBe(1);
+      expect(body.version).toBe(2);
       expect(body.layout).toMatchObject({
         leftSidebarWidth: expect.any(Number),
         rightSidebarWidth: expect.any(Number),

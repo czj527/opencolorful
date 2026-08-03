@@ -8,21 +8,34 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { AgentStore } from "../../src/config/agent-store.js";
 import { DECOR_COLORS } from "../../src/contracts/agent-identity.js";
 import { createServerApp } from "../../src/server/app.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
 
 const temporaryDirectories: string[] = [];
+const openDatabases: Array<import("better-sqlite3").Database> = [];
 
 function createAgentContext() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-agent-"));
   temporaryDirectories.push(directory);
   const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const agentStore = new AgentStore(paths.agents);
-  const { app } = createServerApp({ agentStore });
+  // 评审 P0（第三轮）：沙箱/工作区设置属 fail-closed——测试提供真实审计
+  const database = openMetadataDatabase(paths.database);
+  openDatabases.push(database);
+  const audit = new AuditRecorder({
+    database,
+    producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+  });
+  const { app } = createServerApp({ agentStore, audit });
   return { paths, agentStore, app };
 }
 
 afterEach(() => {
+  for (const database of openDatabases.splice(0)) {
+    try { database.close(); } catch { /* ignore */ }
+  }
   for (const directory of temporaryDirectories.splice(0)) {
-    fs.rmSync(directory, { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   }
 });
 

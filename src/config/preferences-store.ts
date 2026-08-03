@@ -8,7 +8,11 @@ import {
 } from "../contracts/preferences.js";
 
 export type PreferencesPatch = Partial<
-  Pick<PreferencesDocument, "defaults"> & Pick<PreferencesDocument, "layout"> & Pick<PreferencesDocument, "appearance">
+  Pick<PreferencesDocument, "defaults"> &
+    Pick<PreferencesDocument, "layout"> &
+    Pick<PreferencesDocument, "appearance"> &
+    Pick<PreferencesDocument, "memory"> &
+    Pick<PreferencesDocument, "observability">
 >;
 
 /**
@@ -53,10 +57,20 @@ export class PreferencesStore {
   update(patch: PreferencesPatch): PreferencesDocument {
     const current = this.get();
     const next: PreferencesDocument = {
-      version: 1,
+      version: 2,
       defaults: patch.defaults ?? current.defaults,
       layout: patch.layout ?? current.layout,
       appearance: patch.appearance ?? current.appearance,
+      ...(patch.observability !== undefined
+        ? { observability: patch.observability }
+        : current.observability !== undefined
+          ? { observability: current.observability }
+          : {}),
+      ...(patch.memory !== undefined
+        ? { memory: patch.memory }
+        : current.memory !== undefined
+          ? { memory: current.memory }
+          : {}),
     };
     const normalized = normalizePreferences(next);
     this.write(normalized);

@@ -20,10 +20,10 @@ function tempPaths(home: string) {
 }
 
 describe("preferences document normalization", () => {
-  it("returns version 1 defaults when value is missing entirely", () => {
+  it("returns version 2 defaults when value is missing entirely", () => {
     const prefs = normalizePreferences(undefined);
 
-    expect(prefs.version).toBe(1);
+    expect(prefs.version).toBe(2);
     expect(prefs.defaults.model).toBeNull();
     expect(prefs.defaults.thinkingLevel).toBe("medium");
     expect(prefs.defaults.toolMode).toBe("read-only");
@@ -327,5 +327,42 @@ describe("preferences store persistence", () => {
     expect(JSON.parse(fs.readFileSync(paths.preferences, "utf8")).defaults.toolMode).toBe("read-only");
     expect(warning).toHaveBeenCalledWith(expect.stringContaining("完整工具权限"));
     warning.mockRestore();
+  });
+});
+
+describe("preferences memory section (Phase 10.5)", () => {
+  it("v1 preferences migrate to v2 with observability defaults (backward compatible)", () => {
+    const prefs = normalizePreferences({ version: 1, defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" }, layout: { leftSidebarWidth: 280, rightSidebarWidth: 320, leftCollapsed: false, rightCollapsed: false, focusMode: false, reducedMotion: "system" }, appearance: { theme: "dark", showToolCalls: true, showThinking: true } });
+    expect(prefs.version).toBe(2);
+    expect(prefs.memory).toBeUndefined();
+    // Phase 11：v1 → v2 迁移自动补 observability 默认段
+    expect(prefs.observability?.diagnosticLevel).toBe("info");
+    expect(prefs.observability?.diagnosticDiskBudgetBytes).toBe(500 * 1024 * 1024);
+  });
+
+  it("valid memory section is preserved", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: defaultPreferences().defaults,
+      layout: defaultPreferences().layout,
+      appearance: defaultPreferences().appearance,
+      memory: { enabled: true, utilityProviderId: "openai", utilityModel: "gpt-4o-mini", deepDiveMode: "script", dailyRunTime: "04:00", minIdleMinutes: 45, weeklyReviewDay: 1, weeklyReviewTime: "04:30", turnsPerSummary: 12, injectBudgetChars: 3000, retentionThresholds: { mediumUp: 50, mediumDown: 40, permanentUp: 90 } },
+    });
+    expect(prefs.memory?.dailyRunTime).toBe("04:00");
+    expect(prefs.memory?.utilityProviderId).toBe("openai");
+    expect(prefs.memory?.retentionThresholds.permanentUp).toBe(90);
+  });
+
+  it("invalid memory section falls back to global defaults", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: defaultPreferences().defaults,
+      layout: defaultPreferences().layout,
+      appearance: defaultPreferences().appearance,
+      memory: { enabled: "maybe", deepDiveMode: "skynet" },
+    });
+    expect(prefs.memory?.enabled).toBe(true);
+    expect(prefs.memory?.deepDiveMode).toBe("script");
+    expect(prefs.memory?.dailyRunTime).toBe("03:00");
   });
 });

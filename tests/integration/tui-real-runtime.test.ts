@@ -9,6 +9,7 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { ProviderStore } from "../../src/config/provider-store.js";
 import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import { ModelService } from "../../src/runtime/model-service.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionRuntime } from "../../src/runtime/session-runtime.js";
@@ -36,11 +37,16 @@ describe("TUI real runtime", () => {
     const index = new SessionIndex(database);
     const sessionService = new SessionService(paths, index);
     const providerStore = new ProviderStore(paths.providerSettings);
-    const modelService = await ModelService.create(paths, providerStore);
+    // 评审 P0（第三轮）：凭据变更属 fail-closed——测试提供真实审计
+    const audit = new AuditRecorder({
+      database,
+      producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+    });
+    const modelService = await ModelService.create(paths, providerStore, audit);
 
     const server = await startForegroundServer({
       host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION,
-      appOptions: { promptService, replayStore, sessionService, modelService },
+      appOptions: { promptService, replayStore, sessionService, modelService, audit },
     });
 
     try {

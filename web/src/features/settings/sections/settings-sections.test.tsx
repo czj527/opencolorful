@@ -43,6 +43,15 @@ const fakeSupervisorStatus: SupervisorStatusResponse = {
 
 const fakeLogTail: LogTail = { logs: "ok", truncated: false, nextCursor: null };
 
+const fakeObservabilityPreferences = {
+  diagnosticLevel: "info",
+  diagnosticRetentionDays: { debug: 7, main: 30 },
+  diagnosticFileSizeBytes: 10 * 1024 * 1024,
+  diagnosticDiskBudgetBytes: 500 * 1024 * 1024,
+  activityRetentionDays: { routine: 180, notable: 730 },
+  emergencySpoolBudgetBytes: 128 * 1024 * 1024,
+};
+
 describe("ProvidersSection", () => {
   it("shows configured credential status without echoing the key", () => {
     const html = renderToStaticMarkup(
@@ -138,12 +147,16 @@ describe("LogsSection", () => {
     const html = renderToStaticMarkup(
       <LogsSection
         getSupervisorLogs={async () => fakeLogTail}
+        api={{ getObservabilityPreferences: async () => fakeObservabilityPreferences, saveObservabilityPreferences: async (prefs: typeof fakeObservabilityPreferences) => prefs } as never}
       />,
     );
     // Phase 7 重构后 LogsSection 返回 fragment（标题由 SettingsPage 的 SettingsSection 包装），
     // 验证日志工具栏与级别选择器渲染。
     expect(html).toContain("日志级别");
     expect(html).toContain("关键词过滤");
+    // Phase 11（评审 P1-7）：可观测性偏好表单（SSR 下只渲染加载占位）
+    expect(html).toContain("可观测性偏好");
+    expect(html).toContain("正在加载偏好");
   });
 });
 

@@ -27,6 +27,13 @@ const KNOWN_EVENT_TYPES = [
   "memory.recall.empty",
   "memory.recall.failed",
   "memory.recall.cancelled",
+  "memory.agent.started",
+  "memory.agent.layer_changed",
+  "memory.agent.processing",
+  "memory.agent.completed",
+  "memory.agent.deferred",
+  "memory.agent.failed",
+  "memory.strength.changed",
   "reset",
 ] as const;
 

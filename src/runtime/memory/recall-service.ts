@@ -21,6 +21,9 @@ import {
   extractMessageText,
 } from "./jsonl-branch-reader.js";
 import { sanitizeSensitiveText } from "../sanitize.js";
+import { instrument } from "../../observability/instrument.js";
+import type { ActivationUpdater } from "./activation-updater.js";
+import { strengthTierOf } from "./intensity-calculator.js";
 
 // ═══════════════════════════════════════════════════════════════
 // MemoryEventPublisher：per-stream sequence 计数器
@@ -49,8 +52,9 @@ export function resetAgentStreamSequences(): void {
   agentStreamSequences.clear();
 }
 
-/** 取流内下一条单调递增序号（单线程内同步递增，天然无竞争） */
-function nextAgentStreamSequence(streamId: string): number {
+/** 取流内下一条单调递增序号（单线程内同步递增，天然无竞争）。
+ *  后台整理（resolver/scheduler）与回想共用同一条 agent 流，必须共享分配器。 */
+export function nextAgentStreamSequence(streamId: string): number {
   const next = (agentStreamSequences.get(streamId) ?? 0) + 1;
   agentStreamSequences.set(streamId, next);
   return next;
@@ -98,6 +102,7 @@ export interface MemoryRecallServiceDeps {
   readonly publish: (envelope: PlatformEventEnvelope) => void;
   /** agents 根目录，用于路径 inclusion 校验（防穿越） */
   readonly agentsDir: string;
+  readonly activationUpdater?: Pick<ActivationUpdater, "updateForHits">;
 }
 
 export interface MemoryRecallServiceSearchArgs {
@@ -122,6 +127,7 @@ export class MemoryRecallService {
   private readonly sessionIndex: SessionIndex;
   private readonly publish: (envelope: PlatformEventEnvelope) => void;
   private readonly agentsDir: string;
+  private readonly activationUpdater: Pick<ActivationUpdater, "updateForHits"> | undefined;
 
   constructor(deps: MemoryRecallServiceDeps) {
     this.factStore = deps.factStore;
@@ -130,9 +136,51 @@ export class MemoryRecallService {
     this.sessionIndex = deps.sessionIndex;
     this.publish = deps.publish;
     this.agentsDir = deps.agentsDir;
+    this.activationUpdater = deps.activationUpdater;
   }
 
   async search(
+    input: MemoryRecallServiceSearchInput,
+  ): Promise<MemorySearchResult> {
+    const { agentId, sessionId } = input;
+    // Phase 11 T5：一次 recall run = 一个 operation；trace 继承调用方
+    // （search_memory 工具在 turn 的 runWithTrace 域内执行，自动同 trace）
+    const operationId = `recall-${agentId}-${sessionId}-${crypto.randomUUID().slice(0, 8)}`;
+    const lifecycle = instrument.startLifecycle({
+      startEventName: "memory.recall.started",
+      actor: { kind: "user", id: "web" },
+      executor: { kind: "agent", id: agentId },
+      scope: { ownerAgentId: agentId, sessionId },
+      operationId,
+      terminals: {
+        completed: "memory.recall.completed",
+        failed: "memory.recall.failed",
+        cancelled: "memory.recall.cancelled",
+      },
+    });
+    const result = await this.searchInner(input);
+    if (result.status === "failed") {
+      lifecycle.fail("recall failed");
+    } else if (result.status === "cancelled") {
+      lifecycle.cancel("aborted");
+    } else if (result.hits.length === 0) {
+      // 空结果 → 独立 memory.recall.empty（completed 语义，同一 operationId）
+      instrument.activity({
+        eventName: "memory.recall.empty",
+        status: "completed",
+        operationId,
+        actor: { kind: "user", id: "web" },
+        executor: { kind: "agent", id: agentId },
+        scope: { ownerAgentId: agentId, sessionId },
+        payload: { summaryCode: "memory_recall_empty" },
+      });
+    } else {
+      lifecycle.complete({ attributes: { hits: result.hits.length, reachedLayer: result.reachedLayer } });
+    }
+    return result;
+  }
+
+  private async searchInner(
     input: MemoryRecallServiceSearchInput,
   ): Promise<MemorySearchResult> {
     const { agentId, sessionId, turnId, args, signal } = input;
@@ -353,9 +401,11 @@ export class MemoryRecallService {
   }
 
   private strengthTier(retentionStrength: number): MemoryStrengthTier {
-    if (retentionStrength < 45) return "short";
-    if (retentionStrength < 85) return "medium";
-    return "permanent";
+    return strengthTierOf(retentionStrength, {
+      mediumUp: 45,
+      mediumDown: 35,
+      permanentUp: 85,
+    });
   }
 
   private recallEntryInput(
@@ -530,6 +580,12 @@ export class MemoryRecallService {
     reachedLayer: MemoryRecallLayer,
     publisher: MemoryEventPublisher,
   ): MemorySearchResult {
+    const factTargetIds = [...new Set(hits
+      .filter((hit) => hit.targetType === "fact")
+      .map((hit) => hit.targetId))];
+    if (factTargetIds.length > 0) {
+      this.activationUpdater?.updateForHits({ agentId, targetIds: factTargetIds });
+    }
     const now = new Date().toISOString();
     try {
       this.recallStore.updateEpisode(episodeId, {

@@ -10,6 +10,7 @@ import { SessionService } from "../../src/runtime/session-service.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
+import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -38,7 +39,16 @@ function createTestContext(): TestContext {
   const index = new SessionIndex(database);
   const sessionService = new SessionService(paths, index);
   const agentStore = new AgentStore(paths.agents);
-  const { app } = createServerApp({ sessionService, agentStore, paths });
+  const { app } = createServerApp({
+    sessionService,
+    agentStore,
+    paths,
+    // 评审 P0（第四轮）：Session 创建即绑定工作目录 → 需要严格审计（fail-closed）
+    audit: new AuditRecorder({
+      database,
+      producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
+    }),
+  });
 
   return {
     paths,

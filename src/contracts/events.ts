@@ -1,6 +1,11 @@
 import { type Static, Type } from "typebox";
 
-import { MemoryRecallPayloadSchema, MemoryUpdatedPayloadSchema } from "./memory.js";
+import {
+  MemoryAgentPayloadSchema,
+  MemoryRecallPayloadSchema,
+  MemoryStrengthChangedPayloadSchema,
+  MemoryUpdatedPayloadSchema,
+} from "./memory.js";
 
 export const EVENT_TYPES = [
   "health.changed",
@@ -27,6 +32,13 @@ export const EVENT_TYPES = [
   "memory.recall.empty",
   "memory.recall.failed",
   "memory.recall.cancelled",
+  "memory.agent.started",
+  "memory.agent.layer_changed",
+  "memory.agent.processing",
+  "memory.agent.completed",
+  "memory.agent.deferred",
+  "memory.agent.failed",
+  "memory.strength.changed",
   "error",
 ] as const;
 
@@ -80,6 +92,8 @@ const EventPayloadSchema = Type.Union([
   Type.Object({ code: Type.String(), message: Type.String(), retryable: Type.Boolean() }),
   MemoryUpdatedPayloadSchema,
   MemoryRecallPayloadSchema,
+  MemoryAgentPayloadSchema,
+  MemoryStrengthChangedPayloadSchema,
 ]);
 
 export const PlatformEventEnvelopeSchema = Type.Object({
