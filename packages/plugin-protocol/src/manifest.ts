@@ -46,7 +46,7 @@ export type ManifestCompatibility = Static<typeof ManifestCompatibilitySchema>;
 
 export const ManifestRuntimeSchema = Type.Object(
   {
-    kind: Type.Union(RUNTIME_KINDS.map((kind) => Type.Literal(kind))),
+    kind: Type.Union([Type.Literal("bundle"), Type.Literal("mcp"), Type.Literal("node-process"), Type.Literal("python-process")]),
     /** 代码插件的入口文件（相对插件根）；bundle/mcp 可省略 */
     entry: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   },
@@ -77,7 +77,7 @@ export const ManifestV1Schema = Type.Object(
     author: Type.Optional(AuthorSchema),
     license: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     compatibility: ManifestCompatibilitySchema,
-    trust: Type.Union(TRUST_LEVELS.map((level) => Type.Literal(level))),
+    trust: Type.Union([Type.Literal("restricted"), Type.Literal("full-access")]),
     runtime: ManifestRuntimeSchema,
     /** 权限请求：能力族枚举，实际授权由平台 grant 决定 */
     permissions: Type.Array(PermissionRequestSchema, { maxItems: 256 }),

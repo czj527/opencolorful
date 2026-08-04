@@ -21,7 +21,7 @@ export type PluginSourceType = (typeof PLUGIN_SOURCE_TYPES)[number];
 /** 来源引用：Source Adapter 的统一解析目标 */
 export const PluginSourceRefSchema = Type.Object(
   {
-    sourceType: Type.Union(PLUGIN_SOURCE_TYPES.map((type) => Type.Literal(type))),
+    sourceType: Type.Union([Type.Literal("local"), Type.Literal("zip"), Type.Literal("git"), Type.Literal("npm"), Type.Literal("openclaw"), Type.Literal("hermes"), Type.Literal("mcp")]),
     /** 来源地址/路径/包名（不保存 Secret） */
     ref: Type.String({ minLength: 1, maxLength: 2048 }),
     /** 固定版本/commit/tag；来源缓存不得测试 latest */
@@ -59,7 +59,7 @@ export const CompatibilityReportSchema = Type.Object(
     pluginId: Type.String({ minLength: 1, maxLength: 128 }),
     version: Type.String({ minLength: 1, maxLength: 128 }),
     /** 最高达到的兼容等级 */
-    level: Type.Union(COMPATIBILITY_LEVELS.map((level) => Type.Literal(level))),
+    level: Type.Union([Type.Literal("L1"), Type.Literal("L2"), Type.Literal("L3"), Type.Literal("L4"), Type.Literal("L5"), Type.Literal("L6")]),
     supported: Type.Boolean(),
     missingCapabilities: Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 256 }),
     /** 每项 contribution 的兼容结论 */
@@ -68,7 +68,7 @@ export const CompatibilityReportSchema = Type.Object(
         {
           id: Type.String({ minLength: 1, maxLength: 128 }),
           kind: Type.String({ minLength: 1, maxLength: 64 }),
-          status: Type.Union(COMPATIBILITY_ITEM_STATUSES.map((status) => Type.Literal(status))),
+          status: Type.Union([Type.Literal("supported"), Type.Literal("unsupported"), Type.Literal("degraded"), Type.Literal("blocked")]),
           reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
         },
         { additionalProperties: false },

@@ -42,7 +42,7 @@ export const NormalizedPluginManifestSchema = Type.Object(
     ),
     license: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     compatibility: ManifestCompatibilitySchema,
-    trust: Type.Union(TRUST_LEVELS.map((level) => Type.Literal(level))),
+    trust: Type.Union([Type.Literal("restricted"), Type.Literal("full-access")]),
     runtime: ManifestRuntimeSchema,
     permissions: Type.Array(PermissionRequestSchema, { maxItems: 256 }),
     contributions: ContributionsSchema,

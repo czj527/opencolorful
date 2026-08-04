@@ -48,7 +48,7 @@ export const ToolContributionSchema = Type.Object(
     /** 输入 Schema（JSON Schema 子集）；平台负责 Schema 校验、大小限制和脱敏 */
     inputSchema: Type.Optional(Type.Unknown()),
     outputSchema: Type.Optional(Type.Unknown()),
-    riskLevel: Type.Optional(Type.Union(TOOL_RISK_LEVELS.map((level) => Type.Literal(level)))),
+    riskLevel: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
   },
   { additionalProperties: false },
 );

@@ -173,3 +173,40 @@ describe("Phase 12 兼容报告 / 规范化清单契约（T1 冻结）", () => {
     expect(Value.Check(NormalizedPluginManifestSchema, bad)).toBe(false);
   });
 });
+
+// ── T1 修复（TypeBox Static never）：union 必须显式字面量，编译期验证类型非 never ──
+import type {
+  CapabilityKind,
+  CompatibilityLevel,
+  ManifestV1,
+  PermissionRequest,
+  PluginGrant,
+  PluginRuntimeKind,
+  PluginTrust,
+  PluginSourceRef,
+  PluginStatus,
+} from "@opencolorful/plugin-protocol";
+
+describe("Phase 12 协议 Static 类型（T1 修复：union 显式字面量，不得退化为 never）", () => {
+  it("ManifestV1 / PluginGrant / PermissionRequest 类型可被赋值（编译期验证）", () => {
+    const trust: PluginTrust = "full-access";
+    const runtimeKind: PluginRuntimeKind = "python-process";
+    const capability: CapabilityKind = "secret.read-own";
+    const level: CompatibilityLevel = "L5";
+    const sourceType: PluginSourceRef["sourceType"] = "hermes";
+    const status: PluginStatus = "degraded";
+    const permission: PermissionRequest = { capability: "tool.register", reason: "注册工具" };
+    const grant: PluginGrant = {
+      pluginId: "example.sdk-showcase", capability: "network.connect", decision: "denied",
+      revision: 1, grantedAt: "2026-08-04T00:00:00.000Z", grantedBy: "user:web",
+    };
+    const manifest: ManifestV1 = {
+      manifestVersion: 1, id: "example.sdk-showcase", name: "SDK Showcase", version: "1.0.0",
+      compatibility: { opencolorful: ">=1.0.0", pluginApi: 1 },
+      trust, runtime: { kind: runtimeKind }, permissions: [permission], contributions: {},
+    };
+    expect([trust, runtimeKind, capability, level, sourceType, status]).toHaveLength(6);
+    expect(grant.decision).toBe("denied");
+    expect(manifest.runtime.kind).toBe("python-process");
+  });
+});

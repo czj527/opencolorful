@@ -32,7 +32,14 @@ export type CapabilityKind = (typeof CAPABILITY_KINDS)[number];
 /** 插件声明的能力请求（Manifest.permissions 或运行时扩展请求） */
 export const PermissionRequestSchema = Type.Object(
   {
-    capability: Type.Union(CAPABILITY_KINDS.map((kind) => Type.Literal(kind))),
+    capability: Type.Union([
+      Type.Literal("filesystem.read"), Type.Literal("filesystem.write"), Type.Literal("network.connect"),
+      Type.Literal("process.spawn"), Type.Literal("secret.read-own"), Type.Literal("provider.register"),
+      Type.Literal("tool.register"), Type.Literal("route.register"), Type.Literal("ui.surface"),
+      Type.Literal("ui.host.external-open"), Type.Literal("ui.host.clipboard"), Type.Literal("resource.open"),
+      Type.Literal("resource.pick"), Type.Literal("background.run"), Type.Literal("hook.register"),
+      Type.Literal("activity.emit"),
+    ]),
     reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   },
   { additionalProperties: false },
@@ -49,8 +56,15 @@ export type GrantDecision = (typeof GRANT_DECISIONS)[number];
 export const PluginGrantSchema = Type.Object(
   {
     pluginId: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }),
-    capability: Type.Union(CAPABILITY_KINDS.map((kind) => Type.Literal(kind))),
-    decision: Type.Union(GRANT_DECISIONS.map((decision) => Type.Literal(decision))),
+    capability: Type.Union([
+      Type.Literal("filesystem.read"), Type.Literal("filesystem.write"), Type.Literal("network.connect"),
+      Type.Literal("process.spawn"), Type.Literal("secret.read-own"), Type.Literal("provider.register"),
+      Type.Literal("tool.register"), Type.Literal("route.register"), Type.Literal("ui.surface"),
+      Type.Literal("ui.host.external-open"), Type.Literal("ui.host.clipboard"), Type.Literal("resource.open"),
+      Type.Literal("resource.pick"), Type.Literal("background.run"), Type.Literal("hook.register"),
+      Type.Literal("activity.emit"),
+    ]),
+    decision: Type.Union([Type.Literal("allowed"), Type.Literal("denied")]),
     revision: Type.Integer({ minimum: 1 }),
     grantedAt: Type.String({ minLength: 1, maxLength: 64 }),
     /** 授权主体（用户/平台），供 Audit 归责 */
@@ -64,8 +78,15 @@ export type PluginGrant = Static<typeof PluginGrantSchema>;
 export const GrantChangeInputSchema = Type.Object(
   {
     pluginId: Type.String({ pattern: "^[a-z0-9][a-z0-9._-]{0,127}$" }),
-    capability: Type.Union(CAPABILITY_KINDS.map((kind) => Type.Literal(kind))),
-    decision: Type.Union(GRANT_DECISIONS.map((decision) => Type.Literal(decision))),
+    capability: Type.Union([
+      Type.Literal("filesystem.read"), Type.Literal("filesystem.write"), Type.Literal("network.connect"),
+      Type.Literal("process.spawn"), Type.Literal("secret.read-own"), Type.Literal("provider.register"),
+      Type.Literal("tool.register"), Type.Literal("route.register"), Type.Literal("ui.surface"),
+      Type.Literal("ui.host.external-open"), Type.Literal("ui.host.clipboard"), Type.Literal("resource.open"),
+      Type.Literal("resource.pick"), Type.Literal("background.run"), Type.Literal("hook.register"),
+      Type.Literal("activity.emit"),
+    ]),
+    decision: Type.Union([Type.Literal("allowed"), Type.Literal("denied")]),
     reason: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   },
   { additionalProperties: false },
