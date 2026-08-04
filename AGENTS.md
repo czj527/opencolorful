@@ -31,7 +31,8 @@
 | `plans/phase-09.md` | Phase 9 实施计划与验收记录 | 了解历史 |
 | `plans/phase-10.md` | Phase 10 实施计划、评审修复与验收记录 | 了解历史 |
 | `plans/phase-10.5.md` | Phase 10.5 记忆 Agent 与后台整理计划 | 进入记忆 Agent 阶段时读 |
-| `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已评审定稿，待开发） | 实现或验收统一可观测性时读 |
+| `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已实现并验收） | 接续可观测性工作时读 |
+| `plans/phase-12.md` | Phase 12 通用插件系统计划（已评审修订，待开发） | 实现或评审插件系统时读 |
 
 ## 参考仓库
 
