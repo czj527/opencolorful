@@ -18,6 +18,19 @@ describe("runtime paths", () => {
     expect(paths.database).toBe(path.join(paths.home, "metadata.sqlite"));
   });
 
+  it("Phase 12: exposes all plugin directories under OPENCOLORFUL_HOME", () => {
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: "D:\opencolorful-plugins" });
+
+    expect(paths.pluginsInstalled).toBe(path.join(paths.home, "plugins", "installed"));
+    expect(paths.pluginsStaging).toBe(path.join(paths.home, "plugins", "staging"));
+    expect(paths.pluginsData).toBe(path.join(paths.home, "plugins", "data"));
+    expect(paths.pluginsCache).toBe(path.join(paths.home, "plugins", "cache"));
+    expect(paths.pluginsDev).toBe(path.join(paths.home, "plugins-dev"));
+    expect(paths.pluginDevSources).toBe(path.join(paths.home, "plugin-dev-sources"));
+    expect(paths.pluginSources).toBe(path.join(paths.home, "config", "plugin-sources.json"));
+    expect(paths.pluginSecrets).toBe(path.join(paths.home, "auth", "plugin-secrets.json"));
+  });
+
   it("uses a non-empty OPENCOLORFUL_HOME override", () => {
     const paths = getRuntimePaths({ OPENCOLORFUL_HOME: "D:\\opencolorful-test" });
 

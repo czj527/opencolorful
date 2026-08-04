@@ -238,7 +238,7 @@ describe("migration v7（记忆 Agent 审批与优先级）", () => {
       .pluck()
       .get() as number;
     expect(version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(9);
+    expect(CURRENT_SCHEMA_VERSION).toBe(10);
     const tables = tableNames(database);
     expect(tables).toContain("memory_mutation_proposals");
     expect(tables).toContain("activity_events");
@@ -340,7 +340,7 @@ describe("migration v8/v9（Phase 11 可观测性）", () => {
     database.close();
 
     const reopened = openMetadataDatabase(paths.database);
-    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(9);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(CURRENT_SCHEMA_VERSION);
     const columns = reopened.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
     expect(columns.some((column) => column.name === "event_name")).toBe(true);
     const indexes = reopened.prepare("PRAGMA index_list(audit_events)").all() as Array<{ name: string }>;
@@ -358,7 +358,7 @@ describe("migration v8/v9（Phase 11 可观测性）", () => {
     database.close();
 
     const reopened = openMetadataDatabase(paths.database);
-    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(9);
+    expect(reopened.prepare("SELECT version FROM schema_version").pluck().get()).toBe(CURRENT_SCHEMA_VERSION);
     const columns = reopened.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
     expect(columns.filter((column) => column.name === "event_name")).toHaveLength(1);
     const indexes = reopened.prepare("PRAGMA index_list(audit_events)").all() as Array<{ name: string }>;

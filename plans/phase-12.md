@@ -1185,7 +1185,7 @@ Phase 12 专项门：
 
 ## 实施记录
 
-> 当前尚未开发。实施 Agent 必须在每个任务完成后增量回写，不得在最终验收前一次性补写或提前勾选验收项。
+> T1 由主 Agent 串行冻结共享契约（plan §21.1）；T2/T3 并行子 Agent；T6/T7/T8 并行；子 Agent 报告不作为验收证据，主 Agent 独立复核。
 
 ### 提交记录
 
@@ -1221,3 +1221,18 @@ Phase 12 专项门：
 ### 最终验收结论
 
 待实施。只有全部验收项、质量门和真实 Web 验收通过后，才允许把文档状态改为“已完成”。
+### T1 实施记录（2026-08-04，主 Agent 串行冻结）
+
+**内容**：协议包、Manifest v1、路径、migration v10、插件事件目录、import boundary 全部冻结。
+
+**关键冻结决策**：
+- **协议包构建链**：`packages/plugin-protocol`（@opencolorful/plugin-protocol）独立 workspace 包，独立 tsc build（dist + .d.ts）；根 workspaces 扩为 `["web", "packages/*"]`；`build:protocol` 在 check 链最前；Server 通过 `src/contracts/plugin-protocol.ts` re-export 消费（只走包名，不 import dist 深路径）。typebox 1.3.6 的 `Value` 从 `typebox/value` 子模块导入。
+- **事件命名约定**（T1 冻结，不得新旧混用）：activity 事件点号式（`plugin.execution.timed_out` 等复合词内允许下划线）；audit 事件下划线式（`audit.plugin.install_started/completed/failed`）。Phase 11 已注册的 4 个 plugin activity 事件 + 3 个 audit 镜像保持兼容，迁入 `catalog/plugin-events.ts` 统一维护。
+- **Status 映射**：SQLite `activity_events.status` CHECK 枚举无 exited/crashed/timed_out → 插件进程/执行终态映射：exited→completed、crashed→failed、timed_out→failed（payload reasonCode 表达精确语义）、interrupted→interrupted、cancelled→cancelled。
+- **Migration v10**：7 张插件状态表（installations/grants/configs/bindings/runtime_instances/source_cache/operations），`CURRENT_SCHEMA_VERSION = 10`；operations 表预留补偿状态（started/completed/failed/compensated）满足中断恢复与可验证补偿。
+- **目录拆分**：`src/observability/catalog/shared.ts`（entry/routine/notable 辅助）+ `plugin-events.ts`（Phase 11 基础 + Phase 12 扩展 Activity/Audit 事件），event-catalog.ts spread 合并（保持单一权威注册表）。
+- **verify-plugin-imports.mjs**：强制 packages/* 不得 import Server 内部（src/ 相对路径）与 @earendil-works/pi-*；Server src 不得 import 协议包 dist 深路径。已加入根 check 链。
+
+**针对性测试**（不依赖全量）：tests/contracts/plugin-protocol.test.ts（Manifest v1 正反例/能力族枚举/扩展点种类/grant/binding/snapshot/source-ref/IPC/compatibility/normalized 20 例）、tests/integration/plugin-migration.test.ts（全新库/9→10 升级/中断恢复幂等/拒绝高版本 5 例）、tests/unit/observability-plugin-catalog.test.ts（命名约定/生命周期配对/audit 三阶段/auditMirror 存在性/Phase 11 不回归 10 例）、config-paths 插件路径断言。
+
+**质量门**：tsc ×2 ✓、verify-plugin-imports ✓、vitest 81 files / 865 tests ✓（全量一次，契约冻结验证）。

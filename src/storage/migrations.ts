@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -499,6 +499,107 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
       `);
       database.prepare("UPDATE schema_version SET version = 9").run();
     })();
+  }
+
+  // v10：Phase 12 插件系统规范化状态表（plans/phase-12.md §7.3）。
+  // 事实来源：安装 Artifact 中的原始 Manifest 是包内容事实；plugin_installations
+  // 是安装/active version/启用状态事实；plugin_grants / agent_plugin_bindings 是
+  // 权限与 Agent 可见性事实；plugin_configs 是非敏感配置及 revision 的事实来源；
+  // plugin_secrets 落 auth/plugin-secrets.json（PluginSecretStore，本表不存值）；
+  // plugin_runtime_instances 是运行实例/健康/restart budget 事实；
+  // plugin_source_cache 是来源元数据与版本索引（可清理，provenance 不随删）；
+  // plugin_operations 记录安装/更新/回滚/卸载操作与补偿状态（中断可恢复）。
+  if (current < 10) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS plugin_installations (
+        plugin_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+        status TEXT NOT NULL CHECK (status IN ('discovered','staged','installed','enabled','degraded','disabled','failed','removed')),
+        source_type TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        source_version TEXT,
+        artifact_sha256 TEXT NOT NULL,
+        artifact_size INTEGER NOT NULL DEFAULT 0,
+        provenance_json TEXT NOT NULL DEFAULT '{}',
+        manifest_json TEXT NOT NULL DEFAULT '{}',
+        installed_at TEXT NOT NULL,
+        PRIMARY KEY (plugin_id, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plugin_install_active ON plugin_installations(plugin_id, active);
+      CREATE INDEX IF NOT EXISTS idx_plugin_install_status ON plugin_installations(status);
+
+      CREATE TABLE IF NOT EXISTS plugin_grants (
+        plugin_id TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('allowed','denied')),
+        revision INTEGER NOT NULL,
+        granted_at TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        PRIMARY KEY (plugin_id, capability)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plugin_grants_revision ON plugin_grants(plugin_id, revision);
+
+      CREATE TABLE IF NOT EXISTS plugin_configs (
+        plugin_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL DEFAULT '',
+        revision INTEGER NOT NULL,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (plugin_id, agent_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plugin_configs_revision ON plugin_configs(plugin_id, revision);
+
+      CREATE TABLE IF NOT EXISTS agent_plugin_bindings (
+        agent_id TEXT NOT NULL,
+        plugin_id TEXT NOT NULL,
+        contributions_json TEXT NOT NULL DEFAULT '[]',
+        grant_revision INTEGER NOT NULL DEFAULT 1,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (agent_id, plugin_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_plugin_bindings_plugin ON agent_plugin_bindings(plugin_id, agent_id);
+
+      CREATE TABLE IF NOT EXISTS plugin_runtime_instances (
+        runtime_instance_id TEXT NOT NULL,
+        plugin_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        runtime_kind TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('starting','running','stopped','crashed','degraded')),
+        restart_count INTEGER NOT NULL DEFAULT 0,
+        last_health_at TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (runtime_instance_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plugin_runtime_plugin ON plugin_runtime_instances(plugin_id, status);
+
+      CREATE TABLE IF NOT EXISTS plugin_source_cache (
+        source_type TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        version TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (source_type, source_ref, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS plugin_operations (
+        operation_id TEXT NOT NULL,
+        plugin_id TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK (operation IN ('install','update','rollback','uninstall','enable','disable','dev-install','dev-reload')),
+        status TEXT NOT NULL CHECK (status IN ('started','completed','failed','compensated')),
+        from_version TEXT,
+        to_version TEXT,
+        reason_code TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        PRIMARY KEY (operation_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_plugin_operations_plugin ON plugin_operations(plugin_id, status);
+    `);
+    database.prepare("UPDATE schema_version SET version = 10").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

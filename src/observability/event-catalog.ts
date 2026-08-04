@@ -1,5 +1,6 @@
 import type { EventCatalogEntry } from "../contracts/observability.js";
-import { ActivityPayloadSchema, AuditPayloadSchema } from "../contracts/observability.js";
+import { entry, notable, routine } from "./catalog/shared.js";
+import { pluginActivityEntries, pluginAuditEntries } from "./catalog/plugin-events.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 事件目录（plans/phase-11.md §6）
@@ -19,18 +20,6 @@ import { ActivityPayloadSchema, AuditPayloadSchema } from "../contracts/observab
 //
 // 审计镜像（§6.3）：同名 Activity 用于时间线，Audit 用于责任与策略证据。
 // ═══════════════════════════════════════════════════════════════
-
-const routine = { significance: "routine", producerPolicy: "platform-only" } as const;
-const notable = { significance: "notable", producerPolicy: "platform-only" } as const;
-
-function entry(input: Omit<EventCatalogEntry, "producerPolicy" | "securitySummary" | "payloadSchema"> & { producerPolicy?: EventCatalogEntry["producerPolicy"]; securitySummary?: EventCatalogEntry["securitySummary"]; payloadSchema?: EventCatalogEntry["payloadSchema"] }): EventCatalogEntry {
-  return {
-    producerPolicy: "platform-only",
-    securitySummary: "exclude",
-    payloadSchema: input.channel === "audit" ? AuditPayloadSchema : ActivityPayloadSchema,
-    ...input,
-  };
-}
 
 /** 事件目录：eventName → 注册记录（唯一权威，禁止重复/遗漏） */
 export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> = new Map(
@@ -181,10 +170,9 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "client.render.failed", eventVersion: 1, channel: "activity", category: "client", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...routine, producerPolicy: "extension-allowed" }),
 
       // ── 插件与 Observability 运维 ──
-      entry({ eventName: "plugin.permission.granted", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "info", lifecycleRole: "point", ...notable, auditMirror: "audit.plugin.permission_granted" }),
-      entry({ eventName: "plugin.permission.denied", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "point", ...notable, auditMirror: "audit.plugin.permission_denied" }),
-      entry({ eventName: "plugin.permission.revoked", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "point", ...notable, auditMirror: "audit.plugin.permission_revoked" }),
-      entry({ eventName: "plugin.crashed", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...routine }),
+      // Phase 11 已注册：plugin.permission.granted/denied/revoked（含 audit 镜像）、plugin.crashed
+      // Phase 12（T1 冻结）：其余插件事件见 catalog/plugin-events.ts
+      ...pluginActivityEntries,
       entry({ eventName: "observability.preferences.changed", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "point", ...notable, auditMirror: "audit.observability.preferences_changed" }),
       entry({ eventName: "observability.retention.executed", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...notable, auditMirror: "audit.observability.retention_executed" }),
       entry({ eventName: "observability.export.created", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed", "failed"], ...notable, auditMirror: "audit.observability.export_created" }),
@@ -217,6 +205,7 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "audit.plugin.permission_granted", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "point", significance: "notable" }),
       entry({ eventName: "audit.plugin.permission_denied", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "point", significance: "notable" }),
       entry({ eventName: "audit.plugin.permission_revoked", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "point", significance: "notable" }),
+      ...pluginAuditEntries,
       entry({ eventName: "audit.observability.preferences_change.started", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "started", significance: "notable" }),
       entry({ eventName: "audit.observability.preferences_change.failed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "terminal", significance: "notable" }),
       entry({ eventName: "audit.observability.preferences_changed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "terminal", significance: "notable" }),

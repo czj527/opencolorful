@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "web"
+    "web",
+    "packages/*"
   ],
   "description": "OpenColorful — 承载 agent 完整一生的本地优先平台基础设施",
   "bin": {
@@ -15,11 +16,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:protocol": "npm run build -w @opencolorful/plugin-protocol",
     "check:pi-imports": "node scripts/verify-pi-sdk-imports.mjs",
+    "check:plugin-imports": "node scripts/verify-plugin-imports.mjs",
     "cli": "tsx src/cli/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "npm run check:pi-imports && npm run typecheck && npm run test && npm run build && npm run web:test && npm run web:build",
+    "check": "npm run check:pi-imports && npm run check:plugin-imports && npm run build:protocol && npm run typecheck && npm run test && npm run build && npm run web:test && npm run web:build",
     "web:dev": "npm run dev --workspace=web",
     "web:build": "npm run build --workspace=web",
     "web:test": "npm run test --workspace=web"

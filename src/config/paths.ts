@@ -17,6 +17,16 @@ export interface RuntimePaths {
   readonly serverState: string;
   readonly serverLock: string;
   readonly serverLog: string;
+  // ── Phase 12 插件目录（plans/phase-12.md §7.2）──
+  // 所有路径由 paths.ts 统一生成，调用方不得自行拼接用户数据目录
+  readonly pluginsInstalled: string;
+  readonly pluginsStaging: string;
+  readonly pluginsData: string;
+  readonly pluginsCache: string;
+  readonly pluginsDev: string;
+  readonly pluginDevSources: string;
+  readonly pluginSources: string;
+  readonly pluginSecrets: string;
 }
 
 export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): RuntimePaths {
@@ -43,5 +53,13 @@ export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): R
     serverState: path.join(runtime, "server.json"),
     serverLock: path.join(runtime, "server.lock"),
     serverLog: path.join(logs, "server.log"),
+    pluginsInstalled: path.join(home, "plugins", "installed"),
+    pluginsStaging: path.join(home, "plugins", "staging"),
+    pluginsData: path.join(home, "plugins", "data"),
+    pluginsCache: path.join(home, "plugins", "cache"),
+    pluginsDev: path.join(home, "plugins-dev"),
+    pluginDevSources: path.join(home, "plugin-dev-sources"),
+    pluginSources: path.join(config, "plugin-sources.json"),
+    pluginSecrets: path.join(auth, "plugin-secrets.json"),
   };
 }
