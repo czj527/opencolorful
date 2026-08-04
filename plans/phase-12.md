@@ -1236,3 +1236,15 @@ Phase 12 专项门：
 **针对性测试**（不依赖全量）：tests/contracts/plugin-protocol.test.ts（Manifest v1 正反例/能力族枚举/扩展点种类/grant/binding/snapshot/source-ref/IPC/compatibility/normalized 20 例）、tests/integration/plugin-migration.test.ts（全新库/9→10 升级/中断恢复幂等/拒绝高版本 5 例）、tests/unit/observability-plugin-catalog.test.ts（命名约定/生命周期配对/audit 三阶段/auditMirror 存在性/Phase 11 不回归 10 例）、config-paths 插件路径断言。
 
 **质量门**：tsc ×2 ✓、verify-plugin-imports ✓、vitest 81 files / 865 tests ✓（全量一次，契约冻结验证）。
+
+### T2/T3 实施记录（2026-08-04，并行子 Agent + 主 Agent 独立复核）
+
+**T2（Registry/Source/安装器）**：`src/storage/plugin-registry-store.ts`（installations+operations 表）、`src/runtime/plugins/paths.ts`（ZIP Slip 双防线：assertSafeRelativeEntry + canonical 包含判定，仿 Phase 9 path-guard resolveCanonical）、`sources/`（local/zip/git/npm 四 adapter + 统一 SourceAdapter 接口，Git 固定 commit 禁 latest，纯 Node ZIP 解包拒 symlink/zip bomb）、`installer/plugin-installer.ts`（staging→hash→Manifest v1 校验→normalize→兼容报告→health check）、`registry/plugin-registry.ts`（不可变版本目录 + DB active 原子切换 + per-plugin 串行化 + started→同库事务 completed/failed 严格审计 + 补偿删版本目录写 denied 终态）。不执行 postinstall。
+
+**T3（权限/Grant/Sandbox Bridge）**：`grants/capability-catalog.ts`（16 能力族 + 高风险默认策略）、`grant-service.ts`（平台授权 revision 单调 + 三阶段 fail-closed 审计）、`binding-service.ts`（Agent 绑定只引用授权）、`effective-policy.ts`（manifest∩grant∩binding∩session∩sandbox 五层交集 + deniedBy/evidence）、`execution-snapshot.ts`（不可变快照）、`host-broker.ts`（白名单 Host API，伪造身份/权威字段拒绝）、`sandbox-bridge.ts`（复用 Phase 9 PathGuard，denied 记 plugin.sandbox.denied 脱敏）。
+
+**主 Agent 独立复核发现并修复（T1 缺陷）**：TypeBox 1.3.6 的 `Static` 对 `Type.Union(arr.map(...))`（open array）解析为 `never`，导致 ManifestV1/PluginGrant 等类型不可用。两个并行子 Agent 独立报告同一问题。修复：全部 union 改为显式字面量 tuple + 新增 Static 类型级回归测试（提交 74cc5d7）。
+
+**验证**：T2/T3 针对性测试 8 files / 95 tests ✓；全量阶段验证 89 files / 961 tests ✓；tsc ×2 ✓；verify-plugin-imports ✓。
+
+**已知偏差**：卸载不停止 Runtime（T4 范围）；healthCheck 为 Artifact 完整性级（非运行时健康）；network.connect 目标 allowlist 留 T4/T5；config_change 审计三阶段由 T5 接线。
