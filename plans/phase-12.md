@@ -1248,3 +1248,33 @@ Phase 12 专项门：
 **验证**：T2/T3 针对性测试 8 files / 95 tests ✓；全量阶段验证 89 files / 961 tests ✓；tsc ×2 ✓；verify-plugin-imports ✓。
 
 **已知偏差**：卸载不停止 Runtime（T4 范围）；healthCheck 为 Artifact 完整性级（非运行时健康）；network.connect 目标 allowlist 留 T4/T5；config_change 审计三阶段由 T5 接线。
+
+### T4-T10 实施记录（2026-08-04）
+
+**T4（Runtime Host 与 IPC，提交 750f42e）**：bundle/mcp/node/python 四类 Runtime + JSON-RPC 行帧（1MB 上限）+ 一次性 carrier token（TTL 30s 单次消费）+ 崩溃重启预算（3 次/10min，超限 degraded）+ stdout/stderr 脱敏限长折叠限速→diagnostic + execution/process 生命周期自动埋点（contributionKind 区分）。68 测试。
+
+**T5（Contribution Registry 与 Host API，提交 89c35ff）**：11 类贡献（tool/command/provider/route/surface/background/hook/config/secret/attachment/custom-activity/skill）+ tool namespace pluginId.toolId + route 固定 namespace 白名单 + config/secret 三阶段严格审计 + activate/deactivate 回滚 + HostBroker 白名单 API。92 测试。
+
+**T6（OpenClaw，并入 1966fa8）**：openclaw.plugin.json 识别、L1-L4 映射（工具/MCP/config/commands/static skills 只登记）、专属能力（Gateway/Channel/ACP/Hook/内部 API）精确中文诊断 blocked/degraded、不把 allow/deny 当授权。32 测试 + 固定 fixture。
+
+**T7（Hermes，并入 1966fa8）**：plugin.yaml 解析、静态 register_tool 扫描、宿主依赖诊断、stdlib-only Python worker L5 桥（解释器发现不下载）、异常/traceback/stderr 统一诊断。31 测试（python3 可用时 bridge 全跑）。
+
+**T8（Web 插件中心，并入 1966fa8）**：五视图（installed/discover/permissions/dev/sources）+ 独立详情页（兼容三色/full-access 警示/按 pluginId 跳 /logs）+ Agent 绑定（下一 turn 生效提示）+ Settings 入口 + /plugins 路由 + 404 降级"插件服务未就绪"。12 web 单测 + 2 e2e 冒烟（含 390px 无溢出）。
+
+**T9（Dev SDK 与 Showcase，提交 e50eeb0）**：plugin-sdk/plugin-runtime/plugin-components 三包独立构建（协议类型 re-export，零 Server import）+ dev install/reload/reset/uninstall/invoke-tool/list-surfaces/run-scenario + devRunId 隔离 + destructive 审批 + CLI plugins 命令组 + sdk-showcase 12 扩展点 + docs/plugin-development.md + verify-plugin-package.mjs。37 测试。
+
+**T10（组合根接线与验收，提交 b5c5c1e）**：PluginFacade 装配全部插件服务（Registry/Installer/Sources/Grants/Bindings/Policy/Broker/RuntimeHost/HostApi/DevHost）+ /api/plugins 与 /api/plugins/dev/* 路由 + app/start 接线 + OpenClaw/Hermes 生态包经 compat 转换走 installNormalized。**类型统一**：删除 installer 本地镜像类型改用协议包单一权威类型（T1 Static never 修复后暴露的契约分叉收敛）。
+
+**T10 全量质量门（逐条独立执行）**：verify-pi-sdk-imports ✓、verify-plugin-imports ✓、verify-plugin-package ✓、tsc ×2 ✓、vitest 109 files / 1225 tests ✓、build ✓、web tsc/vitest 361/build ✓、Playwright e2e 54/54 ✓、git diff --check ✓。
+
+**已知偏差**：
+1. OpenClaw/Hermes 生态包安装走 compat 转换路径（installNormalized），T2 installer.prepare 仍只处理原生 manifest.json——记录为受控分叉，生态包 fixture 已锁定。
+2. Custom Activity 经 ExtensionObservabilityPort 发出，插件自定义事件（plugin.<pluginId>.*）的动态登记由运行时 wrapper 处理（extension-allowed），T1 目录只含平台事件。
+3. `plugin_runtime_instances` 表未写（RuntimeHost 实例状态在内存），持久化接线留待后续；plugin-secrets.json 用 InMemorySecretStore 占位。
+4. openclaw-compat 保留 NormalizedPluginManifestMirror/CompatibilityReportMirror 显式镜像（明确命名区分，facade 层收敛为协议类型）。
+5. /logs 的 ?plugin= 预筛选参数为 best-effort（/logs 页未解析，入口已提供）。
+6. MCP 来源 sourceType 标记 supported:false（MCP runtime 已实现，来源直装接线留待后续）。
+
+### 最终验收结论
+
+待用户（创建者）审查 `phase-12-plugin-system` 分支后决定是否合并到 main。自动化质量门全部通过；真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）可作为人工验收步骤执行。
