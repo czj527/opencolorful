@@ -1,0 +1,5 @@
+name: hermes-minimal
+version: 1.2.0
+description: "Phase 12 Hermes 最小插件夹具（L1 识别 / L2 静态 Skills / L4 工具 Schema）"
+author: "OpenColorful Test"
+entry: __init__.py

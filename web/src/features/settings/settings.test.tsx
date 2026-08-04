@@ -13,13 +13,14 @@ import { SettingsNav } from "./SettingsNav.js";
 import { SettingsPage } from "./SettingsPage.js";
 
 describe("SETTINGS_SECTIONS", () => {
-  it("exposes fixed sections models/defaults/layout/agents/logs/usage/runtime/future", () => {
+  it("exposes fixed sections models/defaults/layout/agents/plugins/logs/usage/runtime/future", () => {
     const ids = SETTINGS_SECTIONS.map((s) => s.id);
     expect(ids).toEqual([
       "models",
       "defaults",
       "layout",
       "agents",
+      "plugins",
       "logs",
       "usage",
       "runtime",

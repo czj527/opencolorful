@@ -4,10 +4,12 @@ import { WorkspaceApp } from "./WorkspaceApp.js";
 import { SettingsPage } from "../features/settings/SettingsPage.js";
 import { NewSessionPage } from "../features/sessions/NewSessionPage.js";
 import { ApiClient } from "../lib/api-client.js";
+import { PluginApiClient } from "../lib/plugin-api.js";
 import { AgentCreatePage } from "../features/agents/AgentCreatePage.js";
 import { AgentEditPage } from "../features/agents/AgentEditPage.js";
 import { MemoryPage } from "../features/memory/MemoryPage.js";
 import { LogsPage } from "../features/logs/LogsPage.js";
+import { PluginsPage } from "../features/plugins/PluginsPage.js";
 import {
   navigateToSettings,
   navigateToSettingsSection,
@@ -23,6 +25,7 @@ import type {
 
 const API_BASE = "";
 const api = new ApiClient(API_BASE);
+const pluginApi = new PluginApiClient(API_BASE);
 
 function initialRoute(): PageRoute {
   if (typeof window === "undefined") return "workspace";
@@ -116,6 +119,9 @@ export function App() {
       )}
       {route === "logs" && (
         <LogsPage api={api} />
+      )}
+      {route === "plugins" && (
+        <PluginsPage api={api} pluginApi={pluginApi} />
       )}
       {route === "settings" && (
         <SettingsPage

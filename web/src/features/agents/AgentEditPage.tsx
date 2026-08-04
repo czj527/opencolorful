@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { ApiClient } from "../../lib/api-client.js";
+import { PluginApiClient } from "../../lib/plugin-api.js";
 import {
   initializeAgentFormHistory,
   leaveAgentFormForSettings,
   pushAgentFormDirtyHistory,
 } from "../../app/page-router.js";
 import { AgentForm, ConfirmDiscard, type AgentFormDraft } from "./index.js";
+import { AgentPluginsSection } from "./AgentPluginsSection.js";
 import styles from "./AgentEditPage.module.css";
 
 function extractAgentId(): string {
@@ -41,6 +43,8 @@ export interface AgentEditPageProps {
 
 export function AgentEditPage(props: AgentEditPageProps) {
   const agentId = extractAgentId();
+  // Agent 插件绑定独立于身份/底色编辑；Server /api/agents/:id/plugins 未接线时该区域自行降级
+  const pluginApi = useMemo(() => new PluginApiClient(""), []);
   const [draft, setDraft] = useState<AgentFormDraft | null>(null);
   const [original, setOriginal] = useState<AgentFormDraft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -272,6 +276,8 @@ export function AgentEditPage(props: AgentEditPageProps) {
         dirty={dirty}
         saved={saved}
       />
+
+      <AgentPluginsSection agentId={agentId} pluginApi={pluginApi} />
 
       <ConfirmDiscard
         open={showDiscard}

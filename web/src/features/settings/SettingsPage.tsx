@@ -26,6 +26,7 @@ import { UnavailableSection } from "./sections/UnavailableSection.js";
 import { navigateToAgentNew, navigateToAgentEdit } from "../../app/page-router.js";
 import { AgentsSection } from "./sections/AgentsSection.js";
 import { UsageSection } from "./sections/UsageSection.js";
+import { PluginsSettingsSection } from "../plugins/PluginsSettingsSection.js";
 import { SettingsSection } from "./widgets/index.js";
 import styles from "./SettingsPage.module.css";
 
@@ -42,10 +43,11 @@ const SECTION_META: Record<SettingsSectionId, { title: string; description: stri
   defaults: { title: "默认对话", description: "新建 Session 时的默认行为。已有 Session 的显式设置不受影响。" },
   layout: { title: "界面与布局", description: "调整侧栏宽度、焦点模式、动态效果与显示偏好。" },
   agents: { title: "Agent 管理", description: "管理 Agent 身份、个性与回复风格。" },
+  plugins: { title: "插件", description: "插件中心：已安装、发现、权限、开发与来源。绑定与权限变更从下一 turn 生效。" },
   logs: { title: "日志与诊断", description: "Supervisor 和 Agent Server 运行日志。" },
   usage: { title: "用量统计", description: "查看 Token 消耗与缓存命中情况，支持按时间范围筛选。" },
   runtime: { title: "运行时与关于", description: "当前进程状态与版本信息。" },
-  future: { title: "Profile / 记忆 / 多 Agent / 插件", description: "后续阶段规划的能力，当前尚未开放。" },
+  future: { title: "Profile / 记忆 / 多 Agent", description: "后续阶段规划的能力，当前尚未开放。" },
 };
 
 export function SettingsPage(props: SettingsPageProps) {
@@ -339,6 +341,13 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
           onNavigateEdit={navigateToAgentEdit}
           onArchive={props.onArchiveAgent}
         />
+      </SettingsSection>
+    );
+  }
+  if (active === "plugins") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-plugins">
+        <PluginsSettingsSection />
       </SettingsSection>
     );
   }

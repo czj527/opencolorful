@@ -18,3 +18,6 @@ export type { AgentFormProps, AgentFormDraft, AgentSandboxDraft, AgentFormMode }
 
 export { AgentEditPage } from "./AgentEditPage.js";
 export type { AgentEditPageProps } from "./AgentEditPage.js";
+
+export { AgentPluginsSection } from "./AgentPluginsSection.js";
+export type { AgentPluginsSectionProps } from "./AgentPluginsSection.js";

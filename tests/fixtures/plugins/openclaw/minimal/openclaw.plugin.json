@@ -1,0 +1,10 @@
+{
+  "id": "claw.minimal",
+  "name": "Claw Minimal",
+  "description": "最小 OpenClaw 插件：仅发现元数据（L1）",
+  "author": { "name": "ClawHub Fixture Team", "email": "fixtures@clawhub.test" },
+  "version": "1.0.0",
+  "license": "MIT",
+  "homepage": "https://clawhub.test/plugins/claw-minimal",
+  "engines": { "node": ">=20.0.0" }
+}

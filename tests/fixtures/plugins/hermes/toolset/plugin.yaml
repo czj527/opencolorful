@@ -1,0 +1,11 @@
+name: hermes-toolset
+version: 1.0.0
+description: "Phase 12 Hermes 工具插件夹具（L5 worker：成功/异常/超时/取消/崩溃/stderr）"
+author: "OpenColorful Test"
+entry: __init__.py
+provides_tools:
+  - hermes_sum
+  - hermes_boom
+  - hermes_slow
+  - hermes_wait
+  - hermes_crash

@@ -1,0 +1,63 @@
+{
+  "id": "claw.tools-basic",
+  "name": "Claw Tools Basic",
+  "description": "OpenClaw 工具插件：两个工具 + MCP Server + 静态命令与 Skills",
+  "author": { "name": "ClawHub Fixture Team", "email": "tools@clawhub.test" },
+  "version": "1.2.0",
+  "license": "MIT",
+  "homepage": "https://clawhub.test/plugins/claw-tools-basic",
+  "engines": { "node": ">=20.0.0" },
+  "entry": "./plugin/dist/index.js",
+  "dependencies": { "pino": "^8.0.0" },
+  "tools": [
+    {
+      "name": "claw-web-search",
+      "description": "搜索网页并返回结果摘要",
+      "schema": {
+        "type": "object",
+        "properties": { "query": { "type": "string", "minLength": 1 } },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": { "results": { "type": "array" } },
+        "required": ["results"]
+      },
+      "risk": "medium"
+    },
+    {
+      "name": "claw-file-read",
+      "description": "读取本地文本文件内容",
+      "schema": {
+        "type": "object",
+        "properties": { "path": { "type": "string" } },
+        "required": ["path"]
+      },
+      "risk": "high"
+    }
+  ],
+  "mcp": [
+    {
+      "id": "claw-filesystem-mcp",
+      "description": "文件系统 MCP Server",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"]
+    }
+  ],
+  "commands": [
+    {
+      "id": "claw-scan",
+      "name": "Claw Scan",
+      "description": "扫描工作目录变更"
+    }
+  ],
+  "skills": [
+    {
+      "id": "web-navigation",
+      "name": "网页导航",
+      "description": "网页导航技能（Phase 12 只登记，不激活）",
+      "dir": "./skills/web-navigation"
+    }
+  ]
+}

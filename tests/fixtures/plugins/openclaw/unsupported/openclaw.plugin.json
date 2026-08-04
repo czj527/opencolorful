@@ -1,0 +1,33 @@
+{
+  "id": "claw.unsupported-features",
+  "name": "Claw Unsupported Features",
+  "description": "声明 OpenClaw 专属能力（Gateway/Channel/ACP/Hook/内部 API）的插件",
+  "author": { "name": "ClawHub Fixture Team" },
+  "version": "0.4.2",
+  "license": "MIT",
+  "homepage": "https://clawhub.test/plugins/claw-unsupported",
+  "engines": { "node": ">=20.0.0", "openclaw": ">=0.2.0" },
+  "entry": "./plugin/dist/index.js",
+  "commands": [
+    {
+      "id": "claw-status",
+      "name": "Claw Status",
+      "description": "展示 Claw 运行状态（可映射为 OpenColorful Command）"
+    }
+  ],
+  "permissions": {
+    "allow": ["filesystem.write", "network"],
+    "deny": ["filesystem.read"]
+  },
+  "capabilities": {
+    "gateway": { "port": 18789, "host": "127.0.0.1" },
+    "channels": ["telegram", "slack"],
+    "acp": { "enabled": true },
+    "hooks": { "pre-command": "plugin/dist/hooks.js" },
+    "schedules": { "enabled": true }
+  },
+  "dependencies": {
+    "@openclaw/core": "^0.2.0",
+    "pino": "^8.0.0"
+  }
+}
