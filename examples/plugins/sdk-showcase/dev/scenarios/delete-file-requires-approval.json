@@ -1,0 +1,13 @@
+{
+  "name": "delete-file-requires-approval",
+  "description": "高风险工具需要权限确认的断言示例（destructive，需显式批准）",
+  "destructive": true,
+  "steps": [
+    {
+      "kind": "invoke-tool",
+      "tool": "delete-file",
+      "args": { "path": "/tmp/example-file.txt" },
+      "expect": { "requireConfirmation": true }
+    }
+  ]
+}

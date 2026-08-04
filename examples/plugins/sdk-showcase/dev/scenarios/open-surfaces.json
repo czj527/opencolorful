@@ -1,0 +1,10 @@
+{
+  "name": "open-surfaces",
+  "description": "逐个打开全部 Surface 并校验受控 asset 路径",
+  "destructive": false,
+  "steps": [
+    { "kind": "open-surface", "surface": "settings-page" },
+    { "kind": "open-surface", "surface": "status-widget" },
+    { "kind": "open-surface", "surface": "chat-example" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@opencolorful/plugin-components",
+  "version": "0.1.0",
+  "description": "OpenColorful Phase 12 iframe UI SDK: type/interface declarations and Host request contracts for plugin surfaces. This phase ships types + docs only; the real iframe bridge is implemented in a later phase (plans/phase-12.md §8.5 / §19.1)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opencolorful/plugin-sdk": "0.1.0"
+  }
+}

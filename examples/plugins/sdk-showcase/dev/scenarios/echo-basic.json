@@ -1,0 +1,17 @@
+{
+  "name": "echo-basic",
+  "description": "调用 echo 工具并断言原样返回，随后打开设置页 Surface",
+  "destructive": false,
+  "steps": [
+    {
+      "kind": "invoke-tool",
+      "tool": "echo",
+      "args": { "text": "hello" },
+      "expect": { "result": { "echoed": "hello" }, "requireConfirmation": false }
+    },
+    {
+      "kind": "open-surface",
+      "surface": "settings-page"
+    }
+  ]
+}

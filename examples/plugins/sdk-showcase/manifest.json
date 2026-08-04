@@ -1,0 +1,209 @@
+{
+  "manifestVersion": 1,
+  "id": "example.sdk-showcase",
+  "name": "SDK Showcase",
+  "version": "1.0.0",
+  "description": "OpenColorful 官方 SDK 示例插件：覆盖 Phase 12 全部 12 类扩展点声明与 dev loop 场景，不依赖任何付费外部服务",
+  "author": {
+    "name": "OpenColorful"
+  },
+  "license": "MIT",
+  "compatibility": {
+    "opencolorful": ">=0.1.0",
+    "pluginApi": 1
+  },
+  "trust": "restricted",
+  "runtime": {
+    "kind": "bundle"
+  },
+  "permissions": [
+    { "capability": "tool.register", "reason": "提供 Agent 可见工具" },
+    { "capability": "filesystem.write", "reason": "高风险示例工具（需要权限确认）" },
+    { "capability": "route.register", "reason": "提供 namespaced 路由" },
+    { "capability": "ui.surface", "reason": "提供 Settings Page / Widget / Chat Surface" },
+    { "capability": "background.run", "reason": "提供后台示例任务" },
+    { "capability": "hook.register", "reason": "提供生命周期 Hook 示例" },
+    { "capability": "activity.emit", "reason": "提供自定义 Activity" },
+    { "capability": "secret.read-own", "reason": "声明插件自有 Secret（示例不实际使用）" }
+  ],
+  "contributions": {
+    "tool": [
+      {
+        "id": "echo",
+        "name": "Echo",
+        "description": "原样返回输入文本（restricted 低风险工具）",
+        "riskLevel": "low",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "text": { "type": "string" } },
+          "required": ["text"],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": { "echoed": { "type": "string" } },
+          "required": ["echoed"],
+          "additionalProperties": false
+        }
+      },
+      {
+        "id": "delete-file",
+        "name": "Delete File",
+        "description": "删除指定文件（高风险工具，平台要求用户确认）",
+        "riskLevel": "high",
+        "requiredCapabilities": ["filesystem.write"],
+        "inputSchema": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "command": [
+      {
+        "id": "showcase-summary",
+        "name": "Showcase Summary",
+        "description": "打印 showcase 能力清单",
+        "argumentsSchema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      }
+    ],
+    "route": [
+      {
+        "id": "info-route",
+        "name": "Info Route",
+        "description": "namespaced 路由示例：/api/plugins/example.sdk-showcase/info",
+        "path": "info",
+        "methods": ["GET"],
+        "requiredCapabilities": ["route.register"]
+      }
+    ],
+    "page": [
+      {
+        "id": "settings-page",
+        "name": "Settings Page",
+        "description": "插件设置页（JSON Schema 配置的可视化占位）",
+        "entry": "ui/settings.html",
+        "hostCapabilities": ["theme"]
+      }
+    ],
+    "widget": [
+      {
+        "id": "status-widget",
+        "name": "Status Widget",
+        "description": "状态组件示例",
+        "entry": "ui/widget.html"
+      }
+    ],
+    "chat-surface": [
+      {
+        "id": "chat-example",
+        "name": "Chat Surface",
+        "description": "聊天表面示例",
+        "entry": "ui/chat.html"
+      }
+    ],
+    "background": [
+      {
+        "id": "heartbeat",
+        "name": "Heartbeat",
+        "description": "每分钟心跳示例任务",
+        "maxConcurrency": 1,
+        "maxRetries": 2,
+        "timeoutMs": 30000,
+        "requiredCapabilities": ["background.run"]
+      }
+    ],
+    "hook": [
+      {
+        "id": "session-observer",
+        "name": "Session Observer Hook",
+        "description": "会话生命周期观察 Hook（observe，不阻断）",
+        "point": "session.started",
+        "behavior": "observe",
+        "requiredCapabilities": ["hook.register"]
+      }
+    ],
+    "config": [
+      {
+        "id": "showcase-config",
+        "name": "Showcase Config",
+        "description": "插件非敏感配置（JSON Schema）",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "greeting": { "type": "string" },
+            "threshold": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      }
+    ],
+    "secret": [
+      {
+        "id": "api-key",
+        "name": "API Key",
+        "description": "示例插件 Secret（只声明名称与用途，不在 Manifest 保存值）",
+        "secretName": "api_key",
+        "purpose": "示例外部服务凭据（本插件不实际调用任何外部服务）",
+        "requiredCapabilities": ["secret.read-own"]
+      }
+    ],
+    "context-attachment": [
+      {
+        "id": "code-snippet",
+        "name": "Code Snippet",
+        "description": "结构化上下文附件示例",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "language": { "type": "string" },
+            "source": { "type": "string" }
+          },
+          "required": ["language", "source"],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "custom-activity": [
+      {
+        "id": "showcase-events",
+        "name": "Showcase Events",
+        "description": "自定义 Activity 示例（plugin.example.sdk-showcase.events.<action>）",
+        "eventNamespace": "plugin.example.sdk-showcase.events",
+        "payloadSchema": {
+          "type": "object",
+          "properties": { "message": { "type": "string" } },
+          "additionalProperties": false
+        },
+        "requiredCapabilities": ["activity.emit"]
+      }
+    ],
+    "skill-bundle": [
+      {
+        "id": "skills",
+        "name": "Showcase Skills",
+        "description": "仅登记、不激活的示例技能目录",
+        "skillsDir": "skills"
+      }
+    ]
+  },
+  "config": {
+    "type": "object",
+    "properties": {
+      "greeting": { "type": "string", "default": "hello" },
+      "threshold": { "type": "number", "default": 5 }
+    },
+    "additionalProperties": false
+  },
+  "dev": {
+    "sourceDir": ".",
+    "engines": {
+      "node": ">=18"
+    }
+  }
+}
