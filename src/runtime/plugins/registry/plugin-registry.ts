@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import type { RuntimePaths } from "../../../config/paths.js";
 import type { ActorRef, ExecutorRef, TraceContext } from "../../../contracts/observability.js";
-import type { PluginStatus } from "../../../contracts/plugin-protocol.js";
+import type { ArtifactVerification, CompatibilityReport, ManifestV1, NormalizedPluginManifest, PluginStatus } from "../../../contracts/plugin-protocol.js";
 import { assertDurableAudit, type AuditRecorder, type AuditRecordInput } from "../../../observability/audit-recorder.js";
 import { instrument } from "../../../observability/instrument.js";
 import type {
@@ -13,9 +13,6 @@ import {
   buildCompatibilityReport,
   comparePluginVersions,
   PluginInstallError,
-  type CompatibilityReport,
-  type ManifestV1,
-  type NormalizedPluginManifest,
   type PluginInstaller,
   type PreparedPlugin,
 } from "../installer/plugin-installer.js";
@@ -145,6 +142,60 @@ export class PluginRegistry {
     const prepared = this.deps.installer.prepare(ref);
     const pluginId = prepared.normalized.id;
     return this.runExclusive(pluginId, () => this.installLocked(prepared, actor));
+  }
+
+  /**
+   * 评审 T10：外部生态包（OpenClaw/Hermes）安装路径——来源已由 Source Adapter
+   * fetch + 生态 convert 得到 normalized/compatibility，这里直接进入锁内事务，
+   * 复用 installLocked 的审计/补偿/active 切换（不再走 manifest.json 校验路径）。
+   */
+  async installNormalized(
+    input: {
+      readonly normalized: NormalizedPluginManifest;
+      readonly compatibility: CompatibilityReport;
+      readonly verification: ArtifactVerification;
+      readonly sourceRef: PluginSourceRef;
+      readonly contentRoot: string;
+      readonly stagingDir: string;
+    },
+    actor: PluginOperationActor,
+  ): Promise<PluginInstallResult> {
+    const prepared: PreparedPlugin = {
+      operationId: this.deps.installer.createOperationId("install"),
+      stagingDir: input.stagingDir,
+      contentRoot: input.contentRoot,
+      manifest: this.toManifestV1(input.normalized),
+      normalized: input.normalized,
+      verification: input.verification,
+      // 生态 convert 可能产生 readonly 数组：结构化拷贝为可变 CompatibilityReport
+      compatibility: {
+        ...input.compatibility,
+        missingCapabilities: [...input.compatibility.missingCapabilities],
+        contributions: input.compatibility.contributions.map((item) => ({ ...item })),
+        blockedReasons: [...input.compatibility.blockedReasons],
+      },
+      sourceRef: input.sourceRef,
+      sourceType: input.sourceRef.sourceType,
+    };
+    return this.runExclusive(input.normalized.id, () => this.installLocked(prepared, actor));
+  }
+
+  /** 生态 normalized → ManifestV1 投影（manifest 字段由 normalized 推导，供 buildRecord 使用） */
+  private toManifestV1(normalized: NormalizedPluginManifest): ManifestV1 {
+    return {
+      manifestVersion: 1,
+      id: normalized.id,
+      name: normalized.name,
+      version: normalized.version,
+      ...(normalized.description !== undefined ? { description: normalized.description } : {}),
+      ...(normalized.author !== undefined ? { author: normalized.author } : {}),
+      ...(normalized.license !== undefined ? { license: normalized.license } : {}),
+      compatibility: normalized.compatibility,
+      trust: normalized.trust,
+      runtime: normalized.runtime,
+      permissions: normalized.permissions,
+      contributions: normalized.contributions,
+    };
   }
 
   async update(

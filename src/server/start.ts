@@ -43,6 +43,7 @@ import {
 } from "./runtime-state.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { ObservabilityContext } from "../observability/observability-context.js";
+import { PluginFacade } from "../platform/plugin-facade.js";
 import { instrument } from "../observability/instrument.js";
 import { createBootId } from "../observability/trace-context.js";
 
@@ -234,6 +235,13 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       instrument.storageMigrationCompleted(dbMigrationReport.from, dbMigrationReport.to);
     }
     const sessionIndex = new SessionIndex(database);
+    // ── Phase 12：插件组合根门面（Registry/Sources/Grants/Runtime/Contributions/Dev）──
+    const pluginFacade = new PluginFacade({
+      database,
+      paths,
+      audit: observability.audit,
+      hostVersion: version,
+    });
     const providerStore = new ProviderStore(paths.providerSettings);
     // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）
     const modelService = await ModelService.create(paths, providerStore, observability.audit);
@@ -395,6 +403,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
 
     return {
       appOptions: {
+        pluginFacade,
         modelService,
         sessionService,
         preferencesStore,

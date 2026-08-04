@@ -26,6 +26,7 @@ import { registerUsageRoutes } from "./routes/usage.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
+import { registerPluginDevRoutes, registerPluginRoutes } from "./routes/plugins.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -48,6 +49,7 @@ export interface ServerAppOptions {
   readonly database?: import("better-sqlite3").Database;
   /** Phase 11 fail-closed 审计（沙箱/工作区/凭据等高风险修改，评审 P0-1） */
   readonly audit?: import("../observability/audit-recorder.js").AuditRecorder;
+  readonly pluginFacade?: import("../platform/plugin-facade.js").PluginFacade;
   /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
@@ -167,6 +169,11 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.replayStore !== undefined && options.promptService !== undefined) {
     registerEventRoutes(app, options.replayStore, options.promptService, options.sessionService);
   }
+  if (options.pluginFacade !== undefined) {
+    registerPluginRoutes(app, { facade: options.pluginFacade });
+    registerPluginDevRoutes(app, { facade: options.pluginFacade });
+  }
+
   if (options.database !== undefined && options.paths !== undefined) {
     registerObservabilityRoutes(app, {
       database: options.database,

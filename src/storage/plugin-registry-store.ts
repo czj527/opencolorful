@@ -184,6 +184,14 @@ export class PluginRegistryStore {
     return rows.map((row) => mapInstallationRow(row) as PluginInstallationRecord);
   }
 
+  /** T10 组合根：全量安装记录（插件中心列表用） */
+  listAll(): PluginInstallationRecord[] {
+    const rows = this.database.prepare(
+      "SELECT * FROM plugin_installations ORDER BY installed_at DESC",
+    ).all() as InstallationRow[];
+    return rows.map((row) => mapInstallationRow(row) as PluginInstallationRecord);
+  }
+
   getActive(pluginId: string): PluginInstallationRecord | undefined {
     const row = this.database
       .prepare("SELECT * FROM plugin_installations WHERE plugin_id = ? AND active = 1")

@@ -13,6 +13,15 @@ import {
   NormalizedPluginManifestSchema,
   type CompatibilityItemStatus,
   type CompatibilityLevel,
+  type CompatibilityReport,
+  type Contributions,
+  type ManifestCompatibility,
+  type ManifestDev,
+  type ManifestRuntime,
+  type ManifestV1,
+  type NormalizedPluginManifest,
+  type PermissionRequest,
+  type PluginAuthor,
   type PluginRuntimeKind,
   type PluginSourceType,
   type PluginTrust,
@@ -36,84 +45,7 @@ import {
 // Value.Check 校验，这里仅提供结构相同的静态类型供内部标注。
 // ═══════════════════════════════════════════════════════════════
 
-export interface PluginAuthor {
-  readonly name: string;
-  readonly email?: string;
-  readonly url?: string;
-}
 
-export interface ManifestCompatibility {
-  readonly opencolorful: string;
-  readonly pluginApi: 1;
-}
-
-export interface ManifestRuntime {
-  readonly kind: PluginRuntimeKind;
-  readonly entry?: string;
-}
-
-export interface ManifestDev {
-  readonly sourceDir?: string;
-  readonly engines?: Record<string, string>;
-}
-
-export interface PermissionRequest {
-  readonly capability: string;
-  readonly reason?: string;
-}
-
-export type Contributions = Record<string, unknown>;
-
-export interface ManifestV1 {
-  readonly manifestVersion: 1;
-  readonly id: string;
-  readonly name: string;
-  readonly version: string;
-  readonly description?: string;
-  readonly author?: PluginAuthor;
-  readonly license?: string;
-  readonly compatibility: ManifestCompatibility;
-  readonly trust: PluginTrust;
-  readonly runtime: ManifestRuntime;
-  readonly permissions: readonly PermissionRequest[];
-  readonly contributions: Contributions;
-  readonly config?: unknown;
-  readonly dev?: ManifestDev;
-}
-
-export interface NormalizedPluginManifest {
-  readonly id: string;
-  readonly name: string;
-  readonly version: string;
-  readonly description?: string;
-  readonly author?: PluginAuthor;
-  readonly license?: string;
-  readonly compatibility: ManifestCompatibility;
-  readonly trust: PluginTrust;
-  readonly runtime: ManifestRuntime;
-  readonly permissions: readonly PermissionRequest[];
-  readonly contributions: Contributions;
-  readonly config?: unknown;
-  readonly source: NormalizedSource;
-  readonly normalizedAt: string;
-}
-
-export interface CompatibilityReport {
-  readonly pluginId: string;
-  readonly version: string;
-  readonly level: CompatibilityLevel;
-  readonly supported: boolean;
-  readonly missingCapabilities: readonly string[];
-  readonly contributions: readonly {
-    readonly id: string;
-    readonly kind: string;
-    readonly status: CompatibilityItemStatus;
-    readonly reason?: string;
-  }[];
-  readonly blockedReasons: readonly string[];
-  readonly requiresFullAccess: boolean;
-  readonly requiresRuntime?: string;
-}
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 12 Plugin Installer（plans/phase-12.md §13）
@@ -291,10 +223,10 @@ export function buildCompatibilityReport(
   hostVersion: string,
 ): CompatibilityReport {
   const contributions: Array<{
-    readonly id: string;
-    readonly kind: string;
-    readonly status: CompatibilityItemStatus;
-    readonly reason?: string;
+    id: string;
+    kind: string;
+    status: CompatibilityItemStatus;
+    reason?: string;
   }> = [];
   const missingCapabilities: string[] = [];
   const blockedReasons: string[] = [];
