@@ -1,6 +1,6 @@
 # Phase 12：通用插件系统与生态兼容层
 
-**状态：已评审修订（2026-08-04），待开发** | 建议分支：`phase-12-plugin-system`
+**状态：已实施（T1-T10 完成 + 评审修复轮 T11 完成，2026-08-04），待用户真实验收** | 建议分支：`phase-12-plugin-system`
 **基线：** `main`（Phase 10.5 / Phase 11 合并点，`2d15610`）
 **架构权威：** 本文（审定后）；如实施期拆出 `docs/plugin-architecture.md`，该文档只承载稳定架构，范围与验收仍以本计划为准
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 12
@@ -1191,36 +1191,68 @@ Phase 12 专项门：
 
 | Task | 提交 Hash | 说明 |
 |---|---|---|
-| T1 | 待实施 | 协议、Manifest、路径与 migration |
-| T2 | 待实施 | Registry、Source Adapter 与安装器 |
-| T3 | 待实施 | Permission、Grant 与 Sandbox Bridge |
-| T4 | 待实施 | Runtime Host 与 IPC |
-| T5 | 待实施 | Contribution Registry 与 Host API |
-| T6 | 待实施 | OpenClaw 适配 |
-| T7 | 待实施 | Hermes 适配 |
-| T8 | 待实施 | Web 插件中心与 Agent 绑定 |
-| T9 | 待实施 | Dev SDK 与 Showcase |
-| T10 | 待实施 | Observability、恢复和验收 |
+| T1 | `267c5d2` | 协议、Manifest、路径与 migration v10、插件事件目录 |
+| T1 修复 | `74cc5d7` | TypeBox 1.3.6 Static map-union → never，改显式字面量 union |
+| T2/T3 | `5d1894e` | Registry、Source Adapter、事务安装器、Permission/Grant/Sandbox Bridge |
+| T4 | `750f42e` | Runtime Host 与 IPC（四类 Runtime） |
+| T5 | `89c35ff` | Contribution Registry 与 Host API（11 类贡献） |
+| T6/T7/T8 | `1966fa8` | OpenClaw/Hermes 适配、Web 插件中心与 Agent 绑定 |
+| T9 | `e50eeb0` | Dev SDK 与 Showcase |
+| T10 | `b5c5c1e` | 组合根接线（PluginFacade + /api/plugins 路由 + app/start） |
+| T11 | `待定` | 评审修复轮：A1 激活接线/E1 Hermes 安装/C1 恢复扫描/C2 grant 原子性/C3 卸载清理/E3 dev 授权/B1-B3 Web 契约/F4 沙箱/E2 崩溃竞态（详见下”评审与修复记录”） |
 
 ### 质量门结果
 
-待实施。按第二十三章逐条记录命令、退出码、测试数量和必要的 flake 复跑说明。
+- **T1-T10 全量质量门（逐条独立执行）**：verify-pi-sdk-imports ✓、verify-plugin-imports ✓、verify-plugin-package ✓、tsc ×2 ✓、vitest 109 files / 1225 tests ✓、build ✓、web tsc/vitest 361/build ✓、Playwright e2e 54/54 ✓、git diff --check ✓。
+- **T11 修复轮质量门**：全量质量门在修复后统一复跑（tsc ×2 / vitest 全量 / build / web tsc+vitest / e2e），结果见”最终验收结论”。
 
 ### 真实 Web 验收
 
-待实施。记录隔离 `OPENCOLORFUL_HOME`、固定 fixture 来源、用户可感知流程、关键截图和清理结果。
+待实施（人工步骤，合并前由创建者执行）：隔离 `OPENCOLORFUL_HOME`、安装 sdk-showcase → 权限确认 → 绑定 Agent → 启用后经 dev invoke / HostBroker 调用工具 → 热重载 → 禁用卸载；记录关键截图和清理结果。
 
 ### 已知偏差
 
-待实施。任何与本计划不一致但被接受的实现必须记录原因、影响、补偿和后续处理，不允许以“功能等价”一句带过安全或数据边界变化。
+任何与本计划不一致但被接受的实现必须记录原因、影响、补偿和后续处理，不允许以”功能等价”一句带过安全或数据边界变化。
+
+**T10 记录（6 条）**：
+1. OpenClaw/Hermes 生态包安装走 compat 转换路径（installNormalized），installer.prepare 仍只处理原生 manifest.json——受控分叉，生态包 fixture 已锁定。
+2. Custom Activity 经 ExtensionObservabilityPort 发出，插件自定义事件（plugin.&lt;pluginId&gt;.*）的动态登记由运行时 wrapper 处理（extension-allowed），T1 目录只含平台事件。
+3. `plugin_runtime_instances` 表未写（RuntimeHost 实例状态在内存），持久化接线留待后续；plugin-secrets.json 用 InMemorySecretStore 占位。
+4. openclaw-compat 保留 NormalizedPluginManifestMirror/CompatibilityReportMirror 显式镜像（facade 层收敛为协议类型）。
+5. /logs 的 ?plugin= 预筛选参数为 best-effort（/logs 页未解析，入口已提供）。
+6. MCP 来源 sourceType 标记 supported:false（MCP runtime 已实现，来源直装接线留待后续）。
+
+**T11 修复轮新增/更新的偏差**：
+7. **Agent turn 工具回路未接入**：插件工具已登记并经 `/api/plugins/dev/invoke-tool` 可调用，但 session-runtime 的工具列表（pi-sdk `tools/extraTools` 只是模型可见工具名，无自定义工具 handler 分发）尚未包含插件工具——“绑定 Agent 后下一 turn 直接调用插件工具”需 pi-sdk 自定义工具 handler 支持，留后续阶段（A1 已闭环服务端生命周期：启用即登记贡献+启动运行时）。
+8. **auditMirror 镜像行 decision 硬编码 'allowed' 且 INSERT 不含 event_name**（`activity-recorder.ts:372`，Phase 11 既有，被 Phase 12 权限变更事件首次触发）：denied/revoked 会在账本留下 decision='allowed' 镜像行。修复涉及 Phase 11 事件管道，记为遗留偏差，后续阶段处理。
+9. **HostBroker 白名单 API（config/secret/attachment/custom-activity）与插件 worker 的带 id 请求**：`registerHostBrokerApis` 与 `HostBroker.call` 尚无生产调用点（dev invoke 与工具经 ToolService 直连 runtimeHost 可用）；custom-activity 贡献与 broker 动态能力留待后续接线。
+10. **network.connect 目标 allowlist**（`sandbox-bridge.ts`）：承诺留 T4/T5 但未落地且未进入 T10 偏差清单——授权后插件可连任意目标；作为安全边界记录，allowlist 留后续阶段。
+11. **其余 50 分级评审项（不阻塞合并，随后续阶段处理）**：command/background/hook 空 requiredCapabilities 跳过授权层（D4）、HostBroker/SandboxBridge 能力校验省略 manifest 声明层（D5）、started 审计 decision 取值不统一（D3）、plugin_operations CHECK 枚举与 store 常量分叉（F3）、npm-source 注释与实现矛盾（F5）、plugin.crashed 僵尸事件（G2）、tool 输出脱敏死代码（G3）、timed_out 终态 errorCode/reasonCode 键名不统一（G4）、paths 死常量（G5）。
 
 ### 评审与修复记录
 
-待实施。按轮次记录 P0/P1/P2、复现场景、修复提交和独立验证证据。
+**T11 修复轮（2026-08-04，代码审查后主 Agent 规划 + 子 Agent 开发 + 主 Agent 集成复核）**——审查发现 4 条 ≥80 分 + 8 条 75 分高置信问题，本轮修复 12 项：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| A1 | 生产路径插件运行时从未激活（activatePlugin 死代码） | start 启动激活 enabled 插件（`activateAllEnabled`）+ enable/disable/update/rollback/uninstall 生命周期钩子（activate/deactivate）+ dispose 停用全部运行时 |
+| E1 | Hermes 带工具插件必然安装失败（_ocf/worker.py 缺失） | installer `prepareEntry` 钩子 + facade 注入 hermes materialize（安装/更新在 healthCheck 前具体化 L5 worker） |
+| B1 | Web/Server 契约错配（TypeError/空列表） | server list/detail 富化（name/trust/runtimeKind/enabled/grants/bindings/secretStatus/surfaces/runtime）+ web 类型对齐与防御性解引用 |
+| B2 | 来源搜索恒空 | facade.search 接线 adapter（单来源失败容错）+ 路由解析 sourceType/query |
+| B3 | dev 两个路由 404 | 补 `GET /api/plugins/dev/surfaces` 与 `POST /api/plugins/dev/:pluginId/describe-surface` |
+| C1 | 中断安装无启动恢复（插件永久锁死） | registry.recoverOpenOperations（audit failed + finishOperation + activity）+ start 启动恢复扫描 |
+| C2 | grant 先于安装提交无补偿 | 改为先装后授：安装失败不留授权；授权失败回滚安装 |
+| C3 | 卸载不清理 grants/bindings/config | registry.uninstall 同库事务清理（grantStore/configStore/bindingStore.removeByPlugin）+ 绑定清理验证 |
+| E3 | dev full-access 授权永久残留 | dev uninstall 撤销授权（GrantService.removeAll 三阶段审计） |
+| F4 | Phase 9 SandboxBridge 未接线 | EffectivePolicy.sandboxCheck 注入（base policy 防递归；pathGuard 未配置文件操作 fail-closed） |
+| E2 | 启动崩溃竞态孤儿进程 | startInternal/restartInstance 的 map 删除加实例身份校验 |
+| A2/G1 | shutdown 不 dispose / 文档状态陈旧 | start dispose 停用插件运行时；本文档状态/占位表/偏差更新 |
+
+**验证**：T11 针对性测试（plugin-facade 10、plugin-registry 22、plugin-grant 15、plugin-binding 9、plugin-dev-host 14、plugin-runtime-host +3、observability-plugin-catalog 10 等）+ 全量质量门复跑，见”最终验收结论”。
 
 ### 最终验收结论
 
-待实施。只有全部验收项、质量门和真实 Web 验收通过后，才允许把文档状态改为“已完成”。
+自动化质量门全部通过（T1-T10 与 T11 修复轮）；评审发现的阻断项已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）与已知偏差 #7（Agent turn 工具回路）作为人工验收与后续阶段内容。
 ### T1 实施记录（2026-08-04，主 Agent 串行冻结）
 
 **内容**：协议包、Manifest v1、路径、migration v10、插件事件目录、import boundary 全部冻结。

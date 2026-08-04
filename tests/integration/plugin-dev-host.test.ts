@@ -258,6 +258,22 @@ describe("PluginDevHost enable / disable / reset / uninstall", () => {
     await expect(devEnv.host.uninstall(PLUGIN, state.devRunId)).rejects.toThrow(/未安装/);
   });
 
+  it("uninstall 撤销 dev 授权（plugin_grants 清空），reset 保留授权", async () => {
+    const devEnv = setupDevEnv();
+    const state = await devEnv.host.install({ sourceDir: devEnv.sourceDir });
+    // dev install 自动授予 manifest 请求的非高风险能力（tool.register）
+    expect(devEnv.env.grantStore.list(PLUGIN).length).toBeGreaterThan(0);
+
+    await devEnv.host.uninstall(PLUGIN, state.devRunId);
+    expect(devEnv.env.grantStore.list(PLUGIN)).toHaveLength(0);
+
+    // reset 是开发迭代语义：保留授权
+    const devEnv2 = setupDevEnv();
+    const state2 = await devEnv2.host.install({ sourceDir: devEnv2.sourceDir });
+    await devEnv2.host.reset(PLUGIN, state2.devRunId);
+    expect(devEnv2.env.grantStore.list(PLUGIN).length).toBeGreaterThan(0);
+  });
+
   it("reset 清空 dev 槽", async () => {
     const devEnv = setupDevEnv();
     const state = await devEnv.host.install({ sourceDir: devEnv.sourceDir });

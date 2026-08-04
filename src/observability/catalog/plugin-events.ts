@@ -58,6 +58,9 @@ export const pluginActivityEntries: readonly EventCatalogEntry[] = [
   entry({ eventName: "plugin.permission.requested", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "info", lifecycleRole: "point", ...notable }),
   // plugin.permission.granted / denied / revoked 已在 Phase 11 注册（含 audit 镜像）
 
+  // ── 操作恢复（启动时中断操作终结为 failed，notable）──
+  entry({ eventName: "plugin.operation.recovered", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...notable }),
+
   // ── 完整性 / 沙箱拒绝（安全证据，notable）──
   entry({ eventName: "plugin.integrity.failed", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "error", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...notable }),
   entry({ eventName: "plugin.sandbox.denied", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "point", ...notable }),
@@ -107,4 +110,5 @@ export const pluginAuditEntries: readonly EventCatalogEntry[] = [
   entry({ eventName: "audit.plugin.source_trust_change_started", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "started", significance: "notable" }),
   entry({ eventName: "audit.plugin.source_trust_change_completed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "terminal", significance: "notable" }),
   entry({ eventName: "audit.plugin.source_trust_change_failed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "terminal", significance: "notable" }),
+  entry({ eventName: "audit.plugin.operation_recovered", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "point", significance: "notable" }),
 ];

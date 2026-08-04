@@ -7,8 +7,12 @@ import { assertDurableAudit, type AuditRecorder, type AuditRecordInput } from ".
 import { instrument } from "../../../observability/instrument.js";
 import type {
   PluginInstallationRecord,
+  PluginOperationRecord,
   PluginRegistryStore,
 } from "../../../storage/plugin-registry-store.js";
+import type { PluginBindingStore } from "../../../storage/plugin-binding-store.js";
+import type { PluginConfigStore } from "../../../storage/plugin-config-store.js";
+import type { PluginGrantStore } from "../../../storage/plugin-grant-store.js";
 import {
   buildCompatibilityReport,
   comparePluginVersions,
@@ -91,6 +95,10 @@ export interface PluginRegistryDeps {
   readonly installer: PluginInstaller;
   readonly paths: RuntimePaths;
   readonly audit: AuditRecorder;
+  /** 卸载清理用（可选）：移除插件残留授权/配置/绑定。 */
+  readonly grantStore?: PluginGrantStore;
+  readonly configStore?: PluginConfigStore;
+  readonly bindingStore?: PluginBindingStore;
 }
 
 const DEFAULT_EXECUTOR: ExecutorRef = { kind: "service", id: "plugin-registry" };
@@ -132,6 +140,29 @@ export class PluginRegistry {
 
   listOpenOperations() {
     return this.deps.store.findOpenOperations();
+  }
+
+  /**
+   * 中断恢复：把启动时遗留的 started 操作终结为 failed（fail-closed）——
+   * 写失败终态严格审计（audit.plugin.operation_recovered，decision=denied）后
+   * 标记操作终态，并释放 per-plugin 锁（后续 install/update 可正常进入）。
+   * 单条失败不阻断其余；失败记 instrument.warn。
+   */
+  recoverOpenOperations(actor: PluginOperationActor): void {
+    for (const operation of this.deps.store.findOpenOperations()) {
+      try {
+        this.writeRecoveryAudit(operation, actor);
+        this.deps.store.finishOperation(operation.operationId, "failed", { reasonCode: "interrupted" });
+        this.emitRecoveryActivity(operation, actor);
+      } catch (error) {
+        instrument.warn("plugin.operation.recovery_failed", "中断插件操作恢复失败", {
+          pluginId: operation.pluginId,
+          operationId: operation.operationId,
+          operation: operation.operation,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   // ── 安装/更新/回滚/卸载/启停（状态机） ──────────────────────
@@ -247,6 +278,8 @@ export class PluginRegistry {
       try {
         versionDir = this.deps.installer.copyIntoVersionDir(prepared, pluginId, newVersion);
         copied = true;
+        // 运行时入口准备（Hermes 等平台 worker 具体化）后再做健康检查
+        this.deps.installer.prepareRuntimeEntry(versionDir, prepared.normalized);
         const health = this.deps.installer.healthCheck(versionDir, prepared.normalized);
         if (!health.ok) {
           throw new PluginInstallError("health_check_failed", `新版本健康检查失败：${health.reason ?? ""}`);
@@ -450,12 +483,16 @@ export class PluginRegistry {
             trace,
             actor: actor.actor,
             executor,
-            changedFields: ["activeVersion", "installation"],
+            changedFields: ["activeVersion", "installation", "grants", "bindings", "configs"],
           }),
           () => {
             this.deps.store.markRemoved(pluginId);
             this.deps.store.clearActive(pluginId);
             this.deps.store.finishOperation(operationId, "completed");
+            // 清理残留授权/绑定/配置（可选 store 未注入时不处理）
+            this.deps.grantStore?.removeAll(pluginId);
+            this.deps.configStore?.removeAll(pluginId);
+            this.deps.bindingStore?.removeByPlugin(pluginId);
           },
         );
         // 版本目录清理（DB 已一致；失败仅留可清理残留，不影响卸载结果）
@@ -534,6 +571,8 @@ export class PluginRegistry {
     try {
       versionDir = this.deps.installer.copyIntoVersionDir(prepared, pluginId, version);
       copied = true;
+      // 运行时入口准备（Hermes 等平台 worker 具体化）后再做健康检查
+      this.deps.installer.prepareRuntimeEntry(versionDir, prepared.normalized);
       const health = this.deps.installer.healthCheck(versionDir, prepared.normalized);
       if (!health.ok) {
         throw new PluginInstallError("health_check_failed", `插件健康检查失败：${health.reason ?? ""}`);
@@ -698,6 +737,45 @@ export class PluginRegistry {
     if (this.deps.store.findStartedOperation(pluginId) !== undefined) {
       throw new PluginConflictError(pluginId);
     }
+  }
+
+  /** 中断恢复：写失败终态严格审计（fail-closed，decision=denied/reasonCode=interrupted）。 */
+  private writeRecoveryAudit(operation: PluginOperationRecord, actor: PluginOperationActor): void {
+    const trace = this.buildTrace(operation.operationId);
+    const executor = actor.executor ?? DEFAULT_EXECUTOR;
+    assertDurableAudit(
+      this.deps.audit.appendStrict(
+        this.auditInput({
+          eventName: "audit.plugin.operation_recovered",
+          action: "plugin.operation.recover",
+          decision: "denied",
+          pluginId: operation.pluginId,
+          trace,
+          actor: actor.actor,
+          executor,
+          reasonCode: "interrupted",
+          changedFields: ["status"],
+        }),
+      ),
+      "中断插件操作恢复审计",
+    );
+  }
+
+  /** 中断恢复：发 plugin.operation.recovered Activity（安全摘要）。 */
+  private emitRecoveryActivity(operation: PluginOperationRecord, actor: PluginOperationActor): void {
+    instrument.activity({
+      eventName: "plugin.operation.recovered",
+      status: "completed",
+      operationId: operation.operationId,
+      actor: actor.actor,
+      executor: actor.executor ?? DEFAULT_EXECUTOR,
+      target: { kind: "plugin", id: operation.pluginId },
+      scope: { pluginId: operation.pluginId },
+      payload: {
+        summaryCode: "plugin_operation_recovered",
+        attributes: { pluginId: operation.pluginId, operation: operation.operation, reasonCode: "interrupted" },
+      },
+    });
   }
 
   private summaryAttributes(

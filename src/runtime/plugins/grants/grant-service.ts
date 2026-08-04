@@ -191,6 +191,74 @@ export class GrantService {
     return this.deps.store.list(pluginId);
   }
 
+  /**
+   * 移除插件全部授权（卸载回收）：无授权记录时直接返回；有则走严格三阶段
+   * 审计（started → removeAll + completed 同一事务 → 失败补 failed 终态）。
+   */
+  removeAll(pluginId: string, grantActor: GrantActor): void {
+    const existing = this.deps.store.list(pluginId);
+    if (existing.length === 0) {
+      return;
+    }
+    const beforeRevision = this.deps.store.maxRevision(pluginId);
+    const afterRevision = beforeRevision;
+    const removedCount = existing.length;
+    const operationId = `grant-remove-${pluginId.slice(0, 64)}-${crypto.randomUUID().slice(0, 8)}`;
+    const trace = this.newTrace(operationId);
+    const target: ResourceRef = { kind: "plugin", id: pluginId };
+    const actor = grantActor.actor;
+    const changedFields = ["grants"] as const;
+
+    // 阶段一：started（fail-closed —— audit 未配置/拒绝立即抛错，不写入）
+    assertDurableAudit(
+      this.deps.audit.appendStrict({
+        eventName: "audit.plugin.permission_change_started",
+        payload: {
+          action: ACTION,
+          decision: "deferred",
+          beforeRevision: String(beforeRevision),
+          afterRevision: String(afterRevision),
+          changedFields: [...changedFields],
+        },
+        actor,
+        executor: EXECUTOR,
+        target,
+        scope: { pluginId },
+        trace,
+      }),
+      "权限变更审计(启动)",
+    );
+
+    try {
+      // 阶段二 + 阶段三：清空授权与 completed 审计同一事务，任一失败整体回滚
+      this.deps.audit.runAuditedTransaction(
+        {
+          eventName: "audit.plugin.permission_change_completed",
+          payload: {
+            action: ACTION,
+            decision: "denied",
+            beforeRevision: String(beforeRevision),
+            afterRevision: String(afterRevision),
+            changedFields: [...changedFields],
+          },
+          actor,
+          executor: EXECUTOR,
+          target,
+          scope: { pluginId },
+          trace,
+        },
+        () => {
+          this.deps.store.removeAll(pluginId);
+        },
+      );
+      this.emitRemoveAllActivity({ pluginId, removedCount, revision: afterRevision, actor, trace });
+    } catch (error) {
+      // 事务失败：领域写入已回滚；尽力补 failed 终态（失败不吞原错误）
+      this.tryAppendRemoveAllFailure({ pluginId, beforeRevision, actor, target, trace });
+      throw error;
+    }
+  }
+
   /** 插件当前授权版本（无授权时 0） */
   currentRevision(pluginId: string): number {
     return this.deps.store.maxRevision(pluginId);
@@ -268,6 +336,64 @@ export class GrantService {
         executor: EXECUTOR,
         target,
         scope: { pluginId: request.pluginId },
+        trace,
+      });
+    } catch {
+      // failed 终态也写不进去时保留原错误（appendStrict 已 fail-closed）
+    }
+  }
+
+  /** 全部授权移除发 plugin.permission.revoked Activity（payload 含 removedCount）。 */
+  private emitRemoveAllActivity(params: {
+    pluginId: string;
+    removedCount: number;
+    revision: number;
+    actor: ActorRef;
+    trace: TraceContext;
+  }): void {
+    const { pluginId, removedCount, revision, actor, trace } = params;
+    instrument.activity({
+      eventName: "plugin.permission.revoked",
+      actor,
+      executor: EXECUTOR,
+      target: { kind: "plugin", id: pluginId },
+      scope: { pluginId },
+      trace,
+      payload: {
+        summaryCode: "plugin_permission_revoked",
+        attributes: {
+          pluginId,
+          removedCount,
+          revision,
+          grantedBy: actor.id,
+        },
+      },
+    });
+  }
+
+  /** 移除全部授权失败：尽力补 failed 终态（reasonCode 稳定）。 */
+  private tryAppendRemoveAllFailure(params: {
+    pluginId: string;
+    beforeRevision: number;
+    actor: ActorRef;
+    target: ResourceRef;
+    trace: TraceContext;
+  }): void {
+    const { pluginId, beforeRevision, actor, target, trace } = params;
+    try {
+      this.deps.audit.appendStrict({
+        eventName: "audit.plugin.permission_change_failed",
+        payload: {
+          action: ACTION,
+          decision: "denied",
+          reasonCode: "grant_remove_failed",
+          beforeRevision: String(beforeRevision),
+          changedFields: ["grants"],
+        },
+        actor,
+        executor: EXECUTOR,
+        target,
+        scope: { pluginId },
         trace,
       });
     } catch {

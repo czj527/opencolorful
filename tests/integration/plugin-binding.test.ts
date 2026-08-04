@@ -175,3 +175,28 @@ describe("T3 BindingService：跨 Agent 隔离与 fail-closed", () => {
     expect(ctx.bindingStore.get("a1", "example.sdk")?.grantRevision).toBe(before);
   });
 });
+
+describe("T3 PluginBindingStore：removeByPlugin", () => {
+  it("按插件移除全部绑定，不影响其他插件", () => {
+    const ctx = createContext();
+    setupPlugin(ctx);
+    ctx.grants.grant({ pluginId: "example.other", capability: "tool.register" }, userActor);
+    ctx.bindings.bind({ agentId: "a1", pluginId: "example.sdk" }, userActor);
+    ctx.bindings.bind({ agentId: "a2", pluginId: "example.sdk" }, userActor);
+    ctx.bindings.bind({ agentId: "a1", pluginId: "example.other" }, userActor);
+
+    ctx.bindingStore.removeByPlugin("example.sdk");
+
+    expect(ctx.bindingStore.listByPlugin("example.sdk")).toHaveLength(0);
+    expect(ctx.bindingStore.listByPlugin("example.other")).toHaveLength(1);
+    expect(ctx.bindingStore.listByAgent("a1").map((b) => b.pluginId)).toEqual(["example.other"]);
+  });
+
+  it("对无绑定插件调用 removeByPlugin 是 no-op", () => {
+    const ctx = createContext();
+    setupPlugin(ctx);
+    ctx.bindings.bind({ agentId: "a1", pluginId: "example.sdk" }, userActor);
+    expect(() => ctx.bindingStore.removeByPlugin("example.ghost")).not.toThrow();
+    expect(ctx.bindingStore.listByPlugin("example.sdk")).toHaveLength(1);
+  });
+});

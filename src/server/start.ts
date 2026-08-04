@@ -242,6 +242,28 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       audit: observability.audit,
       hostVersion: version,
     });
+    // 评审修复（C1）：启动恢复扫描——崩溃遗留的 started 操作行终结为 failed，
+    // 释放被永久锁住的插件（单插件失败不阻塞启动）。
+    try {
+      pluginFacade.recoverInterruptedOperations();
+    } catch (error) {
+      instrument.warn("plugin.recovery.failed", "插件中断操作恢复失败", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+    }
+    // 评审修复（A1）：启动时激活 enabled 插件（登记贡献 + 启动运行时）。
+    // 异步执行不阻塞 Server 启动；单个插件激活失败仅记录，不影响其余。
+    pluginFacade.activateAllEnabled()
+      .then(({ failed }) => {
+        for (const failure of failed) {
+          instrument.warn("plugin.activate.failed", "启动时激活插件失败", { pluginId: failure.pluginId });
+        }
+      })
+      .catch((error: unknown) => {
+        instrument.warn("plugin.activate_all.failed", "插件批量激活失败", {
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+      });
     const providerStore = new ProviderStore(paths.providerSettings);
     // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）
     const modelService = await ModelService.create(paths, providerStore, observability.audit);
@@ -436,6 +458,13 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();
+        // 评审修复（A1）：Server 关闭时停用插件运行时（stopAll 是唯一杀子进程路径），
+        // 避免 dev/生产 worker 被孤儿化；必须在 DB 关闭之前。
+        pluginFacade.dispose().catch((error: unknown) => {
+          instrument.warn("plugin.dispose.failed", "插件运行时关闭失败", {
+            reason: error instanceof Error ? error.message : "unknown",
+          });
+        });
         // Phase 11：日志 flush 必须在 DB 关闭之前（activity 已写完，logger 落盘）
         instrument.flush();
         database.close();

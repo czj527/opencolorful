@@ -8,6 +8,7 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PluginFacade } from "../../src/platform/plugin-facade.js";
+import { PluginRegistryStore } from "../../src/storage/plugin-registry-store.js";
 import { createServerApp } from "../../src/server/app.js";
 
 const temporaryDirectories: string[] = [];
@@ -165,5 +166,180 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
     expect(inspect.status).toBe(200);
     const inspected = await inspect.json() as { pluginId: string };
     expect(inspected.pluginId).toBe("example.route");
+  });
+
+  it("enable 激活运行时、disable/uninstall 停用并清理（A1/C3 生命周期接线）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.lifecycle", "Lifecycle", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.lifecycle", capability: "tool.register", decision: "allowed" as const }],
+    );
+    facade.bind("a1", "example.lifecycle", ["greet"]);
+    expect(facade.get("example.lifecycle")?.status).toBe("installed");
+
+    // enable → 运行时真正启动（bundle runtime status=running）
+    await facade.enable("example.lifecycle");
+    expect(facade.get("example.lifecycle")?.status).toBe("enabled");
+    expect(facade.runtimeHost.getStatus("example.lifecycle")).toBe("running");
+
+    // disable → 运行时停用（stopInstance 后实例从 map 移除）
+    await facade.disable("example.lifecycle");
+    expect(facade.get("example.lifecycle")?.status).toBe("disabled");
+    expect(facade.runtimeHost.getStatus("example.lifecycle")).toBeUndefined();
+
+    // uninstall → 停用 + 卸载 + 绑定清理
+    await facade.uninstall("example.lifecycle");
+    expect(facade.get("example.lifecycle")).toBeUndefined();
+    expect(facade.listAgentBindings("a1")).toHaveLength(0);
+  });
+
+  it("安装失败（health check）不留授权残留（C2 原子性）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = path.join(fixture.dir, "src", "example.bad");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.writeFileSync(path.join(pluginDir, "manifest.json"), JSON.stringify({
+      manifestVersion: 1,
+      id: "example.bad",
+      name: "Bad",
+      version: "1.0.0",
+      compatibility: { opencolorful: ">=0.1.0", pluginApi: 1 },
+      trust: "restricted",
+      runtime: { kind: "python-process", entry: "missing.py" },
+      permissions: [{ capability: "filesystem.write", reason: "写文件" }],
+    }, null, 2));
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await expect(facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.bad", capability: "filesystem.write", decision: "allowed" as const }],
+    )).rejects.toThrow();
+    expect(facade.list()).toHaveLength(0);
+    // 授权也未残留（先装后授：安装失败时 grant 从未写入）
+    const grantRows = fixture.database.prepare("SELECT * FROM plugin_grants WHERE plugin_id = ?").all("example.bad");
+    expect(grantRows).toHaveLength(0);
+  });
+
+  it("recoverInterruptedOperations 终结崩溃遗留操作（C1 恢复）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.recover", "Recover", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    // 模拟崩溃遗留：直接插入 started 操作行
+    const registryStore = new PluginRegistryStore(fixture.database);
+    registryStore.startOperation({
+      operationId: "op-crash",
+      pluginId: "example.recover",
+      operation: "install",
+      toVersion: "1.0.0",
+    });
+    facade.recoverInterruptedOperations();
+    // started 行已终结为 failed → 后续安装不再被 PluginConflictError 锁死
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.recover", capability: "tool.register", decision: "allowed" as const }],
+    );
+    expect(facade.get("example.recover")?.version).toBe("1.0.0");
+  });
+
+  it("policy 接入 Phase 9 沙箱策略层（F4 sandboxCheck 注入）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.sandbox", "Sandbox", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.sandbox", capability: "tool.register", decision: "allowed" as const }],
+    );
+    facade.bind("a1", "example.sandbox", ["greet"]);
+    const resolution = facade.policy.resolveCapability({
+      pluginId: "example.sandbox",
+      agentId: "a1",
+      capability: "tool.register",
+      manifestPermissions: [{ capability: "tool.register" }],
+    });
+    expect(resolution.allowed).toBe(true);
+    // evidence 含 sandbox 证明第 5 层（Phase 9 沙箱预检）已参与
+    expect(resolution.evidence).toContain("sandbox");
+  });
+
+  it("getDetail 返回富字段（B1 契约）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.detail", "Detail", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.detail", capability: "tool.register", decision: "allowed" as const }],
+    );
+    facade.bind("a1", "example.detail", ["greet"]);
+    const detail = facade.getDetail("example.detail");
+    expect(detail).toBeDefined();
+    expect(detail?.name).toBe("Detail");
+    expect(detail?.enabled).toBe(false);
+    expect(detail?.grants).toHaveLength(1);
+    expect(detail?.agentBindings).toHaveLength(1);
+    expect(Array.isArray(detail?.secretStatus)).toBe(true);
+    expect(Array.isArray(detail?.surfaces)).toBe(true);
+    expect(detail?.runtime.health).toBe(false);
+    expect(facade.getDetail("example.missing")).toBeUndefined();
+  });
+
+  it("来源搜索与 dev surface 端点接线（B2/B3）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    const { app } = createServerApp({
+      version: "0.1.0",
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: fixture.paths,
+      database: fixture.database,
+      audit: fixture.audit,
+      pluginFacade: facade,
+    });
+    // B2：来源搜索（local 来源无 baseDir → 空结果，端点 200）
+    const search = await app.request("http://local/api/plugin-sources/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceType: "local", query: "" }),
+    });
+    expect(search.status).toBe(200);
+    expect(await search.json()).toEqual([]);
+    // B3：dev surface 列表与 describe-surface 端点存在（非 404）
+    const surfaces = await app.request("http://local/api/plugins/dev/surfaces");
+    expect(surfaces.status).toBe(200);
+    const describe = await app.request("http://local/api/plugins/dev/unknown/describe-surface", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ surfaceId: "x" }),
+    });
+    expect(describe.status).not.toBe(404);
   });
 });

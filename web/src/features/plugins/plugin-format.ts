@@ -127,3 +127,20 @@ export function capabilityLabel(capability: string): string {
 export function contributionKindLabel(kind: string): string {
   return CONTRIBUTION_KIND_LABEL[kind as ContributionKind] ?? kind;
 }
+
+/**
+ * 插件启用语义推导（Server 富化约定：enabled 可由 active + status 推导）。
+ *
+ * 优先级：enabled 富字段 > active > status === "enabled"。
+ * Server 最小集 {pluginId, version, active, status, ...} 不含 enabled，
+ * Web 端不得假设其必返回，一律经本函数推导。
+ */
+export function isPluginEnabled(plugin: {
+  readonly enabled?: boolean;
+  readonly active?: boolean;
+  readonly status?: PluginStatus;
+}): boolean {
+  if (plugin.enabled !== undefined) return plugin.enabled;
+  if (plugin.active !== undefined) return plugin.active;
+  return plugin.status === "enabled";
+}

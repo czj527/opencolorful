@@ -279,7 +279,11 @@ export class RuntimeHost {
       instance.status = "crashed";
       this.deps.broker.invalidateRuntimeInstance(runtimeInstanceId);
       this.emitProcessCrashed(instance, cleaned.message);
-      this.instances.delete(pluginId);
+      // 握手期崩溃可能已触发 handleCrash→restartInstance 并替换 map；
+      // 仅当 map 中仍为本实例时才删除，避免误删重启实例（其子进程仍在运行，成为孤儿）
+      if (this.instances.get(pluginId) === instance) {
+        this.instances.delete(pluginId);
+      }
       throw new PluginRuntimeError(`插件 ${pluginId} 运行实例启动失败：${cleaned.message.slice(0, 300)}`);
     }
   }
@@ -499,7 +503,11 @@ export class RuntimeHost {
           instance.status = "crashed";
           this.deps.broker.invalidateRuntimeInstance(runtimeInstanceId);
           this.emitProcessCrashed(instance, cleaned.message);
-          this.instances.delete(old.pluginId);
+          // 启动失败期间可能已被更新的实例替换（再次崩溃→restart 或新的 start）；
+          // 仅当 map 中仍为本实例时才删除，避免误删替换实例
+          if (this.instances.get(old.pluginId) === instance) {
+            this.instances.delete(old.pluginId);
+          }
           this.emitDegraded(instance, `重启后启动失败：${cleaned.message.slice(0, 200)}`);
         });
       return instance;

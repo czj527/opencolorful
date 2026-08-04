@@ -47,21 +47,29 @@ export function SourcesView(props: SourcesViewProps) {
       {sources.length === 0 && <p className={styles.emptyHint}>暂无已配置的插件来源。</p>}
       <ul className={styles.list}>
         {sources.map((source) => (
-          <li key={source.id} className={styles.card}>
+          // Server 实际返回 {sourceType, label, supported}；id/name/trust 等为富化后可选项
+          <li key={source.id ?? source.sourceType} className={styles.card}>
             <div className={styles.cardMain}>
               <Library size={16} aria-hidden="true" />
-              <span className={styles.cardTitle}>{source.name}</span>
+              <span className={styles.cardTitle}>{source.name ?? source.label}</span>
               <span className={styles.cardMeta}>
                 <span>{PLUGIN_SOURCE_LABEL[source.sourceType]}</span>
-                <StatusPill tone={source.trusted ? "ok" : "warn"}>
-                  {source.trusted ? "已信任" : "未信任"}
+                <StatusPill tone={source.supported ? "ok" : "muted"}>
+                  {source.supported ? "支持" : "未支持"}
                 </StatusPill>
-                <StatusPill tone={source.trustLevel === "full-access" ? "danger" : "muted"}>
-                  {source.trustLevel === "none" ? "不可执行代码" : source.trustLevel === "restricted" ? "受限信任" : "完全信任（高危）"}
-                </StatusPill>
+                {source.trusted !== undefined && (
+                  <StatusPill tone={source.trusted ? "ok" : "warn"}>
+                    {source.trusted ? "已信任" : "未信任"}
+                  </StatusPill>
+                )}
+                {source.trustLevel !== undefined && (
+                  <StatusPill tone={source.trustLevel === "full-access" ? "danger" : "muted"}>
+                    {source.trustLevel === "none" ? "不可执行代码" : source.trustLevel === "restricted" ? "受限信任" : "完全信任（高危）"}
+                  </StatusPill>
+                )}
               </span>
             </div>
-            <p className={styles.cardDesc}>{source.description ?? source.ref}</p>
+            <p className={styles.cardDesc}>{source.description ?? source.ref ?? source.sourceType}</p>
           </li>
         ))}
       </ul>

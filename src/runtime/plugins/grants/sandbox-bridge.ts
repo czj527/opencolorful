@@ -56,7 +56,7 @@ export class SandboxBridge {
     const { pluginId, agentId, operation, path } = input;
     const capability: CapabilityKind = operation === "read" ? "filesystem.read" : "filesystem.write";
 
-    const capabilityDecision = this.resolveCapability(pluginId, agentId, capability);
+    const capabilityDecision = this.resolveCapability({ pluginId, agentId, capability });
     if (!capabilityDecision.allowed) {
       return this.deny({
         pluginId,
@@ -101,7 +101,7 @@ export class SandboxBridge {
     readonly target: string;
   }): SandboxDecision {
     const { pluginId, agentId, target } = input;
-    const capabilityDecision = this.resolveCapability(pluginId, agentId, "network.connect");
+    const capabilityDecision = this.resolveCapability({ pluginId, agentId, capability: "network.connect" });
     if (!capabilityDecision.allowed) {
       return this.deny({
         pluginId,
@@ -122,7 +122,7 @@ export class SandboxBridge {
     readonly command: string;
   }): SandboxDecision {
     const { pluginId, agentId, command } = input;
-    const capabilityDecision = this.resolveCapability(pluginId, agentId, "process.spawn");
+    const capabilityDecision = this.resolveCapability({ pluginId, agentId, capability: "process.spawn" });
     if (!capabilityDecision.allowed) {
       return this.deny({
         pluginId,
@@ -152,7 +152,7 @@ export class SandboxBridge {
     readonly secretName: string;
   }): SandboxDecision {
     const { pluginId, agentId, secretName } = input;
-    const capabilityDecision = this.resolveCapability(pluginId, agentId, "secret.read-own");
+    const capabilityDecision = this.resolveCapability({ pluginId, agentId, capability: "secret.read-own" });
     if (!capabilityDecision.allowed) {
       return this.deny({
         pluginId,
@@ -166,17 +166,24 @@ export class SandboxBridge {
     return { allowed: true, reason: "Secret 策略放行" };
   }
 
-  // ── private helpers ───────────────────────────────────────────
+  // ── capability 级预检（EffectivePolicy.sandboxCheck 注入点）────
 
-  private resolveCapability(
-    pluginId: string,
-    agentId: string,
-    capability: CapabilityKind,
-  ): { allowed: boolean; deniedBy: PolicyLayer; reason: string } {
-    const resolution = this.deps.policy.resolveCapability({ pluginId, agentId, capability });
+  /**
+   * 返回 EffectivePolicy 对某能力的交集决策。签名与 EffectivePolicyDeps.sandboxCheck
+   * 兼容（返回 { allowed, reason }；本桥始终有意见，从不返回 null），可直接注入：
+   *   new EffectivePolicy({ grants, bindings, sandboxCheck: (input) => bridge.resolveCapability(input) })
+   */
+  resolveCapability(input: {
+    readonly pluginId: string;
+    readonly agentId: string;
+    readonly capability: CapabilityKind;
+  }): { allowed: boolean; deniedBy: PolicyLayer; reason: string } {
+    const resolution = this.deps.policy.resolveCapability(input);
     // EffectivePolicy 保证 denied 时 deniedBy 非空（防御性兜底为 grant 层）
     return { allowed: resolution.allowed, deniedBy: resolution.deniedBy ?? "grant", reason: resolution.reason };
   }
+
+  // ── private helpers ───────────────────────────────────────────
 
   private deny(context: DeniedContext): { allowed: false; reason: string; deniedLayer: PolicyLayer | "sandbox" } {
     this.recordDenied(context);

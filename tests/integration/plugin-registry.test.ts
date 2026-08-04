@@ -5,9 +5,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProducerContext } from "../../src/contracts/observability.js";
+import type { NormalizedPluginManifest } from "../../src/contracts/plugin-protocol.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { PluginRegistryStore } from "../../src/storage/plugin-registry-store.js";
+import { PluginGrantStore } from "../../src/storage/plugin-grant-store.js";
+import { PluginBindingStore } from "../../src/storage/plugin-binding-store.js";
+import { PluginConfigStore } from "../../src/storage/plugin-config-store.js";
 import { ObservabilityContext } from "../../src/observability/observability-context.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { instrument } from "../../src/observability/instrument.js";
@@ -27,7 +31,7 @@ import { pluginDataDir, pluginVersionDir } from "../../src/runtime/plugins/paths
 const temporaryDirectories: string[] = [];
 const openDatabases: Array<ReturnType<typeof openMetadataDatabase>> = [];
 
-function createEnvironment() {
+function createEnvironment(options: { prepareEntry?: (versionDir: string, normalized: NormalizedPluginManifest) => void } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-plugin-registry-"));
   temporaryDirectories.push(dir);
   const paths = getRuntimePaths({ OPENCOLORFUL_HOME: dir });
@@ -50,10 +54,26 @@ function createEnvironment() {
   });
   instrument.init(context);
   const adapters = [new LocalSourceAdapter(), new ZipSourceAdapter(), new GitSourceAdapter(), new NpmSourceAdapter()];
-  const installer = new PluginInstaller({ paths, adapters, hostVersion: "1.0.0" });
+  const installer = new PluginInstaller({
+    paths,
+    adapters,
+    hostVersion: "1.0.0",
+    ...(options.prepareEntry !== undefined ? { prepareEntry: options.prepareEntry } : {}),
+  });
   const store = new PluginRegistryStore(database);
-  const registry = new PluginRegistry({ store, installer, paths, audit: context.audit });
-  return { dir, paths, database, context, installer, store, registry };
+  const grantStore = new PluginGrantStore(database);
+  const configStore = new PluginConfigStore(database);
+  const bindingStore = new PluginBindingStore(database);
+  const registry = new PluginRegistry({
+    store,
+    installer,
+    paths,
+    audit: context.audit,
+    grantStore,
+    configStore,
+    bindingStore,
+  });
+  return { dir, paths, database, context, installer, store, grantStore, configStore, bindingStore, registry };
 }
 
 function validManifest(
@@ -394,5 +414,136 @@ describe("Phase 12 严格审计 fail-closed 与补偿", () => {
     expect(failed?.reason_code).toBe("install_failed");
     spy.mockRestore();
     void dir;
+  });
+});
+
+describe("Phase 12 运行时入口准备钩子（prepareRuntimeEntry）", () => {
+  it("install 与 update 时在复制版本目录后调用 prepareEntry 钩子", async () => {
+    const prepareEntry = vi.fn();
+    const { paths, registry } = createEnvironment({ prepareEntry });
+    const dirV1 = writePluginDir(paths.pluginsCache, validManifest("example.registry", "1.0.0"));
+    const dirV2 = writePluginDir(paths.pluginsCache, validManifest("example.registry", "1.1.0"));
+    await registry.install({ sourceType: "local", ref: dirV1 }, USER_ACTOR);
+    expect(prepareEntry).toHaveBeenCalledTimes(1);
+    const [versionDir1, normalized1] = prepareEntry.mock.calls[0] as [string, { id: string; version: string }];
+    expect(versionDir1).toBe(pluginVersionDir(paths, "example.registry", "1.0.0"));
+    expect(normalized1.id).toBe("example.registry");
+
+    await registry.update("example.registry", { sourceType: "local", ref: dirV2 }, USER_ACTOR);
+    expect(prepareEntry).toHaveBeenCalledTimes(2);
+    const [versionDir2] = prepareEntry.mock.calls[1] as [string, { id: string; version: string }];
+    expect(versionDir2).toBe(pluginVersionDir(paths, "example.registry", "1.1.0"));
+  });
+
+  it("prepareEntry 钩子抛错 → 安装失败并补偿（不留半状态）", async () => {
+    const { paths, store, registry } = createEnvironment({
+      prepareEntry: () => {
+        throw new Error("平台 worker 具体化失败");
+      },
+    });
+    const pluginDir = writePluginDir(paths.pluginsCache, validManifest("example.registry", "1.0.0"));
+    await expect(registry.install({ sourceType: "local", ref: pluginDir }, USER_ACTOR)).rejects.toThrow(
+      /平台 worker 具体化失败/,
+    );
+    expect(store.getInstallation("example.registry", "1.0.0")).toBeUndefined();
+    expect(fs.existsSync(pluginVersionDir(paths, "example.registry", "1.0.0"))).toBe(false);
+  });
+});
+
+describe("Phase 12 中断操作恢复（recoverOpenOperations）", () => {
+  it("把 started 行终结为 failed 并写失败终态审计/Activity，之后可正常安装", async () => {
+    const { paths, database, store, registry } = createEnvironment();
+    const pluginDir = writePluginDir(paths.pluginsCache, validManifest("example.registry", "1.0.0"));
+    // 模拟中断遗留：只有 started 操作行（无 completed 审计/终态）
+    store.startOperation({ operationId: "op-interrupted", pluginId: "example.registry", operation: "install", toVersion: "1.0.0" });
+
+    registry.recoverOpenOperations(USER_ACTOR);
+
+    const op = store.getOperation("op-interrupted");
+    expect(op?.status).toBe("failed");
+    expect(op?.reasonCode).toBe("interrupted");
+
+    const audits = database
+      .prepare(
+        "SELECT event_name, decision, reason_code FROM audit_events WHERE operation_id = 'op-interrupted' ORDER BY id ASC",
+      )
+      .all() as Array<{ event_name: string; decision: string; reason_code: string | null }>;
+    expect(audits).toEqual([
+      { event_name: "audit.plugin.operation_recovered", decision: "denied", reason_code: "interrupted" },
+    ]);
+
+    const activities = database
+      .prepare("SELECT status, payload_json FROM activity_events WHERE event_name = 'plugin.operation.recovered'")
+      .all() as Array<{ status: string; payload_json: string }>;
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.status).toBe("completed");
+    const payload = JSON.parse(activities[0]!.payload_json) as { summaryCode: string; attributes: Record<string, unknown> };
+    expect(payload.summaryCode).toBe("plugin_operation_recovered");
+    expect(payload.attributes).toMatchObject({
+      pluginId: "example.registry",
+      operation: "install",
+      reasonCode: "interrupted",
+    });
+
+    // 锁已释放：中断后可正常重装
+    await expect(registry.install({ sourceType: "local", ref: pluginDir }, USER_ACTOR)).resolves.toMatchObject({
+      version: "1.0.0",
+    });
+  });
+
+  it("多条中断操作逐条恢复，单条失败不阻断其余", async () => {
+    const { database, context, store, registry } = createEnvironment();
+    store.startOperation({ operationId: "op-a", pluginId: "example.aaa", operation: "install", toVersion: "1.0.0" });
+    store.startOperation({ operationId: "op-b", pluginId: "example.bbb", operation: "install", toVersion: "1.0.0" });
+    // 模拟 op-b 的恢复审计被拒绝：不应阻断 op-a 的恢复
+    const audit = context.audit;
+    const original = audit.appendStrict.bind(audit);
+    const spy = vi.spyOn(audit, "appendStrict").mockImplementation((input) => {
+      if (input.eventName === "audit.plugin.operation_recovered" && input.target?.id === "example.bbb") {
+        return { kind: "rejected", eventName: input.eventName, reason: "模拟审计拒绝" };
+      }
+      return original(input);
+    });
+
+    expect(() => registry.recoverOpenOperations(USER_ACTOR)).not.toThrow();
+    spy.mockRestore();
+
+    expect(store.getOperation("op-a")?.status).toBe("failed");
+    // op-b 审计失败 → 该条恢复中断，操作行保持 started（不伪装成功）
+    expect(store.getOperation("op-b")?.status).toBe("started");
+    expect(
+      database.prepare("SELECT COUNT(*) AS n FROM activity_events WHERE event_name = 'plugin.operation.recovered'").get(),
+    ).toEqual({ n: 1 });
+  });
+});
+
+describe("Phase 12 卸载清理残留授权/绑定/配置", () => {
+  it("uninstall 清空 grants/bindings/configs，completed 审计记录清理字段", async () => {
+    const { paths, database, store, registry, grantStore, configStore, bindingStore } = createEnvironment();
+    const pluginDir = writePluginDir(paths.pluginsCache, validManifest("example.registry", "1.0.0"));
+    await registry.install({ sourceType: "local", ref: pluginDir }, USER_ACTOR);
+
+    const now = new Date().toISOString();
+    grantStore.upsert({ pluginId: "example.registry", capability: "tool.register", decision: "allowed", revision: 1, grantedBy: "test", grantedAt: now });
+    configStore.set({ pluginId: "example.registry", agentId: "", config: { key: 1 }, updatedAt: now });
+    bindingStore.upsert({ agentId: "agent-1", pluginId: "example.registry", contributions: [], grantRevision: 1, enabled: true, revision: 1, updatedAt: now });
+    expect(grantStore.list("example.registry")).toHaveLength(1);
+    expect(configStore.list("example.registry")).toHaveLength(1);
+    expect(bindingStore.listByPlugin("example.registry")).toHaveLength(1);
+
+    await registry.uninstall("example.registry", USER_ACTOR);
+
+    expect(grantStore.list("example.registry")).toHaveLength(0);
+    expect(configStore.list("example.registry")).toHaveLength(0);
+    expect(bindingStore.listByPlugin("example.registry")).toHaveLength(0);
+
+    const completed = database
+      .prepare(
+        "SELECT payload_json FROM audit_events WHERE event_name = 'audit.plugin.uninstall_completed' ORDER BY id DESC LIMIT 1",
+      )
+      .get() as { payload_json: string };
+    const payload = JSON.parse(completed.payload_json) as { changedFields?: string[] };
+    expect(payload.changedFields).toEqual(expect.arrayContaining(["grants", "bindings", "configs"]));
+    expect(store.getActive("example.registry")).toBeUndefined();
   });
 });

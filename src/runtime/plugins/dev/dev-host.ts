@@ -516,14 +516,24 @@ export class PluginDevHost {
     return { status: "reset" };
   }
 
-  /** 卸载：停用、移除 dev 目录与安装记录、清除 dev 状态。 */
+  /** 卸载：停用、移除 dev 目录与安装记录、清除 dev 状态并撤销 dev 授权。 */
   async uninstall(
     pluginId: string,
     devRunId: string,
     actor?: ActorRef,
   ): Promise<{ pluginId: string; removedVersions: readonly string[] }> {
     const slot = this.requireSlot(pluginId, devRunId);
-    const result = await this.getDevRegistry().uninstall(pluginId, { actor: actor ?? DEV_ACTOR });
+    const uninstallActor = actor ?? DEV_ACTOR;
+    const result = await this.getDevRegistry().uninstall(pluginId, { actor: uninstallActor });
+    // 卸载成功：撤销 dev 授权（授权表不随 dev 槽清理，显式回收；失败不阻断卸载）
+    try {
+      this.grants.removeAll(pluginId, { actor: uninstallActor });
+    } catch (error) {
+      instrument.warn("plugin.dev.uninstall_grant_cleanup_failed", "dev 卸载撤销授权失败", {
+        pluginId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     this.slots.delete(pluginId);
     void slot;
     return { pluginId, removedVersions: result.removedVersions };

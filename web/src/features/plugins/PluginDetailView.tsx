@@ -93,36 +93,36 @@ export function PluginDetailView(props: PluginDetailViewProps) {
           <ArrowLeft size={14} aria-hidden="true" />
           返回
         </Button>
-        <span className={styles.cardTitle}>{detail.name}</span>
+        <span className={styles.cardTitle}>{detail.name ?? detail.pluginId}</span>
         <span className={styles.cardMeta}>
           <span>{detail.pluginId}</span>
           <span>v{detail.version}</span>
           <PluginStatusPill status={detail.status} />
           <PluginHealthPill health={detail.health} />
-          {detail.requiresFullAccess && <StatusPill tone="danger">full-access</StatusPill>}
+          {detail.requiresFullAccess === true && <StatusPill tone="danger">full-access</StatusPill>}
         </span>
       </header>
 
       <section className={styles.sectionCard}>
         <h3 className={styles.sectionTitle}>概览</h3>
         <div className={styles.defList}>
-          <DefItem k="信任级别" v={PLUGIN_TRUST_LABEL[detail.trust]} />
-          <DefItem k="运行形态" v={PLUGIN_RUNTIME_LABEL[detail.runtimeKind]} />
-          <DefItem k="来源类型" v={PLUGIN_SOURCE_LABEL[detail.sourceType]} />
+          <DefItem k="信任级别" v={detail.trust !== undefined ? PLUGIN_TRUST_LABEL[detail.trust] : "—"} />
+          <DefItem k="运行形态" v={detail.runtimeKind !== undefined ? PLUGIN_RUNTIME_LABEL[detail.runtimeKind] : "—"} />
+          <DefItem k="来源类型" v={PLUGIN_SOURCE_LABEL[detail.sourceType ?? detail.source.sourceRef?.sourceType] ?? "—"} />
           <DefItem k="安装时间" v={new Date(detail.installedAt).toLocaleString()} />
-          <DefItem k="更新" v={detail.updateAvailable !== null ? `可更新至 v${detail.updateAvailable}` : "无可用更新"} />
-          <DefItem k="回滚" v={detail.rollbackAvailable ? "可回滚" : "不可用"} />
+          <DefItem k="更新" v={detail.updateAvailable != null ? `可更新至 v${detail.updateAvailable}` : "无可用更新"} />
+          <DefItem k="回滚" v={detail.rollbackAvailable === true ? "可回滚" : "不可用"} />
         </div>
-        {detail.runtime !== null && (
+        {detail.runtime != null && (
           <div className={styles.defList} style={{ marginTop: "var(--space-12)" }}>
             <DefItem k="Runtime 实例" v={detail.runtime.runtimeInstanceId ?? "未启动"} />
-            <DefItem k="启动时间" v={detail.runtime.startedAt === null ? "—" : new Date(detail.runtime.startedAt).toLocaleString()} />
-            <DefItem k="Runtime 健康" v={detail.runtime.healthy ? "正常" : "异常"} />
+            <DefItem k="启动时间" v={detail.runtime.startedAt == null ? "—" : new Date(detail.runtime.startedAt).toLocaleString()} />
+            <DefItem k="Runtime 健康" v={detail.runtime.healthy === true ? "正常" : "异常"} />
           </div>
         )}
       </section>
 
-      {detail.manifest !== null && (
+      {detail.manifest != null && (
         <section className={styles.sectionCard}>
           <h3 className={styles.sectionTitle}>Manifest v1</h3>
           <p className={styles.cardDesc}>{detail.manifest.description ?? "无描述"}</p>
@@ -139,7 +139,7 @@ export function PluginDetailView(props: PluginDetailViewProps) {
 
       <section className={styles.sectionCard}>
         <h3 className={styles.sectionTitle}>来源与校验</h3>
-        {detail.manifest !== null ? (
+        {detail.manifest != null ? (
           <div className={styles.defList}>
             <DefItem k="来源" v={PLUGIN_SOURCE_LABEL[detail.manifest.source.sourceRef.sourceType]} />
             <DefItem k="地址" v={detail.manifest.source.sourceRef.ref} />
@@ -155,15 +155,15 @@ export function PluginDetailView(props: PluginDetailViewProps) {
         )}
       </section>
 
-      {detail.compatibility !== null && (
+      {detail.compatibility != null && (
         <CompatibilitySection compatibility={detail.compatibility} />
       )}
 
       <section className={styles.sectionCard}>
         <h3 className={styles.sectionTitle}>权限与授权</h3>
-        {detail.manifest !== null && detail.manifest.permissions.length > 0 ? (
+        {detail.manifest != null && (detail.manifest.permissions ?? []).length > 0 ? (
           <ul className={styles.permList}>
-            {detail.manifest.permissions.map((permission) => (
+            {(detail.manifest.permissions ?? []).map((permission) => (
               <li key={permission.capability}>
                 {capabilityLabel(permission.capability)}
                 {permission.reason !== undefined ? ` — ${permission.reason}` : ""}
@@ -173,14 +173,14 @@ export function PluginDetailView(props: PluginDetailViewProps) {
         ) : (
           <p className={styles.emptyHint}>该插件不申请权限。</p>
         )}
-        <GrantList grants={detail.grants} />
+        <GrantList grants={detail.grants ?? []} />
       </section>
 
       <section className={styles.sectionCard}>
         <h3 className={styles.sectionTitle}>配置与 Secret</h3>
-        {detail.secretStatus.length > 0 ? (
+        {(detail.secretStatus ?? []).length > 0 ? (
           <ul className={styles.compatList}>
-            {detail.secretStatus.map((secret) => (
+            {(detail.secretStatus ?? []).map((secret) => (
               <li key={secret.name} className={styles.compatItem}>
                 <span className={styles.compatName}>{secret.name}</span>
                 <StatusPill tone={secret.configured ? "ok" : "warn"}>
@@ -203,11 +203,11 @@ export function PluginDetailView(props: PluginDetailViewProps) {
 
       <section className={styles.sectionCard}>
         <h3 className={styles.sectionTitle}>UI Surface（占位 Host）</h3>
-        {detail.surfaces.length === 0 ? (
+        {(detail.surfaces ?? []).length === 0 ? (
           <p className={styles.emptyHint}>该插件未声明 UI Surface。</p>
         ) : (
           <ul className={styles.compatList}>
-            {detail.surfaces.map((surface) => (
+            {(detail.surfaces ?? []).map((surface) => (
               <li key={surface.contributionId} className={styles.compatItem}>
                 <span className={styles.compatName}>{surface.name}</span>
                 <SurfaceHostEntry title={surface.name} assetUrl={surface.assetUrl} />
@@ -228,11 +228,14 @@ export function PluginDetailView(props: PluginDetailViewProps) {
           <>
             <div className={styles.cardMeta}>
               <PluginHealthPill health={diagnostics.health} />
-              <span>生成于 {new Date(diagnostics.generatedAt).toLocaleString()}</span>
+              <span>
+                生成于{" "}
+                {diagnostics.generatedAt !== undefined ? new Date(diagnostics.generatedAt).toLocaleString() : "—"}
+              </span>
             </div>
-            {diagnostics.lastError !== null && <ErrorBlock message={diagnostics.lastError} />}
+            {diagnostics.lastError != null && <ErrorBlock message={diagnostics.lastError} />}
             <ul className={styles.compatList}>
-              {diagnostics.checks.map((check) => (
+              {(diagnostics.checks ?? []).map((check) => (
                 <li key={check.id} className={styles.compatItem}>
                   <StatusPill tone={check.ok ? "ok" : "danger"}>{check.ok ? "通过" : "失败"}</StatusPill>
                   <span className={styles.compatName}>{check.label}</span>
@@ -240,9 +243,9 @@ export function PluginDetailView(props: PluginDetailViewProps) {
                 </li>
               ))}
             </ul>
-            {diagnostics.recentEvents.length > 0 && (
+            {(diagnostics.recentEvents ?? []).length > 0 && (
               <ul className={styles.compatList}>
-                {diagnostics.recentEvents.slice(0, 10).map((event) => (
+                {(diagnostics.recentEvents ?? []).slice(0, 10).map((event) => (
                   <li key={`${event.recordedAt}-${event.eventName}`} className={styles.compatItem}>
                     <span className={styles.compatName}>{event.eventName}</span>
                     <span className={styles.compatReason}>{event.status ?? ""}</span>

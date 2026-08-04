@@ -105,4 +105,11 @@ export class PluginBindingStore {
       .prepare("DELETE FROM agent_plugin_bindings WHERE agent_id = ? AND plugin_id = ?")
       .run(agentId, pluginId);
   }
+
+  /** 按插件移除全部绑定（卸载/回收时清理残留）。 */
+  removeByPlugin(pluginId: string): void {
+    this.database
+      .prepare("DELETE FROM agent_plugin_bindings WHERE plugin_id = ?")
+      .run(pluginId);
+  }
 }

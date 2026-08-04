@@ -92,6 +92,11 @@ export interface PluginInstallerDeps {
   readonly adapters: readonly PluginSourceAdapter[];
   /** 平台版本（opencolorful 版本范围判定）。 */
   readonly hostVersion: string;
+  /**
+   * 可选的运行时入口准备钩子（Hermes 等生态包在复制为版本目录后、健康检查
+   * 前具体化平台 worker）；无钩子时为 no-op。抛错会随安装流程失败并触发补偿。
+   */
+  readonly prepareEntry?: (versionDir: string, normalized: NormalizedPluginManifest) => void;
 }
 
 // ── SemVer 范围判定（本地实现，不引入额外依赖） ────────────────
@@ -443,6 +448,11 @@ export class PluginInstaller {
     fs.rmSync(versionDir, { recursive: true, force: true });
     copyTreeSafe(prepared.contentRoot, versionDir, { exclude: prepared.sourceType === "git" ? [".git"] : [] });
     return versionDir;
+  }
+
+  /** 运行时入口准备（Hermes 等平台 worker 在健康检查前具体化）；无钩子时 no-op。 */
+  prepareRuntimeEntry(versionDir: string, normalized: NormalizedPluginManifest): void {
+    this.deps.prepareEntry?.(versionDir, normalized);
   }
 
   /** 健康检查：版本目录存在、manifest 可解析且与规范化清单一致、代码入口存在。 */

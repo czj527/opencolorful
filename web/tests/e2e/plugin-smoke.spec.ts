@@ -8,8 +8,8 @@ import { createServer } from "node:net";
 
 // Phase 12 T8 插件中心 E2E 冒烟。
 // 启动模式参考 logs.spec.ts：真实 Supervisor + Web dist。
-// 说明：Server 的 /api/plugins 路由由 T10/组合根接线，当前尚未存在——
-// 本用例验证页面级降级（「插件服务未就绪」空态）与五视图 Tab、移动端无横向溢出。
+// 说明：Server /api/plugins 已由 T10/组合根接线并返回 200；fresh 环境下无插件，
+// 已安装视图应展示空态而非崩溃。本用例验证页面级渲染、五视图 Tab、移动端无横向溢出。
 
 const CLI_ENTRY = path.resolve(import.meta.dirname, "../../../src/cli/main.ts");
 const WEB_DIST = path.resolve(import.meta.dirname, "../../dist");
@@ -45,6 +45,9 @@ test.beforeAll(async () => {
     entryScript: CLI_ENTRY,
     webDistDir: WEB_DIST,
   });
+  // startSupervisor 不自动启动 agent server；/api/plugins 需经 supervisor 代理到真实
+  // agent server（含 Phase 12 插件路由）。startAgentServer 自带健康等待（HTTP 就绪）。
+  await supervisor.controller.startAgentServer();
 });
 
 test.afterAll(async () => {
@@ -66,7 +69,7 @@ test.afterAll(async () => {
 const baseUrl = () => `http://127.0.0.1:${supervisorPort}`;
 
 test.describe("web /plugins 插件中心", () => {
-  test("进入 /plugins：标题与五视图 Tab 可见，API 未接线时显示服务未就绪占位", async ({ page }) => {
+  test("进入 /plugins：标题与五视图 Tab 可见，/api/plugins 已接线时已安装视图展示空态", async ({ page }) => {
     await page.goto(`${baseUrl()}/plugins`);
 
     await expect(page.locator("[data-page='plugins']")).toBeVisible({ timeout: 15_000 });
@@ -76,8 +79,10 @@ test.describe("web /plugins 插件中心", () => {
       await expect(page.getByTestId(`plugins-tab-${id}`)).toBeVisible();
     }
 
-    // Server /api/plugins 尚未接线：已安装视图应降级为「插件服务未就绪」而非崩溃
-    await expect(page.getByText("插件服务未就绪")).toBeVisible({ timeout: 15_000 });
+    // Server /api/plugins 已接线（返回 200）：fresh 环境无插件，应展示空态而非「服务未就绪」占位或崩溃。
+    // 注：空态分支不渲染 data-testid="installed-view"（该 testid 仅在有插件时存在），
+    // 直接断言空态文案即可证明列表加载成功且为空。
+    await expect(page.getByText("暂无已安装插件")).toBeVisible({ timeout: 15_000 });
   });
 
   test("移动端（390px）无横向溢出且五个 Tab 可见", async ({ page }) => {

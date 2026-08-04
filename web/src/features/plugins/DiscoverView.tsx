@@ -52,7 +52,8 @@ export function DiscoverView(props: DiscoverViewProps) {
         if (cancelled) return;
         setSources(list);
         setSourcesState("ready");
-        if (list.length > 0) setSelectedSourceId(list[0]?.id ?? "");
+        // Server 来源可能只有 {sourceType, label, supported}：缺 id 时回退 sourceType
+        if (list.length > 0) setSelectedSourceId(list[0]?.id ?? list[0]?.sourceType ?? "");
       } catch {
         if (!cancelled) setSourcesState("unavailable");
       }
@@ -62,7 +63,7 @@ export function DiscoverView(props: DiscoverViewProps) {
     };
   }, [props.pluginApi]);
 
-  const selectedSource = sources.find((s) => s.id === selectedSourceId) ?? null;
+  const selectedSource = sources.find((s) => (s.id ?? s.sourceType) === selectedSourceId) ?? null;
 
   const handleSearch = useCallback(async () => {
     if (query.trim().length === 0) {
@@ -78,7 +79,7 @@ export function DiscoverView(props: DiscoverViewProps) {
       const searchInput: PluginSourceSearchQuery = {
         query: query.trim(),
         ...(selectedSource !== null
-          ? { sourceId: selectedSource.id, sourceType: selectedSource.sourceType }
+          ? { sourceId: selectedSource.id ?? selectedSource.sourceType, sourceType: selectedSource.sourceType }
           : {}),
       };
       const found = await props.pluginApi.searchPluginSources(searchInput);
@@ -151,7 +152,7 @@ export function DiscoverView(props: DiscoverViewProps) {
         <input
           type="search"
           className={styles.searchInput}
-          placeholder={selectedSource === null ? "搜索插件名称 / 本地目录路径…" : `在「${selectedSource.name}」中搜索…`}
+          placeholder={selectedSource === null ? "搜索插件名称 / 本地目录路径…" : `在「${selectedSource.name ?? selectedSource.label}」中搜索…`}
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -168,8 +169,8 @@ export function DiscoverView(props: DiscoverViewProps) {
             style={{ flex: "0 1 auto", minWidth: 140 }}
           >
             {sources.map((source) => (
-              <option key={source.id} value={source.id}>
-                {source.name}（{PLUGIN_SOURCE_LABEL[source.sourceType]}）
+              <option key={source.id ?? source.sourceType} value={source.id ?? source.sourceType}>
+                {source.name ?? source.label}（{PLUGIN_SOURCE_LABEL[source.sourceType]}）
               </option>
             ))}
           </select>

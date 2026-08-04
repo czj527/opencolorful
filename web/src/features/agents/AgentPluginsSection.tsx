@@ -6,9 +6,9 @@ import type {
   AgentPluginBinding,
   PluginContributions,
   PluginDetail,
-  PluginInstallView,
+  PluginListItem,
 } from "../../lib/plugin-types.js";
-import { contributionKindLabel } from "../plugins/plugin-format.js";
+import { contributionKindLabel, isPluginEnabled } from "../plugins/plugin-format.js";
 import { ErrorBlock, LoadingBlock, PluginServiceUnavailable, StatusPill } from "../plugins/plugin-ui.js";
 import styles from "./AgentPluginsSection.module.css";
 
@@ -64,7 +64,7 @@ function flattenContributions(contributions: PluginContributions | undefined): r
 
 export function AgentPluginsSection(props: AgentPluginsSectionProps) {
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [enabledPlugins, setEnabledPlugins] = useState<readonly PluginInstallView[]>([]);
+  const [enabledPlugins, setEnabledPlugins] = useState<readonly PluginListItem[]>([]);
   const [bindingMap, setBindingMap] = useState<Readonly<Record<string, AgentPluginBinding | null>>>({});
   const [detailMap, setDetailMap] = useState<Readonly<Record<string, PluginDetail | null>>>({});
   const [busyPluginId, setBusyPluginId] = useState<string | null>(null);
@@ -80,7 +80,8 @@ export function AgentPluginsSection(props: AgentPluginsSectionProps) {
       ]);
       const byPlugin: Record<string, AgentPluginBinding | null> = {};
       for (const binding of bindings) byPlugin[binding.pluginId] = binding;
-      setEnabledPlugins(plugins.filter((plugin) => plugin.enabled));
+      // Server 最小集不含 enabled 富字段：统一用 active/status 推导（见 isPluginEnabled）
+      setEnabledPlugins(plugins.filter((plugin) => isPluginEnabled(plugin)));
       setBindingMap(byPlugin);
       setLoadState("ready");
     } catch (cause) {

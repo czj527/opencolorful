@@ -33,8 +33,10 @@ export function PluginStatusPill({ status }: { readonly status: PluginStatus }) 
   return <StatusPill tone={PLUGIN_STATUS_TONE[status]}>{PLUGIN_STATUS_LABEL[status]}</StatusPill>;
 }
 
-export function PluginHealthPill({ health }: { readonly health: PluginHealth }) {
-  return <StatusPill tone={PLUGIN_HEALTH_TONE[health]}>{PLUGIN_HEALTH_LABEL[health]}</StatusPill>;
+export function PluginHealthPill({ health }: { readonly health?: PluginHealth | undefined }) {
+  // Server 最小集不含 health 富字段：缺失时降级为「未知」
+  const resolved = health ?? "unknown";
+  return <StatusPill tone={PLUGIN_HEALTH_TONE[resolved]}>{PLUGIN_HEALTH_LABEL[resolved]}</StatusPill>;
 }
 
 export function CompatibilityStatusPill({ status }: { readonly status: CompatibilityItemStatus }) {

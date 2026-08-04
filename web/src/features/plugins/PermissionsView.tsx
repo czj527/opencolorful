@@ -37,8 +37,9 @@ export function PermissionsView(props: PermissionsViewProps) {
       for (const settled of details) {
         if (settled.status !== "fulfilled") continue;
         const detail: PluginDetail = settled.value;
-        collectedGrants.push(...detail.grants);
-        collectedBindings.push(...detail.agentBindings);
+        // Server 详情可能未富化 grants/agentBindings：缺失时按空数组聚合
+        collectedGrants.push(...(detail.grants ?? []));
+        collectedBindings.push(...(detail.agentBindings ?? []));
       }
       setGrants(collectedGrants);
       setBindings(collectedBindings);
@@ -112,10 +113,10 @@ export function PermissionsView(props: PermissionsViewProps) {
                 {binding.enabled ? "已绑定" : "已停用"}
               </StatusPill>
               <span className={styles.compatReason}>
-                {binding.contributions.length === 0
+                {(binding.contributions ?? []).length === 0
                   ? "允许全部 contribution"
-                  : `允许 ${binding.contributions.length} 个 contribution`}
-                {binding.grantRevision > 0 ? ` · grant rev ${binding.grantRevision}` : ""}
+                  : `允许 ${binding.contributions?.length ?? 0} 个 contribution`}
+                {(binding.grantRevision ?? 0) > 0 ? ` · grant rev ${binding.grantRevision}` : ""}
               </span>
             </li>
           ))}

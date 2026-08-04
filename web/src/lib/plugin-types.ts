@@ -7,8 +7,13 @@
 //
 // 约定：
 // - Manifest / Compatibility / Grant / Binding 字段与协议包保持一致；
-// - 面向 API 的响应类型（PluginInstallView 等）按 §十八 契约语义定义，
-//   字段尽可能宽松（readonly + 合理缺省），Server 端点缺失时 UI 走降级空态。
+// - 面向 API 的响应类型（PluginListItem / PluginDetail 等）按 Server 实际
+//   返回结构定义：最小字段集（{pluginId, version, active, status,
+//   sourceType, sourceRef, installedAt} 等）为必选，富字段
+//   （name/health/trust/runtimeKind/grants/secretStatus/surfaces/runtime/
+//   enabled 等）一律可选——Server 未富化时 Web 端走降级占位，不得假设必返回；
+// - enabled 不在最小集内，可由 active + status 推导（见 plugin-format.ts
+//   的 isPluginEnabled 帮助函数）。
 // ═══════════════════════════════════════════════════════════════
 
 // ── Manifest / 信任 / 运行形态 ─────────────────────────────────
@@ -299,37 +304,55 @@ export interface PluginRecentEvent {
 export interface PluginDiagnostics {
   readonly pluginId: string;
   readonly version: string;
-  readonly generatedAt: string;
-  readonly status: PluginStatus;
-  readonly health: PluginHealth;
-  readonly checks: readonly PluginDiagnosticCheck[];
-  readonly lastError: string | null;
-  readonly recentEvents: readonly PluginRecentEvent[];
+  /** Server 当前仅返回最小集 {pluginId, version, status, active}；富字段可选 */
+  readonly status?: PluginStatus;
+  readonly active?: boolean;
+  readonly generatedAt?: string;
+  readonly health?: PluginHealth;
+  readonly checks?: readonly PluginDiagnosticCheck[];
+  readonly lastError?: string | null;
+  readonly recentEvents?: readonly PluginRecentEvent[];
 }
 
-// ── 已安装插件视图（GET /api/plugins）───────────────────────────
-export interface PluginInstallView {
+// ── 已安装插件列表项（GET /api/plugins）─────────────────────────
+//
+// Server 实际返回每条仅最小集 {pluginId, version, active, status,
+// sourceType, sourceRef, installedAt}；name/health/trust/runtimeKind/
+// enabled/requiresFullAccess 等富字段由 Server 富化后可选提供，
+// Web 端不得假设富字段必返回。
+export interface PluginListItem {
   readonly pluginId: string;
-  readonly name: string;
   readonly version: string;
-  /** 当前激活版本；多版本共存时与 version 可能不同 */
-  readonly activeVersion: string | null;
+  /** 是否为当前激活版本（多版本共存时同一 pluginId 可有多条） */
+  readonly active: boolean;
   readonly status: PluginStatus;
-  readonly health: PluginHealth;
-  readonly trust: PluginTrust;
-  readonly runtimeKind: PluginRuntimeKind;
   readonly sourceType: PluginSourceType;
-  /** 存在可更新版本时为其版本号，否则 null */
-  readonly updateAvailable: string | null;
-  readonly rollbackAvailable: boolean;
+  /** 来源地址/路径/包名（Server 列表铺平后的字符串） */
+  readonly sourceRef: string;
   readonly installedAt: string;
-  readonly enabled: boolean;
-  readonly hasSecrets: boolean;
-  readonly requiresFullAccess: boolean;
+
+  // ── 富化后可选字段（缺失时 UI 降级，不得假设必返回）────────────
+  readonly name?: string;
+  readonly health?: PluginHealth;
+  readonly trust?: PluginTrust;
+  readonly runtimeKind?: PluginRuntimeKind;
+  /** 存在可更新版本时为其版本号，否则 null */
+  readonly updateAvailable?: string | null;
+  readonly rollbackAvailable?: boolean;
+  /** 启用语义可由 active + status 推导（见 isPluginEnabled） */
+  readonly enabled?: boolean;
+  readonly hasSecrets?: boolean;
+  readonly requiresFullAccess?: boolean;
   readonly boundAgentCount?: number;
 }
 
 // ── 插件详情（GET /api/plugins/:id）─────────────────────────────
+//
+// Server 实际返回 PluginInstallation 对象：最小集 {pluginId, version,
+// active, status, source, installedAt}（source 为归一化来源，含
+// source.sourceRef.sourceType / source.sourceRef.ref）。grants/secretStatus/
+// surfaces/runtime/config/manifest/compatibility 等富字段由 Server 富化后
+// 可选提供，Web 端一律按缺失处理。
 export interface PluginSurfaceInfo {
   readonly contributionId: string;
   readonly name: string;
@@ -339,10 +362,10 @@ export interface PluginSurfaceInfo {
 
 export interface PluginRuntimeInfo {
   readonly runtimeKind: PluginRuntimeKind;
-  readonly runtimeInstanceId: string | null;
-  readonly startedAt: string | null;
-  readonly healthy: boolean;
-  readonly lastError: string | null;
+  readonly runtimeInstanceId?: string | null;
+  readonly startedAt?: string | null;
+  readonly healthy?: boolean;
+  readonly lastError?: string | null;
 }
 
 export interface PluginSecretStatus {
@@ -350,14 +373,37 @@ export interface PluginSecretStatus {
   readonly configured: boolean;
 }
 
-export interface PluginDetail extends PluginInstallView {
-  readonly manifest: NormalizedPluginManifest | null;
-  readonly compatibility: CompatibilityReport | null;
-  readonly grants: readonly PluginGrant[];
-  readonly agentBindings: readonly AgentPluginBinding[];
-  readonly secretStatus: readonly PluginSecretStatus[];
-  readonly surfaces: readonly PluginSurfaceInfo[];
-  readonly runtime: PluginRuntimeInfo | null;
+export interface PluginDetail {
+  readonly pluginId: string;
+  readonly version: string;
+  /** 是否为当前激活版本 */
+  readonly active: boolean;
+  readonly status: PluginStatus;
+  /** 归一化来源（详情响应结构：source.sourceRef.sourceType / .ref） */
+  readonly source: NormalizedPluginSource;
+  readonly installedAt: string;
+
+  // ── 富化后可选字段（缺失时 UI 降级，不得假设必返回）────────────
+  readonly name?: string;
+  readonly health?: PluginHealth;
+  readonly trust?: PluginTrust;
+  readonly runtimeKind?: PluginRuntimeKind;
+  /** 列表约定的铺平字段；可由 source.sourceRef 推导 */
+  readonly sourceType?: PluginSourceType;
+  readonly sourceRef?: string;
+  readonly updateAvailable?: string | null;
+  readonly rollbackAvailable?: boolean;
+  readonly enabled?: boolean;
+  readonly hasSecrets?: boolean;
+  readonly requiresFullAccess?: boolean;
+
+  readonly manifest?: NormalizedPluginManifest | null;
+  readonly compatibility?: CompatibilityReport | null;
+  readonly grants?: readonly PluginGrant[];
+  readonly agentBindings?: readonly AgentPluginBinding[];
+  readonly secretStatus?: readonly PluginSecretStatus[];
+  readonly surfaces?: readonly PluginSurfaceInfo[];
+  readonly runtime?: PluginRuntimeInfo | null;
   /** 当前配置值（不含 Secret 原文） */
   readonly configValues?: Readonly<Record<string, unknown>>;
 }
@@ -366,12 +412,18 @@ export interface PluginDetail extends PluginInstallView {
 export type PluginSourceTrustLevel = "none" | "restricted" | "full-access";
 
 export interface PluginSource {
-  readonly id: string;
-  readonly name: string;
   readonly sourceType: PluginSourceType;
-  readonly ref: string;
-  readonly trusted: boolean;
-  readonly trustLevel: PluginSourceTrustLevel;
+  /** 展示名（GET /api/plugin-sources 实际返回 label） */
+  readonly label: string;
+  /** 该来源类型当前是否支持 */
+  readonly supported: boolean;
+  /** 富化后可选：唯一 id（缺省回退 sourceType） */
+  readonly id?: string;
+  /** 富化后可选：名称（缺省回退 label） */
+  readonly name?: string;
+  readonly ref?: string;
+  readonly trusted?: boolean;
+  readonly trustLevel?: PluginSourceTrustLevel;
   readonly description?: string;
 }
 
@@ -414,7 +466,8 @@ export interface PluginInstallInput {
 export interface PluginInstallResult {
   readonly pluginId: string;
   readonly version: string;
-  readonly status: PluginStatus;
+  /** Server 实际返回兼容性报告（status 不在响应内） */
+  readonly compatibility?: CompatibilityReport;
 }
 
 // ── Agent 绑定（PUT/DELETE /api/agents/:agentId/plugins/:pluginId）

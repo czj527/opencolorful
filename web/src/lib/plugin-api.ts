@@ -11,7 +11,7 @@ import type {
   PluginInspectResult,
   PluginInstallInput,
   PluginInstallResult,
-  PluginInstallView,
+  PluginListItem,
   PluginSource,
   PluginSourceSearchQuery,
   PluginSourceSearchResult,
@@ -61,8 +61,8 @@ export class PluginApiClient {
   }
 
   // ── 已安装插件 ──────────────────────────────────────────────
-  async listPlugins(): Promise<readonly PluginInstallView[]> {
-    return this.request<readonly PluginInstallView[]>("GET", "/api/plugins");
+  async listPlugins(): Promise<readonly PluginListItem[]> {
+    return this.request<readonly PluginListItem[]>("GET", "/api/plugins");
   }
 
   async getPlugin(id: string): Promise<PluginDetail> {
@@ -77,20 +77,20 @@ export class PluginApiClient {
     return this.request<PluginInstallResult>("POST", "/api/plugins/install", input);
   }
 
-  async enablePlugin(id: string): Promise<PluginInstallView> {
-    return this.request<PluginInstallView>("POST", `/api/plugins/${encodeURIComponent(id)}/enable`);
+  async enablePlugin(id: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>("POST", `/api/plugins/${encodeURIComponent(id)}/enable`);
   }
 
-  async disablePlugin(id: string): Promise<PluginInstallView> {
-    return this.request<PluginInstallView>("POST", `/api/plugins/${encodeURIComponent(id)}/disable`);
+  async disablePlugin(id: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>("POST", `/api/plugins/${encodeURIComponent(id)}/disable`);
   }
 
-  async updatePlugin(id: string): Promise<PluginInstallView> {
-    return this.request<PluginInstallView>("POST", `/api/plugins/${encodeURIComponent(id)}/update`);
+  async updatePlugin(id: string): Promise<PluginInstallResult> {
+    return this.request<PluginInstallResult>("POST", `/api/plugins/${encodeURIComponent(id)}/update`);
   }
 
-  async rollbackPlugin(id: string): Promise<PluginInstallView> {
-    return this.request<PluginInstallView>("POST", `/api/plugins/${encodeURIComponent(id)}/rollback`);
+  async rollbackPlugin(id: string): Promise<PluginInstallResult> {
+    return this.request<PluginInstallResult>("POST", `/api/plugins/${encodeURIComponent(id)}/rollback`);
   }
 
   async uninstallPlugin(id: string): Promise<{ pluginId: string; status: string }> {

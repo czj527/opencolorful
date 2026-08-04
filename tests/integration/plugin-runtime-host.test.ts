@@ -19,6 +19,13 @@ import { HostBroker } from "../../src/runtime/plugins/grants/host-broker.js";
 import { EffectivePolicy } from "../../src/runtime/plugins/grants/effective-policy.js";
 import { CarrierRegistry } from "../../src/runtime/plugins/runtimes/carrier-registry.js";
 import { RuntimeHost } from "../../src/runtime/plugins/runtimes/runtime-host.js";
+import type {
+  PluginRuntime,
+  RuntimeFactory,
+  RuntimeInvokeInput,
+  RuntimeInvokeResult,
+  RuntimeStatus,
+} from "../../src/runtime/plugins/runtimes/runtime-host.js";
 import { StreamCapture } from "../../src/runtime/plugins/runtimes/stream-capture.js";
 import { resolvePythonInterpreter, PythonRuntime } from "../../src/runtime/plugins/runtimes/python-runtime.js";
 
@@ -104,7 +111,7 @@ interface Env {
 function createEnv(
   pluginId: string,
   runtimeKind: "node-process" | "python-process",
-  overrides: { budget?: { maxCrashes?: number; windowMs?: number }; pythonInterpreter?: string } = {},
+  overrides: { budget?: { maxCrashes?: number; windowMs?: number }; pythonInterpreter?: string; runtimeFactory?: RuntimeFactory } = {},
 ): Env {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-runtime-host-"));
   temporaryDirectories.push(dir);
@@ -142,6 +149,7 @@ function createEnv(
     carriers,
     ...(overrides.budget !== undefined ? { budget: overrides.budget } : {}),
     ...(overrides.pythonInterpreter !== undefined ? { pythonInterpreter: overrides.pythonInterpreter } : {}),
+    ...(overrides.runtimeFactory !== undefined ? { runtimeFactory: overrides.runtimeFactory } : {}),
   });
   openHosts.push(host);
 
@@ -453,6 +461,148 @@ describe("PythonRuntime（解释器发现）", () => {
       expect(result.result).toMatchObject({ echo: { hello: "python" } });
     }
     await host.stop("example.python", "shutdown");
+  });
+});
+
+// ── 启动竞态修复专用 fake runtime（模拟握手期崩溃 + restart）──────
+
+class HandshakeCrashRuntime implements PluginRuntime {
+  readonly kind = "bundle" as const;
+  readonly pluginId: string;
+  readonly version: string;
+  readonly runtimeInstanceId: string;
+  state: RuntimeStatus = "starting";
+  private readonly crashOnStart: boolean;
+  private readonly onExit: (info: { code: number | null; signal: string | null }) => void;
+
+  constructor(options: {
+    pluginId: string;
+    version: string;
+    runtimeInstanceId: string;
+    crashOnStart: boolean;
+    onExit: (info: { code: number | null; signal: string | null }) => void;
+  }) {
+    this.pluginId = options.pluginId;
+    this.version = options.version;
+    this.runtimeInstanceId = options.runtimeInstanceId;
+    this.crashOnStart = options.crashOnStart;
+    this.onExit = options.onExit;
+  }
+
+  async start(): Promise<void> {
+    if (this.crashOnStart) {
+      // 与真实 child 'exit' 事件一致：先让出事件循环（handleCrash 已完成对 map 的
+      // 替换），再触发 onExit 并让本次握手 promise reject
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      this.onExit({ code: 1, signal: null });
+      this.state = "crashed";
+      throw new Error("握手期子进程崩溃");
+    }
+    this.state = "running";
+  }
+
+  /** 测试用：模拟运行中的子进程崩溃退出 */
+  crashNow(): void {
+    this.onExit({ code: 1, signal: null });
+  }
+
+  async stop(): Promise<void> {
+    this.state = "stopped";
+  }
+
+  async invoke(_input: RuntimeInvokeInput): Promise<RuntimeInvokeResult> {
+    return { ok: false, code: "not-running", message: "未运行" };
+  }
+
+  cancel(): void {
+    // no-op
+  }
+
+  isHealthy(): boolean {
+    return this.state === "running";
+  }
+}
+
+describe("RuntimeHost 启动竞态（fake runtime）", () => {
+  it("握手期崩溃：start catch 不误删 restart 实例", async () => {
+    let created = 0;
+    const { host } = createEnv(PLUGIN, "node-process", {
+      budget: { maxCrashes: 3, windowMs: 60_000 },
+      runtimeFactory: (_ctx, deps) => {
+        created += 1;
+        return new HandshakeCrashRuntime({
+          pluginId: _ctx.pluginId,
+          version: _ctx.version,
+          runtimeInstanceId: _ctx.runtimeInstanceId,
+          crashOnStart: created === 1, // 首个实例握手期崩溃；restart 实例正常
+          onExit: deps.onExit,
+        });
+      },
+    });
+
+    // 首次 start：握手期崩溃 → handleCrash → restartInstance（attempt 2）替换 map；
+    // start 的 catch 不得误删 restart 实例（旧代码会误删，造成孤儿进程）
+    await expect(host.start(PLUGIN)).rejects.toThrow(/握手/);
+
+    const restarted = await waitFor(() => {
+      const instance = host.getInstance(PLUGIN);
+      if (instance === undefined || instance.attempt !== 2 || instance.status !== "running") return undefined;
+      return instance;
+    });
+    expect(restarted.linkedFrom).toBeDefined();
+  });
+
+  it("重启实例启动时再次崩溃：restart catch 不误删二次重启实例", async () => {
+    let created = 0;
+    const { host } = createEnv(PLUGIN, "node-process", {
+      budget: { maxCrashes: 3, windowMs: 60_000 },
+      runtimeFactory: (_ctx, deps) => {
+        created += 1;
+        return new HandshakeCrashRuntime({
+          pluginId: _ctx.pluginId,
+          version: _ctx.version,
+          runtimeInstanceId: _ctx.runtimeInstanceId,
+          crashOnStart: created === 2, // 实例 1 正常；实例 2 启动即崩溃；实例 3 正常
+          onExit: deps.onExit,
+        });
+      },
+    });
+
+    const first = await host.start(PLUGIN);
+    expect(first.attempt).toBe(1);
+
+    // 实例 1 崩溃 → restart 创建实例 2（启动即崩溃）→ 二次 restart 创建实例 3；
+    // 实例 2 的 restart catch 不得误删实例 3
+    (first.runtime as HandshakeCrashRuntime).crashNow();
+
+    const third = await waitFor(() => {
+      const instance = host.getInstance(PLUGIN);
+      if (instance === undefined || instance.attempt !== 3 || instance.status !== "running") return undefined;
+      return instance;
+    });
+    expect(third.linkedFrom).toBeDefined();
+  });
+
+  it("启动失败（无崩溃）：start catch 正常删除实例", async () => {
+    const { host } = createEnv(PLUGIN, "node-process", {
+      runtimeFactory: (ctx) => ({
+        kind: "bundle",
+        pluginId: ctx.pluginId,
+        version: ctx.version,
+        runtimeInstanceId: ctx.runtimeInstanceId,
+        state: "starting",
+        start: async () => {
+          throw new Error("启动失败");
+        },
+        stop: async () => {},
+        invoke: async (): Promise<RuntimeInvokeResult> => ({ ok: false, code: "not-running", message: "未运行" }),
+        cancel: () => {},
+        isHealthy: () => false,
+      }),
+    });
+
+    await expect(host.start(PLUGIN)).rejects.toThrow(/启动失败/);
+    expect(host.getInstance(PLUGIN)).toBeUndefined();
   });
 });
 

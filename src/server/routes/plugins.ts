@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 
 import { createApiError } from "../../contracts/api-error.js";
+import type { PluginSourceType } from "../../contracts/plugin-protocol.js";
 import { assertPluginSourceRef } from "../../runtime/plugins/sources/source-adapter.js";
 import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type { GrantChangeRequest } from "../../runtime/plugins/grants/grant-service.js";
@@ -22,15 +23,7 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
 
   app.get("/api/plugins", (context) => {
     try {
-      return context.json(facade.list().map((record) => ({
-        pluginId: record.pluginId,
-        version: record.version,
-        active: record.active,
-        status: record.status,
-        sourceType: record.sourceType,
-        sourceRef: record.sourceRef,
-        installedAt: record.installedAt,
-      })));
+      return context.json(facade.list());
     } catch (error) {
       return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "插件列表加载失败"), 500);
     }
@@ -38,11 +31,11 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
 
   app.get("/api/plugins/:id", (context) => {
     try {
-      const installation = facade.get(context.req.param("id"));
-      if (installation === undefined) {
+      const detail = facade.getDetail(context.req.param("id"));
+      if (detail === undefined) {
         return context.json(createApiError("NOT_FOUND", "插件未安装"), 404);
       }
-      return context.json(installation);
+      return context.json(detail);
     } catch (error) {
       return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "插件详情加载失败"), 500);
     }
@@ -142,8 +135,17 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
     ]);
   });
 
-  app.post("/api/plugin-sources/search", (context) => {
-    return context.json([]);
+  app.post("/api/plugin-sources/search", async (context) => {
+    const body = (await parseJsonBody(context, {})) as { sourceType?: unknown; query?: unknown };
+    try {
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      const sourceType = typeof body.sourceType === "string" && body.sourceType.length > 0
+        ? (body.sourceType as PluginSourceType)
+        : undefined;
+      return context.json(facade.search(query, sourceType));
+    } catch (error) {
+      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "来源搜索失败"), 500);
+    }
   });
 
   // ── Agent 绑定 ─────────────────────────────────────────────
@@ -254,6 +256,27 @@ export function registerPluginDevRoutes(app: Hono, deps: PluginRouteDeps): void 
       return context.json(facade.devHost.diagnostics(context.req.param("pluginId")));
     } catch (error) {
       return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "诊断失败"), 500);
+    }
+  });
+
+  app.get("/api/plugins/dev/surfaces", (context) => {
+    try {
+      return context.json(facade.listDevSurfaces());
+    } catch (error) {
+      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "surface 列表加载失败"), 500);
+    }
+  });
+
+  app.post("/api/plugins/dev/:pluginId/describe-surface", async (context) => {
+    const body = (await parseJsonBody(context, {})) as { surfaceId?: unknown };
+    const surfaceId = body.surfaceId;
+    if (typeof surfaceId !== "string" || surfaceId.trim() === "") {
+      return context.json(createApiError("INVALID_INPUT", "需要 surfaceId"), 400);
+    }
+    try {
+      return context.json(facade.describeDevSurface(context.req.param("pluginId"), surfaceId));
+    } catch (error) {
+      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "surface 描述失败"), 500);
     }
   });
 

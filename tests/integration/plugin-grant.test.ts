@@ -217,6 +217,66 @@ describe("T3 GrantService：严格审计与 Activity", () => {
   });
 });
 
+describe("T3 GrantService：removeAll 清空授权", () => {
+  it("清空插件全部授权并走严格三阶段审计（completed decision=denied）", () => {
+    const { db, store, service } = createContext();
+    service.grant({ pluginId: "example.p", capability: "tool.register" }, userActor);
+    service.grant({ pluginId: "example.p", capability: "route.register" }, userActor);
+    expect(service.list("example.p")).toHaveLength(2);
+
+    service.removeAll("example.p", userActor);
+
+    expect(store.list("example.p")).toHaveLength(0);
+    expect(service.currentRevision("example.p")).toBe(0);
+
+    const rows = db.prepare(
+      "SELECT event_name, action, decision, before_revision, after_revision FROM audit_events WHERE event_name LIKE 'audit.plugin.permission_change_%' ORDER BY id ASC",
+    ).all() as Array<{ event_name: string; action: string; decision: string; before_revision: string; after_revision: string }>;
+    // 2 次 grant（started/completed × 2）→ removeAll（started/completed）
+    expect(rows.map((r) => r.event_name)).toEqual([
+      "audit.plugin.permission_change_started",
+      "audit.plugin.permission_change_completed",
+      "audit.plugin.permission_change_started",
+      "audit.plugin.permission_change_completed",
+      "audit.plugin.permission_change_started",
+      "audit.plugin.permission_change_completed",
+    ]);
+    const started = rows[4]!;
+    const completed = rows[5]!;
+    expect(started.action).toBe("grant.change");
+    expect(started.decision).toBe("deferred");
+    expect(started.before_revision).toBe("2");
+    expect(started.after_revision).toBe("2");
+    expect(completed.decision).toBe("denied");
+    expect(completed.before_revision).toBe("2");
+  });
+
+  it("removeAll 发 plugin.permission.revoked Activity（attributes 含 removedCount）", () => {
+    const { db, service } = createContext();
+    service.grant({ pluginId: "example.p", capability: "tool.register" }, userActor);
+    service.removeAll("example.p", userActor);
+
+    const rows = db.prepare(
+      "SELECT payload_json FROM activity_events WHERE event_name = 'plugin.permission.revoked' ORDER BY id ASC",
+    ).all() as Array<{ payload_json: string }>;
+    const last = rows[rows.length - 1] as { payload_json: string } | undefined;
+    expect(last).toBeDefined();
+    const payload = JSON.parse(last!.payload_json) as { summaryCode: string; attributes: Record<string, unknown> };
+    expect(payload.summaryCode).toBe("plugin_permission_revoked");
+    expect(payload.attributes).toMatchObject({ pluginId: "example.p", removedCount: 1, revision: 1, grantedBy: "user-1" });
+  });
+
+  it("无授权记录时直接返回，不产生任何审计", () => {
+    const { db, service } = createContext();
+    service.removeAll("example.missing", userActor);
+    const rows = db.prepare(
+      "SELECT COUNT(*) AS n FROM audit_events WHERE event_name LIKE 'audit.plugin.permission_change_%'",
+    ).get() as { n: number };
+    expect(rows.n).toBe(0);
+    expect(service.list("example.missing")).toHaveLength(0);
+  });
+});
+
 describe("T3 GrantService：fail-closed 与输入校验", () => {
   it("instrument 未初始化时授权仍成功（activity no-op），audit 正常落库", () => {
     instrument.reset();
