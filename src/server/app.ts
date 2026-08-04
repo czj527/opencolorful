@@ -152,6 +152,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
       ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
       ...(options.database !== undefined ? { database: options.database } : {}),
+      ...(options.pluginFacade !== undefined ? { pluginFacade: options.pluginFacade } : {}),
       // 评审 P1#7b：injectBudgetChars 走真实记忆设置（per-Agent 覆盖 → 全局默认 → 平台默认），
       // 与 start.ts resolveMemorySettings 同一优先级链
       ...(options.preferencesStore !== undefined && options.agentStore !== undefined ? {

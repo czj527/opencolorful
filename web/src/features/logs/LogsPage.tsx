@@ -32,6 +32,12 @@ export function LogsPage({ api }: LogsPageProps) {
   const [tab, setTab] = useState<TabId>("activity");
   const [health, setHealth] = useState<ObservabilityHealthResponse | null>(null);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
+  // URL 预筛选：/logs?plugin=<pluginId>（插件详情「查看相关日志」入口）→ 活动 tab 初始搜索值；
+  // 无 plugin 参数时为空，行为与之前一致
+  const [pluginFilter] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("plugin") ?? "";
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +112,7 @@ export function LogsPage({ api }: LogsPageProps) {
       </nav>
 
       <div className={styles.content}>
-        {tab === "activity" && <ActivityView api={api} />}
+        {tab === "activity" && <ActivityView api={api} initialSearch={pluginFilter} />}
         {tab === "errors" && <ErrorsView api={api} />}
         {tab === "audit" && <AuditView api={api} auditEpoch={health?.auditEpoch ?? null} />}
         {tab === "performance" && <PerformanceView api={api} />}

@@ -66,7 +66,11 @@ export class BundleRuntime implements PluginRuntime {
     }
     const handler = this.handlers.get(input.method);
     if (handler === undefined) {
-      return { ok: false, code: "method-not-found", message: `Bundle 未注册方法：${input.method}` };
+      return {
+        ok: false,
+        code: "method-not-found",
+        message: `声明式 bundle 工具未提供执行实现：${input.method}（bundle 为纯声明式运行形态；请升级为 node-process/python-process 代码运行时）`,
+      };
     }
     try {
       const value = await handler(input.params, {

@@ -53,6 +53,37 @@ rl.on("line", (line) => {
 });
 `;
 
+const WORKER_WITH_HOST_REQUEST = String.raw`
+import readline from "node:readline";
+const rl = readline.createInterface({ input: process.stdin });
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
+const pendingHost = {};
+rl.on("line", (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  if (msg.id === undefined) {
+    if (msg.method === "runtime.shutdown") { process.exit(0); }
+    return;
+  }
+  const id = msg.id;
+  if (msg.method === undefined) {
+    // host 对 worker 主动请求的响应（result 或 error）
+    const cb = pendingHost[msg.id];
+    if (cb !== undefined) { delete pendingHost[msg.id]; cb(msg); }
+    return;
+  }
+  if (msg.method === "runtime.initialize") {
+    send({ jsonrpc: "2.0", id, result: { protocolVersion: 1, ok: true } });
+  } else if (msg.method === "ask-host") {
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.ping", params: { from: "worker" }, carrier: msg.carrier });
+  } else {
+    send({ jsonrpc: "2.0", id, error: { code: -32601, message: "unknown" } });
+  }
+});
+`;
+
 const temporaryDirectories: string[] = [];
 const children: ChildProcess[] = [];
 
@@ -273,6 +304,51 @@ describe("NodeRuntime 独立子进程", () => {
         onOutput: () => undefined,
       }),
     ).toThrow(/超出版本目录/);
+  });
+
+  it("worker 主动请求经 onWorkerRequest 转发（携带 carrier）", async () => {
+    const env = createEnv(WORKER_WITH_HOST_REQUEST);
+    const received: Array<{ method: string; params?: unknown; carrier?: unknown }> = [];
+    const runtime = makeRuntime(env, {
+      onWorkerRequest: (message: import("../../src/runtime/plugins/runtimes/json-rpc.js").JsonRpcWorkerRequest) => {
+        received.push(message);
+        return { forwarded: true, method: message.method };
+      },
+    });
+    await runtime.start();
+    const carrier = env.carriers.issue({
+      pluginId: "example.node",
+      runtimeInstanceId: "runtime-example.node-1",
+      operationId: "exec-ask",
+    });
+    const result = await runtime.invoke({ operationId: "exec-ask", method: "ask-host", carrier });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result).toEqual({ host: { forwarded: true, method: "host.ping" } });
+    }
+    expect(received.length).toBe(1);
+    expect(received[0]?.method).toBe("host.ping");
+    expect(received[0]?.params).toEqual({ from: "worker" });
+    // carrier 原样透传给桥接层（由 RuntimeHost 校验/单次消费）
+    expect(received[0]?.carrier).toEqual(carrier);
+    await runtime.stop("shutdown");
+  });
+
+  it("未注入 onWorkerRequest 时 worker 主动请求 → method-not-found 回写 worker", async () => {
+    const env = createEnv(WORKER_WITH_HOST_REQUEST);
+    const runtime = makeRuntime(env);
+    await runtime.start();
+    const carrier = env.carriers.issue({
+      pluginId: "example.node",
+      runtimeInstanceId: "runtime-example.node-1",
+      operationId: "exec-ask-nohandler",
+    });
+    const result = await runtime.invoke({ operationId: "exec-ask-nohandler", method: "ask-host", carrier });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result).toMatchObject({ host: { code: -32601 } });
+    }
+    await runtime.stop("shutdown");
   });
 
   it("stop 优雅关闭：进程退出且不再触发 onExit", async () => {

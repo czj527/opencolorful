@@ -17,7 +17,13 @@ import type { PluginInstallationRecord } from "../storage/plugin-registry-store.
 import type { AuditRecorder } from "../observability/audit-recorder.js";
 import { instrument } from "../observability/instrument.js";
 import { PluginRegistry, type PluginInstallResult } from "../runtime/plugins/registry/plugin-registry.js";
-import { PluginInstaller, type PreparedPlugin } from "../runtime/plugins/installer/plugin-installer.js";
+import {
+  buildCompatibilityReport,
+  comparePluginVersions,
+  PluginInstallError,
+  PluginInstaller,
+  type PreparedPlugin,
+} from "../runtime/plugins/installer/plugin-installer.js";
 import { LocalSourceAdapter } from "../runtime/plugins/sources/local-source.js";
 import { ZipSourceAdapter } from "../runtime/plugins/sources/zip-source.js";
 import { GitSourceAdapter } from "../runtime/plugins/sources/git-source.js";
@@ -37,6 +43,8 @@ import { CarrierRegistry } from "../runtime/plugins/runtimes/carrier-registry.js
 import { RuntimeHost } from "../runtime/plugins/runtimes/runtime-host.js";
 import { PluginHostApi } from "../runtime/plugins/contributions/host-api.js";
 import { InMemorySecretStore } from "../runtime/plugins/contributions/secret-contribution.js";
+import type { PluginSecretStore } from "../runtime/plugins/contributions/secret-contribution.js";
+import { FileSecretStore } from "../runtime/plugins/contributions/file-secret-store.js";
 import type { SurfaceDescriptor } from "../runtime/plugins/contributions/surface-contribution.js";
 import { PluginDevHost } from "../runtime/plugins/dev/dev-host.js";
 import { PluginDevInvokeService, type PluginDevInvokeToolInput } from "../runtime/plugins/dev/dev-invoke.js";
@@ -45,7 +53,7 @@ import { convertOpenClawPlugin, type CompatibilityReportMirror, type NormalizedP
 import { convertHermesPlugin, readHermesPluginDir } from "../runtime/plugins/compat/hermes-compat.js";
 import { materializeHermesWorker } from "../runtime/plugins/compat/hermes-python-bridge.js";
 import type { SourceSearchResult } from "../runtime/plugins/sources/source-adapter.js";
-import { pluginDataDir } from "../runtime/plugins/paths.js";
+import { assertNotSymlinkOrJunction, pluginDataDir, pluginVersionDir, safeJoin } from "../runtime/plugins/paths.js";
 
 export interface PluginFacadeDeps {
   readonly database: Database.Database;
@@ -87,6 +95,8 @@ export interface PluginListItemView {
   readonly trust?: string;
   readonly runtimeKind?: string;
   readonly enabled?: boolean;
+  readonly rollbackAvailable?: boolean;
+  readonly updateAvailable?: boolean;
 }
 
 /** 详情视图（含授权/绑定/Secret/Surface/运行时状态） */
@@ -110,6 +120,25 @@ const WEB_ACTOR: PluginOperationActor = {
   executor: { kind: "service", id: "plugin-facade" },
 };
 
+/** 资产 Content-Type 推断（受限白名单，未知扩展名回 application/octet-stream） */
+function contentTypeForAsset(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".html": case ".htm": return "text/html; charset=utf-8";
+    case ".css": return "text/css; charset=utf-8";
+    case ".js": case ".mjs": return "text/javascript; charset=utf-8";
+    case ".json": return "application/json; charset=utf-8";
+    case ".png": return "image/png";
+    case ".jpg": case ".jpeg": return "image/jpeg";
+    case ".gif": return "image/gif";
+    case ".svg": return "image/svg+xml";
+    case ".webp": return "image/webp";
+    case ".ico": return "image/x-icon";
+    case ".txt": case ".md": return "text/plain; charset=utf-8";
+    default: return "application/octet-stream";
+  }
+}
+
 /**
  * Phase 12 组合根门面（plans/phase-12.md §19.2 src/platform/plugin-*）。
  * 装配 Registry/Sources/Installer/Grants/Bindings/Runtime/Contributions/Dev，
@@ -132,7 +161,7 @@ export class PluginFacade {
   private readonly grantStore: PluginGrantStore;
   private readonly bindingStore: PluginBindingStore;
   private readonly configStore: PluginConfigStore;
-  private readonly secretStore: InMemorySecretStore;
+  private readonly secretStore: PluginSecretStore;
   private readonly adapters: readonly import("../runtime/plugins/sources/source-adapter.js").PluginSourceAdapter[];
   private readonly paths: RuntimePaths;
 
@@ -146,15 +175,17 @@ export class PluginFacade {
     this.bindingStore = bindingStore;
     const configStore = new PluginConfigStore(deps.database);
     this.configStore = configStore;
-    const secretStore = new InMemorySecretStore();
+    const secretStore = new FileSecretStore({ filePath: deps.paths.pluginSecrets });
     this.secretStore = secretStore;
+    // P0-2：来源目录（用户放置本地插件的目录）作为 local/openclaw/hermes 的搜索根
+    const sourcesDir = path.join(deps.paths.home, "plugins", "sources");
     const adapters = [
-      new LocalSourceAdapter(),
+      new LocalSourceAdapter({ baseDir: sourcesDir }),
       new ZipSourceAdapter(),
       new GitSourceAdapter(),
       new NpmSourceAdapter(),
-      new OpenClawSourceAdapter(),
-      new HermesSourceAdapter(),
+      new OpenClawSourceAdapter({ baseDir: sourcesDir }),
+      new HermesSourceAdapter({ baseDir: sourcesDir }),
     ];
     this.adapters = adapters;
     this.installer = new PluginInstaller({
@@ -204,6 +235,9 @@ export class PluginFacade {
       secretStore,
       audit: deps.audit,
     });
+    // P1：注册 HostBroker 白名单 API（config/secret/attachment/custom-activity），
+    // worker 主动请求经 json-rpc → runtime-host 校验 carrier 后可达
+    this.hostApi.registerHostBrokerApis();
     this.devHost = new PluginDevHost({
       paths: deps.paths,
       store: registryStore,
@@ -260,6 +294,17 @@ export class PluginFacade {
     if (!prepared.compatibility.supported) {
       throw new Error(`插件不兼容：${prepared.compatibility.blockedReasons.join("；")}`);
     }
+    // P0-6：授权对象与目标插件强绑定——grant.pluginId 必须等于安装插件 id，
+    // 且能力必须在目标插件 Manifest 权限声明中（防止安装 A 时给 B 写授权/绕过声明层）
+    const declaredCapabilities = new Set(prepared.normalized.permissions.map((permission) => permission.capability));
+    for (const grant of grants) {
+      if (grant.pluginId !== prepared.normalized.id) {
+        throw new Error(`授权对象与安装插件不一致：${grant.pluginId} ≠ ${prepared.normalized.id}`);
+      }
+      if (!declaredCapabilities.has(grant.capability)) {
+        throw new Error(`授权能力未在插件 Manifest 中声明：${grant.capability}`);
+      }
+    }
     // 评审修复（C2 原子性）：先安装（health check/ZIP 校验/already_installed 全部
     // 在安装事务内失败即回滚），成功后再落授权——授权随安装成功才生效（fail-closed）；
     // 授权阶段失败则回滚刚完成的安装，不留"未安装插件的授权残留"。
@@ -305,7 +350,21 @@ export class PluginFacade {
     }
     const result = await this.registry.update(pluginId, sourceRef, actor);
     if (wasEnabled) {
-      await this.hostApi.activate(pluginId);
+      try {
+        await this.hostApi.activate(pluginId);
+      } catch (error) {
+        // P1 更新补偿：新版本激活失败 → 回滚 active 到旧版本（旧版本目录仍在），
+        // 避免"DB 显示新版本 enabled 但没有运行实例"的悬挂状态
+        try {
+          await this.registry.rollback(pluginId, actor);
+        } catch (rollbackError) {
+          instrument.warn("plugin.update.activate_rollback_failed", "更新激活失败后回滚旧版本未能完成", {
+            pluginId,
+            reason: rollbackError instanceof Error ? rollbackError.message : "unknown",
+          });
+        }
+        throw error;
+      }
     }
     return result;
   }
@@ -361,7 +420,10 @@ export class PluginFacade {
   }
 
   list(): PluginListItemView[] {
-    return this.registryStore.listAll().map((record) => this.toListItem(record));
+    return this.registryStore
+      .listAll()
+      .filter((record) => record.status !== "removed")
+      .map((record) => this.toListItem(record));
   }
   get(pluginId: string) { return this.registry.getActive(pluginId); }
 
@@ -373,8 +435,10 @@ export class PluginFacade {
     }
     const status = this.runtimeHost.getStatus(pluginId);
     const instance = this.runtimeHost.getInstance(pluginId);
+    const updateAvailable = this.resolveUpdateAvailable(record);
     return {
       ...this.toListItem(record),
+      ...(updateAvailable !== undefined ? { updateAvailable } : {}),
       manifest: record.manifest ?? undefined,
       grants: this.grantStore.list(pluginId),
       agentBindings: this.bindingStore.listByPlugin(pluginId),
@@ -390,9 +454,45 @@ export class PluginFacade {
     };
   }
 
+  /**
+   * P1：插件资产读取（Surface 资产路由）——版本目录内受控路径，
+   * 防父目录穿越/空段/反斜杠/符号链接；Content-Type 按扩展名推断。
+   */
+  readPluginAsset(
+    pluginId: string,
+    assetPath: string,
+  ): { ok: true; data: Buffer; contentType: string } | { ok: false; reason: string } {
+    const record = this.registryStore.getActive(pluginId);
+    if (record === undefined) {
+      return { ok: false, reason: "插件未安装" };
+    }
+    if (assetPath.length === 0 || path.isAbsolute(assetPath) || assetPath.includes("\\")) {
+      return { ok: false, reason: "资产路径必须相对且使用正斜杠" };
+    }
+    const segments = assetPath.split("/");
+    if (segments.some((segment) => segment === ".." || segment === "")) {
+      return { ok: false, reason: "资产路径不能包含父目录穿越或空段" };
+    }
+    const versionDir = pluginVersionDir(this.deps.paths, pluginId, record.version);
+    let resolved: string;
+    try {
+      resolved = safeJoin(versionDir, ...segments);
+      assertNotSymlinkOrJunction(resolved, "资产文件");
+      if (!fs.statSync(resolved).isFile()) {
+        return { ok: false, reason: "资产不是普通文件" };
+      }
+    } catch {
+      return { ok: false, reason: "资产路径不在插件版本目录内" };
+    }
+    try {
+      return { ok: true, data: fs.readFileSync(resolved), contentType: contentTypeForAsset(resolved) };
+    } catch {
+      return { ok: false, reason: "资产读取失败" };
+    }
+  }
+
   /** 来源搜索（Discover 视图；sourceType 过滤可空；单来源失败不阻断其余） */
-  search(query: string, sourceType?: PluginSourceType): SourceSearchResult[] {
-    const adapters = sourceType === undefined
+  search(query: string, sourceType?: PluginSourceType): SourceSearchResult[] {    const adapters = sourceType === undefined
       ? this.adapters
       : this.adapters.filter((adapter) => adapter.sourceType === sourceType);
     const results: SourceSearchResult[] = [];
@@ -460,6 +560,9 @@ export class PluginFacade {
   /** 列表项视图：最小集 + manifest 富化（Web 插件中心契约） */
   private toListItem(record: PluginInstallationRecord): PluginListItemView {
     const manifest = (typeof record.manifest === "object" && record.manifest !== null ? record.manifest : {}) as Partial<ManifestV1>;
+    const rollbackAvailable = this.registryStore
+      .listVersions(record.pluginId)
+      .some((item) => !item.active && item.status !== "removed");
     return {
       pluginId: record.pluginId,
       version: record.version,
@@ -472,7 +575,33 @@ export class PluginFacade {
       ...(manifest.trust !== undefined ? { trust: manifest.trust } : {}),
       ...(manifest.runtime?.kind !== undefined ? { runtimeKind: manifest.runtime.kind } : {}),
       enabled: record.status === "enabled",
+      ...(rollbackAvailable ? { rollbackAvailable: true } : {}),
     };
+  }
+
+  /**
+   * 更新可用性判定（P1）：尽力而为——来源适配器可解析到更高版本时 true；
+   * 来源不可达/异常时 undefined（Web 端按钮不显示，不阻塞列表）。
+   */
+  private resolveUpdateAvailable(record: PluginInstallationRecord): boolean | undefined {
+    try {
+      const adapter = this.adapters.find((item) => item.sourceType === record.sourceType);
+      if (adapter === undefined) {
+        return undefined;
+      }
+      const versions = adapter.listVersions({
+        sourceType: record.sourceType,
+        ref: record.sourceRef,
+        ...(record.sourceVersion !== null ? { version: record.sourceVersion } : {}),
+      });
+      const latest = [...versions].sort((a, b) => comparePluginVersions(b.version, a.version))[0];
+      if (latest === undefined) {
+        return undefined;
+      }
+      return comparePluginVersions(latest.version, record.version) > 0;
+    } catch {
+      return undefined;
+    }
   }
 
   /** 运行时入口准备（评审 E1）：Hermes 生态包安装/更新时具体化 L5 worker。 */

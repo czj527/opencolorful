@@ -12,6 +12,7 @@ import {
   type ResourceLoader,
   SessionManager,
   SettingsManager,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
@@ -28,6 +29,7 @@ import type {
   PiAgentSessionOptions,
   PiFauxAgentOptions,
   PiSessionUsageStats,
+  PluginSessionTool,
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
 
@@ -310,6 +312,32 @@ function minimalResourceLoader(
   };
 }
 
+/**
+ * 会话级插件工具 → PI ToolDefinition（P0-1）。
+ * - 工具名使用稳定命名空间 pluginId.toolId，防跨插件冲突；
+ * - parameters 为标准 JSON Schema（PI 运行时兼容非 TypeBox Schema）；
+ * - execute 委托宿主 ToolService.invoke（权限/绑定/沙箱前置已在宿主侧完成）。
+ */
+function toPiToolDefinition(tool: PluginSessionTool): ToolDefinition {
+  return {
+    name: tool.qualifiedName,
+    label: tool.qualifiedName,
+    description: tool.description ?? "",
+    // parameters 为必选：无声明 Schema 时给宽松对象 Schema（PI 运行时兼容非 TypeBox Schema）
+    parameters: (tool.inputSchema ?? { type: "object", properties: {}, additionalProperties: true }) as ToolDefinition["parameters"],
+    execute: async (toolCallId, params, signal) => {
+      const result = await tool.invoke(params, signal);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result.result) }],
+        details: undefined,
+      };
+    },
+  };
+}
+
 export async function createPiFauxAgentSession(
   options: PiFauxAgentOptions & {
     toolPolicy?: ToolPolicy;
@@ -460,6 +488,8 @@ export async function createPiAgentSession(
     sandboxContext?: SandboxContext;
     /** 额外启用的工具名称（如记忆工具），不受 noTools 影响 */
     extraTools?: readonly string[];
+    /** 会话级插件工具（P0-1：按 Agent 绑定过滤后注入 PI 工具注册表） */
+    customTools?: readonly PluginSessionTool[];
   },
 ): Promise<PiAgentSessionHandle> {
   const resolved = options.modelRuntime.resolveModel(options.providerId, options.modelId);
@@ -511,6 +541,23 @@ export async function createPiAgentSession(
     createOptions.tools = [...fileTools, ...options.extraTools!];
   } else if (options.tools && options.tools.length > 0) {
     createOptions.tools = [...options.tools];
+  }
+
+  // 插件工具：注入 PI 工具注册表（可执行），并把工具名并入模型可见列表
+  const hasPluginTools = options.customTools !== undefined && options.customTools.length > 0;
+  if (hasPluginTools) {
+    createOptions.customTools = options.customTools!.map((tool) => toPiToolDefinition(tool));
+    const pluginToolNames = options.customTools!.map((tool) => tool.qualifiedName);
+    if (createOptions.noTools === "all") {
+      delete createOptions.noTools;
+      createOptions.tools = [...pluginToolNames];
+    } else if (hasExtraTools) {
+      createOptions.tools = [...(options.tools ?? []), ...options.extraTools!, ...pluginToolNames];
+    } else if (options.tools && options.tools.length > 0) {
+      createOptions.tools = [...options.tools, ...pluginToolNames];
+    } else {
+      createOptions.tools = [...pluginToolNames];
+    }
   }
 
   const createSession = () => createAgentSession(createOptions);

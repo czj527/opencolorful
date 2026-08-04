@@ -18,7 +18,7 @@ import { ZipSourceAdapter } from "../../src/runtime/plugins/sources/zip-source.j
 import { GitSourceAdapter } from "../../src/runtime/plugins/sources/git-source.js";
 import { NpmSourceAdapter } from "../../src/runtime/plugins/sources/npm-source.js";
 import { PluginSourceError, SourceIntegrityError } from "../../src/runtime/plugins/sources/source-adapter.js";
-import { PluginInstallError, PluginInstaller, satisfiesOpenColorfulRange } from "../../src/runtime/plugins/installer/plugin-installer.js";
+import { PluginInstallError, PluginInstaller, buildCompatibilityReport, satisfiesOpenColorfulRange } from "../../src/runtime/plugins/installer/plugin-installer.js";
 import { PluginRegistry } from "../../src/runtime/plugins/registry/plugin-registry.js";
 import { pluginVersionDir } from "../../src/runtime/plugins/paths.js";
 
@@ -69,6 +69,28 @@ function validManifest(version = "1.0.0", overrides: Record<string, unknown> = {
     permissions: [{ capability: "tool.register", reason: "注册示例工具" }],
     contributions: { tool: [{ id: "installer.echo", name: "Echo", riskLevel: "low" }] },
     ...overrides,
+  };
+}
+
+/** 最小化规范化清单（兼容报告直接判定用；来源校验字段满足契约）。 */
+function minimalNormalized(
+  runtime: { kind: "mcp" | "bundle" | "node-process" | "python-process"; entry?: string },
+  trust: "restricted" | "full-access",
+): Parameters<typeof buildCompatibilityReport>[0] {
+  return {
+    id: "example.mcp",
+    name: "MCP Fixture",
+    version: "1.0.0",
+    compatibility: { opencolorful: ">=1.0.0", pluginApi: 1 },
+    trust,
+    runtime,
+    permissions: [],
+    contributions: {},
+    source: {
+      sourceRef: { sourceType: "local", ref: "file://fixture" },
+      verification: { sha256: "a".repeat(64), sizeBytes: 1 },
+    },
+    normalizedAt: new Date().toISOString(),
   };
 }
 
@@ -240,6 +262,37 @@ describe("Phase 12 Installer prepare（staging → 校验 → normalize → 兼�
     const prepared = installer.prepare({ sourceType: "local", ref: pluginDir });
     expect(prepared.compatibility.supported).toBe(true);
     expect(prepared.compatibility.requiresFullAccess).toBe(true);
+  });
+
+  it("mcp 运行形态未声明 full-access → 阻断（prepare 抛 full-access）", () => {
+    const { paths, installer } = createEnvironment();
+    const pluginDir = writePluginDir(
+      paths.pluginsCache,
+      validManifest("1.0.0", { trust: "restricted", runtime: { kind: "mcp", entry: "server.js" } }),
+    );
+    expect(() => installer.prepare({ sourceType: "local", ref: pluginDir })).toThrow(/full-access/);
+  });
+
+  it("mcp 兼容报告：restricted → supported=false 且 blockedReasons 含 full-access", () => {
+    const report = buildCompatibilityReport(
+      minimalNormalized({ kind: "mcp", entry: "server.js" }, "restricted"),
+      "1.0.0",
+    );
+    expect(report.supported).toBe(false);
+    expect(report.requiresFullAccess).toBe(false);
+    expect(report.blockedReasons.join("；")).toContain("full-access");
+    expect(report.requiresRuntime).toBe("mcp");
+  });
+
+  it("mcp 兼容报告：full-access → supported 且 requiresFullAccess=true", () => {
+    const report = buildCompatibilityReport(
+      minimalNormalized({ kind: "mcp", entry: "server.js" }, "full-access"),
+      "1.0.0",
+    );
+    expect(report.supported).toBe(true);
+    expect(report.requiresFullAccess).toBe(true);
+    expect(report.blockedReasons).toEqual([]);
+    expect(report.requiresRuntime).toBe("mcp");
   });
 
   it("ZIP Slip zip 经 installer.prepare 被拒绝", () => {

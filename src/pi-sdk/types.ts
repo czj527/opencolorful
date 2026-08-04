@@ -40,6 +40,26 @@ export interface PiSessionHandle {
   dispose(): void;
 }
 
+/**
+ * 会话级插件工具（Phase 12 P0-1：主会话 Contribution 接入）。
+ * 由宿主（messages 路由）按 Agent 绑定过滤插件 Tool contribution 后构造，
+ * 经 createPiAgentSession 的 customTools 注入 PI 工具注册表（模型可见可调用）。
+ */
+export interface PluginSessionTool {
+  /** 稳定命名空间：pluginId.toolId */
+  readonly qualifiedName: string;
+  readonly name: string;
+  readonly description?: string;
+  /** 输入 JSON Schema（标准 JSON Schema 运行时兼容） */
+  readonly inputSchema?: unknown;
+  /** 执行入口：params 已过 Schema 校验；结果对象由宿主 JSON 序列化回模型 */
+  invoke(params: unknown, signal?: AbortSignal): Promise<PluginSessionToolInvokeResult>;
+}
+
+export type PluginSessionToolInvokeResult =
+  | { readonly ok: true; readonly result: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
 export interface PiCredentialInfo {
   readonly providerId: string;
   readonly type: "api_key" | "oauth";

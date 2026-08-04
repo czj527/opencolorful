@@ -22,6 +22,8 @@ import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
 import { SessionIndex } from "../../storage/session-index.js";
 import { registerMemoryContext } from "../../pi-sdk/memory-tools.js";
 import { MEMORY_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
+import type { PluginSessionTool } from "../../pi-sdk/index.js";
+import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type Database from "better-sqlite3";
 
 export interface MessageRoutesOptions {
@@ -38,6 +40,8 @@ export interface MessageRoutesOptions {
    * 未提供时按平台默认（buildMemoryInjectionBlock 的默认预算）。
    */
   readonly memorySettingsResolver?: (agentId: string) => MemoryAgentSettings;
+  /** Phase 12：插件组合根（绑定 Agent 的插件工具注入主会话） */
+  readonly pluginFacade?: PluginFacade;
 }
 
 // ensureRuntime 的失败结果：路由层直接转成对应状态码
@@ -52,6 +56,56 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
 
   // 跟踪每个 session 运行时使用的 systemPrompt（含记忆块 revision），用于检测 profile/memory 更新
   const runtimeSystemPrompt = new Map<string, string | undefined>();
+
+  /**
+   * Phase 12 P0-1：按 Agent 绑定解析插件工具（注入主会话 PI 工具注册表）。
+   * - 仅注入 enabled 绑定；工具贡献需插件已激活（ToolService.listTools 只列已登记工具）；
+   * - 绑定指定了 contributions 时按 id 过滤，否则取该插件全部工具；
+   * - 插件系统异常时降级为空（不阻塞会话创建）。
+   */
+  function resolvePluginTools(agentId: string | undefined, sessionId: string): readonly PluginSessionTool[] {
+    const facade = options.pluginFacade;
+    if (agentId === undefined || facade === undefined) {
+      return [];
+    }
+    try {
+      const bindings = facade.listAgentBindings(agentId).filter((binding) => binding.enabled);
+      if (bindings.length === 0) {
+        return [];
+      }
+      const bound = new Map<string, readonly string[] | undefined>();
+      for (const binding of bindings) {
+        bound.set(binding.pluginId, binding.contributions.length > 0 ? binding.contributions : undefined);
+      }
+      return facade.hostApi.tools
+        .listTools()
+        .filter((tool) => {
+          const allowed = bound.get(tool.pluginId);
+          return allowed === undefined || allowed.includes(tool.contributionId);
+        })
+        .map((descriptor) => ({
+          qualifiedName: descriptor.qualifiedName,
+          name: descriptor.name,
+          ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
+          ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
+          invoke: async (params: unknown, signal?: AbortSignal) => {
+            const result = await facade.hostApi.tools.invoke({
+              pluginId: descriptor.pluginId,
+              contributionId: descriptor.contributionId,
+              params,
+              agentId,
+              sessionId,
+              ...(signal !== undefined ? { signal } : {}),
+            });
+            return result.ok
+              ? { ok: true as const, result: result.result }
+              : { ok: false as const, code: result.code, message: result.message };
+          },
+        }));
+    } catch {
+      return [];
+    }
+  }
 
   /** 构建含记忆注入的完整 system prompt。未绑定 Agent 或不具备记忆条件时仅返回 persona。 */
   function buildSystemPrompt(agentId: string): string | undefined {
@@ -169,6 +223,9 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
       };
 
+      // 插件工具（P0-1）：按 Agent 绑定过滤，注入主会话
+      const pluginTools = resolvePluginTools(view.agentId ?? undefined, sessionId);
+
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;
       if (selectedModel && modelService && selectedModel.providerId !== "faux") {
@@ -185,6 +242,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
+          ...(pluginTools.length > 0 ? { pluginTools } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -212,6 +270,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
+          ...(pluginTools.length > 0 ? { pluginTools } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),

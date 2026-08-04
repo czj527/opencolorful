@@ -465,7 +465,7 @@
   font-size: var(--fs-ui);
 }
 
-/* ── UI Surface Host（占位，真实 iframe 渲染依赖 Server asset route） ── */
+/* ── UI Surface Host（iframe 渲染受控资产路由；无 entry 时降级占位） ── */
 .surfaceHost {
   margin-top: var(--space-8);
   border: 1px dashed var(--border-color);

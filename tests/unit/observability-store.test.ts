@@ -409,11 +409,39 @@ describe("T3 AuditRecorder：同库回滚与 ledger reset", () => {
     });
     expect(result.kind).toBe("accepted");
     if (result.kind !== "accepted") return;
-    const mirror = db.prepare("SELECT action, decision, ledger_epoch FROM audit_events WHERE event_id = ?").get(`mirror:${result.eventId}`) as { action: string; decision: string; ledger_epoch: number } | undefined;
+    const mirror = db.prepare("SELECT action, decision, event_name, ledger_epoch FROM audit_events WHERE event_id = ?").get(`mirror:${result.eventId}`) as { action: string; decision: string; event_name: string; ledger_epoch: number } | undefined;
     expect(mirror).toBeDefined();
     expect(mirror?.action).toBe("audit.agent.deleted");
     expect(mirror?.decision).toBe("allowed");
+    expect(mirror?.event_name).toBe("audit.agent.deleted");
     expect(mirror?.ledger_epoch).toBe(1);
+    db.close();
+  });
+
+  it("audit 镜像：denied/revoked 事件 decision=denied 且 event_name 正确", () => {
+    const directory = makeTempDir("t3-mirror-denied-");
+    const db = openDb(directory);
+    const recorder = new ActivityRecorder({ database: db, producer });
+    const denied = recorder.append({
+      eventName: "plugin.permission.denied",
+      payload: { summaryCode: "plugin_permission_denied" },
+      actor: { kind: "user", id: "tester" },
+      executor: { kind: "service", id: "unit-test" },
+    });
+    expect(denied.kind).toBe("accepted");
+    const revoked = recorder.append({
+      eventName: "plugin.permission.revoked",
+      payload: { summaryCode: "plugin_permission_revoked" },
+      actor: { kind: "user", id: "tester" },
+      executor: { kind: "service", id: "unit-test" },
+    });
+    expect(revoked.kind).toBe("accepted");
+    const rows = db.prepare(
+      "SELECT action, decision, event_name FROM audit_events WHERE event_id IN (?, ?) ORDER BY id ASC",
+    ).all(`mirror:${denied.kind === "accepted" ? denied.eventId : ""}`, `mirror:${revoked.kind === "accepted" ? revoked.eventId : ""}`) as Array<{ action: string; decision: string; event_name: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ action: "audit.plugin.permission_denied", decision: "denied", event_name: "audit.plugin.permission_denied" });
+    expect(rows[1]).toEqual({ action: "audit.plugin.permission_revoked", decision: "denied", event_name: "audit.plugin.permission_revoked" });
     db.close();
   });
 

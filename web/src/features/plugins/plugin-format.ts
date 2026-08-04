@@ -129,6 +129,23 @@ export function contributionKindLabel(kind: string): string {
 }
 
 /**
+ * 拼接插件 Surface 资产的受控路由 URL。
+ *
+ * 约定：`GET /api/plugins/:id/assets/<相对路径>`（服务插件版本目录内文件，
+ * 路径穿越防护由 Server 校验，见 plans/phase-12.md §8.5）。entry 按 `/`
+ * 分段逐段 encodeURIComponent，pluginId 整体 encodeURIComponent；与
+ * @opencolorful/plugin-components 的 resolveSurfaceAssetUrl 保持一致。
+ * 返回站内相对路径（/ 开头），Web 与 Server 同源时可直接作为 iframe src。
+ */
+export function buildPluginAssetUrl(pluginId: string, entry: string): string {
+  const segments = entry
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `/api/plugins/${encodeURIComponent(pluginId)}/assets/${segments}`;
+}
+
+/**
  * 插件启用语义推导（Server 富化约定：enabled 可由 active + status 推导）。
  *
  * 优先级：enabled 富字段 > active > status === "enabled"。

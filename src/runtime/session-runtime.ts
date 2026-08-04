@@ -10,6 +10,7 @@ import {
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
   type PiSessionHandle,
+  type PluginSessionTool,
 } from "../pi-sdk/index.js";
 import { SandboxService } from "../sandbox/sandbox-service.js";
 import { ToolPolicy } from "./tool-policy.js";
@@ -55,6 +56,8 @@ export interface SessionRuntimeOptions {
   readonly workspaceCwd?: string | null;
   /** 额外启用的工具名称（如记忆工具），不受 tool_mode 影响 */
   readonly extraTools?: readonly string[];
+  /** 会话级插件工具（P0-1：宿主按 Agent 绑定过滤后注入 PI 工具注册表） */
+  readonly pluginTools?: readonly PluginSessionTool[];
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -178,6 +181,7 @@ export class SessionRuntime {
         sessionHandle: options.sessionHandle,
         ...(options.tools ? { tools: options.tools } : {}),
         ...(options.extraTools ? { extraTools: options.extraTools } : {}),
+        ...(options.pluginTools && options.pluginTools.length > 0 ? { customTools: options.pluginTools } : {}),
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),

@@ -8,6 +8,8 @@ import styles from "./LogsPage.module.css";
 
 export interface ActivityViewProps {
   readonly api: ApiClient;
+  /** URL 预筛选初始值（如 /logs?plugin=<pluginId>），填入「全文搜索」并作为初始过滤条件 */
+  readonly initialSearch?: string;
 }
 
 const CATEGORY_OPTIONS = [
@@ -83,10 +85,12 @@ function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean 
   return true;
 }
 
-export function ActivityView({ api }: ActivityViewProps) {
-  const [draft, setDraft] = useState<DraftFilter>(EMPTY_DRAFT);
+export function ActivityView({ api, initialSearch = "" }: ActivityViewProps) {
+  // 预筛选（?plugin= 等）：初始 draft 与 applied 都带 initialSearch，
+  // 使首次加载即按该条件过滤；无预筛选时与之前行为一致
+  const [draft, setDraft] = useState<DraftFilter>(() => ({ ...EMPTY_DRAFT, search: initialSearch }));
   // 初始 applied 为空过滤（buildQuery 过滤空串），避免把空串参数发给后端导致零匹配
-  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery(EMPTY_DRAFT));
+  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery({ ...EMPTY_DRAFT, search: initialSearch }));
   const [items, setItems] = useState<readonly ActivityRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

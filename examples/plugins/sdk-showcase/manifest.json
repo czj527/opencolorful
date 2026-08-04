@@ -12,9 +12,10 @@
     "opencolorful": ">=0.1.0",
     "pluginApi": 1
   },
-  "trust": "restricted",
+  "trust": "full-access",
   "runtime": {
-    "kind": "bundle"
+    "kind": "node-process",
+    "entry": "node-worker/index.js"
   },
   "permissions": [
     { "capability": "tool.register", "reason": "提供 Agent 可见工具" },
@@ -123,7 +124,7 @@
         "id": "session-observer",
         "name": "Session Observer Hook",
         "description": "会话生命周期观察 Hook（observe，不阻断）",
-        "point": "session.started",
+        "point": "session.after-start",
         "behavior": "observe",
         "requiredCapabilities": ["hook.register"]
       }

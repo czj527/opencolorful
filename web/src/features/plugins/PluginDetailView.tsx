@@ -9,6 +9,7 @@ import type {
   PluginGrant,
 } from "../../lib/plugin-types.js";
 import {
+  buildPluginAssetUrl,
   capabilityLabel,
   contributionKindLabel,
   PLUGIN_RUNTIME_LABEL,
@@ -110,7 +111,7 @@ export function PluginDetailView(props: PluginDetailViewProps) {
           <DefItem k="运行形态" v={detail.runtimeKind !== undefined ? PLUGIN_RUNTIME_LABEL[detail.runtimeKind] : "—"} />
           <DefItem k="来源类型" v={PLUGIN_SOURCE_LABEL[detail.sourceType ?? detail.source.sourceRef?.sourceType] ?? "—"} />
           <DefItem k="安装时间" v={new Date(detail.installedAt).toLocaleString()} />
-          <DefItem k="更新" v={detail.updateAvailable != null ? `可更新至 v${detail.updateAvailable}` : "无可用更新"} />
+          <DefItem k="更新" v={detail.updateAvailable === true ? "可更新" : "无可用更新"} />
           <DefItem k="回滚" v={detail.rollbackAvailable === true ? "可回滚" : "不可用"} />
         </div>
         {detail.runtime != null && (
@@ -202,22 +203,28 @@ export function PluginDetailView(props: PluginDetailViewProps) {
       </section>
 
       <section className={styles.sectionCard}>
-        <h3 className={styles.sectionTitle}>UI Surface（占位 Host）</h3>
+        <h3 className={styles.sectionTitle}>UI Surface</h3>
         {(detail.surfaces ?? []).length === 0 ? (
           <p className={styles.emptyHint}>该插件未声明 UI Surface。</p>
         ) : (
           <ul className={styles.compatList}>
-            {(detail.surfaces ?? []).map((surface) => (
-              <li key={surface.contributionId} className={styles.compatItem}>
-                <span className={styles.compatName}>{surface.name}</span>
-                <SurfaceHostEntry title={surface.name} assetUrl={surface.assetUrl} />
-              </li>
-            ))}
+            {(detail.surfaces ?? []).map((surface) => {
+              // Server 富化 assetUrl 优先；缺失时按受控资产路由约定由 entry 拼接
+              const assetUrl =
+                surface.assetUrl ??
+                (surface.entry !== undefined ? buildPluginAssetUrl(detail.pluginId, surface.entry) : null);
+              return (
+                <li key={surface.surfaceId} className={styles.compatItem}>
+                  <span className={styles.compatName}>{surface.name}</span>
+                  <SurfaceHostEntry title={surface.name} assetUrl={assetUrl} />
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className={styles.hint} style={{ marginTop: "var(--space-8)" }}>
-          Surface 资产由 Server namespaced route 托管；真实 iframe 渲染依赖 Server asset route 接线。
-          加载失败会被隔离在本区域，不影响聊天与设置主页面。
+          Surface 资产经受控资产路由 GET /api/plugins/:id/assets/&lt;相对路径&gt; 托管；
+          iframe 加载失败会被隔离在本区域，不影响聊天与设置主页面。
         </p>
       </section>
 
@@ -359,8 +366,11 @@ function SurfaceHostEntry(props: { readonly title: string; readonly assetUrl: st
         />
       ) : (
         <div className={styles.surfaceFallback} role="alert">
-          <span>Surface 资产路由尚未接线，无法渲染插件 UI。</span>
-          <span className={styles.hint}>加载失败不影响聊天与设置主页面；接入 /api/plugins/:pluginId/assets/* 后此处将显示插件界面。</span>
+          <span>该 Surface 未声明资源入口（entry），无法渲染插件 UI。</span>
+          <span className={styles.hint}>
+            Surface 资产经受控资产路由 GET /api/plugins/:id/assets/&lt;相对路径&gt; 托管；
+            插件声明 entry 后将在此显示界面，加载失败不影响聊天与设置主页面。
+          </span>
         </div>
       )}
     </div>
@@ -382,7 +392,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** 按 pluginId 预筛选跳转 /logs。/logs 当前不解析查询参数，作为 best-effort 入口。 */
+/** 按 pluginId 预筛选跳转 /logs（LogsPage 读取 ?plugin= 作为活动搜索初始值）。 */
 function openPrefilteredLogs(pluginId: string): void {
   if (typeof window === "undefined") return;
   const target = `/logs?plugin=${encodeURIComponent(pluginId)}`;

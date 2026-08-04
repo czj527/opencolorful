@@ -123,6 +123,61 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
     }
   });
 
+  // P1：Surface 资产路由（受控路径：版本目录内、防穿越/符号链接，facade 校验）
+  app.get("/api/plugins/:id/assets/*", (context) => {
+    const pluginId = context.req.param("id");
+    // Hono wildcard 的 param("*") 在此不返回通配段，用 req.path 手动截取
+    const prefix = `/api/plugins/${pluginId}/assets/`;
+    const assetPath = context.req.path.startsWith(prefix)
+      ? context.req.path.slice(prefix.length)
+      : "";
+    const result = facade.readPluginAsset(pluginId, assetPath);
+    if (!result.ok) {
+      const notFound = result.reason === "插件未安装";
+      return context.json(
+        createApiError(notFound ? "NOT_FOUND" : "INVALID_INPUT", result.reason),
+        notFound ? 404 : 400,
+      );
+    }
+    return new Response(result.data, {
+      headers: { "content-type": result.contentType },
+    });
+  });
+
+  // P1：插件 Secret 写入入口（变更走严格审计；值不进入日志/payload）
+  app.post("/api/plugins/:id/secrets", async (context) => {
+    const body = (await parseJsonBody(context, {})) as { secretName?: unknown; value?: unknown };
+    const secretName = body.secretName;
+    const value = body.value;
+    if (typeof secretName !== "string" || secretName.trim() === "" || typeof value !== "string") {
+      return context.json(createApiError("INVALID_INPUT", "需要 secretName 与 value（字符串）"), 400);
+    }
+    try {
+      facade.hostApi.secrets.setSecret({
+        pluginId: context.req.param("id"),
+        secretName: secretName.trim(),
+        value,
+        actor: { kind: "user", id: "web" },
+      });
+      return context.json({ status: "saved" });
+    } catch (error) {
+      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "Secret 写入失败"), 500);
+    }
+  });
+
+  app.delete("/api/plugins/:id/secrets/:name", (context) => {
+    try {
+      facade.hostApi.secrets.removeSecret({
+        pluginId: context.req.param("id"),
+        secretName: context.req.param("name"),
+        actor: { kind: "user", id: "web" },
+      });
+      return context.json({ status: "removed" });
+    } catch (error) {
+      return context.json(createApiError("INTERNAL_ERROR", error instanceof Error ? error.message : "Secret 移除失败"), 500);
+    }
+  });
+
   app.get("/api/plugin-sources", (context) => {
     return context.json([
       { sourceType: "local", label: "本地目录", supported: true },

@@ -360,22 +360,27 @@ export class ActivityRecorder {
     return row.id;
   }
 
-  /** audit 镜像：action=auditMirror 事件名（摘要化），不含 payload 正文 */
+  /** audit 镜像：action=auditMirror 事件名（摘要化），不含 payload 正文；
+   *  event_name 同步落 mirror 事件名；decision 按事件名推导
+   *  （含 denied/revoked → 'denied'，否则 'allowed'） */
   private insertAuditMirror(envelope: ActivityEnvelope, mirrorEventName: string, scope: EventScope): void {
+    const decision = mirrorEventName.includes("denied") || mirrorEventName.includes("revoked") ? "denied" : "allowed";
     this.deps.database
       .prepare(
         `INSERT OR IGNORE INTO audit_events
           (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
-           action, decision, actor_kind, actor_id, executor_kind, executor_id,
+           action, decision, event_name, actor_kind, actor_id, executor_kind, executor_id,
            target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
            policy_version, payload_json)
-         VALUES (?, ?, 1, 1, ?, ?, ?, 'allowed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         `mirror:${envelope.eventId}`,
         this.ledgerEpoch(),
         envelope.recordedAt,
         envelope.occurredAt,
+        mirrorEventName,
+        decision,
         mirrorEventName,
         envelope.actor.kind,
         envelope.actor.id,

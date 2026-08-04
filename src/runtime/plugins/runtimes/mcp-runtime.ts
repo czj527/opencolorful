@@ -9,6 +9,7 @@ import {
   RpcTimeoutError,
   RpcTransportError,
   type JsonRpcNotificationMessage,
+  type JsonRpcWorkerRequest,
 } from "./json-rpc.js";
 import type { PluginRuntime, RuntimeInvokeInput, RuntimeInvokeResult, RuntimeStatus } from "./runtime-host.js";
 
@@ -36,6 +37,11 @@ export interface McpRuntimeOptions {
   readonly carriers: CarrierRegistry;
   readonly onExit: (info: { code: number | null; signal: string | null }) => void;
   readonly onOutput: (chunk: Buffer | string) => void;
+  /**
+   * worker 主动请求（带 id）处理入口：由 RuntimeHost 注入桥接
+   * （校验 carrier → 身份 → HostBroker 白名单调用）；缺省回 method-not-found。
+   */
+  readonly onWorkerRequest?: (message: JsonRpcWorkerRequest) => unknown;
   readonly handshakeTimeoutMs?: number;
   readonly shutdownGraceMs?: number;
 }
@@ -117,6 +123,8 @@ export class McpRuntime implements PluginRuntime {
       transport: { stdin, stdout },
       deferConnectionFailure: true,
       onNotification: (message) => this.handleNotification(message),
+      // worker 主动请求：未注入 handler 时不传 onRequest（json-rpc 缺省回 method-not-found）
+      ...(this.options.onWorkerRequest !== undefined ? { onRequest: this.options.onWorkerRequest } : {}),
     });
     this.client = client;
     try {

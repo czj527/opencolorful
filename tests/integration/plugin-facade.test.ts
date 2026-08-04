@@ -342,4 +342,100 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
     });
     expect(describe.status).not.toBe(404);
   });
+
+  it("安装授权校验：grant 对象与目标插件强绑定（P0-6）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.guard", "Guard", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    const sourceRef = { sourceType: "local" as const, ref: pluginDir };
+    // 携带其他插件的 grant → 拒绝
+    await expect(facade.install(
+      sourceRef,
+      [{ pluginId: "other.plugin", capability: "tool.register", decision: "allowed" as const }],
+    )).rejects.toThrow(/授权对象与安装插件不一致/);
+    // 能力未在 Manifest 声明 → 拒绝
+    await expect(facade.install(
+      sourceRef,
+      [{ pluginId: "example.guard", capability: "network.connect", decision: "allowed" as const }],
+    )).rejects.toThrow(/授权能力未在插件 Manifest 中声明/);
+    // 合法 grant 正常安装
+    const installed = await facade.install(
+      sourceRef,
+      [{ pluginId: "example.guard", capability: "tool.register", decision: "allowed" as const }],
+    );
+    expect(installed.pluginId).toBe("example.guard");
+  });
+
+  it("插件资产读取与受控路径（P1 assets）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.asset", "Asset", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.asset", capability: "tool.register", decision: "allowed" as const }],
+    );
+    const ok = facade.readPluginAsset("example.asset", "skills/hello.md");
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.data.toString()).toContain("# Hello");
+      expect(ok.contentType).toContain("text/plain");
+    }
+    // 穿越/空段/反斜杠拒绝
+    expect(facade.readPluginAsset("example.asset", "../manifest.json").ok).toBe(false);
+    expect(facade.readPluginAsset("example.asset", "skills/../manifest.json").ok).toBe(false);
+    expect(facade.readPluginAsset("example.asset", "skills\\hello.md").ok).toBe(false);
+    expect(facade.readPluginAsset("example.missing", "skills/hello.md").ok).toBe(false);
+  });
+
+  it("资产与 Secret HTTP 端点接线（P1 routes）", async () => {
+    const fixture = makeFixture();
+    const pluginDir = writeBundlePlugin(path.join(fixture.dir, "src"), "example.routes2", "Routes2", "1.0.0");
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await facade.install(
+      { sourceType: "local", ref: pluginDir },
+      [{ pluginId: "example.routes2", capability: "tool.register", decision: "allowed" as const }],
+    );
+    const { app } = createServerApp({
+      version: "0.1.0",
+      pid: process.pid,
+      startedAt: Date.now(),
+      paths: fixture.paths,
+      database: fixture.database,
+      audit: fixture.audit,
+      pluginFacade: facade,
+    });
+    const asset = await app.request("http://local/api/plugins/example.routes2/assets/skills/hello.md");
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toContain("# Hello");
+    // URL 规范在客户端就把 .. 解析掉（404 或 400 都代表拒绝；facade 层另有穿越断言）
+    const escape = await app.request("http://local/api/plugins/example.routes2/assets/../manifest.json");
+    expect([400, 404]).toContain(escape.status);
+    // Secret 写入 + 落盘（listSecretNames 反映激活时声明的 Secret 名，用 hasSecret 验证 store 值）
+    const saved = await app.request("http://local/api/plugins/example.routes2/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ secretName: "api-key", value: "sk-test-123" }),
+    });
+    expect(saved.status).toBe(200);
+    expect(facade.hostApi.secrets.hasSecret("example.routes2", "api-key")).toBe(true);
+    expect(fixture.database.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_name LIKE 'audit.plugin.secret_change_%'").get()).toMatchObject({ n: 2 });
+    const removed = await app.request("http://local/api/plugins/example.routes2/secrets/api-key", { method: "DELETE" });
+    expect(removed.status).toBe(200);
+    expect(facade.hostApi.secrets.hasSecret("example.routes2", "api-key")).toBe(false);
+  });
 });

@@ -27,7 +27,7 @@ import {
   type PluginTrust,
 } from "../../../contracts/plugin-protocol.js";
 import { instrument } from "../../../observability/instrument.js";
-import { assertPathWithinRoot, copyTreeSafe, PluginPathError, pluginStagingDir, pluginVersionDir } from "../paths.js";
+import { assertPathWithinRoot, copyTreeSafe, linkLocalDependencies, PluginPathError, pluginStagingDir, pluginVersionDir } from "../paths.js";
 import {
   assertPluginSourceRef,
   PluginSourceError,
@@ -293,9 +293,11 @@ export function buildCompatibilityReport(
     );
   }
   const requiresCodeRuntime =
-    normalized.runtime.kind === "node-process" || normalized.runtime.kind === "python-process";
+    normalized.runtime.kind === "node-process" ||
+    normalized.runtime.kind === "python-process" ||
+    normalized.runtime.kind === "mcp";
   if (requiresCodeRuntime && normalized.trust !== "full-access") {
-    blockedReasons.push("代码运行时（node-process/python-process）必须声明 full-access");
+    blockedReasons.push("代码运行时（node-process/python-process/mcp）必须声明 full-access");
   }
 
   return {
@@ -447,6 +449,11 @@ export class PluginInstaller {
     assertPathWithinRoot(versionDir, this.deps.paths.pluginsInstalled, "版本目录");
     fs.rmSync(versionDir, { recursive: true, force: true });
     copyTreeSafe(prepared.contentRoot, versionDir, { exclude: prepared.sourceType === "git" ? [".git"] : [] });
+    // local 来源：链接源码目录（或其祖先）的 node_modules，使 node-process/python
+    // worker 能解析 SDK 依赖（npm workspace 场景）。zip/git/npm 包自包含依赖不走此路径。
+    if (prepared.sourceType === "local") {
+      linkLocalDependencies(versionDir, prepared.contentRoot);
+    }
     return versionDir;
   }
 

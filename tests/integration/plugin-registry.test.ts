@@ -539,7 +539,7 @@ describe("Phase 12 卸载清理残留授权/绑定/配置", () => {
 
     const completed = database
       .prepare(
-        "SELECT payload_json FROM audit_events WHERE event_name = 'audit.plugin.uninstall_completed' ORDER BY id DESC LIMIT 1",
+        "SELECT payload_json FROM audit_events WHERE event_name = 'audit.plugin.uninstall_completed' AND event_id NOT LIKE 'mirror:%' ORDER BY id DESC LIMIT 1",
       )
       .get() as { payload_json: string };
     const payload = JSON.parse(completed.payload_json) as { changedFields?: string[] };

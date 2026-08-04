@@ -42,6 +42,7 @@ const NODE_WORKER = String.raw`
 import readline from "node:readline";
 const rl = readline.createInterface({ input: process.stdin });
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
+const pendingHost = {};
 rl.on("line", (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
@@ -50,6 +51,12 @@ rl.on("line", (line) => {
     return;
   }
   const id = msg.id;
+  if (msg.method === undefined) {
+    // host 对 worker 主动请求的响应（result 或 error）
+    const cb = pendingHost[msg.id];
+    if (cb !== undefined) { delete pendingHost[msg.id]; cb(msg); }
+    return;
+  }
   if (msg.method === "runtime.initialize") {
     send({ jsonrpc: "2.0", id, result: { protocolVersion: 1, ok: true } });
   } else if (msg.method === "echo") {
@@ -60,6 +67,19 @@ rl.on("line", (line) => {
     // no response
   } else if (msg.method === "crash") {
     process.exit(7);
+  } else if (msg.method === "ask-host") {
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.ping", params: { from: "worker" }, carrier: msg.carrier });
+  } else if (msg.method === "ask-host-forged") {
+    // 伪造 carrier：token 未签发 → Host 桥接应拒绝
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.ping", params: {}, carrier: { ...msg.carrier, token: "forged-token-" + "x".repeat(20) } });
+  } else if (msg.method === "ask-host-no-carrier") {
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.ping", params: {} });
   } else {
     send({ jsonrpc: "2.0", id, error: { code: -32601, message: "unknown" } });
   }
@@ -284,6 +304,63 @@ describe("RuntimeHost 生命周期（node-process）", () => {
         expect(payloadJson).not.toContain("forged-trace");
         expect(payloadJson).not.toContain("forged-event");
       }
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+});
+
+describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
+  it("合法 carrier 的 host.ping 请求 → broker 白名单 API 执行并回写结果", async () => {
+    const { host } = createEnv(PLUGIN, "node-process");
+    const instance = await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host",
+      method: "ask-host",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // host.ping 为 HostBroker 内置白名单 API，返回平台签发身份
+      expect(result.result).toMatchObject({
+        host: { pong: true, pluginId: PLUGIN, runtimeInstanceId: instance.runtimeInstanceId },
+      });
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("伪造 carrier（token 未签发）→ 桥接拒绝且错误回写 worker", async () => {
+    const { host } = createEnv(PLUGIN, "node-process");
+    await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-forged",
+      method: "ask-host-forged",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const hostResp = result.result as { host?: { code?: number; message?: string } };
+      expect(hostResp.host?.code).toBe(-32600);
+      expect(hostResp.host?.message).toMatch(/carrier 校验失败/);
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("缺少 carrier 的请求 → 明确拒绝（-32600）", async () => {
+    const { host } = createEnv(PLUGIN, "node-process");
+    await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-no-carrier",
+      method: "ask-host-no-carrier",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const hostResp = result.result as { host?: { code?: number; message?: string } };
+      expect(hostResp.host?.code).toBe(-32600);
+      expect(hostResp.host?.message).toMatch(/缺少平台签发的一次性 carrier/);
     }
     await host.stop(PLUGIN, "shutdown");
   });

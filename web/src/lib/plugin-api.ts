@@ -13,6 +13,7 @@ import type {
   PluginInstallResult,
   PluginListItem,
   PluginSource,
+  PluginSourceRef,
   PluginSourceSearchQuery,
   PluginSourceSearchResult,
 } from "./plugin-types.js";
@@ -85,8 +86,12 @@ export class PluginApiClient {
     return this.request<{ status: string }>("POST", `/api/plugins/${encodeURIComponent(id)}/disable`);
   }
 
-  async updatePlugin(id: string): Promise<PluginInstallResult> {
-    return this.request<PluginInstallResult>("POST", `/api/plugins/${encodeURIComponent(id)}/update`);
+  /**
+   * 更新插件。Server 要求 body.sourceRef（assertPluginSourceRef 校验），
+   * 缺省返回 400；sourceType 为 local/zip/git/npm/openclaw/hermes 之一。
+   */
+  async updatePlugin(id: string, sourceRef: PluginSourceRef): Promise<PluginInstallResult> {
+    return this.request<PluginInstallResult>("POST", `/api/plugins/${encodeURIComponent(id)}/update`, { sourceRef });
   }
 
   async rollbackPlugin(id: string): Promise<PluginInstallResult> {

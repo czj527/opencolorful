@@ -50,6 +50,16 @@ export class RpcCancelledError extends RpcTransportError {
   }
 }
 
+/** worker 主动请求处理失败：onRequest 抛此错时按 code 映射为 JSON-RPC error 响应。 */
+export class RpcRequestError extends Error {
+  readonly code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.name = "RpcRequestError";
+    this.code = code;
+  }
+}
+
 export interface JsonRpcTransport {
   /** 平台 → worker 写入通道（child.stdin） */
   readonly stdin: NodeJS.WritableStream;
@@ -64,14 +74,26 @@ export interface JsonRpcNotificationMessage {
   readonly carrier?: PluginIpcCarrier;
 }
 
+/** worker → host 主动请求（带 id）；carrier 由平台签发，上层做身份认证与单次消费。 */
+export interface JsonRpcWorkerRequest {
+  readonly id: number | string;
+  readonly method: string;
+  readonly params?: unknown;
+  readonly carrier?: PluginIpcCarrier;
+}
+
 export interface JsonRpcClientOptions {
   readonly transport: JsonRpcTransport;
   readonly maxFrameBytes?: number;
   readonly defaultTimeoutMs?: number;
   /** 收到 worker 通知（无 id 消息）时回调（如携带 carrier，由上层做一次性消费）。 */
   readonly onNotification?: (message: JsonRpcNotificationMessage) => void;
-  /** 收到 worker 主动请求（带 id 的请求消息）时回调；缺省回 method-not-found。 */
-  readonly onRequest?: (message: { id: number | string; method: string; params?: unknown }) => unknown;
+  /**
+   * 收到 worker 主动请求（带 id 的请求消息）时回调；返回结果（或 Promise）回写
+   * result 响应，抛 RpcRequestError 时按 code 回写 error 响应（其他错误按
+   * internal-error）；未注入时缺省回 method-not-found（向后兼容）。
+   */
+  readonly onRequest?: (message: JsonRpcWorkerRequest) => unknown;
   /**
    * 延迟连接失败拒绝：stdout 结束时先不拒绝 pending，而是等待运行时在
    * 子进程 exit 事件中先完成崩溃判定（onExit）再 failConnection。
@@ -302,28 +324,15 @@ export class JsonRpcClient {
       return;
     }
     if (hasId && typeof record.method === "string") {
-      // worker → host 请求（本阶段不支持领域回调，缺省回 method-not-found）
-      const response: PluginRpcResponse = {
-        jsonrpc: "2.0",
-        id: record.id as number | string,
-        error: { code: JSON_RPC_ERROR_CODES.methodNotFound, message: `平台暂不支持 worker 主动请求 ${record.method}` },
-      };
-      try {
-        this.writeLine(JSON.stringify(response));
-      } catch {
-        // ignore
+      // worker → host 请求：未注入 handler 时缺省回 method-not-found（向后兼容）
+      if (this.onRequest === undefined) {
+        this.writeResponse(record.id as number | string, undefined, {
+          code: JSON_RPC_ERROR_CODES.methodNotFound,
+          message: `平台暂不支持 worker 主动请求 ${record.method}`,
+        });
+        return;
       }
-      if (this.onRequest !== undefined) {
-        try {
-          void this.onRequest({
-            id: record.id as number | string,
-            method: record.method,
-            ...((record as { params?: unknown }).params !== undefined ? { params: (record as { params?: unknown }).params } : {}),
-          });
-        } catch {
-          // handler 失败不影响协议
-        }
-      }
+      void this.handleWorkerRequest(record as { id: unknown; method: unknown; params?: unknown; carrier?: unknown });
       return;
     }
     if (!hasId && typeof record.method === "string") {
@@ -348,6 +357,46 @@ export class JsonRpcClient {
     this.failAll(new RpcTransportError("protocol-error", reason));
     if (this.errorHandler !== undefined) {
       this.errorHandler(new RpcTransportError("protocol-error", reason));
+    }
+  }
+
+  /** 处理 worker 主动请求：等待 handler 结果并回写响应（result 或映射后的 error）。 */
+  private async handleWorkerRequest(record: { id: unknown; method: unknown; params?: unknown; carrier?: unknown }): Promise<void> {
+    const id = record.id as number | string;
+    const message: JsonRpcWorkerRequest = {
+      id,
+      method: record.method as string,
+      ...((record as { params?: unknown }).params !== undefined ? { params: (record as { params?: unknown }).params } : {}),
+      ...((record as { carrier?: PluginIpcCarrier }).carrier !== undefined ? { carrier: (record as { carrier?: PluginIpcCarrier }).carrier } : {}),
+    };
+    try {
+      const result = await Promise.resolve(this.onRequest?.(message));
+      this.writeResponse(id, result ?? null, undefined);
+    } catch (error) {
+      this.writeResponse(id, undefined, this.toRpcError(error));
+    }
+  }
+
+  /** 抛出错误 → JSON-RPC error 结构（RpcRequestError 携带错误码，其余按 internal）。 */
+  private toRpcError(error: unknown): { code: number; message: string } {
+    if (error instanceof RpcRequestError) {
+      return { code: error.code, message: error.message.slice(0, 512) };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return { code: JSON_RPC_ERROR_CODES.internalError, message: `处理 worker 主动请求失败：${message.slice(0, 480)}` };
+  }
+
+  /** 回写 worker 主动请求的响应；成功时 result 必填（undefined 按 null，JSON-RPC 2.0）。 */
+  private writeResponse(id: number | string, result: unknown | undefined, error: { code: number; message: string } | undefined): void {
+    const response: PluginRpcResponse = {
+      jsonrpc: "2.0",
+      id,
+      ...(error !== undefined ? { error } : { result: result ?? null }),
+    };
+    try {
+      this.writeLine(JSON.stringify(response));
+    } catch {
+      // 连接已关闭：忽略
     }
   }
 

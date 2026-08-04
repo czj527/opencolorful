@@ -49,6 +49,7 @@ import { PluginInstaller } from "../installer/plugin-installer.js";
 import {
   canonicalPathSync,
   copyTreeSafe,
+  linkLocalDependencies,
   PluginPathError,
   pluginVersionDir,
   safeJoin,
@@ -360,6 +361,10 @@ export class PluginDevHost {
 
     // 3. 注册安装记录（sourceType=local，sourceRef=dev 源码目录）
     const verification = computeArtifactHash(versionDir);
+    // dev 依赖链接：node-process/python worker 需要解析 SDK（@opencolorful/plugin-runtime）。
+    // 复制阶段排除了 node_modules，这里把源码目录（或其祖先）的 node_modules junction 进来；
+    // 必须在 computeArtifactHash 之后（junction 会被 hash 遍历按符号链接拒绝）。
+    this.linkDevDependencies(versionDir, contentRoot);
     this.store.saveInstallation({
       pluginId,
       version,
@@ -394,7 +399,15 @@ export class PluginDevHost {
       const message = error instanceof Error ? error.message : String(error);
       this.store.markRemoved(pluginId);
       this.store.clearActive(pluginId);
-      fs.rmSync(pluginInstalledRootOf(this.devPaths as RuntimePaths, pluginId), { recursive: true, force: true });
+      try {
+        fs.rmSync(pluginInstalledRootOf(this.devPaths as RuntimePaths, pluginId), { recursive: true, force: true });
+      } catch (cleanupError) {
+        // 清理尽力而为（Windows 上进程句柄可能短暂占用目录）；不覆盖原始激活错误
+        instrument.warn("plugin.dev.install_cleanup_failed", "dev 安装失败后目录清理未完成", {
+          pluginId,
+          reason: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
       throw new PluginDevError(`dev install 激活失败：${message.slice(0, 300)}`);
     }
 
@@ -435,6 +448,8 @@ export class PluginDevHost {
 
     // 3. 刷新安装记录（版本变化时重建 active 记录）
     const verification = computeArtifactHash(versionDir);
+    // dev 依赖链接（在 computeArtifactHash 之后：junction 会被 hash 遍历按符号链接拒绝）
+    this.linkDevDependencies(versionDir, contentRoot);
     const record = this.store.getInstallation(pluginId, version);
     if (record === undefined || record.status === "removed") {
       this.store.saveInstallation({
@@ -752,6 +767,19 @@ export class PluginDevHost {
 
   // ── 内部：工具 ────────────────────────────────────────────────
 
+  /**
+   * dev 依赖链接：复用共享 linkLocalDependencies（源码目录或其祖先的 node_modules
+   * junction 进版本目录，使 node-process/python worker 能解析 SDK 依赖）。
+   * 复制阶段已排除 node_modules（正式包自包含依赖不走此路径）；失败仅 warn。
+   */
+  private linkDevDependencies(versionDir: string, sourceDir: string): void {
+    if (!linkLocalDependencies(versionDir, sourceDir)) {
+      instrument.warn("plugin.dev.dependency_link_failed", "dev 依赖链接失败（worker 可能无法解析 SDK 依赖）", {
+        pluginId: path.basename(path.dirname(versionDir)),
+      });
+    }
+  }
+
   private validateSourceDir(sourceDir: string): string {
     if (typeof sourceDir !== "string" || sourceDir.trim() === "") {
       throw new PluginDevError("sourceDir 必须是非空路径");
@@ -789,8 +817,7 @@ export class PluginDevHost {
   }
 
   /** manifest.dev.sourceDir 声明子目录时复制该子目录（相对源码根）。 */
-  private resolveContentRoot(sourceDir: string, devSourceDir: string | undefined): string {
-    if (devSourceDir === undefined || devSourceDir === "" || devSourceDir === ".") {
+  private resolveContentRoot(sourceDir: string, devSourceDir: string | undefined): string {    if (devSourceDir === undefined || devSourceDir === "" || devSourceDir === ".") {
       return sourceDir;
     }
     const segments = devSourceDir.split("/").filter((segment) => segment !== "" && segment !== ".");

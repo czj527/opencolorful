@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ApiClient, ApiClientError } from "../../lib/api-client.js";
@@ -169,6 +169,73 @@ describe("InstalledView（最小集响应）", () => {
   });
 });
 
+describe("InstalledView（更新/回滚按富字段显示）", () => {
+  it("updateAvailable===true 时显示更新按钮，false/undefined 时不显示", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([
+      { ...MINIMAL_LIST_ITEM, updateAvailable: true },
+    ])));
+    render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "更新" })).toBeTruthy();
+  });
+
+  it("updateAvailable=false 或缺失（undefined）时不显示更新按钮", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([
+      { ...MINIMAL_LIST_ITEM, updateAvailable: false },
+    ])));
+    const first = render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "更新" })).toBeNull();
+    first.unmount();
+
+    // 富字段完全缺失（Server 最小集）也不显示
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([MINIMAL_LIST_ITEM])));
+    render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "更新" }).length).toBe(0);
+  });
+
+  it("rollbackAvailable===true 时显示回滚按钮，缺失时不显示", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([
+      { ...MINIMAL_LIST_ITEM, rollbackAvailable: true },
+    ])));
+    const first = render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "回滚" })).toBeTruthy();
+    first.unmount();
+
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([MINIMAL_LIST_ITEM])));
+    render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "回滚" })).toBeNull();
+  });
+
+  it("点击更新：请求体携带 sourceRef（sourceType/ref 取自列表项）", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/plugins/demo.minimal/update")) {
+        return jsonResponse({ pluginId: "demo.minimal", version: "1.1.0" });
+      }
+      // 初始加载：updateAvailable=true → 更新按钮可见；更新后的 reload 同样返回
+      return jsonResponse([{ ...MINIMAL_LIST_ITEM, updateAvailable: true }]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InstalledView pluginApi={fakeApi} onOpenDetail={() => {}} />);
+    expect(await screen.findByTestId("installed-view")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "更新" }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((args) => String(args[0]).endsWith("/api/plugins/demo.minimal/update"));
+      expect(call).toBeDefined();
+      const [, init] = call!;
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        sourceRef: { sourceType: "local", ref: "/tmp/demo" },
+      });
+    });
+  });
+});
+
 describe("PluginDetailView（最小集响应）", () => {
   it("grants/secretStatus/surfaces/runtime/manifest 缺失时全部降级为空态", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -189,6 +256,70 @@ describe("PluginDetailView（最小集响应）", () => {
     expect(screen.getByText("Manifest 不可用。")).toBeTruthy();
     // 诊断最小集 {pluginId, version, status, active}：health/生成时间占位而非崩溃
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+});
+
+describe("PluginDetailView（Surface 资产 URL）", () => {
+  function detailWithSurfaces(surfaces: unknown[]): typeof MINIMAL_DETAIL & { surfaces: unknown[] } {
+    return { ...MINIMAL_DETAIL, surfaces };
+  }
+
+  it("surfaces 带 entry 时按约定拼接资产 URL 渲染 iframe 与链接（无占位提示）", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/diagnostics")) {
+        return jsonResponse({ pluginId: "demo.minimal", version: "1.0.0", status: "enabled", active: true });
+      }
+      return jsonResponse(
+        detailWithSurfaces([{ surfaceId: "settings-page", name: "设置页", kind: "page", entry: "ui/settings.html" }]),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PluginDetailView pluginApi={fakeApi} pluginId="demo.minimal" onBack={() => {}} />);
+    const frame = await screen.findByTestId("surface-frame");
+    expect(frame.getAttribute("src")).toBe("/api/plugins/demo.minimal/assets/ui/settings.html");
+    const link = screen.getByTestId("surface-asset-link");
+    expect(link.getAttribute("href")).toBe("/api/plugins/demo.minimal/assets/ui/settings.html");
+    expect(screen.queryByText(/尚未接线/)).toBeNull();
+    expect(screen.queryByText(/未声明资源入口/)).toBeNull();
+  });
+
+  it("Server 富化 assetUrl 时优先使用 assetUrl 而非自行拼接", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/diagnostics")) {
+        return jsonResponse({ pluginId: "demo.minimal", version: "1.0.0", status: "enabled", active: true });
+      }
+      return jsonResponse(
+        detailWithSurfaces([
+          {
+            surfaceId: "settings-page",
+            name: "设置页",
+            entry: "ui/settings.html",
+            assetUrl: "/api/plugins/demo.minimal/assets/custom/dir.html",
+          },
+        ]),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PluginDetailView pluginApi={fakeApi} pluginId="demo.minimal" onBack={() => {}} />);
+    const frame = await screen.findByTestId("surface-frame");
+    expect(frame.getAttribute("src")).toBe("/api/plugins/demo.minimal/assets/custom/dir.html");
+  });
+
+  it("surfaces 无 entry 且无 assetUrl 时降级占位且不崩溃", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/diagnostics")) {
+        return jsonResponse({ pluginId: "demo.minimal", version: "1.0.0", status: "enabled", active: true });
+      }
+      return jsonResponse(detailWithSurfaces([{ surfaceId: "settings-page", name: "设置页" }]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PluginDetailView pluginApi={fakeApi} pluginId="demo.minimal" onBack={() => {}} />);
+    expect(await screen.findByText(/未声明资源入口/)).toBeTruthy();
+    expect(screen.queryByTestId("surface-frame")).toBeNull();
+    expect(screen.queryByTestId("surface-asset-link")).toBeNull();
   });
 });
 

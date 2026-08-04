@@ -1250,6 +1250,27 @@ Phase 12 专项门：
 
 **验证**：T11 针对性测试（plugin-facade 10、plugin-registry 22、plugin-grant 15、plugin-binding 9、plugin-dev-host 14、plugin-runtime-host +3、observability-plugin-catalog 10 等）+ 全量质量门复跑，见”最终验收结论”。
 
+**T12 修复轮（2026-08-04，用户验收未通过 → P0×6 + P1×7 + 质量门修复）**——验收结论确认"插件基础设施原型较完整，主产品调用链尚未闭环"，本轮按建议顺序修复全部 P0 与 P1：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P0-1 | 插件 Contribution 未接入主产品运行链（主会话只注入文件+记忆工具） | pi-sdk `createPiAgentSession` 增加 `customTools`（ToolDefinition 适配，工具名用 pluginId.toolId 命名空间）+ session-runtime `pluginTools` 透传 + messages 路由按 Agent enabled 绑定过滤 `ToolService.listTools` 注入主会话 + app 装配 |
+| P0-2 | Web 插件发现不可用（adapter 无配置，search 恒空） | facade 来源目录接线（local/openclaw/hermes baseDir = `home/plugins/sources`）+ search 单来源失败容错 |
+| P0-3 | sdk-showcase 无法安装/执行工具 | hook 时点 `session.started` → `session.after-start`（冻结清单内）；runtime bundle → node-process（entry=node-worker/index.js + full-access）；worker 改纯 JS（原文件含 TS 语法）+ 补 package.json type:module；dev/local 来源依赖 junction（共享 `linkLocalDependencies`，worker 可解析 SDK 依赖） |
+| P0-4 | CLI dev loop install 后立即断裂（devRunId 不匹配） | CLI 保存 devRunId 到 `~/.opencolorful/dev-runs.json`，reload/enable/disable/reset/uninstall/invoke-tool/run-scenario 自动读取传递，`--dev-run-id` 显式覆盖，uninstall/reset 清除 |
+| P0-5 | restricted MCP 可绕过 Full Access 提示 | installer `requiresCodeRuntime` 纳入 mcp（mcp 也 spawn 本地代码，必须 full-access） |
+| P0-6 | 安装接口可修改另一插件权限 | facade.install 校验每个 grant：pluginId === 安装插件 id + 能力在 Manifest 声明中 |
+| P1-1 | worker → HostBroker 未接通 | json-rpc `onRequest` 注入 + runtime-host `handleWorkerRequest`（carrier 缺失/跨实例/单次消费校验 → broker.call）+ `registerHostBrokerApis` 组合根构造时调用 |
+| P1-2 | Secret 内存存储重启丢失 | `FileSecretStore`（auth/plugin-secrets.json：原子写/损坏容错 .bak/0o600 best-effort）+ facade 替换 InMemory + `POST/DELETE /api/plugins/:id/secrets` 写入入口（严格审计） |
+| P1-3 | UI SDK 调用即抛错 + Surface 资产路由未接线 | `resolveSurfaceAssetUrl`/`defineSurfaceComponent` 返回注册描述/`useHostApi` 降级句柄（不抛异常）+ `GET /api/plugins/:id/assets/*` 受控路由（版本目录内、防穿越/符号链接）+ Web iframe/资产链接 |
+| P1-4 | Audit mirror 硬编码 allowed + event_name NULL | `insertAuditMirror` 补 `event_name` 列 + decision 按事件名推导（denied/revoked → denied） |
+| P1-5 | 更新激活失败不恢复旧版本 | facade.update 新版本激活失败 → `registry.rollback` 回旧版本（不留"DB 新版本 enabled 无运行实例"悬挂态） |
+| P1-6 | Web 更新无 sourceRef / 按钮不出现 | `updatePlugin` 传 `{sourceRef:{sourceType,ref}}`；更新按钮 `updateAvailable===true`、回滚按钮 `rollbackAvailable===true`（list 本地判定 + detail 尽力判定） |
+| P1-7 | /logs?plugin= 未解析 | LogsPage 解析查询参数并预筛选（initialSearch 播种） |
+| 质量门 | vitest 并发 1 失败（audit mirror 补 event_name 后查询命中镜像行）+ Phase 12 无真实 e2e | 测试查询排除 `mirror:%` 行；新增 plugin-lifecycle e2e（dev loop install/enable/绑定/invoke echo/reload/disable/uninstall + 正式路径 inspect/install/授权/enable/绑定/详情/资产/卸载） |
+
+**验证**：T12 针对性测试（plugin-facade 16、plugin-dev-host 14、plugin-runtime-node/json-rpc/host、file-secret-store 13、plugin-components-ui 10、CLI devrun 6、web +9 等）+ 全量质量门复跑（vitest 112 files / 1291 tests、web 375、e2e 56/56），见”最终验收结论”。
+
 ### 最终验收结论
 
 自动化质量门全部通过（T1-T10 与 T11 修复轮）；评审发现的阻断项已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）与已知偏差 #7（Agent turn 工具回路）作为人工验收与后续阶段内容。

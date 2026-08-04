@@ -167,3 +167,32 @@ export function pluginStagingDir(paths: RuntimePaths, operationId: string): stri
 export function pluginDataDir(paths: RuntimePaths, pluginId: string): string {
   return safeJoin(paths.pluginsData, pluginId);
 }
+
+/**
+ * 本地来源依赖链接：把 sourceRoot（或其祖先目录）的 node_modules junction 进
+ * 版本目录，使 node-process/python worker 能解析 SDK 依赖（npm workspace 场景下
+ * 源码目录自身没有 node_modules，依赖在仓库根）。仅 local 来源使用（用户本机
+ * 目录，可信）；zip/git/npm 包自包含依赖不走此路径。失败返回 false（worker 可能
+ * 无法解析依赖，由调用方决定日志级别），不抛错。
+ */
+export function linkLocalDependencies(versionDir: string, sourceRoot: string): boolean {
+  try {
+    const existing = path.join(versionDir, "node_modules");
+    if (fs.existsSync(existing)) {
+      return true;
+    }
+    let cursor: string | undefined = path.resolve(sourceRoot);
+    while (cursor !== undefined) {
+      const candidate = path.join(cursor, "node_modules");
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+        fs.symlinkSync(candidate, existing, "junction");
+        return true;
+      }
+      const parent = path.dirname(cursor);
+      cursor = parent === cursor ? undefined : parent;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}

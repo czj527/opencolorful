@@ -187,7 +187,7 @@ describe("T3 GrantService：严格审计与 Activity", () => {
     expect(rows[0]?.after_revision).toBe("1");
   });
 
-  it("授权结果发 plugin.permission.granted Activity（含 grantedBy/能力）", () => {
+  it("授权结果发 plugin.permission.granted Activity（含 grantedBy/能力），audit 镜像 decision=allowed", () => {
     const { db, service } = createContext();
     service.grant({ pluginId: "example.p", capability: "route.register" }, userActor);
     const row = db.prepare(
@@ -203,9 +203,17 @@ describe("T3 GrantService：严格审计与 Activity", () => {
       revision: 1,
       grantedBy: "user-1",
     });
+    // audit 镜像：event_name 落 mirror 事件名，决策与授权一致（allowed）
+    const mirror = db.prepare(
+      "SELECT action, decision, event_name FROM audit_events WHERE event_name = 'audit.plugin.permission_granted'",
+    ).get() as { action: string; decision: string; event_name: string } | undefined;
+    expect(mirror).toBeDefined();
+    expect(mirror?.action).toBe("audit.plugin.permission_granted");
+    expect(mirror?.decision).toBe("allowed");
+    expect(mirror?.event_name).toBe("audit.plugin.permission_granted");
   });
 
-  it("撤销发 plugin.permission.revoked，重复拒绝发 plugin.permission.denied", () => {
+  it("撤销发 plugin.permission.revoked，重复拒绝发 plugin.permission.denied（镜像 decision=denied）", () => {
     const { db, service } = createContext();
     service.grant({ pluginId: "example.p", capability: "activity.emit" }, userActor);
     service.revoke({ pluginId: "example.p", capability: "activity.emit" }, userActor);
@@ -214,6 +222,14 @@ describe("T3 GrantService：严格审计与 Activity", () => {
       "SELECT event_name FROM activity_events WHERE event_name IN ('plugin.permission.revoked','plugin.permission.denied') ORDER BY id ASC",
     ).all() as Array<{ event_name: string }>;
     expect(rows.map((r) => r.event_name)).toEqual(["plugin.permission.revoked", "plugin.permission.denied"]);
+    // audit 镜像：拒绝/撤销类事件 decision 必须为 denied（不再硬编码 allowed）
+    const mirrors = db.prepare(
+      "SELECT action, decision, event_name FROM audit_events WHERE event_name IN ('audit.plugin.permission_revoked','audit.plugin.permission_denied') ORDER BY id ASC",
+    ).all() as Array<{ action: string; decision: string; event_name: string }>;
+    expect(mirrors.map((r) => ({ action: r.action, decision: r.decision, event_name: r.event_name }))).toEqual([
+      { action: "audit.plugin.permission_revoked", decision: "denied", event_name: "audit.plugin.permission_revoked" },
+      { action: "audit.plugin.permission_denied", decision: "denied", event_name: "audit.plugin.permission_denied" },
+    ]);
   });
 });
 

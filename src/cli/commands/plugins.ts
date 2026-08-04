@@ -16,9 +16,19 @@
 //   list-surfaces
 //   describe-surface <pluginId> <surfaceId>
 //   run-scenario <pluginId> <scenarioName> [--agent <id>] [--destructive] [--approve] [--arg k=v ...]
+//
+// devRunId 自动传递：install 成功后把 devRunId 保存到
+// ~/.opencolorful/dev-runs.json（key 为 pluginId）；reload 生成新
+// devRunId 时同步覆盖；uninstall/reset 后清除。reload/enable/disable/
+// reset/uninstall/invoke-tool/run-scenario 未显式指定 --dev-run-id 时
+// 自动读取已保存值传入请求体。
 // ═══════════════════════════════════════════════════════════════
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { loadEnvironment } from "../../config/environment.js";
+import { getRuntimePaths } from "../../config/paths.js";
 
 export async function runPluginsCommand(args: readonly string[]): Promise<void> {
   const command = args[0] ?? "dev";
@@ -43,38 +53,54 @@ async function runDevCommand(args: readonly string[]): Promise<void> {
       const fullAccess = hasFlag(rest, "--full-access");
       const sourceType = flagValue(rest, "--source-type") ?? "local";
       const state = await post("/api/plugins/dev/install", { sourceDir, fullAccess, sourceType });
+      // dev install 成功后保存 Server 返回的 devRunId（后续 dev 子命令自动复用）
+      const installed = state as { pluginId?: unknown; devRunId?: unknown };
+      if (typeof installed.pluginId === "string" && typeof installed.devRunId === "string" && installed.devRunId !== "") {
+        saveDevRun(installed.pluginId, installed.devRunId);
+      }
       printState(state);
       return;
     }
     case "reload": {
       const [pluginId] = rest;
       requireValue(pluginId, "pluginId（reload <pluginId>）");
-      printState(await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/reload`, {}));
+      const devRunId = resolveDevRunId(pluginId, rest);
+      const state = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/reload`, { devRunId });
+      // reload 生成新 devRunId（旧运行上下文失效），CLI 侧同步覆盖保存值
+      const reloaded = state as { devRunId?: unknown };
+      if (typeof reloaded.devRunId === "string" && reloaded.devRunId !== "") {
+        saveDevRun(pluginId, reloaded.devRunId);
+      }
+      printState(state);
       return;
     }
     case "enable": {
       const [pluginId] = rest;
       requireValue(pluginId, "pluginId（enable <pluginId>）");
-      printState(await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/enable`, {}));
+      printState(await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/enable`, { devRunId: resolveDevRunId(pluginId, rest) }));
       return;
     }
     case "disable": {
       const [pluginId] = rest;
       requireValue(pluginId, "pluginId（disable <pluginId>）");
-      printState(await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/disable`, {}));
+      printState(await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/disable`, { devRunId: resolveDevRunId(pluginId, rest) }));
       return;
     }
     case "reset": {
       const [pluginId] = rest;
       requireValue(pluginId, "pluginId（reset <pluginId>）");
-      const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/reset`, {});
+      const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/reset`, { devRunId: resolveDevRunId(pluginId, rest) });
+      // dev 槽已重置，运行上下文失效 → 清除保存值
+      clearDevRun(pluginId);
       console.log(`插件 ${pluginId} dev 槽已重置（${String((result as { status?: string })["status"] ?? "reset")}）`);
       return;
     }
     case "uninstall": {
       const [pluginId] = rest;
       requireValue(pluginId, "pluginId（uninstall <pluginId>）");
-      const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/uninstall`, {});
+      const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/uninstall`, { devRunId: resolveDevRunId(pluginId, rest) });
+      // 已卸载 → 清除保存值
+      clearDevRun(pluginId);
       console.log(`插件 ${pluginId} dev 槽已卸载`);
       void result;
       return;
@@ -95,6 +121,7 @@ async function runDevCommand(args: readonly string[]): Promise<void> {
       const sessionId = flagValue(rest, "--session");
       const args = parseKeyValueArgs(rest, "--arg");
       const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/invoke-tool`, {
+        devRunId: resolveDevRunId(pluginId, rest),
         agentId,
         ...(sessionId !== undefined ? { sessionId } : {}),
         toolName,
@@ -132,6 +159,7 @@ async function runDevCommand(args: readonly string[]): Promise<void> {
       const approve = hasFlag(rest, "--approve");
       const args = parseKeyValueArgs(rest, "--arg");
       const result = await post(`/api/plugins/dev/${encodeURIComponent(pluginId)}/run-scenario`, {
+        devRunId: resolveDevRunId(pluginId, rest),
         scenarioName,
         ...(agentId !== undefined ? { agentId } : {}),
         ...(destructive ? { destructive: true } : {}),
@@ -150,6 +178,83 @@ async function runDevCommand(args: readonly string[]): Promise<void> {
     default:
       throw new Error(`未知 plugins dev 命令: ${sub ?? "(空)"}`);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// devRunId 状态文件（~/.opencolorful/dev-runs.json）
+//
+// dev install 成功后保存 Server 返回的 devRunId；reload 生成新 devRunId
+// 时同步覆盖；uninstall/reset 后清除。其余 dev 子命令自动读取并随请求体
+// 传递，用户可用 --dev-run-id 显式覆盖。
+// 写文件采用临时文件 + rename 原子替换（与 PreferencesStore 一致）。
+// ═══════════════════════════════════════════════════════════════
+
+interface DevRunsDocument {
+  version: number;
+  devRuns: Record<string, string>;
+}
+
+function devRunsPath(): string {
+  return path.join(getRuntimePaths().home, "dev-runs.json");
+}
+
+function readDevRuns(): DevRunsDocument {
+  const filePath = devRunsPath();
+  if (!fs.existsSync(filePath)) {
+    return { version: 1, devRuns: {} };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as { devRuns?: unknown };
+    if (parsed !== null && typeof parsed === "object" && typeof parsed.devRuns === "object" && parsed.devRuns !== null) {
+      return { version: 1, devRuns: parsed.devRuns as Record<string, string> };
+    }
+  } catch {
+    // 文件损坏/不可解析：按空状态处理，后续写入会重建
+  }
+  return { version: 1, devRuns: {} };
+}
+
+function writeDevRuns(document: DevRunsDocument): void {
+  const filePath = devRunsPath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+  fs.renameSync(temporaryPath, filePath);
+}
+
+function saveDevRun(pluginId: string, devRunId: string): void {
+  const document = readDevRuns();
+  document.devRuns[pluginId] = devRunId;
+  writeDevRuns(document);
+}
+
+function clearDevRun(pluginId: string): void {
+  const document = readDevRuns();
+  if (document.devRuns[pluginId] === undefined) {
+    return;
+  }
+  delete document.devRuns[pluginId];
+  writeDevRuns(document);
+}
+
+function savedDevRunId(pluginId: string): string | undefined {
+  return readDevRuns().devRuns[pluginId];
+}
+
+/** 解析 devRunId：--dev-run-id 显式值优先，否则回退已保存值；两者皆无 → 清晰中文错误 */
+function resolveDevRunId(pluginId: string, args: readonly string[]): string {
+  const explicit = flagValue(args, "--dev-run-id");
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  const saved = savedDevRunId(pluginId);
+  if (saved !== undefined) {
+    return saved;
+  }
+  throw new Error(
+    `插件 ${pluginId} 没有已保存的 devRunId（~/.opencolorful/dev-runs.json 无记录）。\n` +
+      `请先运行 dev install 安装该插件，或显式指定 --dev-run-id <devRunId>。`,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════

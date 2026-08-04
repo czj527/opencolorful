@@ -44,6 +44,8 @@ export type {
   PiProviderDefinition,
   PiResolvedModel,
   PiSessionHandle,
+  PluginSessionTool,
+  PluginSessionToolInvokeResult,
   WorkspaceToolMode,
 } from "./types.js";
 

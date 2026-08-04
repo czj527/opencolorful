@@ -336,8 +336,8 @@ export interface PluginListItem {
   readonly health?: PluginHealth;
   readonly trust?: PluginTrust;
   readonly runtimeKind?: PluginRuntimeKind;
-  /** 存在可更新版本时为其版本号，否则 null */
-  readonly updateAvailable?: string | null;
+  /** 存在可更新版本时为 true；无法判定（来源不可达等）时为 undefined */
+  readonly updateAvailable?: boolean;
   readonly rollbackAvailable?: boolean;
   /** 启用语义可由 active + status 推导（见 isPluginEnabled） */
   readonly enabled?: boolean;
@@ -353,11 +353,22 @@ export interface PluginListItem {
 // source.sourceRef.sourceType / source.sourceRef.ref）。grants/secretStatus/
 // surfaces/runtime/config/manifest/compatibility 等富字段由 Server 富化后
 // 可选提供，Web 端一律按缺失处理。
+/**
+ * 详情响应 surfaces 项：与 Server SurfaceDescriptor（pluginId/surfaceId/version/
+ * kind/name/entry/hostCapabilities）对齐。Server 未富化 assetUrl 时，
+ * Web 端按受控资产路由约定由 entry 自行拼接（见 plugin-format.ts 的
+ * buildPluginAssetUrl）。
+ */
 export interface PluginSurfaceInfo {
-  readonly contributionId: string;
+  /** 与 Server SurfaceDescriptor 对齐：surfaceId 即 contribution id */
+  readonly surfaceId: string;
   readonly name: string;
-  /** 受控 asset route 地址；Server asset route 未接线时为 null */
-  readonly assetUrl: string | null;
+  readonly kind?: "page" | "widget" | "chat-surface";
+  readonly description?: string;
+  /** 静态资源入口（相对插件版本目录，如 ui/settings.html）；缺失时无法渲染 iframe */
+  readonly entry?: string;
+  /** 受控 asset route 地址；Server 未富化时为 null/缺失，由 entry 约定拼接 */
+  readonly assetUrl?: string | null;
 }
 
 export interface PluginRuntimeInfo {
@@ -391,7 +402,8 @@ export interface PluginDetail {
   /** 列表约定的铺平字段；可由 source.sourceRef 推导 */
   readonly sourceType?: PluginSourceType;
   readonly sourceRef?: string;
-  readonly updateAvailable?: string | null;
+  /** 存在可更新版本时为 true；无法判定（来源不可达等）时为 undefined */
+  readonly updateAvailable?: boolean;
   readonly rollbackAvailable?: boolean;
   readonly enabled?: boolean;
   readonly hasSecrets?: boolean;

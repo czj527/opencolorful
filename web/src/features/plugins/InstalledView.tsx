@@ -122,10 +122,17 @@ export function InstalledView(props: InstalledViewProps) {
                     启用
                   </Button>
                 )}
-                {plugin.updateAvailable != null && (
-                  <Button size="sm" variant="ghost" loading={busy} onClick={() => void runAction(plugin.pluginId, "更新", () => props.pluginApi.updatePlugin(plugin.pluginId))}>
+                {plugin.updateAvailable === true && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={busy}
+                    onClick={() => void runAction(plugin.pluginId, "更新", () =>
+                      props.pluginApi.updatePlugin(plugin.pluginId, { sourceType: plugin.sourceType, ref: plugin.sourceRef }),
+                    )}
+                  >
                     <RefreshCw size={14} aria-hidden="true" />
-                    更新至 {plugin.updateAvailable}
+                    更新
                   </Button>
                 )}
                 {plugin.rollbackAvailable === true && (

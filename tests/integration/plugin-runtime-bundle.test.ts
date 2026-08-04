@@ -171,7 +171,7 @@ describe("BundleRuntime + RuntimeHost", () => {
     });
   });
 
-  it("未注册方法 → method-not-found，并记录 failed 终态", async () => {
+  it("未注册方法 → method-not-found + 声明式诊断，并记录 failed 终态", async () => {
     const { db, host } = createEnv();
     await host.start("example.bundle");
     const result = await host.invoke({
@@ -183,6 +183,9 @@ describe("BundleRuntime + RuntimeHost", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("method-not-found");
+      expect(result.message).toContain("声明式 bundle 工具未提供执行实现：missing.tool");
+      expect(result.message).toContain("纯声明式运行形态");
+      expect(result.message).toContain("升级为 node-process/python-process 代码运行时");
     }
     const failed = queryActivity(db, "plugin.execution.failed");
     expect(failed).toHaveLength(1);

@@ -6,7 +6,7 @@ import { PassThrough } from "node:stream";
 
 import { afterAll, describe, expect, it } from "vitest";
 
-import { JsonRpcClient, RpcCancelledError, RpcTimeoutError } from "../../src/runtime/plugins/runtimes/json-rpc.js";
+import { JsonRpcClient, RpcCancelledError, RpcRequestError, RpcTimeoutError } from "../../src/runtime/plugins/runtimes/json-rpc.js";
 
 // ═══════════════════════════════════════════════════════════════
 // T4 版本化 JSON-RPC/stdio（plans/phase-12.md §9.2）
@@ -175,6 +175,82 @@ describe("JsonRpcClient 帧上限与双向消息", () => {
     const worker = new JsonRpcClient({ transport: { stdin: bIn, stdout: bOut } });
     // worker 请求 host，host 无 onRequest → method-not-found
     await expect(worker.request("host.domain-op", { data: 1 })).rejects.toMatchObject({ code: "protocol-error", message: /worker 主动请求/ });
+    host.close();
+    worker.close();
+  });
+});
+
+describe("JsonRpcClient worker 主动请求（onRequest 注入）", () => {
+  function connectHost(onRequest: (message: { id: number | string; method: string; params?: unknown; carrier?: unknown }) => unknown) {
+    const aIn = new PassThrough();
+    const aOut = new PassThrough();
+    const bIn = new PassThrough();
+    const bOut = new PassThrough();
+    aIn.pipe(bOut);
+    bIn.pipe(aOut);
+    const host = new JsonRpcClient({ transport: { stdin: aIn, stdout: aOut }, onRequest });
+    const worker = new JsonRpcClient({ transport: { stdin: bIn, stdout: bOut } });
+    return { host, worker };
+  }
+
+  it("注入 onRequest：worker 主动请求 → 结果回写 result 响应", async () => {
+    const { host, worker } = connectHost(async (message) => {
+      expect(message.method).toBe("host.ping");
+      expect(message.params).toEqual({ from: "worker" });
+      return { pong: true, echoId: message.id };
+    });
+    const result = await worker.request("host.ping", { from: "worker" });
+    expect(result).toEqual({ pong: true, echoId: expect.any(Number) });
+    host.close();
+    worker.close();
+  });
+
+  it("worker 请求携带 carrier → onRequest 收到完整 carrier（透传身份供上层校验）", async () => {
+    const seen: Array<{ method: string; carrier?: unknown }> = [];
+    const { host, worker } = connectHost((message) => {
+      seen.push(message);
+      return { ok: true };
+    });
+    const carrier = {
+      pluginId: "example.plugin",
+      runtimeInstanceId: "runtime-1",
+      operationId: "exec-1",
+      token: "tok-" + "x".repeat(40),
+      traceId: "t1",
+      spanId: "s1",
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    };
+    const result = await worker.request("host.ping", {}, { carrier });
+    expect(result).toEqual({ ok: true });
+    expect(seen.length).toBe(1);
+    expect(seen[0]?.carrier).toEqual(carrier);
+    host.close();
+    worker.close();
+  });
+
+  it("onRequest 抛 RpcRequestError → 回写对应错误码与消息", async () => {
+    const { host, worker } = connectHost(() => {
+      throw new RpcRequestError(-32600, "worker 请求缺少 carrier，拒绝");
+    });
+    await expect(worker.request("host.ping")).rejects.toMatchObject({ code: "protocol-error", message: /缺少 carrier/ });
+    host.close();
+    worker.close();
+  });
+
+  it("onRequest 抛普通错误 → 按 internal-error 回写", async () => {
+    const { host, worker } = connectHost(() => {
+      throw new Error("handler boom");
+    });
+    await expect(worker.request("host.ping")).rejects.toMatchObject({ code: "protocol-error", message: /internal-error|handler boom/ });
+    host.close();
+    worker.close();
+  });
+
+  it("handler 返回 undefined → 成功回写 result: null", async () => {
+    const { host, worker } = connectHost(() => undefined);
+    const result = await worker.request("host.ping");
+    expect(result).toBeNull();
     host.close();
     worker.close();
   });

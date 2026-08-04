@@ -109,7 +109,8 @@ export interface NavigatePayload {
 
 /**
  * Surface 侧 Host API 类型声明：真实 iframe 桥在本阶段不实现，
- * 运行时调用会抛出 PluginComponentsNotImplementedError（见 useHostApi）。
+ * useHostApi 返回降级句柄（调用不抛异常，句柄方法以拒绝的 Promise
+ * 携带 PluginComponentsNotImplementedError，见 ui.ts）。
  */
 export interface SurfaceHostApi {
   /** 读取宿主主题（当前只读 token）。 */

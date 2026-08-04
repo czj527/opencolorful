@@ -1,0 +1,8 @@
+{
+  "name": "@opencolorful/sdk-showcase",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SDK Showcase 插件包（示例）",
+  "type": "module",
+  "license": "MIT"
+}

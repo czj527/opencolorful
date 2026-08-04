@@ -534,3 +534,38 @@ describe("LogsPage 复审修复（评审 P1-11 复现级测试）", () => {
     vi.stubGlobal("fetch", mockFetch);
   });
 });
+
+describe("LogsPage /logs?plugin= 预筛选", () => {
+  it("带 plugin 参数：初始加载即带 search 过滤，且「全文搜索」输入框预填", async () => {
+    window.history.pushState({}, "", "/logs?plugin=demo.minimal");
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    await waitFor(() => {
+      const request = activityRequests().at(-1);
+      expect(request).toBeDefined();
+      const params = new URLSearchParams(request!.split("?")[1] ?? "");
+      expect(params.get("search")).toBe("demo.minimal");
+      expect(params.get("limit")).toBe("50");
+    });
+    expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("demo.minimal");
+  });
+
+  it("无 plugin 参数时行为不变：search 为空、输入框为空", async () => {
+    window.history.pushState({}, "", "/logs");
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    await waitFor(() => {
+      const request = activityRequests().at(-1);
+      expect(request).toBeDefined();
+      const params = new URLSearchParams(request!.split("?")[1] ?? "");
+      expect(params.get("search")).toBeNull();
+    });
+    expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("");
+  });
+});

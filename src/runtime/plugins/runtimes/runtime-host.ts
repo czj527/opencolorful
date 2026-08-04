@@ -14,8 +14,9 @@ import { sanitizeError } from "../../../observability/safe-value.js";
 import { pluginVersionDir } from "../paths.js";
 import type { PluginRegistry } from "../registry/plugin-registry.js";
 import { readManifestFile } from "../sources/source-adapter.js";
-import type { HostBroker } from "../grants/host-broker.js";
+import type { HostBroker, HostIdentity, HostRejectCode } from "../grants/host-broker.js";
 import { CarrierRegistry } from "./carrier-registry.js";
+import { JSON_RPC_ERROR_CODES, RpcRequestError, type JsonRpcWorkerRequest } from "./json-rpc.js";
 import { StreamCapture } from "./stream-capture.js";
 import { BundleRuntime } from "./bundle-runtime.js";
 import { McpRuntime } from "./mcp-runtime.js";
@@ -119,6 +120,11 @@ export interface ProcessRuntimeDeps {
   readonly onExit: (info: { code: number | null; signal: string | null }) => void;
   /** stderr/stdout 输出 sink（经 StreamCapture 脱敏/折叠/限速） */
   readonly onOutput: (chunk: Buffer | string) => void;
+  /**
+   * worker 主动请求（带 id）处理入口：由 RuntimeHost 注入桥接
+   * （校验 carrier → 身份 → HostBroker 白名单调用 → 结果回写）。
+   */
+  readonly onWorkerRequest?: (message: JsonRpcWorkerRequest) => unknown;
 }
 
 export interface RuntimeCreationContext {
@@ -571,6 +577,7 @@ export class RuntimeHost {
           carriers: this.deps.carriers,
           onExit: (info) => this.handleProcessExit(instance, info),
           onOutput: (chunk) => streamCapture.write(chunk),
+          onWorkerRequest: (message) => this.handleWorkerRequest(instance, message),
         },
       ),
     };
@@ -596,6 +603,7 @@ export class RuntimeHost {
           carriers: deps.carriers,
           onExit: deps.onExit,
           onOutput: deps.onOutput,
+          ...(deps.onWorkerRequest !== undefined ? { onWorkerRequest: deps.onWorkerRequest } : {}),
         });
       case "python-process":
         return new PythonRuntime({
@@ -608,6 +616,7 @@ export class RuntimeHost {
           carriers: deps.carriers,
           onExit: deps.onExit,
           onOutput: deps.onOutput,
+          ...(deps.onWorkerRequest !== undefined ? { onWorkerRequest: deps.onWorkerRequest } : {}),
         });
       case "mcp":
         return new McpRuntime({
@@ -620,6 +629,7 @@ export class RuntimeHost {
           carriers: deps.carriers,
           onExit: deps.onExit,
           onOutput: deps.onOutput,
+          ...(deps.onWorkerRequest !== undefined ? { onWorkerRequest: deps.onWorkerRequest } : {}),
         });
       default: {
         const kind: string = ctx.kind;
@@ -651,6 +661,43 @@ export class RuntimeHost {
       operation.reasonCode = reasonCode;
       operation.controller.abort();
     }
+  }
+
+  /**
+   * worker 主动请求桥接：carrier 认证（一次性、未过期、属于该运行实例）→
+   * HostBroker 白名单 API → 结果/错误回写 JSON-RPC 响应（经 json-rpc 层）。
+   * 非法/无 carrier 请求抛 RpcRequestError 明确拒绝。
+   */
+  private handleWorkerRequest(instance: RuntimeInstance, message: JsonRpcWorkerRequest): unknown {
+    const carrier = message.carrier;
+    if (carrier === undefined) {
+      throw new RpcRequestError(JSON_RPC_ERROR_CODES.invalidRequest, "worker 请求缺少平台签发的一次性 carrier，拒绝");
+    }
+    // 身份：carrier 必须属于接收该请求的运行实例（防跨实例/跨插件冒用）
+    if (carrier.pluginId !== instance.pluginId || carrier.runtimeInstanceId !== instance.runtimeInstanceId) {
+      throw new RpcRequestError(
+        JSON_RPC_ERROR_CODES.invalidRequest,
+        `worker 请求 carrier 不属于当前运行实例（${carrier.runtimeInstanceId}），拒绝`,
+      );
+    }
+    // 单次消费：一次性、未过期、绑定 pluginId+runtimeInstanceId+operationId
+    const consumed = this.deps.carriers.consume(carrier);
+    if (!consumed.ok) {
+      throw new RpcRequestError(JSON_RPC_ERROR_CODES.invalidRequest, `worker 请求 carrier 校验失败：${consumed.reason}`);
+    }
+    // HostBroker 白名单调用（内部再次校验身份 + 参数防伪造 + 能力校验）
+    const result = this.deps.broker.call({
+      identity: { pluginId: carrier.pluginId, runtimeInstanceId: carrier.runtimeInstanceId },
+      apiName: message.method,
+      ...(message.params !== undefined ? { args: message.params } : {}),
+    });
+    if (!result.ok) {
+      throw new RpcRequestError(
+        hostRejectToJsonRpcCode(result.code),
+        `Host API ${message.method} 调用被拒绝（${result.code}）：${result.reason}`,
+      );
+    }
+    return result.value;
   }
 
   // ── 可观测性（进程/执行生命周期）─────────────────────────────
@@ -867,5 +914,21 @@ export class RuntimeHost {
         emitTerminal(EXECUTION_TERMINAL_EVENT.interrupted, "interrupted", { reasonCode });
       },
     };
+  }
+}
+
+/** HostBroker 拒绝原因 → JSON-RPC 错误码（能力被拒用实现定义的服务端错误区间 -32000..-32099）。 */
+function hostRejectToJsonRpcCode(code: HostRejectCode): number {
+  switch (code) {
+    case "unknown-api":
+      return JSON_RPC_ERROR_CODES.methodNotFound;
+    case "forged-authority-fields":
+      return JSON_RPC_ERROR_CODES.invalidParams;
+    case "unauthorized-identity":
+      return JSON_RPC_ERROR_CODES.invalidRequest;
+    case "capability-denied":
+      return -32003;
+    case "handler-error":
+      return JSON_RPC_ERROR_CODES.internalError;
   }
 }
