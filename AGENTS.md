@@ -20,7 +20,7 @@
 
 | 文档 | 作用 | 何时读 |
 |---|---|---|
-| `docs/positioning-and-roadmap.md` | **核心理念与开发路线权威**（定位/三层架构/Phase 8-14/差异化） | 必读，理解项目是什么 |
+| `docs/positioning-and-roadmap.md` | **核心理念与开发路线权威**（定位/三层架构/Phase 8-14+/差异化） | 必读，理解项目是什么 |
 | `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/日志 Electron 时机/流程评估） | 必读，理解边界与选型 |
 | `docs/logging-architecture.md` | **Phase 11 日志架构权威**（三通道、trace、持久化、扩展接入、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
 | `docs/architecture.md` | 架构说明（Phase 0-3 平台层技术栈/模块边界/事件协议） | 改平台层时读 |
@@ -32,7 +32,8 @@
 | `plans/phase-10.md` | Phase 10 实施计划、评审修复与验收记录 | 了解历史 |
 | `plans/phase-10.5.md` | Phase 10.5 记忆 Agent 与后台整理计划 | 进入记忆 Agent 阶段时读 |
 | `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已实现并验收） | 接续可观测性工作时读 |
-| `plans/phase-12.md` | Phase 12 通用插件系统计划、实施记录与验收结论（已完成） | 接续插件、技能或 Subagent 工作时读 |
+| `plans/phase-12.md` | Phase 12 通用插件系统计划、实施记录与验收结论（已完成） | 接续插件、Skill 或 Subagent 工作时读 |
+| `plans/phase-13.md` | Phase 13 Skill 系统与 Agent Skills 生态兼容计划（规划中） | 开发或评审 Skill 系统时必读 |
 
 ## 参考仓库
 
@@ -44,9 +45,12 @@
 - **Phase 8 已完成（2026-07-28）**：Agent 模型去枚举化（identity v2，无 `type`）、底色与运行设置分离、旧数据迁移、底色模板、Windows 工作目录选择、独立 Agent 创建/编辑页和新会话创建页。模板只用于初始化，不是 Agent 的持久化依赖。
 - **Phase 9 已完成（2026-07-28 验收，已合并）**：应用层 PathGuard 沙箱系统（能力声明 + 执行边界 + 审计日志），多轮安全审查后合入 `main`。
 - **Phase 10 已完成（2026-08-01 验收，`phase-10-complete`）**：记忆系统底座——openhanako 四段 Markdown 传送带、PI 分支感知 rolling summary、事件索引（FTS5 + CJK n-gram）、`search_memory` 主动回想（RecallEpisode + Agent SSE）、intent-only 记忆工具、封存队列、dirty 恢复与 `/memory` 只读页。
+- **Phase 10.5 已完成（2026-08-03）**：记忆 Agent、sealed batch、retention/activation 强度、proposal + MemoryPolicy 审批、每日/每周整理和 deep-dive。
+- **Phase 11 已完成并验收（2026-08-03）**：Diagnostic/Activity/Audit 三通道、Trace、严格审计生命周期、查询/保留/恢复与 `/logs`。
+- **Phase 12 已完成并验收（2026-08-05）**：通用插件系统、四类 Runtime、10 类扩展点、生态适配、Agent 绑定、权限快照、开发循环和全链路日志。
+- **当前阶段（Phase 13）**：Skill 系统——Agent Skills 标准兼容、Catalog/Bundle/绑定、会话内安装、PI 渐进披露、每 turn 快照和日志闭环。详见 `plans/phase-13.md`。
+- **Phase 14 已定概念边界**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill 的 Subagent 1.0；不聚焦多 Agent 协作。
 - **当前定位已重新明确（2026-07-27）**：从"全能私人助理平台"修正为"承载 agent 完整一生的平台基础设施"。
-- **下一阶段（Phase 10.5）**：记忆 Agent 与后台整理——sealed batch 消化、retention/activation 强度、proposal + MemoryPolicy 审批、每日空闲/每周复核调度、时间线强度 UI。穿插完善结构化日志框架。
-- Phase 8 已移除 `type: work|coding|assistant` 硬枚举；yuan 模板、capabilities、skills、插件与梦境仍属于后续阶段，不在本阶段提前固化。
 
 接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。
 
@@ -68,11 +72,12 @@
 - 多 Agent 身份证 + 底色人设注入 + Token 用量全链路。
 - Phase 8 Agent 基础模型：`identity.json`、`base-color.json`、`settings.json`、底色模板 API、创建/编辑路由与新会话创建页。
 
-下一阶段核心目标（原"非目标"，现已转为核心）：
+下一阶段核心目标：
 
-- 沙箱机制（能力声明 + 执行边界 + 应用层 PathGuard）；
-- 记忆系统（案头/笺/今日记/往事/识见/手艺/梦境）；
-- 结构化日志框架 + 关键行为埋点。
+- Skill Catalog、来源/版本/哈希和 Agent/Bundle 绑定；
+- 会话内搜索、检查、安装和风险确认；
+- PI 原生渐进披露、不可变 turn snapshot 和安全内容读取；
+- Skill 对 Phase 9 Sandbox、Phase 11 Observability、Phase 12 Plugin Skill Bundle 的统一接入。
 
 暂不做（等自我层稳定）：Electron 桌面端、形态特化层（coding/design 专用交互基础设施）、技能自创（手艺高阶）、性格自我演变（风险极高，yuan 作稳定锚点不漂移）。
 

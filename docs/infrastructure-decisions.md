@@ -43,22 +43,24 @@
 
 **不是**。plan 编排是"复杂多步任务"agent 才需要的能力，陪伴朋友/简单对话 agent 不需要。
 
-- **plan 工具**：作为可选技能包提供（让 agent 能规划），不进 core
+- **plan 工具**：作为可选 Skill 提供（让 agent 能规划），不进 core
 - **多步任务执行框架**：agent loop 已有，平台不额外造
-- **多 agent DAG 编排**：才是框架级需求，属于 Phase 13 多 Agent 协作，且只对需要协作的 agent 有意义
+- **临时 Subagent**：Phase 14 提供受控生命周期、上下文委派和结果回传，不等同于 DAG 编排
+- **多 agent DAG 编排**：属于 Phase 15+ 的多 Agent 协作，只对需要协作的 Agent 有意义
 
-**结论**：plan 不进 core 基础设施。平台提供执行框架，plan 作为技能包，复杂编排作为 Phase 13 框架。
+**结论**：plan 不进 core 基础设施。平台提供执行框架，plan 作为 Skill；Phase 14 只做临时 Subagent，复杂团队编排顺延到 Phase 15+。
 
 ## 四、subagent 特化：coding 子智能体与其他子智能体功能不同，怎么特化？
 
-**核心洞察：subagent 本身就是一个 agent**（有自己的 yuan + 技能包 + 工具集）。"特化"就是给 subagent 配不同的技能包，平台不为每种 subagent 写专门代码。
+**核心洞察：Phase 14 的 Subagent 是临时、无长期记忆的受控 Agent Runtime。** 它不是新的持久 Agent 身份，也不继承主 Agent 的底色或长期记忆；“特化”来自创建时显式选择的模型、系统任务、Skill、Plugin、工具和权限。
 
-- coding 的"代码审查子 agent" = 一个带【代码审查技能包】的 agent
-- 文档的"校对子 agent" = 一个带【校对技能包】的 agent
-- 平台只提供：**委派协议（ACP）+ subagent 生命周期管理 + 结果汇总**
-- 具体子 agent 类型 = 技能包预设，由创建者定义
+- coding 的“代码审查子 agent” = 临时 Runtime + 代码审查 Skill + 受控文件工具；
+- 文档的“校对子 agent” = 临时 Runtime + 校对 Skill + 对应文档工具；
+- 平台提供：父子任务契约、生命周期管理、取消/超时、权限快照、日志和结果回传；
+- ACP、channel、常驻 Agent 团队和图编排不纳入 Phase 14，顺延到 Phase 15+；
+- 具体 Subagent 类型由调用方配置，不在平台中硬编码职业枚举。
 
-这完全符合"agent 形态由创建者定义"理念——子 agent 也是 agent，特化靠技能包而非硬编码。落地在 Phase 13。
+这符合“Agent 形态由创建者定义”的理念，同时保持 Phase 14 的基础设施边界：先把单个临时 Subagent 做可靠，再讨论多 Agent 协作。
 
 ## 五、记忆系统选型与 OpenColorful 自己的风格
 

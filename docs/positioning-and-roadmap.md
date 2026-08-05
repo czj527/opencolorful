@@ -112,7 +112,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 6. **插件系统统一扩展点**
    PluginContext + 两级权限（restricted/full-access）+ capabilities 声明。工具/技能/命令/路由/provider/页面/widget 都走插件，避免散乱的扩展点。
 
-## 五、分阶段开发路线（Phase 8-14）
+## 五、分阶段开发路线（Phase 8-14，后续能力顺延）
 
 按"奠基 → 安全 → 核心 → 扩展"的依赖顺序：
 
@@ -147,25 +147,34 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - 日志查询、健康状态和问题诊断接口；
 - **验收**：关键运行链路可追踪，日志不泄露 API Key、Authorization、Cookie 或完整敏感记忆
 
-### Phase 12：插件系统（技能系统后移，具体阶段另行确定）
-- PluginContext + 两级权限 + capabilities 白名单
-- 11 类扩展点（先做工具/技能/命令/provider/路由 5 类，页面/widget/后台任务后续）
-- 插件配置 schema + 拖拽安装
-- 插件市场骨架（本地优先，远程可选）
-- **验收**：第三方插件能贡献工具并被 Agent 调用；restricted 权限生效
+### Phase 12：通用插件系统（已完成，2026-08-05）
+- 原生 Manifest、Protocol、Runtime/Server/UI SDK 与 10 类扩展点；
+- Bundle、MCP、Node、Python 四类运行形态及受控权限快照；
+- OpenClaw/Hermes 来源兼容、Agent 绑定、开发态循环和 `sdk-showcase`；
+- Phase 9 Sandbox 与 Phase 11 Activity/Audit/Trace 全链路接入；
+- **验收**：主会话真实模型工具回路、安装/更新/回滚/卸载、日志与 Web E2E 全部通过，详见 `plans/phase-12.md`。
 
-### Phase 13：多 Agent 协作
-- channel 群聊（多 Agent 共享频道）
-- subagent 委派（Agent 间任务派发，参考 openclaw ACP 协议）
-- 多 Agent 独立记忆/人格/定时任务
-- **验收**：Agent 间能委派任务并汇总结果
+### Phase 13：Skill 系统
+- 兼容 Agent Skills、OpenClaw、Hermes、Claude Code、Codex 与 PI 的 Skill 包；
+- Skill Catalog、来源/版本/哈希、Bundle、Agent 绑定和每 turn 不可变快照；
+- 元数据常驻、正文/支持文件渐进披露，脚本仍走 Phase 9 Sandbox；
+- Agent 可在会话中搜索、检查和安装 Skill；风险安装会话内审批；
+- Agent 可主动学习，但不得无确认持久停用、解绑或迁移自己的 Skill；
+- **验收**：真实 Agent 主会话按需加载 Skill，安装/绑定/风险/日志链路闭环，详见 `plans/phase-13.md`。
 
-### Phase 14：Bridge + 书桌 + 定时任务 + 角色卡
-- Bridge（Telegram/飞书/QQ/微信，参考 hermes-agent 13 平台 gateway）
-- 书桌 desk/ + 笺（异步协作空间）
-- cron 定时任务 + 心跳巡检
-- 角色卡 zip 导入导出（人格 + 头像 + 可选记忆 + skills）
-- **验收**：移动端可远程操作 Agent；定时任务按时触发
+### Phase 14：Subagent 1.0
+- 临时创建、无长期记忆的子 Agent；
+- 可自定义模型、工具、Plugin、Skill 和执行权限；
+- 继承父 Session 的任务上下文与工作目录，但不继承主 Agent 的长期记忆；
+- 结果回传主 Agent，生命周期、工具调用和权限全量接入日志；
+- **不聚焦** channel 群聊、常驻 Agent 团队、ACP 图编排或多 Agent 协作；
+- **验收**：主 Agent 能创建、观察、取消临时 Subagent 并接收结构化结果。
+
+### Phase 15+：后续生活与协作基础设施（未排期）
+- 多 Agent channel/ACP/图编排；
+- Bridge、书桌与笺、cron/心跳、角色卡一生档案；
+- Electron Core Browser 和形态特化工作台；
+- 技能自创、团队运营等高阶能力需重新评估后单独立项。
 
 ## 六、横向参考项目启示
 
@@ -173,10 +182,10 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 |---|---|---|
 | **openhanako** | 全能助理，可组合不分类 | **主参考**，可组合模型（yuan/skills/plugin/bridge）直接借鉴 |
 | oh-my-pi | coding 专精，task subagent 派生其他 | 单场景专精路线的对照（你不走这条） |
-| openclaw | ACP 协议子 agent，拒绝 nested planner | 多 Agent 协作协议可参考（Phase 13） |
+| openclaw | ACP 协议子 agent，拒绝 nested planner | Skill 生态与后续 Subagent/多 Agent 协议参考（Phase 13/14+） |
 | lobehub | 从聊天进化为多 Agent 平台 | 平台化 + marketplace 路径参考（Phase 12） |
 | opencode | Plan/Build 双 agent + git worktree 隔离 | coding 场景的隔离方案参考（Phase 9/11） |
-| hermes-agent | 自我改进闭环 + 13 平台 gateway | 记忆巩固 + Bridge 参考（Phase 10/14） |
+| hermes-agent | 自我改进闭环 + 13 平台 gateway | 记忆巩固、Skill 兼容与后续 Bridge 参考（Phase 10/13/15+） |
 | codex | Guardian 审批 + Execpolicy DSL | 沙箱策略 DSL 参考（Phase 9） |
 
 ## 七、全方位差异化设计（相对 openhanako）
@@ -202,7 +211,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 openclaw 架构原则**：明确拒绝 nested planner（manager-of-managers 嵌套树），坚持扁平协作
 - **借鉴 openclaw harness 机制**：coding 场景 **harness 外部 agent**（codex/copilot）而非自造——集成优于重造，OpenColorful 的 coding skill bundle 可 harness 现成 coding agent
 - **vs openhanako**：openhanako 是 channel + subagent，无协议规范、无图编排、coding 全自造
-- **落地**：Phase 13
+- **落地**：Phase 14 先实现临时 Subagent 1.0；channel、ACP 与图运行时顺延到 Phase 15+
 
 ### 方向 3：沙箱——多后端可插拔 + serverless
 
@@ -223,7 +232,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **借鉴 openclaw Core lean 哲学**：核心精简，能力外置为插件；"如果一个能力还不能做成插件，优先扩展插件 API 而非加 core 行为"
 - **借鉴 openclaw ClawHub + lobehub Skill Store**：独立插件/技能市场 + provenance + 安全审查 + 官方发布者机制
 - **vs openhanako**：openhanako 单一插件模型，memory 硬编码不可替换，无 bundle/code 区分
-- **落地**：Phase 12
+- **落地**：Phase 12（插件）/ Phase 13（Skill）
 
 ### 方向 5：定位升级——私人 AI 团队运营 + 人格温度
 
@@ -234,7 +243,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 - **保留 openhanako 人格温度**：每个 Agent 有 yuan 人格，团队不是冷冰冰的 worker 池，而是有"性格"的成员
 - **借鉴 lobehub Evolve 愿景**：人机共进化
 - **vs openhanako**：openhanako 是"一个有灵魂的助理"；OpenColorful 是"一支有灵魂的 AI 团队"——既有个体人格，又有团队运营
-- **落地**：定位层面，贯穿 Phase 8-14；Phase 13/14 落地团队编排与任务管理
+- **落地**：定位层面长期保留；Phase 14 只落地临时 Subagent，团队编排与任务管理顺延到 Phase 15+
 
 ### 方向 6：工程化优势（保留并强化）
 
@@ -253,7 +262,7 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 | 多Agent协作 | ◐ channel+subagent | ● ACP协议+拒绝nested | ◐ subagent+RPC | ● GraphRuntime | ● ACP+GraphRuntime |
 | 沙箱后端 | ◐ 双层固定 | ● 4后端+三层策略 | ● 6后端含serverless | ○ | ● 多后端可插拔+serverless |
 | 插件模型 | ● 11类(单一) | ● bundle/code二分+memory可替换 | ◐ | ● Market+SkillStore | ● bundle/code二分+市场 |
-| 自我进化 | ○ | ○ 暂不排期 | ● 闭环(技能自创+改进) | ● SelfIteration | ○ 技能系统后移 |
+| 自我进化 | ○ | ○ 暂不排期 | ● 闭环(技能自创+改进) | ● SelfIteration | ○ Phase 13 只做 Skill 基础设施，技能自创仍不排期 |
 | 团队运营 | ○ | ◐ | ○ | ● Operator+TaskManager | ● 团队运营+人格温度 |
 | 人格(yuan) | ● 模板+角色卡 | ○ | ◐ | ◐ | ● yuan模板(主参考) |
 | 多平台Bridge | ● 4平台 | ● 28+平台 | ● 5平台 | ○ | ● 选择性接入 |
@@ -269,17 +278,19 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 | 记忆底座 + 主动回想 | Phase 10 | openhanako ticker + Hermes curator 调度思想 + FTS5 |
 | 记忆 Agent 整理 + 强度 | Phase 10.5 | Hermes curator 后台 fork + provenance + policy approval |
 | 结构化日志 | Phase 11 | 统一 Envelope + 全链路可观测性 |
-| 多 Agent ACP + 图运行时 | Phase 13 | openclaw ACP + lobehub GraphRuntime |
+| Skill 标准兼容 + Bundle + 会话内安装 | Phase 13 | Agent Skills + openhanako + openclaw + hermes |
+| 临时 Subagent 1.0 | Phase 14 | openhanako subagent + openclaw 生命周期思想 |
+| 多 Agent ACP + 图运行时 | Phase 15+ | openclaw ACP + lobehub GraphRuntime |
 | 多后端沙箱 + serverless | Phase 9 | openclaw 4后端 + hermes Modal/Daytona |
 | 插件 bundle/code 二分 | Phase 12 | openclaw 插件双风格 + ClawHub |
-| 团队运营 + 人格 | Phase 13/14 + 定位 | lobehub Operator + openhanako yuan |
+| 团队运营 + 人格 | Phase 15+ + 定位 | lobehub Operator + openhanako yuan |
 | 工程化（doctor/repair/标准） | 贯穿 | openclaw doctor/repair + hermes agentskills.io |
 
 ## 十、立即行动建议
 
-1. **Phase 8 已完成**：身份、底色、运行设置与会话创建地基已建立，详细验收见 `plans/phase-08.md`。
-2. **进入 Phase 9**：优先讨论和实现沙箱机制层（执行边界与 PathGuard），不把职业形态硬编码回 Agent 模型。
-3. **Phase 10 → 10.5 → 11 顺序推进**：先稳定记忆通道，再引入记忆 Agent，最后用日志验证和诊断；技能系统后移，具体阶段另行确定。
+1. **Phase 0-12 已完成并验收**：运行时、Agent 底色、沙箱、记忆、日志和插件基础设施已经建立。
+2. **进入 Phase 13 Skill 系统**：先完成标准兼容、Bundle、会话内安装、不可变快照和日志闭环，详细计划见 `plans/phase-13.md`。
+3. **Phase 14 只做临时 Subagent 1.0**：不提前混入 channel、ACP 图编排或常驻多 Agent 团队；技能自创和多 Agent 协作继续后移。
 
 ---
 
