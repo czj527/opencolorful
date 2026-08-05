@@ -445,6 +445,57 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
     await host.stop(PLUGIN, "shutdown");
   });
 
+  it("P1 旧快照调用新 Runtime 被拒绝 → plugin.execution.rejected 留痕（含 snapshotId），worker 未执行", async () => {
+    const { broker, host, db } = createEnv(PLUGIN, "node-process");
+    await host.start(PLUGIN);
+    const currentInstanceId = host.getInstance(PLUGIN)!.runtimeInstanceId;
+
+    // 旧快照：runtimeInstanceId 故意与当前实例不一致（模拟 turn 中途重启/更新）
+    const staleSnapshot = {
+      version: 1,
+      snapshotId: "snap-stale-1",
+      pluginId: PLUGIN,
+      pluginVersion: "1.0.0",
+      runtimeKind: "node-process",
+      runtimeInstanceId: "runtime-stale-instance",
+      grantRevision: 1,
+      bindingRevision: 1,
+      contributions: ["echo"],
+      createdAt: new Date().toISOString(),
+    };
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "echo",
+      method: "echo",
+      params: { text: "must-not-run" },
+      agentId: "agent-1",
+      sessionId: "session-1",
+      // 快照的实例已与当前不一致：expected 校验触发 fail-closed，snapshot 提供 rejected 事件的 snapshotId
+      expectedRuntimeInstanceId: "runtime-stale-instance",
+      snapshot: staleSnapshot as never,
+    });
+    // fail-closed：拒绝执行
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("runtime-instance-mismatch");
+    }
+
+    // 拒绝留痕：plugin.execution.rejected 事件携带旧快照 snapshotId + 预期/当前实例与稳定 reasonCode
+    const rejectedRows = queryActivity(db, "plugin.execution.rejected");
+    expect(rejectedRows.length).toBe(1);
+    const rejectedPayload = JSON.parse(rejectedRows[0]!.payload_json as string) as {
+      attributes?: Record<string, unknown>;
+    };
+    expect(rejectedPayload.attributes?.snapshotId).toBe("snap-stale-1");
+    expect(rejectedPayload.attributes?.reasonCode).toBe("runtime-instance-mismatch");
+    expect(rejectedPayload.attributes?.expectedRuntimeInstanceId).toBe("runtime-stale-instance");
+    expect(rejectedPayload.attributes?.currentRuntimeInstanceId).toBe(currentInstanceId);
+    // worker 未执行：无 execution.started（进入 Runtime 的调用为零）
+    expect(queryActivity(db, "plugin.execution.started")).toHaveLength(0);
+    await host.stop(PLUGIN, "shutdown");
+  });
+
   it("invoke 不带上下文 → broker API 收到 undefined（行为与修复前一致）", async () => {
     const { broker, host } = createEnv(PLUGIN, "node-process");
     broker.registerApi({

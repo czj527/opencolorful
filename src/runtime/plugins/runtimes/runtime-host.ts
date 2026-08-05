@@ -342,8 +342,16 @@ export class RuntimeHost {
       return { ok: false, code: "not-running", message: `插件 ${input.pluginId} 运行实例状态为 ${instance.status}` };
     }
     // P0-2：快照冻结的实例/版本与当前实例不一致（turn 中途重启/更新）→ fail-closed，
-    // 不允许旧 turn 在新实现上继续执行（phase-12.md §十一"不能中途换工具实现"）
+    // 不允许旧 turn 在新实现上继续执行（phase-12.md §十一"不能中途换工具实现"）。
+    // P1（第五轮）：拒绝必须留痕——plugin.execution.rejected 点事件携带旧快照
+    // snapshotId/预期版本/当前版本/稳定 reasonCode（诊断更新竞态与旧 turn 调用的关键证据）
     if (input.expectedRuntimeInstanceId !== undefined && instance.runtimeInstanceId !== input.expectedRuntimeInstanceId) {
+      this.recordExecutionRejected({
+        input,
+        instance,
+        reasonCode: "runtime-instance-mismatch",
+        message: `插件 ${input.pluginId} 运行实例已变更（快照 ${input.expectedRuntimeInstanceId} ≠ 当前 ${instance.runtimeInstanceId}）`,
+      });
       return {
         ok: false,
         code: "runtime-instance-mismatch",
@@ -351,6 +359,12 @@ export class RuntimeHost {
       };
     }
     if (input.expectedPluginVersion !== undefined && instance.version !== input.expectedPluginVersion) {
+      this.recordExecutionRejected({
+        input,
+        instance,
+        reasonCode: "runtime-version-mismatch",
+        message: `插件 ${input.pluginId} 版本已变更（快照 ${input.expectedPluginVersion} ≠ 当前 ${instance.version}）`,
+      });
       return {
         ok: false,
         code: "runtime-version-mismatch",
@@ -748,6 +762,54 @@ export class RuntimeHost {
       );
     }
     return result.value;
+  }
+
+  /**
+   * 执行被安全拒绝的证据（P1 第五轮）：旧快照调用新 Runtime（实例/版本不匹配）时，
+   * 在 fail-closed 返回前记录 `plugin.execution.rejected` 点事件——携带旧快照
+   * snapshotId、预期版本、当前版本与稳定 reasonCode，供诊断插件更新竞态/旧 turn
+   * 调用（§十一"每次工具调用记录实际插件版本和 snapshot id"）。
+   */
+  private recordExecutionRejected(options: {
+    readonly input: RuntimeInvokeCall;
+    readonly instance: RuntimeInstance;
+    readonly reasonCode: "runtime-instance-mismatch" | "runtime-version-mismatch";
+    readonly message: string;
+  }): void {
+    const { input, instance, reasonCode, message } = options;
+    const trace = input.trace ?? instrument.currentTrace() ?? {
+      traceId: instrument.newTraceId(),
+      spanId: instrument.newSpanId(),
+    };
+    instrument.activity({
+      eventName: "plugin.execution.rejected",
+      // point 事件（与 plugin.sandbox.denied 同语义）：不带 status，reasonCode 在 attributes
+      operationId: `exec-rejected-${crypto.randomUUID()}`,
+      actor: { kind: "plugin", id: input.pluginId },
+      executor: { kind: "service", id: "runtime-host" },
+      target: { kind: "plugin", id: input.pluginId },
+      scope: {
+        pluginId: input.pluginId,
+        ...(input.agentId !== undefined ? { ownerAgentId: input.agentId } : {}),
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+      },
+      trace,
+      payload: {
+        summaryCode: "plugin_execution_rejected",
+        attributes: {
+          pluginId: input.pluginId,
+          contributionKind: input.contributionKind,
+          contributionId: input.contributionId,
+          reasonCode,
+          snapshotId: input.snapshot?.snapshotId ?? null,
+          expectedRuntimeInstanceId: input.expectedRuntimeInstanceId ?? null,
+          currentRuntimeInstanceId: instance.runtimeInstanceId,
+          expectedVersion: input.expectedPluginVersion ?? null,
+          currentVersion: instance.version,
+          detail: message.slice(0, 300),
+        },
+      },
+    });
   }
 
   // ── 可观测性（进程/执行生命周期）─────────────────────────────

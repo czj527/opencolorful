@@ -53,6 +53,9 @@ export const pluginActivityEntries: readonly EventCatalogEntry[] = [
   entry({ eventName: "plugin.execution.cancelled", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "terminal", terminalStatuses: ["cancelled"], ...routine }),
   entry({ eventName: "plugin.execution.timed_out", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "terminal", terminalStatuses: ["failed"], ...routine }),
   entry({ eventName: "plugin.execution.interrupted", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "terminal", terminalStatuses: ["interrupted"], ...routine }),
+  // 执行被安全拒绝（旧快照调用新 Runtime 等，未进入 worker）——安全证据，notable；
+  // payload.attributes：snapshotId（旧快照）/ expectedVersion / currentVersion / reasonCode
+  entry({ eventName: "plugin.execution.rejected", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "warn", lifecycleRole: "point", ...notable }),
 
   // ── 权限（责任证据，notable）──
   entry({ eventName: "plugin.permission.requested", eventVersion: 1, channel: "activity", category: "plugin", defaultLevel: "info", lifecycleRole: "point", ...notable }),

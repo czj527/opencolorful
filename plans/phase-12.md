@@ -1367,6 +1367,14 @@ Phase 12 专项门：
 5. /logs 的 ?plugin= 预筛选参数为 best-effort（/logs 页未解析，入口已提供）。
 6. MCP 来源 sourceType 标记 supported:false（MCP runtime 已实现，来源直装接线留待后续）。
 
+**T16 修复轮（2026-08-05，第五轮复审：P1×1 日志闭环）**——复审确认 T15 四项全部通过，仅剩旧快照安全拒绝无日志，本轮修复：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P1 | Runtime mismatch（实例/版本不匹配）在创建 operation/lifecycle 前直接返回 → 旧快照的安全拒绝无任何日志（snapshotId 不可追踪，诊断更新竞态/旧 turn 调用缺证据） | 注册 `plugin.execution.rejected` **点事件**（catalog/plugin-events.ts，warn/notable，payload attributes：snapshotId/expectedRuntimeInstanceId/currentRuntimeInstanceId/expectedVersion/currentVersion/reasonCode/contributionId）；`RuntimeHost.recordExecutionRejected` 在 fail-closed 返回前记录（`runtime-instance-mismatch`/`runtime-version-mismatch` 稳定 reasonCode）；回归测试：旧快照 invoke → mismatch + DB 存在携带原 snapshotId 的 rejected 事件 + `plugin.execution.started` 为零（worker 未执行） |
+
+**验证**：T16 针对性测试（plugin-runtime-host 30（含 rejected 留痕断言）、observability-plugin-catalog 10（事件目录含新注册））+ 全量质量门复跑（vitest 113/1319、web 375/375、web build、tsc build、imports、protocol、sdk、e2e 56/56）。
+
 ### 最终验收结论
 
 待用户（创建者）审查 `phase-12-plugin-system` 分支后决定是否合并到 main。自动化质量门全部通过；真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）可作为人工验收步骤执行。
