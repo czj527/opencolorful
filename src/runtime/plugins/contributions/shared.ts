@@ -218,6 +218,9 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
   );
   // 领域写入是否已成功返回：外部副作用可能已生效，审计事务失败时需要补偿
   let writeCommitted = false;
+  // P1-4 可验证补偿：失败终态记录补偿结果（计划 §17.3"可验证补偿和终态"）——
+  // 调用方/审计查询可判定"写入是否停留在变更后状态"，不掩盖账本事实
+  let compensation: "not-applicable" | "rolled-back" | "rollback-failed" | "uncompensated" = "not-applicable";
   try {
     const { result } = audit.runAuditedTransaction(
       {
@@ -238,11 +241,13 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
     return result;
   } catch (error) {
     // 领域写入已生效但审计事务失败：先 best-effort 补偿外部副作用，
-    // 再补 failed 终态；failed 也写不进去时保留原错误
+    // 再补 failed 终态（带补偿结果）；failed 也写不进去时保留原错误
     if (writeCommitted && options.rollback !== undefined) {
       try {
         options.rollback();
+        compensation = "rolled-back";
       } catch (rollbackError) {
+        compensation = "rollback-failed";
         instrument.warn(
           "plugin.audit.rollback_failed",
           `${options.action} 审计失败，领域补偿未生效（数据可能停留在变更后状态）`,
@@ -252,6 +257,9 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
           },
         );
       }
+    } else if (writeCommitted) {
+      // 写入已生效但未提供补偿钩子：终态如实标记未补偿
+      compensation = "uncompensated";
     }
     try {
       audit.appendStrict({
@@ -259,6 +267,7 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
         payload: {
           ...basePayload("denied"),
           reasonCode: "write_failed",
+          compensation,
         },
         actor,
         executor,

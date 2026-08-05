@@ -217,7 +217,9 @@ export class SessionRuntime {
   /**
    * P0-2 turn 冻结：对每个插件工具按 snapshotFactory 冻结授权/绑定状态，
    * 写入 tool.turnContext.current（invoke 闭包读取后传给 ToolService）。
-   * 无 snapshotFactory 或冻结失败时保持 undefined（调用方按实时状态执行）。
+   * P1-2：冻结失败（factory 抛错或返回 error）时写入 { error }——invoke 侧
+   * fail-closed 拒绝执行，绝不静默降级为实时权限；无 snapshotFactory（未接入
+   * 插件系统）时不设置（调用方按实时状态执行，此时也没有插件工具注入）。
    */
   private beginTurn(): void {
     if (this.snapshotFactory === undefined) {
@@ -229,8 +231,12 @@ export class SessionRuntime {
       }
       try {
         tool.turnContext.current = this.snapshotFactory(tool.pluginId, this.agentId ?? "");
-      } catch {
-        tool.turnContext.current = undefined;
+      } catch (error) {
+        tool.turnContext.current = {
+          snapshot: undefined,
+          state: undefined,
+          error: error instanceof Error ? error.message.slice(0, 400) : "插件快照冻结失败",
+        };
       }
     }
   }

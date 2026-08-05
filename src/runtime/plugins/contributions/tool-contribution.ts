@@ -63,6 +63,7 @@ export type ToolInvokeResult =
         | "denied"
         | "invalid-output"
         | "not-running"
+        | "runtime-mismatch"
         | "runtime-error";
       readonly message: string;
       readonly deniedBy?: string;
@@ -199,6 +200,9 @@ export class ToolService {
     }
 
     // 统一经 RuntimeHost.invoke：自动产生 plugin.execution.*（contributionKind=tool）
+    // P0-2：快照冻结的实例/版本作为期望值传递——实例重启/更新后旧 turn 的
+    // 调用被 RuntimeHost fail-closed 拒绝（不能中途换工具实现）；
+    // P1-1：snapshot/state 随 operation 绑定，worker 嵌套 Host 请求复用冻结权限
     const result = await this.deps.runtimeHost.invoke({
       pluginId,
       contributionKind: "tool",
@@ -206,6 +210,14 @@ export class ToolService {
       method: contributionId,
       params: input.params,
       agentId,
+      ...(input.snapshot !== undefined
+        ? {
+            expectedRuntimeInstanceId: input.snapshot.runtimeInstanceId,
+            expectedPluginVersion: input.snapshot.pluginVersion,
+            snapshot: input.snapshot,
+          }
+        : {}),
+      ...(input.state !== undefined ? { state: input.state } : {}),
       ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
       ...(input.trace !== undefined ? { trace: input.trace } : {}),
       ...(input.signal !== undefined ? { signal: input.signal } : {}),
@@ -213,7 +225,12 @@ export class ToolService {
     if (!result.ok) {
       return {
         ok: false,
-        code: result.code === "not-running" ? "not-running" : "runtime-error",
+        code:
+          result.code === "not-running"
+            ? "not-running"
+            : result.code === "runtime-instance-mismatch" || result.code === "runtime-version-mismatch"
+              ? "runtime-mismatch"
+              : "runtime-error",
         message: result.message.slice(0, 400),
       };
     }

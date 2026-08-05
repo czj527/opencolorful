@@ -63,10 +63,15 @@ export interface PluginSessionTool {
   invoke(params: unknown, signal?: AbortSignal): Promise<PluginSessionToolInvokeResult>;
 }
 
-/** turn 级冻结的授权/绑定状态（in-flight turn 内工具调用以它为准） */
+/**
+ * turn 级冻结的授权/绑定状态（in-flight turn 内工具调用以它为准）。
+ * P1-2：冻结失败时携带 error——invoke 必须 fail-closed（拒绝执行），
+ * 不允许静默降级为实时权限（权限边界不容许 fail-open）。
+ */
 export interface PluginToolTurnContext {
   readonly snapshot: unknown;
   readonly state: unknown;
+  readonly error?: string;
 }
 
 export type PluginSessionToolInvokeResult =

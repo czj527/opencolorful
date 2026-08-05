@@ -76,6 +76,11 @@ rl.on("line", (line) => {
     const rid = "w-" + Math.random().toString(16).slice(2, 10);
     pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
     send({ jsonrpc: "2.0", id: rid, method: "host.echo-context", params: {}, carrier: msg.carrier });
+  } else if (msg.method === "ask-host-frozen") {
+    // 嵌套 Host 请求：验证 operation 绑定的冻结 snapshot/state 传给 broker API
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.echo-frozen-context", params: {}, carrier: msg.carrier });
   } else if (msg.method === "ask-host-forged-context") {
     // 篡改 carrier 的 Agent/Session 上下文：token 绑定校验应拒绝
     const rid = "w-" + Math.random().toString(16).slice(2, 10);
@@ -384,6 +389,54 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
     if (result.ok) {
       // carrier 携带的 Agent/Session 上下文经 handleWorkerRequest 传给 broker.call
       expect(result.result).toEqual({ host: { agentId: "agent-1", sessionId: "session-1" } });
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("P1-1 invoke 携带冻结 snapshot/state → worker 嵌套 Host API 收到同一冻结视图", async () => {
+    const { broker, host } = createEnv(PLUGIN, "node-process");
+    // 注册回显冻结上下文的 broker API（验证 broker.call 收到的 snapshot/state）
+    broker.registerApi({
+      name: "host.echo-frozen-context",
+      description: "回显当前调用的冻结 snapshot/state（测试专用）",
+      handler: (ctx) => ({
+        snapshotId: ctx.snapshot?.snapshotId ?? null,
+        snapshotPlugin: ctx.snapshot?.pluginId ?? null,
+        stateFrozen: ctx.state !== undefined,
+      }),
+    });
+    await host.start(PLUGIN);
+    const instanceId = host.getInstance(PLUGIN)!.runtimeInstanceId;
+    // 构造 in-flight turn 冻结快照（与当前实例一致，绕过实例一致性校验）
+    const snapshot = {
+      version: 1,
+      snapshotId: "snap-p1-1",
+      pluginId: PLUGIN,
+      pluginVersion: "1.0.0",
+      runtimeKind: "node-process",
+      runtimeInstanceId: instanceId,
+      grantRevision: 1,
+      bindingRevision: 1,
+      contributions: ["echo"],
+      createdAt: new Date().toISOString(),
+    };
+    const state = { grants: [], binding: null };
+
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-frozen",
+      method: "ask-host-frozen",
+      agentId: "agent-1",
+      sessionId: "session-1",
+      snapshot: snapshot as never,
+      state: state as never,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // operation 绑定的冻结快照经 handleWorkerRequest 传给 broker.call：
+      // 嵌套 Host 请求与工具入口同一冻结授权视图（非实时权限）
+      expect(result.result).toEqual({ host: { snapshotId: "snap-p1-1", snapshotPlugin: PLUGIN, stateFrozen: true } });
     }
     await host.stop(PLUGIN, "shutdown");
   });

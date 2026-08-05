@@ -1286,6 +1286,19 @@ Phase 12 专项门：
 
 **验证**：T13 针对性测试（plugin-main-session 2、file-secret-store 18、plugin-config-secret 17、plugin-runtime-host/json-rpc/node、logs 16 等）+ 全量质量门复跑（vitest、web、e2e），见”最终验收结论”。
 
+**T14 修复轮（2026-08-05，第三轮复审：P0×2 + P1×4）**——复审确认工程稳定但不可变执行快照契约存在两个可复现 P0（空列表语义冲突、实例未冻结）与四个 P1，本轮全部修复：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P0-1 | 绑定空列表 = "允许全部"，但快照原样冻结空数组，`assertContributionInSnapshot` includes 校验拒绝所有 contribution（默认绑定下主会话插件工具全部不可用） | `ExecutionSnapshotService.create` 冻结时展开：空列表 → 插件当前登记的全部贡献 id（`listContributionIds` 注入，PluginFacade 组合根接线）；协议注释明确语义；回归测试验证展开集 = 登记贡献集 + 真实 invoke 成功 |
+| P0-2 | ToolService.invoke 不传快照的 runtimeInstanceId/pluginVersion，RuntimeHost 始终取当前实例 → 旧快照可调用重启后的新 Runtime（工具实现未冻结，违反 §十一"不能中途换工具实现"） | `RuntimeInvokeCall` 加 `expectedRuntimeInstanceId/expectedPluginVersion`；ToolService 从快照透传；RuntimeHost 实例不一致 fail-closed 拒绝（`runtime-instance-mismatch`/`runtime-version-mismatch`，经 ToolService 映射为 `runtime-mismatch`） |
+| P1-1 | worker 嵌套 Host API（secret/config/…）只恢复 agentId/sessionId，不恢复 operation 绑定的冻结 snapshot/state → 嵌套调用读实时权限 | invoke 把 snapshot/state 存入 operation 记录；handleWorkerRequest 消费 carrier 后从 operation 取回传给 `broker.call`；`HostCallContext` 补 `state` 字段（ctx 构造同步）；host-api 的 secret.read/attachment.validate handler 透传 ctx.state；集成测试断言 worker 嵌套 API 收到同一冻结视图 |
+| P1-2 | 快照冻结失败被吞成 undefined → 静默降级实时权限（fail-open） | `PluginToolTurnContext` 加 `error` 字段；`SessionRuntime.beginTurn` 冻结失败写 `{ error }`；`buildPluginTurnSnapshotFactory` 同样返回 `{ error }`；invoke 闭包检测 error → fail-closed 拒绝（`snapshot-error`），绝不走实时权限 |
+| P1-3 | 新增主会话测试复制路由解析逻辑（绕开 messages 路由/SessionRuntime.beginTurn），工具结果断言在 `_handle` 缺失时跳过 | 生产接线提取为模块级导出 `buildPluginSessionTools` / `buildPluginTurnSnapshotFactory`（测试直接复用，不再复制）；测试改用生产函数 + **无条件 invoke 结果断言**（不再依赖 `_handle` 内部结构）+ 新增 HTTP 生产链冒烟（createServerApp + messages 路由 faux 分支：ensureRuntime → 工具注入 → beginTurn 每 turn 冻结全路径执行）+ P0-1/P0-2/P1-2 回归场景 |
+| P1-4 | rollback 失败只 warn，failed 终态固定 `write_failed` 无补偿结果（§17.3"可验证补偿和终态"不满足） | `runStrictAuditLifecycle` 收集补偿结果，failed 终态 payload 加 `compensation` 字段（`not-applicable`/`rolled-back`/`rollback-failed`/`uncompensated`）；`AuditPayloadSchema`/`AuditPayload` 契约同步；4 个补偿场景测试 |
+
+**验证**：T14 针对性测试（plugin-main-session 6（含 HTTP 生产链冒烟）、plugin-runtime-host 29（含 P1-1 冻结视图）、plugin-config-secret 19（含 compensation 4 场景））+ 全量质量门复跑（vitest 113/1315、web 375/375、web build、tsc build、imports、protocol 构建）。
+
 ### 最终验收结论
 
 自动化质量门全部通过（T1-T10 与 T11/T12/T13 修复轮）；两轮评审阻断项均已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）作为人工验收步骤；主会话工具回路已有集成测试闭环（faux 模型驱动 tool_call → worker 执行），偏差 #7 已移除。

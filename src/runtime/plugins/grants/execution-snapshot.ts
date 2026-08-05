@@ -32,6 +32,12 @@ export interface ResolveState {
 export interface ExecutionSnapshotDeps {
   readonly bindings: PluginBindingStore;
   readonly grants: PluginGrantStore;
+  /**
+   * 解析插件当前全部登记 contribution id（P0-1：绑定空列表 = "允许全部"，
+   * 冻结时必须展开为冻结时刻的实际贡献集合，否则快照的 includes 校验
+   * 会拒绝所有 contribution）。未提供时按空集合处理（fail-closed）。
+   */
+  readonly listContributionIds?: (pluginId: string) => readonly string[];
   readonly now?: () => Date;
   readonly snapshotIdFactory?: () => string;
 }
@@ -68,6 +74,13 @@ export class ExecutionSnapshotService {
       throw new Error(`插件 ${pluginId} 尚无任何授权，无法创建执行快照`);
     }
     const grants = this.deps.grants.list(pluginId);
+    // P0-1：绑定空列表 = "允许全部"（binding-service 契约），冻结时展开为
+    // 当前登记贡献集合——快照是 turn 开始时刻的冻结视图，后续新增贡献不在
+    // 本 turn 生效；展开失败（无解析源）按空集合处理（fail-closed：宁缺毋滥）。
+    const contributions =
+      binding.contributions.length > 0
+        ? [...binding.contributions]
+        : [...(this.deps.listContributionIds?.(pluginId) ?? [])];
 
     const snapshot: PluginExecutionSnapshot = {
       version: PLUGIN_EXECUTION_SNAPSHOT_VERSION,
@@ -78,7 +91,7 @@ export class ExecutionSnapshotService {
       runtimeInstanceId,
       grantRevision,
       bindingRevision: binding.revision,
-      contributions: [...binding.contributions],
+      contributions,
       createdAt: this.now().toISOString(),
     };
 

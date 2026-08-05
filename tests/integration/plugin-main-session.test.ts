@@ -11,6 +11,15 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PluginFacade } from "../../src/platform/plugin-facade.js";
 import { createPiAgentSession, createInMemorySession, type PluginSessionTool } from "../../src/pi-sdk/index.js";
+import { SessionService } from "../../src/runtime/session-service.js";
+import { PromptService } from "../../src/runtime/prompt-service.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
+import { createServerApp } from "../../src/server/app.js";
+// P1-3：生产接线（messages 路由同款实现，测试直接复用，不再复制逻辑）
+import {
+  buildPluginSessionTools,
+  buildPluginTurnSnapshotFactory,
+} from "../../src/server/routes/messages.js";
 import { SHOWCASE_SOURCE_DIR } from "./plugin-main-session.fixture.js";
 
 const temporaryDirectories: string[] = [];
@@ -29,6 +38,14 @@ function makeFixture() {
   return { dir, paths, database, audit };
 }
 
+async function installShowcase(facade: PluginFacade): Promise<void> {
+  await facade.install(
+    { sourceType: "local", ref: SHOWCASE_SOURCE_DIR },
+    [{ pluginId: "example.sdk-showcase", capability: "tool.register", decision: "allowed" as const }],
+  );
+  await facade.enable("example.sdk-showcase");
+}
+
 afterEach(() => {
   for (const db of openDatabases.splice(0)) {
     try { db.close(); } catch { /* ignore */ }
@@ -43,76 +60,7 @@ afterEach(() => {
   }
 });
 
-/** 与 messages 路由同逻辑：按 Agent enabled 绑定过滤工具并构造 PluginSessionTool */
-function resolvePluginTools(facade: PluginFacade, agentId: string, sessionId: string): readonly PluginSessionTool[] {
-  const bindings = facade.listAgentBindings(agentId).filter((binding) => binding.enabled);
-  if (bindings.length === 0) {
-    return [];
-  }
-  const bound = new Map<string, readonly string[] | undefined>();
-  for (const binding of bindings) {
-    bound.set(binding.pluginId, binding.contributions.length > 0 ? binding.contributions : undefined);
-  }
-  return facade.hostApi.tools
-    .listTools()
-    .filter((tool) => {
-      // P0-2：未绑定插件的工具绝不注入（has 区分"未绑定"与"绑定但允许全部"）
-      if (!bound.has(tool.pluginId)) {
-        return false;
-      }
-      const allowed = bound.get(tool.pluginId);
-      return allowed === undefined || allowed.includes(tool.contributionId);
-    })
-    .map((descriptor) => {
-      const turnContext: { current: import("../../src/pi-sdk/index.js").PluginToolTurnContext | undefined } = { current: undefined };
-      return {
-        qualifiedName: descriptor.qualifiedName,
-        pluginId: descriptor.pluginId,
-        name: descriptor.name,
-        ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
-        ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
-        turnContext,
-        invoke: async (params: unknown) => {
-          const frozen = turnContext.current;
-          const result = await facade.hostApi.tools.invoke({
-            pluginId: descriptor.pluginId,
-            contributionId: descriptor.contributionId,
-            params,
-            agentId,
-            sessionId,
-            ...(frozen?.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../src/contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
-            ...(frozen?.state !== undefined ? { state: frozen.state as import("../../src/runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
-          });
-          return result.ok
-            ? { ok: true as const, result: result.result }
-            : { ok: false as const, code: result.code, message: result.message };
-        },
-      };
-    });
-}
-
-/** 与 messages 路由同逻辑：turn 快照工厂（ExecutionSnapshotService.create） */
-function pluginSnapshotFactory(facade: PluginFacade) {
-  return (pluginId: string, agentId: string): import("../../src/pi-sdk/index.js").PluginToolTurnContext | undefined => {
-    const active = facade.get(pluginId);
-    if (active === undefined) {
-      return undefined;
-    }
-    const instance = facade.runtimeHost.getInstance(pluginId);
-    if (instance === undefined) {
-      return undefined;
-    }
-    return facade.snapshots.create({
-      pluginId,
-      pluginVersion: active.version,
-      runtimeKind: instance.kind,
-      runtimeInstanceId: instance.runtimeInstanceId,
-      agentId,
-    });
-  };
-}
-
-describe("Phase 12 主会话插件工具（P0-1/P0-2 闭环）", () => {
+describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线）", () => {
   it("绑定过滤：未绑定插件（即使已激活）的工具不注入", async () => {
     const fixture = makeFixture();
     const facade = new PluginFacade({
@@ -121,21 +69,115 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2 闭环）", () => {
       audit: fixture.audit,
       hostVersion: "0.1.0",
     });
-    // 安装两个插件并启用（都激活）；只绑定 agent-a
-    const showcase1 = path.join(SHOWCASE_SOURCE_DIR);
-    await facade.install(
-      { sourceType: "local", ref: showcase1 },
-      [{ pluginId: "example.sdk-showcase", capability: "tool.register", decision: "allowed" as const }],
-    );
-    await facade.enable("example.sdk-showcase");
+    await installShowcase(facade);
     facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
 
-    const tools = resolvePluginTools(facade, "agent-a", "s1");
+    const tools = buildPluginSessionTools(facade, "agent-a", "s1");
     expect(tools.length).toBeGreaterThan(0);
     expect(tools.every((tool) => tool.pluginId === "example.sdk-showcase")).toBe(true);
     expect(tools.map((tool) => tool.qualifiedName)).toContain("example.sdk-showcase.echo");
     // 未绑定 Agent 的会话不注入任何工具
-    expect(resolvePluginTools(facade, "agent-other", "s2")).toHaveLength(0);
+    expect(buildPluginSessionTools(facade, "agent-other", "s2")).toHaveLength(0);
+  });
+
+  it("P0-1 空列表绑定（允许全部）→ 快照展开当前贡献集，工具真实可调", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    // 空数组 = 允许全部（Web 绑定接口缺省语义）
+    facade.bind("agent-a", "example.sdk-showcase", []);
+    const tools = buildPluginSessionTools(facade, "agent-a", "s1");
+    // 生产注入：允许全部 → echo 与 delete-file 都注入
+    expect(tools.map((tool) => tool.qualifiedName).sort()).toEqual([
+      "example.sdk-showcase.delete-file",
+      "example.sdk-showcase.echo",
+    ]);
+
+    // 生产冻结：空列表绑定 → 快照展开为冻结时刻登记的贡献集合（修复前为空数组，includes 校验拒绝一切）
+    const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
+    const frozen = snapshotFactory("example.sdk-showcase", "agent-a");
+    expect(frozen).toBeDefined();
+    expect(frozen!.snapshot).toBeDefined();
+    const snapshot = frozen!.snapshot as { contributions: readonly string[] };
+    // 快照不可变（deepFreeze）：展开的贡献集 = 该插件全部登记贡献（"允许全部"语义）
+    expect(snapshot.contributions).toContain("echo");
+    expect(snapshot.contributions).toContain("delete-file");
+    expect([...snapshot.contributions].sort()).toEqual(
+      facade.hostApi.contributions.list("example.sdk-showcase").map((c) => c.id).sort(),
+    );
+
+    // 生产 invoke：带冻结快照的调用真实执行（worker echo）
+    const tool = tools.find((t) => t.qualifiedName === "example.sdk-showcase.echo")!;
+    tool.turnContext!.current = frozen;
+    const result = await tool.invoke({ text: "allow-all-works" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result).toEqual({ echoed: "allow-all-works" });
+    }
+  });
+
+  it("P0-2 旧快照调用重启后的新 Runtime → fail-closed 拒绝（不换工具实现）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
+    expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+    const oldInstanceId = facade.runtimeHost.getInstance("example.sdk-showcase")!.runtimeInstanceId;
+
+    // turn 开始冻结
+    const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
+    const frozen = snapshotFactory("example.sdk-showcase", "agent-a")!;
+    const tools = buildPluginSessionTools(facade, "agent-a", "s1");
+    const tool = tools.find((t) => t.qualifiedName === "example.sdk-showcase.echo")!;
+    tool.turnContext!.current = frozen;
+
+    // turn 中途插件重启：handoff 停止旧实例 → start 产生新 runtimeInstanceId
+    await facade.runtimeHost.handoff("example.sdk-showcase", "plugin_updated");
+    await facade.runtimeHost.start("example.sdk-showcase");
+    const newInstanceId = facade.runtimeHost.getInstance("example.sdk-showcase")!.runtimeInstanceId;
+    expect(newInstanceId).not.toBe(oldInstanceId);
+
+    // 带旧快照调用：RuntimeHost 校验 expectedRuntimeInstanceId 不一致 → fail-closed
+    const result = await tool.invoke({ text: "old-turn" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("runtime-mismatch");
+      expect(result.message).toContain("运行实例已变更");
+    }
+  });
+
+  it("P1-2 快照冻结失败 → 工具调用 fail-closed（不静默降级实时权限）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
+    const tools = buildPluginSessionTools(facade, "agent-a", "s1");
+    const tool = tools.find((t) => t.qualifiedName === "example.sdk-showcase.echo")!;
+
+    // 冻结失败（如插件中途卸载导致 create 抛错）：生产 factory 返回 { error }
+    // （SessionRuntime.beginTurn 生产路径对抛错同样包装为 { error }）
+    tool.turnContext!.current = { snapshot: undefined, state: undefined, error: "插件未绑定或已禁用，无法创建执行快照" };
+    const result = await tool.invoke({ text: "must-not-run" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("snapshot-error");
+      expect(result.message).toContain("快照冻结失败");
+    }
   });
 
   it("PI customTools 驱动：模型 tool_call → PluginSessionTool.invoke → ToolService → worker 执行", async () => {
@@ -146,21 +188,16 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2 闭环）", () => {
       audit: fixture.audit,
       hostVersion: "0.1.0",
     });
-    // 安装 Showcase（node-process worker 提供 echo 真实实现）
-    await facade.install(
-      { sourceType: "local", ref: SHOWCASE_SOURCE_DIR },
-      [{ pluginId: "example.sdk-showcase", capability: "tool.register", decision: "allowed" as const }],
-    );
-    await facade.enable("example.sdk-showcase");
+    await installShowcase(facade);
     facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
     expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
 
     const sessionId = "main-session-1";
-    const pluginTools = resolvePluginTools(facade, "agent-a", sessionId);
+    const pluginTools = buildPluginSessionTools(facade, "agent-a", sessionId);
     expect(pluginTools).toHaveLength(1);
 
-    // turn 冻结（等价 SessionRuntime.beginTurn）：snapshotFactory 写入 turnContext
-    const snapshotFactory = pluginSnapshotFactory(facade);
+    // turn 冻结（等价 SessionRuntime.beginTurn）：生产 snapshotFactory 写入 turnContext
+    const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
     const frozen = snapshotFactory("example.sdk-showcase", "agent-a");
     expect(frozen).toBeDefined();
     pluginTools[0]!.turnContext!.current = frozen;
@@ -219,17 +256,64 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2 闭环）", () => {
     const snapshot = frozenSnapshot as { pluginId: string; pluginVersion: string; grantRevision: number };
     expect(snapshot.pluginId).toBe("example.sdk-showcase");
     expect(snapshot.grantRevision).toBeGreaterThanOrEqual(1);
-    // 工具执行结果经 ToolService → RuntimeHost → worker（node-process）真实产生并回写会话
-    const handle = (agent as unknown as { _handle: unknown })._handle;
-    const toolCalls = handle !== undefined
-      ? (handle as { messageEntries: Array<{ toolCalls?: Array<{ toolName: string; status: string; result?: string }> }> }).messageEntries.flatMap((e) => e.toolCalls ?? [])
-      : [];
-    const executed = toolCalls.find((t) => t.toolName === "example.sdk-showcase.echo");
-    if (executed !== undefined) {
-      expect(executed.status).toBe("completed");
-      expect(executed.result).toContain("hello-main-session");
+    // worker 真实执行结果（无条件断言，不依赖内部 _handle 结构）
+    const echoed = calls[0]!.params as { text: string };
+    const toolResult = await tool.invoke({ text: echoed.text });
+    expect(toolResult.ok).toBe(true);
+    if (toolResult.ok) {
+      expect(toolResult.result).toEqual({ echoed: "hello-main-session" });
     }
-    // 工具执行结果经 ToolService → RuntimeHost → worker（node-process）真实产生
+    // 会话内模型可见的工具执行记录存在（工具结果回写会话）
+    const handle = (agent as unknown as { _handle: unknown })._handle;
+    if (handle !== undefined) {
+      const toolCalls = (handle as { messageEntries: Array<{ toolCalls?: Array<{ toolName: string; status: string }> }> }).messageEntries.flatMap((e) => e.toolCalls ?? []);
+      const executed = toolCalls.find((t) => t.toolName === "example.sdk-showcase.echo");
+      if (executed !== undefined) {
+        expect(executed.status).toBe("completed");
+      }
+    }
+    expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+  });
+
+  it("HTTP 生产链冒烟：messages 路由 → ensureRuntime → 绑定插件会话正常 turn", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
+
+    const index = new SessionIndex(fixture.database);
+    const sessionService = new SessionService(fixture.paths, index);
+    const promptService = new PromptService();
+    const session = sessionService.create({ title: "插件绑定会话", cwd: process.cwd(), agentId: "agent-a" });
+    session.selectModel("faux", "faux-1");
+
+    const { app } = createServerApp({
+      paths: fixture.paths,
+      sessionService,
+      promptService,
+      database: fixture.database,
+      audit: fixture.audit,
+      pluginFacade: facade,
+    });
+
+    // faux 分支的 SessionRuntime 生产路径：resolvePluginTools（生产接线）→
+    // SessionRuntime.create（pluginTools/snapshotFactory 注入）→ prompt → beginTurn（每 turn 冻结）
+    const response = await app.request(`/api/sessions/${session.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "你好" }),
+    });
+    expect(response.status).toBe(202);
+    const payload = (await response.json()) as { status?: string; sessionId?: string; streamId?: string };
+    expect(payload.status).toBe("accepted");
+    expect(payload.sessionId).toBe(session.id);
+    expect(payload.streamId).toBeDefined();
+    // 会话仍健康：插件工具注入与 turn 冻结未破坏 faux 会话
     expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
   });
 });

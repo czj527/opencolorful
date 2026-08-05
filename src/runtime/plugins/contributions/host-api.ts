@@ -205,6 +205,7 @@ export class PluginHostApi {
           agentId,
           ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
           ...(ctx.snapshot !== undefined ? { snapshot: ctx.snapshot } : {}),
+          ...(ctx.state !== undefined ? { state: ctx.state } : {}),
         });
       },
     });
@@ -224,6 +225,7 @@ export class PluginHostApi {
           ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
           ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
           ...(ctx.snapshot !== undefined ? { snapshot: ctx.snapshot } : {}),
+          ...(ctx.state !== undefined ? { state: ctx.state } : {}),
         });
         return result;
       },

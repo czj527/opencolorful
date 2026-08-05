@@ -326,6 +326,9 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_started",
       "audit.plugin.secret_change_failed",
     ]);
+    // P1-4 可验证补偿：failed 终态记录补偿结果（写入已生效且 rollback 成功）
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    expect(failedPayload.compensation).toBe("rolled-back");
   });
 
   it("write 自身抛错：视为副作用未生效，不调用 rollback", () => {
@@ -345,6 +348,45 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_started",
       "audit.plugin.secret_change_failed",
     ]);
+    // P1-4：写入未生效（副作用从未产生）→ 补偿不适用
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    expect(failedPayload.compensation).toBe("not-applicable");
+  });
+
+  it("rollback 补偿自身抛错：failed 终态记录 rollback-failed（数据可能停留变更后状态）", () => {
+    const rejectingAudit = new CompletedRejectingAudit({ database: db, producer });
+    const options: StrictAuditLifecycleOptions = {
+      ...lifecycleOptions({ audit: rejectingAudit, operationId: "op-rollback-rollback-throws" }),
+      rollback: () => {
+        throw new Error("补偿写盘失败");
+      },
+    };
+
+    expect(() => runStrictAuditLifecycle(options, () => {})).toThrow(/审计记录被拒绝/);
+    const rows = queryAudit(db, "audit.plugin.secret_change_");
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "audit.plugin.secret_change_started",
+      "audit.plugin.secret_change_failed",
+    ]);
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    expect(failedPayload.compensation).toBe("rollback-failed");
+  });
+
+  it("写入已生效但未提供 rollback 钩子：failed 终态如实记录 uncompensated", () => {
+    const rejectingAudit = new CompletedRejectingAudit({ database: db, producer });
+    const options: StrictAuditLifecycleOptions = lifecycleOptions({
+      audit: rejectingAudit,
+      operationId: "op-rollback-no-hook",
+    });
+
+    expect(() => runStrictAuditLifecycle(options, () => {})).toThrow(/审计记录被拒绝/);
+    const rows = queryAudit(db, "audit.plugin.secret_change_");
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "audit.plugin.secret_change_started",
+      "audit.plugin.secret_change_failed",
+    ]);
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    expect(failedPayload.compensation).toBe("uncompensated");
   });
 
   it("成功路径：写入与 completed 均落账，不调用 rollback", () => {

@@ -29,6 +29,8 @@ export interface HostCallContext {
   readonly agentId?: string;
   readonly sessionId?: string;
   readonly snapshot?: PluginExecutionSnapshot;
+  /** P1-1：in-flight turn 冻结的授权/绑定状态（与 snapshot 同源，由运行时随 operation 绑定） */
+  readonly state?: ResolveState;
 }
 
 export interface HostApiEntry {
@@ -174,6 +176,7 @@ export class HostBroker {
       ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
       ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
       ...(input.snapshot !== undefined ? { snapshot: input.snapshot } : {}),
+      ...(input.state !== undefined ? { state: input.state } : {}),
     };
     try {
       const value = api.handler(ctx, input.args);

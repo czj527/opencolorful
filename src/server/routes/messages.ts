@@ -26,6 +26,119 @@ import type { PluginSessionTool } from "../../pi-sdk/index.js";
 import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type Database from "better-sqlite3";
 
+
+/**
+ * Phase 12 P0-1/P0-2/P1-2 生产接线（模块级导出供测试直接复用，不复制逻辑）：
+ * 按 Agent 绑定解析插件工具（注入主会话 PI 工具注册表）。
+ * - 仅注入 enabled 绑定；工具贡献需插件已激活（ToolService.listTools 只列已登记工具）；
+ * - 绑定指定了 contributions 时按 id 过滤，否则取该插件全部工具；
+ * - P0-2 turn 快照槽：SessionRuntime 每 turn 冻结写入 turnContext.current，
+ *   invoke 读取后传给 ToolService（in-flight 以冻结态为准）；
+ * - P1-2：冻结失败 fail-closed（invoke 拒绝执行，不降级实时权限）；
+ * - 插件系统异常时降级为空（不阻塞会话创建）。
+ */
+export function buildPluginSessionTools(
+  facade: PluginFacade,
+  agentId: string,
+  sessionId: string,
+): readonly PluginSessionTool[] {
+  try {
+    const bindings = facade.listAgentBindings(agentId).filter((binding) => binding.enabled);
+    if (bindings.length === 0) {
+      return [];
+    }
+    const bound = new Map<string, readonly string[] | undefined>();
+    for (const binding of bindings) {
+      bound.set(binding.pluginId, binding.contributions.length > 0 ? binding.contributions : undefined);
+    }
+    return facade.hostApi.tools
+      .listTools()
+      .filter((tool) => {
+        // P0-2：未绑定插件的工具绝不注入（bound.get 对未绑定插件也返回 undefined，
+        // 必须用 has 区分"未绑定"与"绑定但允许全部贡献"）
+        if (!bound.has(tool.pluginId)) {
+          return false;
+        }
+        const allowed = bound.get(tool.pluginId);
+        return allowed === undefined || allowed.includes(tool.contributionId);
+      })
+      .map((descriptor) => {
+        // P0-2 turn 快照槽：SessionRuntime 每 turn 开始冻结该插件的授权/绑定状态
+        const turnContext: { current: import("../../pi-sdk/index.js").PluginToolTurnContext | undefined } = { current: undefined };
+        return {
+          qualifiedName: descriptor.qualifiedName,
+          pluginId: descriptor.pluginId,
+          name: descriptor.name,
+          ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
+          ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
+          turnContext,
+          invoke: async (params: unknown, signal?: AbortSignal) => {
+            const frozen = turnContext.current;
+            // P1-2：冻结失败 fail-closed——本 turn 该插件工具禁用，不执行、不降级实时权限
+            if (frozen?.error !== undefined) {
+              return {
+                ok: false as const,
+                code: "snapshot-error",
+                message: `插件 ${descriptor.pluginId} 快照冻结失败，本 turn 工具已禁用：${frozen.error}`,
+              };
+            }
+            const result = await facade.hostApi.tools.invoke({
+              pluginId: descriptor.pluginId,
+              contributionId: descriptor.contributionId,
+              params,
+              agentId,
+              sessionId,
+              ...(frozen?.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
+              ...(frozen?.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
+              ...(signal !== undefined ? { signal } : {}),
+            });
+            return result.ok
+              ? { ok: true as const, result: result.result }
+              : { ok: false as const, code: result.code, message: result.message };
+          },
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * P0-2 turn 快照工厂（模块级导出供测试直接复用，不复制逻辑）：每 turn 开始
+ * 冻结绑定插件的授权/绑定状态（ExecutionSnapshotService.create），in-flight
+ * 工具调用以冻结态为准。P1-2：冻结失败返回 { error }（invoke 侧 fail-closed），
+ * 绝不吞成 undefined 走实时权限——权限边界不容许静默 fail-open。
+ */
+export function buildPluginTurnSnapshotFactory(
+  facade: PluginFacade,
+): NonNullable<SessionRuntimeOptions["snapshotFactory"]> {
+  return (pluginId: string, agentId: string) => {
+    try {
+      const active = facade.get(pluginId);
+      if (active === undefined) {
+        return undefined;
+      }
+      const instance = facade.runtimeHost.getInstance(pluginId);
+      if (instance === undefined) {
+        return undefined;
+      }
+      return facade.snapshots.create({
+        pluginId,
+        pluginVersion: active.version,
+        runtimeKind: instance.kind,
+        runtimeInstanceId: instance.runtimeInstanceId,
+        agentId,
+      });
+    } catch (error) {
+      return {
+        snapshot: undefined,
+        state: undefined,
+        error: error instanceof Error ? error.message.slice(0, 400) : `插件 ${pluginId} 快照冻结失败`,
+      };
+    }
+  };
+}
+
 export interface MessageRoutesOptions {
   readonly promptService: PromptService;
   readonly sessionService?: SessionService;
@@ -93,103 +206,18 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
     }
   }
 
-  /**
-   * P0-2 turn 快照工厂：每 turn 开始冻结绑定插件的授权/绑定状态
-   * （ExecutionSnapshotService.create），in-flight 工具调用以冻结态为准。
-   */
+  /** P0-2/P1-2 turn 快照工厂：模块级 buildPluginTurnSnapshotFactory 的接线（facade 未接入时无快照） */
   function pluginSnapshotFactory(): SessionRuntimeOptions["snapshotFactory"] {
-    const facade = options.pluginFacade;
-    if (facade === undefined) {
+    if (options.pluginFacade === undefined) {
       return undefined;
     }
-    return (pluginId: string, agentId: string) => {
-      try {
-        const active = facade.get(pluginId);
-        if (active === undefined) {
-          return undefined;
-        }
-        const instance = facade.runtimeHost.getInstance(pluginId);
-        if (instance === undefined) {
-          return undefined;
-        }
-        return facade.snapshots.create({
-          pluginId,
-          pluginVersion: active.version,
-          runtimeKind: instance.kind,
-          runtimeInstanceId: instance.runtimeInstanceId,
-          agentId,
-        });
-      } catch {
-        return undefined;
-      }
-    };
+    return buildPluginTurnSnapshotFactory(options.pluginFacade);
   }
+
 
   /**
-   * Phase 12 P0-1：按 Agent 绑定解析插件工具（注入主会话 PI 工具注册表）。
-   * - 仅注入 enabled 绑定；工具贡献需插件已激活（ToolService.listTools 只列已登记工具）；
-   * - 绑定指定了 contributions 时按 id 过滤，否则取该插件全部工具；
-   * - 插件系统异常时降级为空（不阻塞会话创建）。
+   * 构建含记忆注入的完整 system prompt。未绑定 Agent 或不具备记忆条件时仅返回 persona。
    */
-  function resolvePluginTools(agentId: string | undefined, sessionId: string): readonly PluginSessionTool[] {
-    const facade = options.pluginFacade;
-    if (agentId === undefined || facade === undefined) {
-      return [];
-    }
-    try {
-      const bindings = facade.listAgentBindings(agentId).filter((binding) => binding.enabled);
-      if (bindings.length === 0) {
-        return [];
-      }
-      const bound = new Map<string, readonly string[] | undefined>();
-      for (const binding of bindings) {
-        bound.set(binding.pluginId, binding.contributions.length > 0 ? binding.contributions : undefined);
-      }
-      return facade.hostApi.tools
-        .listTools()
-        .filter((tool) => {
-          // P0-2：未绑定插件的工具绝不注入（bound.get 对未绑定插件也返回 undefined，
-          // 必须用 has 区分"未绑定"与"绑定但允许全部贡献"）
-          if (!bound.has(tool.pluginId)) {
-            return false;
-          }
-          const allowed = bound.get(tool.pluginId);
-          return allowed === undefined || allowed.includes(tool.contributionId);
-        })
-        .map((descriptor) => {
-          // P0-2 turn 快照槽：SessionRuntime 每 turn 开始冻结该插件的授权/绑定状态
-          const turnContext: { current: import("../../pi-sdk/index.js").PluginToolTurnContext | undefined } = { current: undefined };
-          return {
-            qualifiedName: descriptor.qualifiedName,
-            pluginId: descriptor.pluginId,
-            name: descriptor.name,
-            ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
-            ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
-            turnContext,
-            invoke: async (params: unknown, signal?: AbortSignal) => {
-              const frozen = turnContext.current;
-              const result = await facade.hostApi.tools.invoke({
-                pluginId: descriptor.pluginId,
-                contributionId: descriptor.contributionId,
-                params,
-                agentId,
-                sessionId,
-                ...(frozen?.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
-                ...(frozen?.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
-                ...(signal !== undefined ? { signal } : {}),
-              });
-              return result.ok
-                ? { ok: true as const, result: result.result }
-                : { ok: false as const, code: result.code, message: result.message };
-            },
-          };
-        });
-    } catch {
-      return [];
-    }
-  }
-
-  /** 构建含记忆注入的完整 system prompt。未绑定 Agent 或不具备记忆条件时仅返回 persona。 */
   function buildSystemPrompt(agentId: string): string | undefined {
     if (agentStore === undefined) return undefined;
     const baseColor = agentStore.getBaseColor(agentId);
@@ -306,8 +334,11 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
       };
 
-      // 插件工具（P0-1）：按 Agent 绑定过滤，注入主会话
-      const pluginTools = resolvePluginTools(view.agentId ?? undefined, sessionId);
+      // 插件工具（P0-1）：按 Agent 绑定过滤，注入主会话（生产接线 buildPluginSessionTools）
+      const pluginTools =
+        view.agentId !== undefined && view.agentId !== null && options.pluginFacade !== undefined
+          ? buildPluginSessionTools(options.pluginFacade, view.agentId, sessionId)
+          : [];
 
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;

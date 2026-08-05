@@ -236,6 +236,8 @@ export const AuditPayloadSchema = Type.Object(
     afterRevision: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
     changedFields: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 64 }), { maxItems: 16 })),
     approver: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    /** §17.3 可验证补偿：写入已生效但审计事务失败时，failed 终态记录外部副作用补偿结果 */
+    compensation: Type.Optional(Type.Union([Type.Literal("not-applicable"), Type.Literal("rolled-back"), Type.Literal("rollback-failed"), Type.Literal("uncompensated")])),
   },
   { additionalProperties: false },
 );
@@ -248,6 +250,7 @@ export interface AuditPayload {
   afterRevision?: string;
   changedFields?: string[];
   approver?: string;
+  compensation?: "not-applicable" | "rolled-back" | "rollback-failed" | "uncompensated";
 }
 
 /** DiagnosticPayload：可丢弃的排错材料，message 上限 4KB / stack 16KB */

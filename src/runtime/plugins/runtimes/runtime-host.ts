@@ -8,13 +8,14 @@ import type {
   ResourceRef,
   TraceContext,
 } from "../../../contracts/observability.js";
-import type { ManifestRuntime, PluginIpcCarrier, PluginRuntimeKind } from "../../../contracts/plugin-protocol.js";
+import type { ManifestRuntime, PluginExecutionSnapshot, PluginIpcCarrier, PluginRuntimeKind } from "../../../contracts/plugin-protocol.js";
 import { instrument } from "../../../observability/instrument.js";
 import { sanitizeError } from "../../../observability/safe-value.js";
 import { pluginVersionDir } from "../paths.js";
 import type { PluginRegistry } from "../registry/plugin-registry.js";
 import { readManifestFile } from "../sources/source-adapter.js";
 import type { HostBroker, HostIdentity, HostRejectCode } from "../grants/host-broker.js";
+import type { ResolveState } from "../grants/execution-snapshot.js";
 import { CarrierRegistry } from "./carrier-registry.js";
 import { JSON_RPC_ERROR_CODES, RpcRequestError, type JsonRpcWorkerRequest } from "./json-rpc.js";
 import { StreamCapture } from "./stream-capture.js";
@@ -86,8 +87,8 @@ export interface RuntimeInstance {
   lastError?: string;
   /** 崩溃时间戳（崩溃判定标记；避免对 status 的 TS 窄化依赖） */
   crashedAt?: number;
-  /** in-flight 执行：operationId → 取消原因（插件生命周期取消时先写入） */
-  readonly operations: Map<string, { controller: AbortController; reasonCode: string }>;
+  /** in-flight 执行：operationId → 取消原因 + 触发执行的冻结快照/授权状态（P0-2/P1-1：worker 嵌套 Host 请求复用） */
+  readonly operations: Map<string, { controller: AbortController; reasonCode: string; snapshot?: PluginExecutionSnapshot; state?: ResolveState }>;
 }
 
 export type PluginCancelReasonCode =
@@ -162,6 +163,16 @@ export interface RuntimeInvokeCall {
   readonly agentId?: string;
   readonly sessionId?: string;
   readonly trace?: TraceContext;
+  /**
+   * P0-2：调用方（ToolService）携带的 in-flight turn 冻结实例/版本。
+   * 当前实例与快照不一致（重启/更新产生新 runtimeInstanceId）时 fail-closed
+   * 拒绝——"in-flight turn 不能中途换工具实现"（phase-12.md §十一）。
+   */
+  readonly expectedRuntimeInstanceId?: string;
+  readonly expectedPluginVersion?: string;
+  /** P1-1：in-flight turn 冻结快照/授权状态（随 operation 绑定，worker 嵌套 Host 请求复用） */
+  readonly snapshot?: PluginExecutionSnapshot;
+  readonly state?: ResolveState;
 }
 
 export class PluginRuntimeError extends Error {
@@ -330,10 +341,33 @@ export class RuntimeHost {
     if (instance.status !== "running") {
       return { ok: false, code: "not-running", message: `插件 ${input.pluginId} 运行实例状态为 ${instance.status}` };
     }
+    // P0-2：快照冻结的实例/版本与当前实例不一致（turn 中途重启/更新）→ fail-closed，
+    // 不允许旧 turn 在新实现上继续执行（phase-12.md §十一"不能中途换工具实现"）
+    if (input.expectedRuntimeInstanceId !== undefined && instance.runtimeInstanceId !== input.expectedRuntimeInstanceId) {
+      return {
+        ok: false,
+        code: "runtime-instance-mismatch",
+        message: `插件 ${input.pluginId} 运行实例已变更（快照 ${input.expectedRuntimeInstanceId} ≠ 当前 ${instance.runtimeInstanceId}），拒绝执行`,
+      };
+    }
+    if (input.expectedPluginVersion !== undefined && instance.version !== input.expectedPluginVersion) {
+      return {
+        ok: false,
+        code: "runtime-version-mismatch",
+        message: `插件 ${input.pluginId} 版本已变更（快照 ${input.expectedPluginVersion} ≠ 当前 ${instance.version}），拒绝执行`,
+      };
+    }
 
     const operationId = `exec-${crypto.randomUUID()}`;
     const controller = new AbortController();
-    const operation = { controller, reasonCode: "user-abort" as PluginCancelReasonCode };
+    // P1-1：冻结快照/授权状态随 operation 绑定——worker 嵌套 Host 请求（secret/config/…）
+    // 由 handleWorkerRequest 从 operation 取回并传给 broker.call，与工具入口同一冻结视图
+    const operation = {
+      controller,
+      reasonCode: "user-abort" as PluginCancelReasonCode,
+      ...(input.snapshot !== undefined ? { snapshot: input.snapshot } : {}),
+      ...(input.state !== undefined ? { state: input.state } : {}),
+    };
     instance.operations.set(operationId, operation);
 
     const externalSignal = input.signal;
@@ -690,13 +724,19 @@ export class RuntimeHost {
       throw new RpcRequestError(JSON_RPC_ERROR_CODES.invalidRequest, `worker 请求 carrier 校验失败：${consumed.reason}`);
     }
     // HostBroker 白名单调用（内部再次校验身份 + 参数防伪造 + 能力校验）；
-    // Agent/Session 上下文取自已消费校验的 carrier（随 token 绑定，worker 无法篡改）
+    // Agent/Session 上下文取自已消费校验的 carrier（随 token 绑定，worker 无法篡改）；
+    // P1-1：snapshot/state 取自已消费校验的 operation（触发本执行的 in-flight 冻结
+    // 授权/绑定视图）——嵌套 Host API（secret.read-own/config/…）与工具入口同一
+    // 冻结权限，turn 中途的授权变更不影响本 turn（phase-12.md §十七.3 冻结语义）
+    const operation = instance.operations.get(carrier.operationId);
     const result = this.deps.broker.call({
       identity: { pluginId: carrier.pluginId, runtimeInstanceId: carrier.runtimeInstanceId },
       apiName: message.method,
       ...(message.params !== undefined ? { args: message.params } : {}),
       ...(carrier.agentId !== undefined ? { agentId: carrier.agentId } : {}),
       ...(carrier.sessionId !== undefined ? { sessionId: carrier.sessionId } : {}),
+      ...(operation?.snapshot !== undefined ? { snapshot: operation.snapshot } : {}),
+      ...(operation?.state !== undefined ? { state: operation.state } : {}),
     });
     if (!result.ok) {
       throw new RpcRequestError(

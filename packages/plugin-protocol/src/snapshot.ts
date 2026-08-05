@@ -42,7 +42,7 @@ export const PluginExecutionSnapshotSchema = Type.Object(
     runtimeInstanceId: Type.String({ minLength: 1, maxLength: 128 }),
     grantRevision: Type.Integer({ minimum: 1 }),
     bindingRevision: Type.Integer({ minimum: 1 }),
-    /** 快照生效时允许的 contribution id（绑定列表的交集） */
+    /** 快照生效时允许的 contribution id：绑定列表的交集；绑定空列表（允许全部）时冻结为创建时刻插件登记的全部贡献集 */
     contributions: Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 512 }),
     createdAt: Type.String({ minLength: 1, maxLength: 64 }),
   },

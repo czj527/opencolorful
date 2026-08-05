@@ -208,8 +208,13 @@ export class PluginFacade {
     });
     this.grants = new GrantService({ store: grantStore, audit: deps.audit });
     this.bindings = new BindingService({ store: bindingStore, grants: grantStore, audit: deps.audit });
-    // P0-2：turn 级执行快照（主会话每 turn 冻结绑定插件的授权/绑定状态）
-    this.snapshots = new ExecutionSnapshotService({ bindings: bindingStore, grants: grantStore });
+    // P0-2：turn 级执行快照（主会话每 turn 冻结绑定插件的授权/绑定状态）；
+    // 绑定空列表（允许全部）时按冻结时刻登记的贡献集展开（P0-1）
+    this.snapshots = new ExecutionSnapshotService({
+      bindings: bindingStore,
+      grants: grantStore,
+      listContributionIds: (pluginId) => this.hostApi.contributions.list(pluginId).map((c) => c.id),
+    });
     // Phase 9 沙箱策略层接线：base policy（不含 sandboxCheck）供 SandboxBridge 委托，
     // 外层 policy 注入 sandboxCheck —— 避免 bridge→policy→sandboxCheck 无限递归；
     // 平台 PathGuard 未配置时插件文件操作 fail-closed 拒绝（SandboxBridge 语义）。
