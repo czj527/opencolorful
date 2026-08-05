@@ -10,6 +10,8 @@ export interface ActivityViewProps {
   readonly api: ApiClient;
   /** URL 预筛选初始值（如 /logs?plugin=<pluginId>），填入「全文搜索」并作为初始过滤条件 */
   readonly initialSearch?: string;
+  /** P1-3：插件预筛选（/logs?plugin=<pluginId>）——按 plugin_id 独立过滤，而非全文搜索 */
+  readonly initialPluginId?: string;
 }
 
 const CATEGORY_OPTIONS = [
@@ -33,6 +35,7 @@ interface DraftFilter {
   readonly status: string;
   readonly sessionId: string;
   readonly ownerAgentId: string;
+  readonly pluginId: string;
   readonly search: string;
   readonly from: string;
   readonly to: string;
@@ -45,6 +48,7 @@ const EMPTY_DRAFT: DraftFilter = {
   status: "",
   sessionId: "",
   ownerAgentId: "",
+  pluginId: "",
   search: "",
   from: "",
   to: "",
@@ -58,6 +62,7 @@ function buildQuery(draft: DraftFilter): ActivityQuery {
     ...(draft.status !== "" ? { status: draft.status } : {}),
     ...(draft.sessionId.trim() !== "" ? { sessionId: draft.sessionId.trim() } : {}),
     ...(draft.ownerAgentId.trim() !== "" ? { ownerAgentId: draft.ownerAgentId.trim() } : {}),
+    ...(draft.pluginId.trim() !== "" ? { pluginId: draft.pluginId.trim() } : {}),
     ...(draft.search.trim() !== "" ? { search: draft.search.trim() } : {}),
     ...(draft.from !== "" ? { from: draft.from } : {}),
     ...(draft.to !== "" ? { to: draft.to } : {}),
@@ -76,6 +81,7 @@ function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean 
   if (filter.status !== undefined && row.status !== filter.status) return false;
   if (filter.sessionId !== undefined && row.sessionId !== filter.sessionId) return false;
   if (filter.ownerAgentId !== undefined && row.ownerAgentId !== filter.ownerAgentId) return false;
+  if (filter.pluginId !== undefined && row.pluginId !== filter.pluginId) return false;
   if (filter.search !== undefined && filter.search.trim() !== "") {
     const term = filter.search.trim();
     if (!row.eventName.includes(term) && !row.category.includes(term)) return false;
@@ -85,12 +91,12 @@ function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean 
   return true;
 }
 
-export function ActivityView({ api, initialSearch = "" }: ActivityViewProps) {
-  // 预筛选（?plugin= 等）：初始 draft 与 applied 都带 initialSearch，
+export function ActivityView({ api, initialSearch = "", initialPluginId = "" }: ActivityViewProps) {
+  // 预筛选（?plugin= 等）：初始 draft 与 applied 都带 initialSearch/initialPluginId，
   // 使首次加载即按该条件过滤；无预筛选时与之前行为一致
-  const [draft, setDraft] = useState<DraftFilter>(() => ({ ...EMPTY_DRAFT, search: initialSearch }));
+  const [draft, setDraft] = useState<DraftFilter>(() => ({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId }));
   // 初始 applied 为空过滤（buildQuery 过滤空串），避免把空串参数发给后端导致零匹配
-  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery({ ...EMPTY_DRAFT, search: initialSearch }));
+  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId }));
   const [items, setItems] = useState<readonly ActivityRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

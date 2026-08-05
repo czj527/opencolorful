@@ -112,7 +112,8 @@ export function LogsPage({ api }: LogsPageProps) {
       </nav>
 
       <div className={styles.content}>
-        {tab === "activity" && <ActivityView api={api} initialSearch={pluginFilter} />}
+        {/* P1-3：?plugin= 走独立 plugin_id 过滤（非全文搜索）；无参数时行为不变 */}
+        {tab === "activity" && <ActivityView api={api} initialSearch="" initialPluginId={pluginFilter} />}
         {tab === "errors" && <ErrorsView api={api} />}
         {tab === "audit" && <AuditView api={api} auditEpoch={health?.auditEpoch ?? null} />}
         {tab === "performance" && <PerformanceView api={api} />}

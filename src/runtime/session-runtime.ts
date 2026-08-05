@@ -11,6 +11,7 @@ import {
   type PiFauxAgentOptions,
   type PiSessionHandle,
   type PluginSessionTool,
+  type PluginToolTurnContext,
 } from "../pi-sdk/index.js";
 import { SandboxService } from "../sandbox/sandbox-service.js";
 import { ToolPolicy } from "./tool-policy.js";
@@ -58,6 +59,11 @@ export interface SessionRuntimeOptions {
   readonly extraTools?: readonly string[];
   /** 会话级插件工具（P0-1：宿主按 Agent 绑定过滤后注入 PI 工具注册表） */
   readonly pluginTools?: readonly PluginSessionTool[];
+  /**
+   * P0-2 turn 快照工厂：每 turn 开始冻结绑定插件的授权/绑定状态
+   * （ExecutionSnapshotService.create），in-flight turn 内工具调用以冻结态为准。
+   */
+  readonly snapshotFactory?: (pluginId: string, agentId: string) => PluginToolTurnContext | undefined;
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -83,6 +89,9 @@ export class SessionRuntime {
   private modelCallSeq = 0;
   /** toolCallId → toolName（tool_end 事件不含 toolName，需要从 tool_start 记账） */
   private readonly toolNames = new Map<string, string>();
+  /** 会话级插件工具（P0-1/P0-2：注入 PI 注册表；每 turn 冻结快照） */
+  private readonly pluginTools: readonly PluginSessionTool[];
+  private readonly snapshotFactory: SessionRuntimeOptions["snapshotFactory"];
 
   private constructor(
     readonly sessionId: string,
@@ -98,6 +107,8 @@ export class SessionRuntime {
     this.agentId = options.agentId;
     this.providerId = options.resolveProviderId ?? options.providerId;
     this.modelId = options.resolveModelId ?? options.modelId;
+    this.pluginTools = options.pluginTools ?? [];
+    this.snapshotFactory = options.snapshotFactory;
     this.unsubscribe = agent.subscribe((event) => {
       this.observePiEvent(event);
       const mapper = this.mapper ?? this.resolveControlMapper(event);
@@ -203,6 +214,27 @@ export class SessionRuntime {
     );
   }
 
+  /**
+   * P0-2 turn 冻结：对每个插件工具按 snapshotFactory 冻结授权/绑定状态，
+   * 写入 tool.turnContext.current（invoke 闭包读取后传给 ToolService）。
+   * 无 snapshotFactory 或冻结失败时保持 undefined（调用方按实时状态执行）。
+   */
+  private beginTurn(): void {
+    if (this.snapshotFactory === undefined) {
+      return;
+    }
+    for (const tool of this.pluginTools) {
+      if (tool.turnContext === undefined) {
+        continue;
+      }
+      try {
+        tool.turnContext.current = this.snapshotFactory(tool.pluginId, this.agentId ?? "");
+      } catch {
+        tool.turnContext.current = undefined;
+      }
+    }
+  }
+
   prompt(text: string): PromptRun {
     if (!text.trim()) throw new Error("Prompt 不能为空");
     const controller = new AbortController();
@@ -248,6 +280,10 @@ export class SessionRuntime {
         ? { startPayload: { attributes: { providerId: this.providerId ?? null, modelId: this.modelId ?? null } } }
         : {}),
     });
+
+    // P0-2：turn 开始冻结绑定插件的授权/绑定快照——本 turn 内工具调用以冻结态为准，
+    // 绑定/授权在 turn 中途的变更不影响 in-flight 执行
+    this.beginTurn();
 
     return instrument.runWithTrace({ trace }, () => {
       void this.runPrompt(text, started.streamId, mapper, controller);

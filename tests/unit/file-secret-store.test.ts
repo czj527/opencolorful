@@ -197,3 +197,115 @@ describe("FileSecretStore", () => {
     expect(mode).toBe(0o600);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// P0-3：写盘失败原子性——先持久化成功，再更新内存。
+// 通过把目录路径替换成同名文件注入写盘失败（persistSnapshot 的
+// mkdirSync 抛 ENOTDIR，等价 EPERM 类失败）：set/remove 必须抛错，
+// 且内存与磁盘都保持变更前状态。
+// ═══════════════════════════════════════════════════════════════
+describe("FileSecretStore：写盘失败原子性（P0-3）", () => {
+  let dir: string;
+  let filePath: string;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = makeTempDir();
+    filePath = secretFilePath(dir);
+    warnSpy = vi.spyOn(instrument, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(`${dir}.blocked`, { recursive: true, force: true });
+  });
+
+  /** 把目录移开、在原路径放一个同名文件：此后 persistSnapshot 的 mkdirSync 必然失败。 */
+  function breakDirectory(): void {
+    fs.renameSync(dir, `${dir}.blocked`);
+    fs.writeFileSync(dir, "", "utf8");
+  }
+
+  /** 恢复目录（移回原位），用于断言磁盘内容未变。 */
+  function restoreDirectory(): void {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.renameSync(`${dir}.blocked`, dir);
+  }
+
+  it("set 写盘失败 → 抛错且内存保持旧值，磁盘也保持旧内容", () => {
+    const store = new FileSecretStore({ filePath });
+    store.set("plugin-a", "apiKey", "old-value");
+    const before = fs.readFileSync(filePath, "utf8");
+
+    breakDirectory();
+    expect(() => store.set("plugin-a", "apiKey", "new-value")).toThrow();
+    expect(store.get("plugin-a", "apiKey")).toBe("old-value");
+    expect(store.has("plugin-a", "apiKey")).toBe(true);
+    expect(store.listNames("plugin-a")).toEqual(["apiKey"]);
+
+    restoreDirectory();
+    expect(fs.readFileSync(filePath, "utf8")).toBe(before);
+  });
+
+  it("首次 set 写盘失败 → 抛错且内存无该键（get undefined），磁盘不产生文件", () => {
+    breakDirectory();
+
+    const store = new FileSecretStore({ filePath });
+    expect(() => store.set("plugin-a", "apiKey", "secret-value")).toThrow();
+    expect(store.get("plugin-a", "apiKey")).toBeUndefined();
+    expect(store.has("plugin-a", "apiKey")).toBe(false);
+
+    restoreDirectory();
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
+  it("remove 写盘失败 → 抛错且键仍存在，内存与磁盘均保持变更前状态", () => {
+    const store = new FileSecretStore({ filePath });
+    store.set("plugin-a", "apiKey", "old-value");
+    const before = fs.readFileSync(filePath, "utf8");
+
+    breakDirectory();
+    expect(() => store.remove("plugin-a", "apiKey")).toThrow();
+    expect(store.has("plugin-a", "apiKey")).toBe(true);
+    expect(store.get("plugin-a", "apiKey")).toBe("old-value");
+
+    restoreDirectory();
+    expect(fs.readFileSync(filePath, "utf8")).toBe(before);
+  });
+
+  it("写盘失败后内存保持旧值，后续 set 基于旧值继续，失败变更不残留", () => {
+    const store = new FileSecretStore({ filePath });
+    store.set("plugin-a", "apiKey", "old-value");
+
+    breakDirectory();
+    expect(() => store.set("plugin-b", "webhook", "v2")).toThrow();
+    expect(store.get("plugin-b", "webhook")).toBeUndefined();
+    expect(store.get("plugin-a", "apiKey")).toBe("old-value");
+
+    // 恢复可写后：旧值未因失败 set 丢失；失败写入的键从未进入内存与磁盘
+    restoreDirectory();
+    store.set("plugin-a", "apiKey", "updated-value");
+    expect(store.get("plugin-a", "apiKey")).toBe("updated-value");
+
+    const second = new FileSecretStore({ filePath });
+    expect(second.get("plugin-a", "apiKey")).toBe("updated-value");
+    expect(second.get("plugin-b", "webhook")).toBeUndefined();
+    expect(second.listNames("plugin-a")).toEqual(["apiKey"]);
+  });
+
+  it("写盘成功后内存与磁盘一致（覆盖旧值与删除键均落盘）", () => {
+    const store = new FileSecretStore({ filePath });
+    store.set("plugin-a", "apiKey", "v1");
+    store.set("plugin-a", "apiKey", "v2");
+    store.remove("plugin-a", "apiKey");
+
+    expect(store.has("plugin-a", "apiKey")).toBe(false);
+
+    // 新实例（模拟重启）从磁盘读到同一状态
+    const second = new FileSecretStore({ filePath });
+    expect(second.has("plugin-a", "apiKey")).toBe(false);
+    expect(second.get("plugin-a", "apiKey")).toBeUndefined();
+    expect(second.listNames("plugin-a")).toEqual([]);
+  });
+});

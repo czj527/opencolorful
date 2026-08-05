@@ -140,7 +140,14 @@ export function registerPluginRoutes(app: Hono, deps: PluginRouteDeps): void {
       );
     }
     return new Response(result.data, {
-      headers: { "content-type": result.contentType },
+      headers: {
+        "content-type": result.contentType,
+        // P0-1 Surface 隔离双保险：CSP sandbox 强制插件文档为 opaque origin
+        //（即使前端 iframe 属性被移除/配置错误也无法同源逃逸）+ 禁止 MIME 嗅探。
+        // 插件脚本/样式来源不做额外限制（完整 CSP 策略随 Surface Session 后续落地）。
+        "content-security-policy": "sandbox allow-scripts",
+        "x-content-type-options": "nosniff",
+      },
     });
   });
 

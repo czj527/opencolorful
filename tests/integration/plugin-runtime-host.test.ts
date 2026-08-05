@@ -71,6 +71,22 @@ rl.on("line", (line) => {
     const rid = "w-" + Math.random().toString(16).slice(2, 10);
     pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
     send({ jsonrpc: "2.0", id: rid, method: "host.ping", params: { from: "worker" }, carrier: msg.carrier });
+  } else if (msg.method === "ask-host-context") {
+    // 回传原样 carrier → Host 应把 carrier 携带的 Agent/Session 上下文传给 broker API
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({ jsonrpc: "2.0", id: rid, method: "host.echo-context", params: {}, carrier: msg.carrier });
+  } else if (msg.method === "ask-host-forged-context") {
+    // 篡改 carrier 的 Agent/Session 上下文：token 绑定校验应拒绝
+    const rid = "w-" + Math.random().toString(16).slice(2, 10);
+    pendingHost[rid] = (resp) => send({ jsonrpc: "2.0", id, result: { host: resp.result ?? resp.error } });
+    send({
+      jsonrpc: "2.0",
+      id: rid,
+      method: "host.echo-context",
+      params: {},
+      carrier: { ...msg.carrier, agentId: "forged-agent", sessionId: "forged-session" },
+    });
   } else if (msg.method === "ask-host-forged") {
     // 伪造 carrier：token 未签发 → Host 桥接应拒绝
     const rid = "w-" + Math.random().toString(16).slice(2, 10);
@@ -343,6 +359,77 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
       const hostResp = result.result as { host?: { code?: number; message?: string } };
       expect(hostResp.host?.code).toBe(-32600);
       expect(hostResp.host?.message).toMatch(/carrier 校验失败/);
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("invoke 携带 agentId/sessionId → worker 请求 broker API 收到同一上下文", async () => {
+    const { broker, host } = createEnv(PLUGIN, "node-process");
+    // 注册一个回显调用上下文的白名单 API（验证 broker.call 收到的 ctx）
+    broker.registerApi({
+      name: "host.echo-context",
+      description: "回显当前调用的 Agent/Session 上下文（测试专用）",
+      handler: (ctx) => ({ agentId: ctx.agentId ?? null, sessionId: ctx.sessionId ?? null }),
+    });
+    await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-context",
+      method: "ask-host-context",
+      agentId: "agent-1",
+      sessionId: "session-1",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // carrier 携带的 Agent/Session 上下文经 handleWorkerRequest 传给 broker.call
+      expect(result.result).toEqual({ host: { agentId: "agent-1", sessionId: "session-1" } });
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("invoke 不带上下文 → broker API 收到 undefined（行为与修复前一致）", async () => {
+    const { broker, host } = createEnv(PLUGIN, "node-process");
+    broker.registerApi({
+      name: "host.echo-context",
+      description: "回显当前调用的 Agent/Session 上下文（测试专用）",
+      handler: (ctx) => ({ agentId: ctx.agentId ?? null, sessionId: ctx.sessionId ?? null }),
+    });
+    await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-context",
+      method: "ask-host-context",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result).toEqual({ host: { agentId: null, sessionId: null } });
+    }
+    await host.stop(PLUGIN, "shutdown");
+  });
+
+  it("worker 篡改 carrier 的 Agent/Session 上下文 → 绑定校验拒绝（防伪造）", async () => {
+    const { broker, host } = createEnv(PLUGIN, "node-process");
+    broker.registerApi({
+      name: "host.echo-context",
+      description: "回显当前调用的 Agent/Session 上下文（测试专用）",
+      handler: (ctx) => ({ agentId: ctx.agentId ?? null, sessionId: ctx.sessionId ?? null }),
+    });
+    await host.start(PLUGIN);
+    const result = await host.invoke({
+      pluginId: PLUGIN,
+      contributionKind: "tool",
+      contributionId: "ask-host-forged-context",
+      method: "ask-host-forged-context",
+      agentId: "agent-1",
+      sessionId: "session-1",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const hostResp = result.result as { host?: { code?: number; message?: string } };
+      expect(hostResp.host?.code).toBe(-32600);
+      expect(hostResp.host?.message).toMatch(/Agent 上下文被篡改/);
     }
     await host.stop(PLUGIN, "shutdown");
   });

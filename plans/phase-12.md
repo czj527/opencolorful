@@ -1222,12 +1222,13 @@ Phase 12 专项门：
 5. /logs 的 ?plugin= 预筛选参数为 best-effort（/logs 页未解析，入口已提供）。
 6. MCP 来源 sourceType 标记 supported:false（MCP runtime 已实现，来源直装接线留待后续）。
 
-**T11 修复轮新增/更新的偏差**：
-7. **Agent turn 工具回路未接入**：插件工具已登记并经 `/api/plugins/dev/invoke-tool` 可调用，但 session-runtime 的工具列表（pi-sdk `tools/extraTools` 只是模型可见工具名，无自定义工具 handler 分发）尚未包含插件工具——“绑定 Agent 后下一 turn 直接调用插件工具”需 pi-sdk 自定义工具 handler 支持，留后续阶段（A1 已闭环服务端生命周期：启用即登记贡献+启动运行时）。
-8. **auditMirror 镜像行 decision 硬编码 'allowed' 且 INSERT 不含 event_name**（`activity-recorder.ts:372`，Phase 11 既有，被 Phase 12 权限变更事件首次触发）：denied/revoked 会在账本留下 decision='allowed' 镜像行。修复涉及 Phase 11 事件管道，记为遗留偏差，后续阶段处理。
-9. **HostBroker 白名单 API（config/secret/attachment/custom-activity）与插件 worker 的带 id 请求**：`registerHostBrokerApis` 与 `HostBroker.call` 尚无生产调用点（dev invoke 与工具经 ToolService 直连 runtimeHost 可用）；custom-activity 贡献与 broker 动态能力留待后续接线。
-10. **network.connect 目标 allowlist**（`sandbox-bridge.ts`）：承诺留 T4/T5 但未落地且未进入 T10 偏差清单——授权后插件可连任意目标；作为安全边界记录，allowlist 留后续阶段。
+**T11 修复轮新增/更新的偏差（T13 已修复并移除 #7/#8/#9 主体）**：
+7. ~~**Agent turn 工具回路未接入**~~（T13 已修复：pi-sdk `customTools` 注入 + 主会话集成测试验证 tool_call → ToolService → worker 全链）。
+8. ~~**auditMirror 镜像行 decision 硬编码 'allowed' 且 INSERT 不含 event_name**~~（T12 已修复：补 event_name + decision 按事件名推导）。
+9. ~~**HostBroker 白名单 API 无生产调用点**~~（T12/T13 已修复：`registerHostBrokerApis` 组合根调用 + worker 请求经 carrier 校验接通 broker，含 agentId/sessionId 上下文传递）。
+10. **network.connect 目标 allowlist**（`sandbox-bridge.ts`）：授权后插件可连任意目标；allowlist 留后续阶段。
 11. **其余 50 分级评审项（不阻塞合并，随后续阶段处理）**：command/background/hook 空 requiredCapabilities 跳过授权层（D4）、HostBroker/SandboxBridge 能力校验省略 manifest 声明层（D5）、started 审计 decision 取值不统一（D3）、plugin_operations CHECK 枚举与 store 常量分叉（F3）、npm-source 注释与实现矛盾（F5）、plugin.crashed 僵尸事件（G2）、tool 输出脱敏死代码（G3）、timed_out 终态 errorCode/reasonCode 键名不统一（G4）、paths 死常量（G5）。
+12. **Surface Host 桥（postMessage）未实现**：iframe 已按 opaque origin 隔离（sandbox 无 allow-same-origin + CSP sandbox 服务端双保险），插件 UI 为纯静态 HTML；`useHostApi()` 返回降级句柄（拒绝的 Promise 携带说明）。完整的 Surface Session / Host capability 校验 / postMessage 桥留后续阶段。
 
 ### 评审与修复记录
 
@@ -1271,9 +1272,23 @@ Phase 12 专项门：
 
 **验证**：T12 针对性测试（plugin-facade 16、plugin-dev-host 14、plugin-runtime-node/json-rpc/host、file-secret-store 13、plugin-components-ui 10、CLI devrun 6、web +9 等）+ 全量质量门复跑（vitest 112 files / 1291 tests、web 375、e2e 56/56），见”最终验收结论”。
 
+**T13 修复轮（2026-08-04，第二轮复审：P0×3 + P1×3 + 测试缺口）**——复审确认自动化质量门全过但存在安全边界与主回路问题，本轮全部修复：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P0-1 | Surface iframe 同源权限（allow-scripts + allow-same-origin + 同源顶层打开） | iframe `sandbox="allow-scripts"`（opaque origin）+ 资产路由 CSP `sandbox allow-scripts` 服务端双保险 + `X-Content-Type-Options: nosniff` + 移除"打开资产链接"顶层入口；ui.ts 降级说明更新（桥未实现明确化，偏差 #12 记录） |
+| P0-2 | 绑定过滤 bug（bound.get 未绑定返回 undefined 被放行）+ Runtime 不随插件状态重建 + turn 快照未接线 | `bound.has` 区分未绑定；`pluginSignature`（绑定/授权修订/版本/运行实例/贡献列表）变化触发 Runtime 重建（下一 turn 生效）；`ExecutionSnapshotService` 组合根接线 + `turnContext` 槽（SessionRuntime.beginTurn 每 turn 冻结）+ invoke 闭包传 snapshot/state |
+| P0-3 | Secret 写失败后进程内仍生效；审计事务无法回滚文件 | FileSecretStore 改**先盘后内存**（写盘失败内存不变）；`runStrictAuditLifecycle` 增加 `rollback` 补偿钩子；SecretService.setSecret/removeSecret 捕获旧值并在 completed 审计失败时写回（best-effort + warn） |
+| P1-1 | worker→HostBroker 丢失 agent/session 上下文（config/secret API missing agent） | PluginIpcCarrier 协议加 agentId/sessionId（向后兼容）；carrier issue/consume 携带 + **绑定校验（篡改拒绝）**；runtime-host invoke 签发时带 scope 上下文、handleWorkerRequest 传递 |
+| P1-2 | 更新激活失败只回滚 DB 不恢复 Runtime | facade.update 补偿：rollback 后**重新 hostApi.activate 旧版本**（恢复 Runtime/贡献/Hook） |
+| P1-3 | /logs?plugin= 只是全文搜索（search_text 不含 plugin_id） | ActivityFilter/queryActivities/queryAudit 加 pluginId 过滤（audit 按 target_kind='plugin'）；search_text 加入 scope.pluginId；路由 pluginId 参数；LogsPage/ActivityView 独立 pluginId 过滤（不污染搜索框） |
+| 测试缺口 | 无主会话工具调用集成测试 | 新增 plugin-main-session 集成测试（2 用例）：绑定过滤回归（未绑定插件工具不注入）+ **faux provider 驱动 PI customTools**（模型 tool_call → PluginSessionTool.invoke → ToolService → node worker 真实执行 → 结果回写会话，含 turn 快照冻结断言） |
+
+**验证**：T13 针对性测试（plugin-main-session 2、file-secret-store 18、plugin-config-secret 17、plugin-runtime-host/json-rpc/node、logs 16 等）+ 全量质量门复跑（vitest、web、e2e），见”最终验收结论”。
+
 ### 最终验收结论
 
-自动化质量门全部通过（T1-T10 与 T11 修复轮）；评审发现的阻断项已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）与已知偏差 #7（Agent turn 工具回路）作为人工验收与后续阶段内容。
+自动化质量门全部通过（T1-T10 与 T11/T12/T13 修复轮）；两轮评审阻断项均已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）作为人工验收步骤；主会话工具回路已有集成测试闭环（faux 模型驱动 tool_call → worker 执行），偏差 #7 已移除。
 ### T1 实施记录（2026-08-04，主 Agent 串行冻结）
 
 **内容**：协议包、Manifest v1、路径、migration v10、插件事件目录、import boundary 全部冻结。

@@ -37,6 +37,7 @@ import { PluginConfigStore } from "../storage/plugin-config-store.js";
 import { GrantService, type GrantChangeRequest } from "../runtime/plugins/grants/grant-service.js";
 import { BindingService } from "../runtime/plugins/grants/binding-service.js";
 import { EffectivePolicy } from "../runtime/plugins/grants/effective-policy.js";
+import { ExecutionSnapshotService } from "../runtime/plugins/grants/execution-snapshot.js";
 import { HostBroker } from "../runtime/plugins/grants/host-broker.js";
 import { SandboxBridge } from "../runtime/plugins/grants/sandbox-bridge.js";
 import { CarrierRegistry } from "../runtime/plugins/runtimes/carrier-registry.js";
@@ -156,6 +157,8 @@ export class PluginFacade {
   readonly devHost: PluginDevHost;
   readonly devInvoke: PluginDevInvokeService;
   readonly devScenario: PluginDevScenarioService;
+  /** P0-2：turn 级不可变执行快照（in-flight turn 授权/绑定冻结） */
+  readonly snapshots: ExecutionSnapshotService;
   private readonly installer: PluginInstaller;
   private readonly registryStore: PluginRegistryStore;
   private readonly grantStore: PluginGrantStore;
@@ -205,6 +208,8 @@ export class PluginFacade {
     });
     this.grants = new GrantService({ store: grantStore, audit: deps.audit });
     this.bindings = new BindingService({ store: bindingStore, grants: grantStore, audit: deps.audit });
+    // P0-2：turn 级执行快照（主会话每 turn 冻结绑定插件的授权/绑定状态）
+    this.snapshots = new ExecutionSnapshotService({ bindings: bindingStore, grants: grantStore });
     // Phase 9 沙箱策略层接线：base policy（不含 sandboxCheck）供 SandboxBridge 委托，
     // 外层 policy 注入 sandboxCheck —— 避免 bridge→policy→sandboxCheck 无限递归；
     // 平台 PathGuard 未配置时插件文件操作 fail-closed 拒绝（SandboxBridge 语义）。
@@ -354,9 +359,11 @@ export class PluginFacade {
         await this.hostApi.activate(pluginId);
       } catch (error) {
         // P1 更新补偿：新版本激活失败 → 回滚 active 到旧版本（旧版本目录仍在），
-        // 避免"DB 显示新版本 enabled 但没有运行实例"的悬挂状态
+        // 并重新激活旧版本 Runtime（rollback 只回滚 DB，需恢复旧 Runtime/贡献/Hook），
+        // 避免"DB 显示旧版本 enabled 但没有运行实例"的悬挂状态
         try {
           await this.registry.rollback(pluginId, actor);
+          await this.hostApi.activate(pluginId);
         } catch (rollbackError) {
           instrument.warn("plugin.update.activate_rollback_failed", "更新激活失败后回滚旧版本未能完成", {
             pluginId,

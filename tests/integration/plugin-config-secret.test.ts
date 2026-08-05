@@ -2,16 +2,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { PluginConfigStore } from "../../src/storage/plugin-config-store.js";
-import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { PluginGrantStore } from "../../src/storage/plugin-grant-store.js";
+import { PluginBindingStore } from "../../src/storage/plugin-binding-store.js";
+import {
+  AuditRecorder,
+  type AuditAcceptResult,
+  type AuditRecorderDeps,
+  type AuditRecordInput,
+} from "../../src/observability/audit-recorder.js";
 import { ContributionRegistry } from "../../src/runtime/plugins/contributions/contribution-registry.js";
 import { ConfigService } from "../../src/runtime/plugins/contributions/config-contribution.js";
+import { FileSecretStore } from "../../src/runtime/plugins/contributions/file-secret-store.js";
 import { SecretService, InMemorySecretStore, SecretAccessError } from "../../src/runtime/plugins/contributions/secret-contribution.js";
+import { runStrictAuditLifecycle, type StrictAuditLifecycleOptions } from "../../src/runtime/plugins/contributions/shared.js";
 import { EffectivePolicy } from "../../src/runtime/plugins/grants/effective-policy.js";
 import {
   bindAgent,
@@ -19,6 +28,7 @@ import {
   createT5Env,
   grantCapabilities,
   installPlugin,
+  producer,
   queryAudit,
   type T5Env,
 } from "./plugin-t5-helper.js";
@@ -205,5 +215,155 @@ describe("SecretService：声明/读写与授权", () => {
     expect(store.get("plugin.a", "key")).toBe("a-value");
     expect(store.get("plugin.b", "key")).toBe("b-value");
     expect(store.listNames("plugin.a")).toEqual(["key"]);
+  });
+
+  it("audit 不可用 → Secret 写入 fail-closed（store 与磁盘均不写入）", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-t5-secret-closed-"));
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: dir });
+    const liveDb = openMetadataDatabase(paths.database);
+    const closedDb = openMetadataDatabase(path.join(dir, "audit-closed.db"));
+    closedDb.close();
+    const closedAudit = new AuditRecorder({ database: closedDb, producer });
+    const registry = new ContributionRegistry();
+    registry.register({
+      pluginId: PLUGIN,
+      version: "1.0.0",
+      contributions: {
+        secret: [{ id: "api-key", name: "API Key", secretName: "apiKey" }],
+      },
+    });
+    const secretFilePath = path.join(dir, "plugin-secrets.json");
+    const store = new FileSecretStore({ filePath: secretFilePath });
+    const service = new SecretService({
+      registry,
+      policy: new EffectivePolicy({ grants: new PluginGrantStore(liveDb), bindings: new PluginBindingStore(liveDb) }),
+      store,
+      audit: closedAudit,
+    });
+    expect(() => service.setSecret({ pluginId: PLUGIN, secretName: "apiKey", value: "v", actor: USER_ACTOR })).toThrow();
+    expect(store.has(PLUGIN, "apiKey")).toBe(false);
+    expect(fs.existsSync(secretFilePath)).toBe(false);
+    liveDb.close();
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// P0-3：runStrictAuditLifecycle 审计失败补偿（shared.ts rollback）
+// - completed 审计被拒（或 SQLite 事务提交失败）时，外部副作用（文件/
+//   Secret）已生效，必须通过 rollback 恢复到变更前状态（§17.3 可验证补偿）；
+// - write 自身抛错视为副作用未生效（写入方失败原子性：先持久化后更新
+//   内存，如 FileSecretStore），不调用 rollback。
+// ═══════════════════════════════════════════════════════════════
+
+/** 注入"completed 审计被拒"的 Recorder：started 正常落库，completed 插入
+ *  随 SQLite 事务回滚后返回 rejected，模拟"审计账本拒绝终态"。 */
+class CompletedRejectingAudit extends AuditRecorder {
+  constructor(deps: AuditRecorderDeps) {
+    super(deps);
+  }
+
+  override appendStrict(input: AuditRecordInput): AuditAcceptResult {
+    const result = super.appendStrict(input);
+    if (input.eventName === "audit.plugin.secret_change_completed" && result.kind === "accepted") {
+      return { kind: "rejected", eventName: input.eventName, reason: "模拟 completed 审计拒绝" };
+    }
+    return result;
+  }
+}
+
+describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
+  let dir: string;
+  let db: Database.Database;
+  let audit: AuditRecorder;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "oc-t5-audit-rollback-"));
+    db = openMetadataDatabase(path.join(dir, "audit.db"));
+    audit = new AuditRecorder({ database: db, producer });
+  });
+
+  afterEach(() => {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+
+  function lifecycleOptions(overrides: { audit: AuditRecorder; operationId: string }): StrictAuditLifecycleOptions {
+    return {
+      audit: overrides.audit,
+      trace: { traceId: "trace-p0-3", spanId: "span-p0-3", operationId: overrides.operationId },
+      actor: USER_ACTOR,
+      executor: { kind: "service", id: "plugin-secrets" },
+      target: { kind: "plugin", id: PLUGIN },
+      scope: { pluginId: PLUGIN },
+      startEventName: "audit.plugin.secret_change_started",
+      completedEventName: "audit.plugin.secret_change_completed",
+      failedEventName: "audit.plugin.secret_change_failed",
+      action: "secret.change",
+      beforeRevision: "0",
+      afterRevision: "1",
+      changedFields: ["secretName"],
+    };
+  }
+
+  it("completed 审计被拒：写入已生效时调用 rollback 补偿，账本为 started + failed", () => {
+    const rejectingAudit = new CompletedRejectingAudit({ database: db, producer });
+    let writeRan = false;
+    let rollbackRan = false;
+    const options: StrictAuditLifecycleOptions = {
+      ...lifecycleOptions({ audit: rejectingAudit, operationId: "op-rollback-completed-rejected" }),
+      rollback: () => {
+        rollbackRan = true;
+      },
+    };
+
+    expect(() => runStrictAuditLifecycle(options, () => { writeRan = true; })).toThrow(/审计记录被拒绝/);
+    expect(writeRan).toBe(true);
+    expect(rollbackRan).toBe(true);
+
+    const rows = queryAudit(db, "audit.plugin.secret_change_");
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "audit.plugin.secret_change_started",
+      "audit.plugin.secret_change_failed",
+    ]);
+  });
+
+  it("write 自身抛错：视为副作用未生效，不调用 rollback", () => {
+    let rollbackRan = false;
+    const options: StrictAuditLifecycleOptions = {
+      ...lifecycleOptions({ audit, operationId: "op-rollback-write-throws" }),
+      rollback: () => {
+        rollbackRan = true;
+      },
+    };
+
+    expect(() => runStrictAuditLifecycle(options, () => { throw new Error("store 写入失败"); })).toThrow(/store 写入失败/);
+    expect(rollbackRan).toBe(false);
+
+    const rows = queryAudit(db, "audit.plugin.secret_change_");
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "audit.plugin.secret_change_started",
+      "audit.plugin.secret_change_failed",
+    ]);
+  });
+
+  it("成功路径：写入与 completed 均落账，不调用 rollback", () => {
+    let rollbackRan = false;
+    const options: StrictAuditLifecycleOptions = {
+      ...lifecycleOptions({ audit, operationId: "op-rollback-success" }),
+      rollback: () => {
+        rollbackRan = true;
+      },
+    };
+
+    const result = runStrictAuditLifecycle(options, () => "ok");
+    expect(result).toBe("ok");
+    expect(rollbackRan).toBe(false);
+
+    const rows = queryAudit(db, "audit.plugin.secret_change_");
+    expect(rows.map((row) => row.event_name)).toEqual([
+      "audit.plugin.secret_change_started",
+      "audit.plugin.secret_change_completed",
+    ]);
   });
 });

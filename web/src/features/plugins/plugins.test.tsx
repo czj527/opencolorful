@@ -278,8 +278,9 @@ describe("PluginDetailView（Surface 资产 URL）", () => {
     render(<PluginDetailView pluginApi={fakeApi} pluginId="demo.minimal" onBack={() => {}} />);
     const frame = await screen.findByTestId("surface-frame");
     expect(frame.getAttribute("src")).toBe("/api/plugins/demo.minimal/assets/ui/settings.html");
-    const link = screen.getByTestId("surface-asset-link");
-    expect(link.getAttribute("href")).toBe("/api/plugins/demo.minimal/assets/ui/settings.html");
+    // P0-1 隔离：iframe 必须 opaque origin（sandbox 无 allow-same-origin）；不提供顶层打开链接
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(screen.queryByTestId("surface-asset-link")).toBeNull();
     expect(screen.queryByText(/尚未接线/)).toBeNull();
     expect(screen.queryByText(/未声明资源入口/)).toBeNull();
   });

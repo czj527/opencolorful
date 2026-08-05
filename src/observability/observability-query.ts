@@ -28,6 +28,8 @@ export interface ActivityFilter {
   readonly errorCode?: string;
   readonly traceId?: string;
   readonly operationId?: string;
+  /** P1-3：按插件过滤（activity_events.plugin_id 列） */
+  readonly pluginId?: string;
   readonly search?: string;
 }
 
@@ -153,7 +155,7 @@ const ACTIVITY_COLUMNS = `
   actor_kind AS actorKind, actor_id AS actorId,
   executor_kind AS executorKind, executor_id AS executorId,
   target_kind AS targetKind, target_id AS targetId,
-  owner_agent_id AS ownerAgentId, session_id AS sessionId,
+  owner_agent_id AS ownerAgentId, session_id AS sessionId, plugin_id AS pluginId,
   trace_id AS traceId, span_id AS spanId, parent_span_id AS parentSpanId,
   operation_id AS operationId, duration_ms AS durationMs,
   error_code AS errorCode, retryable,
@@ -188,6 +190,7 @@ export class ObservabilityQuery {
     if (filter.to !== undefined) { where.push("recorded_at <= ?"); params.push(filter.to); }
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
+    if (filter.pluginId !== undefined) { where.push("plugin_id = ?"); params.push(filter.pluginId); }
     if (filter.eventName !== undefined) { where.push("event_name = ?"); params.push(filter.eventName); }
     if (filter.category !== undefined) { where.push("category = ?"); params.push(filter.category); }
     if (filter.level !== undefined) { where.push("level = ?"); params.push(filter.level); }
@@ -259,7 +262,7 @@ export class ObservabilityQuery {
   // ─── Audit cursor 分页 ────────────────────────────────────────
 
   queryAudit(
-    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string },
+    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string; pluginId?: string },
     cursor: PageCursor | null,
     limit = 50,
   ): PagedResult<AuditRow> {
@@ -274,6 +277,8 @@ export class ObservabilityQuery {
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
     if (filter.traceId !== undefined) { where.push("trace_id = ?"); params.push(filter.traceId); }
+    // P1-3：audit_events 无 plugin_id 列，插件审计按 target（target_kind='plugin'）过滤
+    if (filter.pluginId !== undefined) { where.push("target_kind = 'plugin' AND target_id = ?"); params.push(filter.pluginId); }
     if (cursor !== null) {
       where.push("(recorded_at < ? OR (recorded_at = ? AND id < ?))");
       params.push(cursor.recordedAt, cursor.recordedAt, cursor.id);

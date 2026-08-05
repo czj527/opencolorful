@@ -107,7 +107,8 @@ function unimplementedHostCall(method: string): Promise<never> {
   return Promise.reject(
     new PluginComponentsNotImplementedError(
       `useHostApi().${method}：iframe 桥（postMessage 宿主通道）尚未接线（后续阶段）。` +
-        "Surface 静态资源经受控资产路由 GET /api/plugins/:id/assets/<相对路径> 托管；" +
+        "Surface 静态资源经受控资产路由 GET /api/plugins/:id/assets/<相对路径> 托管，" +
+        "iframe 已按 opaque origin 隔离（sandbox 无 allow-same-origin + CSP sandbox）；" +
         "当前请以纯静态 HTML 渲染，宿主能力调用在桥接入后可用。",
     ),
   );

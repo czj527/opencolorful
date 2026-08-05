@@ -536,7 +536,7 @@ describe("LogsPage 复审修复（评审 P1-11 复现级测试）", () => {
 });
 
 describe("LogsPage /logs?plugin= 预筛选", () => {
-  it("带 plugin 参数：初始加载即带 search 过滤，且「全文搜索」输入框预填", async () => {
+  it("带 plugin 参数：初始加载即带 pluginId 过滤（P1-3 独立过滤，非全文搜索），输入框不预填", async () => {
     window.history.pushState({}, "", "/logs?plugin=demo.minimal");
     renderPage([
       route("/api/observability/activity", activityPage([activityRow()])),
@@ -547,10 +547,12 @@ describe("LogsPage /logs?plugin= 预筛选", () => {
       const request = activityRequests().at(-1);
       expect(request).toBeDefined();
       const params = new URLSearchParams(request!.split("?")[1] ?? "");
-      expect(params.get("search")).toBe("demo.minimal");
+      expect(params.get("pluginId")).toBe("demo.minimal");
+      expect(params.get("search")).toBeNull();
       expect(params.get("limit")).toBe("50");
     });
-    expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("demo.minimal");
+    // 插件过滤是独立的 plugin_id 条件，不污染全文搜索输入框
+    expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("");
   });
 
   it("无 plugin 参数时行为不变：search 为空、输入框为空", async () => {

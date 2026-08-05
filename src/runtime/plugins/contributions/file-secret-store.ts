@@ -11,8 +11,11 @@ import type { PluginSecretStore } from "./secret-contribution.js";
 //   明文值），SecretService 无感知切换；
 // - 文件格式见 FileSecretsDocument：`auth/plugin-secrets.json`
 //   （paths.pluginSecrets），版本化便于后续迁移；
-// - 变更后立即落盘；写入用临时文件 + renameSync 原子替换，避免半写
-//   文件被进程重启后当作合法数据读取；
+// - 先落盘后更新内存（失败原子性，P0-3）：set/remove 先把"变更后视图"
+//   原子写盘，写盘成功才更新内存 Map——写盘失败（如 EPERM）抛错时内存
+//   与磁盘都保持变更前状态，进程内读不到"报告失败但已生效"的值；
+// - 写入用临时文件 + renameSync 原子替换，避免半写文件被进程重启后
+//   当作合法数据读取；
 // - 缺失/损坏按空状态处理；损坏时先备份 `.bak` 再按空处理，并走
 //   instrument.warn 记录（文件路径可入日志，Secret 值绝不入日志）；
 // - 文件权限 best-effort 收紧到 0o600（明文 Secret 文件仅限当前用户
@@ -70,9 +73,17 @@ export class FileSecretStore implements PluginSecretStore {
   set(pluginId: string, secretName: string, value: string): void {
     this.ensureLoaded();
     const key = this.key(pluginId, secretName);
+    // 失败原子性（P0-3）：先持久化成功，再更新内存。构造"变更后视图"
+    // 写盘，写盘失败抛错时内存保持旧值，get/has/listNames 语义不受影响，
+    // 后续 set 基于旧值继续。
+    const updatedAt = new Date().toISOString();
+    const nextValues = new Map(this.values);
+    const nextUpdatedAt = new Map(this.updatedAt);
+    nextValues.set(key, value);
+    nextUpdatedAt.set(key, updatedAt);
+    this.persistSnapshot(nextValues, nextUpdatedAt);
     this.values.set(key, value);
-    this.updatedAt.set(key, new Date().toISOString());
-    this.persist();
+    this.updatedAt.set(key, updatedAt);
   }
 
   has(pluginId: string, secretName: string): boolean {
@@ -95,11 +106,18 @@ export class FileSecretStore implements PluginSecretStore {
   remove(pluginId: string, secretName: string): void {
     this.ensureLoaded();
     const key = this.key(pluginId, secretName);
-    if (!this.values.delete(key)) {
-      return;
+    if (!this.values.has(key)) {
+      return; // 键不存在：无变更，不写盘（保持幂等语义）
     }
+    // 失败原子性（P0-3）：删除后的视图先写盘成功，才删除内存键；
+    // 写盘失败抛错时键仍存在，内存与磁盘均保持变更前状态。
+    const nextValues = new Map(this.values);
+    const nextUpdatedAt = new Map(this.updatedAt);
+    nextValues.delete(key);
+    nextUpdatedAt.delete(key);
+    this.persistSnapshot(nextValues, nextUpdatedAt);
+    this.values.delete(key);
     this.updatedAt.delete(key);
-    this.persist();
   }
 
   // ── private helpers ───────────────────────────────────────────
@@ -173,9 +191,16 @@ export class FileSecretStore implements PluginSecretStore {
     });
   }
 
-  /** 全量原子写回：临时文件 + renameSync，避免半写文件被后续进程读到。 */
-  private persist(): void {
-    const document = this.toDocument();
+  /**
+   * 以指定视图原子写盘（临时文件 + renameSync，避免半写文件被后续进程
+   * 读到）。set/remove 先构造"变更后视图"调用本方法，写盘成功后才更新
+   * 内存：写盘失败时磁盘与内存都保持变更前状态（失败原子性）。
+   */
+  private persistSnapshot(
+    values: ReadonlyMap<string, string>,
+    updatedAt: ReadonlyMap<string, string>,
+  ): void {
+    const document = this.toDocument(values, updatedAt);
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -189,9 +214,12 @@ export class FileSecretStore implements PluginSecretStore {
     fs.renameSync(temporaryPath, this.filePath);
   }
 
-  private toDocument(): FileSecretsDocument {
+  private toDocument(
+    values: ReadonlyMap<string, string>,
+    updatedAt: ReadonlyMap<string, string>,
+  ): FileSecretsDocument {
     const secrets: Record<string, Record<string, FileSecretRecord>> = {};
-    for (const [key, value] of this.values) {
+    for (const [key, value] of values) {
       const separator = key.indexOf("\u0000");
       const pluginId = key.slice(0, separator);
       const secretName = key.slice(separator + 1);
@@ -200,7 +228,7 @@ export class FileSecretStore implements PluginSecretStore {
         pluginSecrets = {};
         secrets[pluginId] = pluginSecrets;
       }
-      const recordUpdatedAt = this.updatedAt.get(key);
+      const recordUpdatedAt = updatedAt.get(key);
       pluginSecrets[secretName] =
         recordUpdatedAt !== undefined ? { value, updatedAt: recordUpdatedAt } : { value };
     }

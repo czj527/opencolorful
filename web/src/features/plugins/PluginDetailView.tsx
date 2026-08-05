@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ExternalLink, ScrollText } from "lucide-react";
+import { ArrowLeft, ScrollText } from "lucide-react";
 import { Button } from "../../components/ui/index.js";
 import { isPluginServiceUnavailable, PluginApiClient } from "../../lib/plugin-api.js";
 import type {
@@ -343,25 +343,16 @@ function SurfaceHostEntry(props: { readonly title: string; readonly assetUrl: st
     <div className={styles.surfaceHost} data-testid="surface-host">
       <div className={styles.surfaceHeader}>
         <span>{props.title}</span>
-        {props.assetUrl !== null && (
-          <a
-            className={styles.retryButton}
-            href={props.assetUrl}
-            target="_blank"
-            rel="noreferrer"
-            data-testid="surface-asset-link"
-          >
-            <ExternalLink size={14} aria-hidden="true" />
-            打开资产链接
-          </a>
-        )}
       </div>
       {props.assetUrl !== null ? (
+        // P0-1 Surface 隔离：资产经同源受控路由托管，但 iframe 必须 opaque origin——
+        // 去掉 allow-same-origin（allow-scripts + allow-same-origin 组合等于无隔离，
+        // 恶意 Surface 可访问父页面/同源存储/平台 API）。不提供顶层打开入口。
         <iframe
           className={styles.surfaceFrame}
           src={props.assetUrl}
           title={props.title}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts"
           data-testid="surface-frame"
         />
       ) : (

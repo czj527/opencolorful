@@ -334,6 +334,38 @@ describe("NodeRuntime 独立子进程", () => {
     await runtime.stop("shutdown");
   });
 
+  it("issue 携带 agentId/sessionId → carrier 携带上下文并经 worker 原样回传", async () => {
+    const env = createEnv(WORKER_WITH_HOST_REQUEST);
+    const received: Array<{ method: string; params?: unknown; carrier?: unknown }> = [];
+    const runtime = makeRuntime(env, {
+      onWorkerRequest: (message: import("../../src/runtime/plugins/runtimes/json-rpc.js").JsonRpcWorkerRequest) => {
+        received.push(message);
+        return { forwarded: true, method: message.method };
+      },
+    });
+    await runtime.start();
+    const carrier = env.carriers.issue({
+      pluginId: "example.node",
+      runtimeInstanceId: "runtime-example.node-1",
+      operationId: "exec-ask-ctx",
+      agentId: "agent-1",
+      sessionId: "session-1",
+    });
+    // 签发的 carrier 携带 Agent/Session 上下文（随 token 绑定）
+    expect(carrier.agentId).toBe("agent-1");
+    expect(carrier.sessionId).toBe("session-1");
+    const result = await runtime.invoke({ operationId: "exec-ask-ctx", method: "ask-host", carrier });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.result).toEqual({ host: { forwarded: true, method: "host.ping" } });
+    }
+    expect(received.length).toBe(1);
+    // worker 原样回传 carrier，上下文不丢失（由 RuntimeHost 校验后传给 broker.call）
+    expect((received[0]?.carrier as { agentId?: string; sessionId?: string } | undefined)?.agentId).toBe("agent-1");
+    expect((received[0]?.carrier as { agentId?: string; sessionId?: string } | undefined)?.sessionId).toBe("session-1");
+    await runtime.stop("shutdown");
+  });
+
   it("未注入 onWorkerRequest 时 worker 主动请求 → method-not-found 回写 worker", async () => {
     const env = createEnv(WORKER_WITH_HOST_REQUEST);
     const runtime = makeRuntime(env);

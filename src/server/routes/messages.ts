@@ -10,7 +10,7 @@ import type { EventReplayStore } from "../../runtime/event-replay-store.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { SessionService } from "../../runtime/session-service.js";
-import { SessionRuntime } from "../../runtime/session-runtime.js";
+import { SessionRuntime, type SessionRuntimeOptions } from "../../runtime/session-runtime.js";
 import { ToolPolicy } from "../../runtime/tool-policy.js";
 import { buildMemoryInjectionBlock } from "../../runtime/memory/memory-injection.js";
 import { MemoryRecallService } from "../../runtime/memory/recall-service.js";
@@ -56,6 +56,74 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
 
   // 跟踪每个 session 运行时使用的 systemPrompt（含记忆块 revision），用于检测 profile/memory 更新
   const runtimeSystemPrompt = new Map<string, string | undefined>();
+  // P0-2：插件状态签名（绑定/授权修订/版本/运行实例），变化时重建 Runtime（下一 turn 生效）
+  const pluginSignatures = new Map<string, string>();
+
+  /**
+   * P0-2：Agent 的插件状态签名——enabled 绑定的 pluginId、active 版本、状态、
+   * grantRevision/bindingRevision、运行实例 id 与绑定贡献列表。任一变化都会
+   * 使签名不同，触发 Runtime 重建（解绑/新绑定/授权变更/插件更新下一 turn 生效）。
+   */
+  function pluginSignature(agentId: string | undefined): string {
+    const facade = options.pluginFacade;
+    if (agentId === undefined || facade === undefined) {
+      return "";
+    }
+    try {
+      const bindings = facade.listAgentBindings(agentId).filter((binding) => binding.enabled);
+      if (bindings.length === 0) {
+        return "";
+      }
+      const parts = bindings.map((binding) => {
+        const active = facade.get(binding.pluginId);
+        const instance = facade.runtimeHost.getInstance(binding.pluginId);
+        return [
+          binding.pluginId,
+          active?.version ?? "",
+          active?.status ?? "",
+          String(binding.grantRevision),
+          String(binding.revision),
+          instance?.runtimeInstanceId ?? "",
+          [...binding.contributions].sort().join(","),
+        ].join(":");
+      });
+      return parts.sort().join("|");
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * P0-2 turn 快照工厂：每 turn 开始冻结绑定插件的授权/绑定状态
+   * （ExecutionSnapshotService.create），in-flight 工具调用以冻结态为准。
+   */
+  function pluginSnapshotFactory(): SessionRuntimeOptions["snapshotFactory"] {
+    const facade = options.pluginFacade;
+    if (facade === undefined) {
+      return undefined;
+    }
+    return (pluginId: string, agentId: string) => {
+      try {
+        const active = facade.get(pluginId);
+        if (active === undefined) {
+          return undefined;
+        }
+        const instance = facade.runtimeHost.getInstance(pluginId);
+        if (instance === undefined) {
+          return undefined;
+        }
+        return facade.snapshots.create({
+          pluginId,
+          pluginVersion: active.version,
+          runtimeKind: instance.kind,
+          runtimeInstanceId: instance.runtimeInstanceId,
+          agentId,
+        });
+      } catch {
+        return undefined;
+      }
+    };
+  }
 
   /**
    * Phase 12 P0-1：按 Agent 绑定解析插件工具（注入主会话 PI 工具注册表）。
@@ -80,28 +148,42 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       return facade.hostApi.tools
         .listTools()
         .filter((tool) => {
+          // P0-2：未绑定插件的工具绝不注入（bound.get 对未绑定插件也返回 undefined，
+          // 必须用 has 区分"未绑定"与"绑定但允许全部贡献"）
+          if (!bound.has(tool.pluginId)) {
+            return false;
+          }
           const allowed = bound.get(tool.pluginId);
           return allowed === undefined || allowed.includes(tool.contributionId);
         })
-        .map((descriptor) => ({
-          qualifiedName: descriptor.qualifiedName,
-          name: descriptor.name,
-          ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
-          ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
-          invoke: async (params: unknown, signal?: AbortSignal) => {
-            const result = await facade.hostApi.tools.invoke({
-              pluginId: descriptor.pluginId,
-              contributionId: descriptor.contributionId,
-              params,
-              agentId,
-              sessionId,
-              ...(signal !== undefined ? { signal } : {}),
-            });
-            return result.ok
-              ? { ok: true as const, result: result.result }
-              : { ok: false as const, code: result.code, message: result.message };
-          },
-        }));
+        .map((descriptor) => {
+          // P0-2 turn 快照槽：SessionRuntime 每 turn 开始冻结该插件的授权/绑定状态
+          const turnContext: { current: import("../../pi-sdk/index.js").PluginToolTurnContext | undefined } = { current: undefined };
+          return {
+            qualifiedName: descriptor.qualifiedName,
+            pluginId: descriptor.pluginId,
+            name: descriptor.name,
+            ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
+            ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
+            turnContext,
+            invoke: async (params: unknown, signal?: AbortSignal) => {
+              const frozen = turnContext.current;
+              const result = await facade.hostApi.tools.invoke({
+                pluginId: descriptor.pluginId,
+                contributionId: descriptor.contributionId,
+                params,
+                agentId,
+                sessionId,
+                ...(frozen?.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
+                ...(frozen?.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
+                ...(signal !== undefined ? { signal } : {}),
+              });
+              return result.ok
+                ? { ok: true as const, result: result.result }
+                : { ok: false as const, code: result.code, message: result.message };
+            },
+          };
+        });
     } catch {
       return [];
     }
@@ -151,6 +233,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
   // 失败抛 EnsureRuntimeError，由调用方映射为 HTTP 响应。
   async function ensureRuntime(sessionId: string): Promise<void> {
     const createRuntime = async (systemPrompt: string | undefined) => {
+      const snapshotFactory = pluginSnapshotFactory();
       // 仅在需要创建/重建 runtime 时才要求 sessionService 与 paths 存在
       if (!sessionService || !paths) {
         throw new EnsureRuntimeError(createApiError("CONFLICT", "Session Runtime 未就绪"), 409);
@@ -243,6 +326,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
           ...(pluginTools.length > 0 ? { pluginTools } : {}),
+          ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -255,6 +339,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         setupMemoryContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
+        pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
       } else {
         const runtime = await SessionRuntime.create({
           sessionId,
@@ -271,6 +356,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
           ...(pluginTools.length > 0 ? { pluginTools } : {}),
+          ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -283,6 +369,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         setupMemoryContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
+        pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
       }
     };
 
@@ -303,15 +390,20 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       return;
     }
 
-    // Runtime 已存在：检查 Agent profile 是否有更新，如有则重建 runtime
+    // Runtime 已存在：检查 Agent profile 或插件状态是否有更新，如有则重建 runtime
     const view = sessionService?.getView(sessionId);
     if (view?.agentId && agentStore) {
       const currentPrompt = buildSystemPrompt(view.agentId);
       const lastPrompt = runtimeSystemPrompt.get(sessionId);
-      if (currentPrompt !== lastPrompt) {
-        // profile 已更新，使旧 runtime 失效并重建
+      // P0-2：插件绑定/授权/版本/运行实例变化（解绑、新绑定、授权变更、插件更新）
+      // 必须触发重建——否则下一 turn 仍看到旧工具集
+      const currentPluginSig = pluginSignature(view.agentId ?? undefined);
+      const lastPluginSig = pluginSignatures.get(sessionId);
+      if (currentPrompt !== lastPrompt || currentPluginSig !== lastPluginSig) {
+        // profile 或插件状态已更新，使旧 runtime 失效并重建
         promptService.invalidate(sessionId);
         runtimeSystemPrompt.delete(sessionId);
+        pluginSignatures.delete(sessionId);
         try {
           await createRuntime(currentPrompt);
         } catch (error) {

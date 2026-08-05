@@ -26,6 +26,10 @@ export interface CarrierIssueInput {
   /** 可覆盖的只读 traceId/spanId（缺省平台新生成） */
   readonly traceId?: string;
   readonly spanId?: string;
+  /** 触发本次执行的 Agent 上下文（平台签发，随 carrier 绑定，worker 不得篡改） */
+  readonly agentId?: string;
+  /** 触发本次执行的 Session 上下文（平台签发，随 carrier 绑定，worker 不得篡改） */
+  readonly sessionId?: string;
 }
 
 export interface CarrierRegistryDeps {
@@ -43,6 +47,9 @@ interface IssuedCarrier {
   readonly runtimeInstanceId: string;
   readonly operationId: string;
   readonly token: string;
+  /** 签发时的 Agent/Session 上下文（回传时校验，防 worker 篡改/伪造） */
+  readonly agentId?: string;
+  readonly sessionId?: string;
   readonly issuedAtMs: number;
   readonly expiresAtMs: number;
   consumed: boolean;
@@ -76,6 +83,8 @@ export class CarrierRegistry {
       spanId,
       issuedAt: issuedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
     };
     if (!Value.Check(PluginIpcCarrierSchema, carrier)) {
       throw new Error("签发的 IPC carrier 不符合协议 schema");
@@ -85,6 +94,8 @@ export class CarrierRegistry {
       runtimeInstanceId: carrier.runtimeInstanceId,
       operationId: carrier.operationId,
       token,
+      ...(carrier.agentId !== undefined ? { agentId: carrier.agentId } : {}),
+      ...(carrier.sessionId !== undefined ? { sessionId: carrier.sessionId } : {}),
       issuedAtMs: issuedAt.getTime(),
       expiresAtMs: expiresAt.getTime(),
       consumed: false,
@@ -176,6 +187,13 @@ export class CarrierRegistry {
     }
     if (record.operationId !== carrier.operationId) {
       return "token 绑定的操作与 carrier 不一致（跨操作复用拒绝）";
+    }
+    // Agent/Session 上下文随 token 绑定：worker 不得篡改/删除/伪造
+    if (record.agentId !== carrier.agentId) {
+      return "token 绑定的 Agent 上下文与 carrier 不一致（Agent 上下文被篡改）";
+    }
+    if (record.sessionId !== carrier.sessionId) {
+      return "token 绑定的 Session 上下文与 carrier 不一致（Session 上下文被篡改）";
     }
     return null;
   }

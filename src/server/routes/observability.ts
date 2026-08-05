@@ -141,6 +141,7 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("errorCode") !== undefined ? { errorCode: context.req.query("errorCode")! } : {}),
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
       ...(context.req.query("operationId") !== undefined ? { operationId: context.req.query("operationId")! } : {}),
+      ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
       ...(context.req.query("search") !== undefined ? { search: context.req.query("search")! } : {}),
     };
     const cursor = parseCursor(context.req.query("cursor") ?? undefined);
@@ -256,6 +257,7 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("ownerAgentId") !== undefined ? { ownerAgentId: context.req.query("ownerAgentId")! } : {}),
       ...(context.req.query("sessionId") !== undefined ? { sessionId: context.req.query("sessionId")! } : {}),
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
+      ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
     };
     const cursor = parseCursor(context.req.query("cursor") ?? undefined);
     const limit = parseOptionalInt(context.req.query("limit") ?? undefined, 50, 200);

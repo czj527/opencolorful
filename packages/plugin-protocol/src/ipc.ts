@@ -23,6 +23,13 @@ export const PluginIpcCarrierSchema = Type.Object(
     spanId: Type.String({ minLength: 1, maxLength: 128 }),
     issuedAt: Type.String({ minLength: 1, maxLength: 64 }),
     expiresAt: Type.String({ minLength: 1, maxLength: 64 }),
+    /**
+     * 触发本次执行的 Agent/Session 上下文（平台签发，worker 回传时按
+     * token 绑定校验，不允许 worker 篡改/伪造）；向后兼容：旧 carrier
+     * 无此字段。
+     */
+    agentId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
 );

@@ -165,6 +165,12 @@ export function assertContributionInSnapshot(input: {
  * 严格审计三阶段生命周期（plans/phase-12.md §17.3）：
  * started（fail-closed，未接受立即抛错）→ 领域写入 + completed 同一事务
  * → 失败补 failed 终态。用于 Config 变更 / Secret 变更等高风险领域修改。
+ *
+ * 外部副作用（文件/Secret 等，不在 SQLite 事务内的修改）失败补偿：
+ * 通过可选 rollback 把"写入已生效但审计事务失败"的副作用恢复到变更前
+ * 状态（§17.3：文件、Secret 或外部进程操作使用审计先行、可验证补偿）。
+ * 仅当 write 成功返回后才调用——write 自身抛错视为副作用未生效（依赖
+ * 写入方失败原子性：先持久化后更新内存，如 FileSecretStore）。
  */
 export interface StrictAuditLifecycleOptions {
   readonly audit: AuditRecorder;
@@ -180,6 +186,13 @@ export interface StrictAuditLifecycleOptions {
   readonly beforeRevision: string;
   readonly afterRevision?: string;
   readonly changedFields: readonly string[];
+  /**
+   * 审计失败补偿（可选，best-effort）：领域写入已成功返回、但 completed
+   * 审计被拒（或 SQLite 事务提交失败）导致操作整体失败时，把已生效的外部
+   * 副作用恢复到变更前状态（如 Secret 变更写回旧值）。补偿失败只 warn，
+   * 不掩盖原错误。
+   */
+  readonly rollback?: () => void;
 }
 
 export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions, write: () => T): T {
@@ -203,6 +216,8 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
     }),
     `${options.startEventName} 审计(启动)`,
   );
+  // 领域写入是否已成功返回：外部副作用可能已生效，审计事务失败时需要补偿
+  let writeCommitted = false;
   try {
     const { result } = audit.runAuditedTransaction(
       {
@@ -214,10 +229,30 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
         scope,
         trace,
       },
-      write,
+      () => {
+        const result = write();
+        writeCommitted = true;
+        return result;
+      },
     );
     return result;
   } catch (error) {
+    // 领域写入已生效但审计事务失败：先 best-effort 补偿外部副作用，
+    // 再补 failed 终态；failed 也写不进去时保留原错误
+    if (writeCommitted && options.rollback !== undefined) {
+      try {
+        options.rollback();
+      } catch (rollbackError) {
+        instrument.warn(
+          "plugin.audit.rollback_failed",
+          `${options.action} 审计失败，领域补偿未生效（数据可能停留在变更后状态）`,
+          {
+            action: options.action,
+            error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+          },
+        );
+      }
+    }
     try {
       audit.appendStrict({
         eventName: options.failedEventName,

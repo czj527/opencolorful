@@ -132,6 +132,9 @@ export class SecretService {
     const { pluginId, secretName, value, actor } = input;
     this.validateSecretName(secretName);
     const beforeRevision = this.deps.store.has(pluginId, secretName) ? "1" : "0";
+    // P0-3 审计补偿：completed 审计失败时把旧值写回（FileSecretStore 先盘后内存，
+    // 保证 best-effort 恢复本身是原子的）；新写入本身失败时 store 已原子回滚。
+    const previousValue = this.deps.store.get(pluginId, secretName);
     const operationId = `secret-change-${pluginId.slice(0, 64)}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     const trace = this.newTrace(operationId);
     runStrictAuditLifecycle(
@@ -149,6 +152,13 @@ export class SecretService {
         beforeRevision,
         afterRevision: "1",
         changedFields: CHANGED_FIELDS,
+        rollback: () => {
+          if (previousValue !== undefined) {
+            this.deps.store.set(pluginId, secretName, previousValue);
+          } else {
+            this.deps.store.remove(pluginId, secretName);
+          }
+        },
       },
       () => {
         this.deps.store.set(pluginId, secretName, value);
@@ -161,6 +171,8 @@ export class SecretService {
     const { pluginId, secretName, actor } = input;
     this.validateSecretName(secretName);
     const beforeRevision = this.deps.store.has(pluginId, secretName) ? "1" : "0";
+    // P0-3 审计补偿：completed 审计失败时恢复旧值
+    const previousValue = this.deps.store.get(pluginId, secretName);
     const operationId = `secret-change-${pluginId.slice(0, 64)}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     const trace = this.newTrace(operationId);
     runStrictAuditLifecycle(
@@ -178,6 +190,11 @@ export class SecretService {
         beforeRevision,
         afterRevision: "0",
         changedFields: CHANGED_FIELDS,
+        rollback: () => {
+          if (previousValue !== undefined) {
+            this.deps.store.set(pluginId, secretName, previousValue);
+          }
+        },
       },
       () => {
         this.deps.store.remove(pluginId, secretName);

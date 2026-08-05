@@ -350,6 +350,7 @@ export interface ActivityRow {
   readonly targetId: string | null;
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
+  readonly pluginId?: string | null;
   readonly traceId: string;
   readonly spanId: string;
   readonly parentSpanId: string | null;
@@ -377,6 +378,8 @@ export interface ActivityQuery {
   readonly errorCode?: string;
   readonly traceId?: string;
   readonly operationId?: string;
+  /** P1-3：按插件过滤 */
+  readonly pluginId?: string;
   readonly search?: string;
 }
 
@@ -411,6 +414,7 @@ export interface AuditRow {
   readonly actorId: string;
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
+  readonly pluginId?: string | null;
   readonly traceId: string;
   readonly operationId: string | null;
   readonly payloadJson: string;

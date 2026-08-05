@@ -48,12 +48,25 @@ export interface PiSessionHandle {
 export interface PluginSessionTool {
   /** 稳定命名空间：pluginId.toolId */
   readonly qualifiedName: string;
+  /** 所属插件（P0-2 turn 快照按插件冻结） */
+  readonly pluginId: string;
   readonly name: string;
   readonly description?: string;
   /** 输入 JSON Schema（标准 JSON Schema 运行时兼容） */
   readonly inputSchema?: unknown;
+  /**
+   * 宿主可写的 turn 上下文槽（P0-2）：SessionRuntime 每 turn 开始冻结
+   * 该插件的授权/绑定快照写入 current；invoke 闭包读取后传给 ToolService。
+   */
+  readonly turnContext?: { current: PluginToolTurnContext | undefined };
   /** 执行入口：params 已过 Schema 校验；结果对象由宿主 JSON 序列化回模型 */
   invoke(params: unknown, signal?: AbortSignal): Promise<PluginSessionToolInvokeResult>;
+}
+
+/** turn 级冻结的授权/绑定状态（in-flight turn 内工具调用以它为准） */
+export interface PluginToolTurnContext {
+  readonly snapshot: unknown;
+  readonly state: unknown;
 }
 
 export type PluginSessionToolInvokeResult =

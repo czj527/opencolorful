@@ -284,6 +284,7 @@ export class ApiClient {
       if (filter.errorCode !== undefined) params.set("errorCode", filter.errorCode);
       if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
       if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
+      if (filter.pluginId !== undefined) params.set("pluginId", filter.pluginId);
       if (filter.search !== undefined) params.set("search", filter.search);
     }
     if (cursor !== undefined && cursor !== null) params.set("cursor", cursor);

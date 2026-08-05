@@ -365,6 +365,10 @@ export class RuntimeHost {
       operationId,
       ...(trace.traceId !== undefined ? { traceId: trace.traceId } : {}),
       ...(trace.spanId !== undefined ? { spanId: trace.spanId } : {}),
+      // Agent/Session 上下文随 carrier 签发：worker 回传请求 Host API 时
+      // 由 handleWorkerRequest 提取并传入 broker.call（host-broker 上下文）
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
     });
 
     const lifecycle = this.startExecutionLifecycle({
@@ -685,11 +689,14 @@ export class RuntimeHost {
     if (!consumed.ok) {
       throw new RpcRequestError(JSON_RPC_ERROR_CODES.invalidRequest, `worker 请求 carrier 校验失败：${consumed.reason}`);
     }
-    // HostBroker 白名单调用（内部再次校验身份 + 参数防伪造 + 能力校验）
+    // HostBroker 白名单调用（内部再次校验身份 + 参数防伪造 + 能力校验）；
+    // Agent/Session 上下文取自已消费校验的 carrier（随 token 绑定，worker 无法篡改）
     const result = this.deps.broker.call({
       identity: { pluginId: carrier.pluginId, runtimeInstanceId: carrier.runtimeInstanceId },
       apiName: message.method,
       ...(message.params !== undefined ? { args: message.params } : {}),
+      ...(carrier.agentId !== undefined ? { agentId: carrier.agentId } : {}),
+      ...(carrier.sessionId !== undefined ? { sessionId: carrier.sessionId } : {}),
     });
     if (!result.ok) {
       throw new RpcRequestError(

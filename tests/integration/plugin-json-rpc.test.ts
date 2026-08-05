@@ -229,6 +229,55 @@ describe("JsonRpcClient worker 主动请求（onRequest 注入）", () => {
     worker.close();
   });
 
+  it("worker 请求携带带 agentId/sessionId 的 carrier → onRequest 原样收到（上下文不丢失）", async () => {
+    const seen: Array<{ method: string; carrier?: unknown }> = [];
+    const { host, worker } = connectHost((message) => {
+      seen.push(message);
+      return { ok: true };
+    });
+    const carrier = {
+      pluginId: "example.plugin",
+      runtimeInstanceId: "runtime-1",
+      operationId: "exec-1",
+      token: "tok-" + "x".repeat(40),
+      traceId: "t1",
+      spanId: "s1",
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      agentId: "agent-1",
+      sessionId: "session-1",
+    };
+    const result = await worker.request("host.ping", {}, { carrier });
+    expect(result).toEqual({ ok: true });
+    expect(seen[0]?.carrier).toEqual(carrier);
+    host.close();
+    worker.close();
+  });
+
+  it("旧格式 carrier（无 agentId/sessionId）仍可传输（协议向后兼容）", async () => {
+    const seen: Array<{ method: string; carrier?: unknown }> = [];
+    const { host, worker } = connectHost((message) => {
+      seen.push(message);
+      return { ok: true };
+    });
+    const carrier = {
+      pluginId: "example.plugin",
+      runtimeInstanceId: "runtime-1",
+      operationId: "exec-1",
+      token: "tok-" + "x".repeat(40),
+      traceId: "t1",
+      spanId: "s1",
+      issuedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+    };
+    const result = await worker.request("host.ping", {}, { carrier });
+    expect(result).toEqual({ ok: true });
+    expect(seen[0]?.carrier).toEqual(carrier);
+    expect((seen[0]?.carrier as { agentId?: string }).agentId).toBeUndefined();
+    host.close();
+    worker.close();
+  });
+
   it("onRequest 抛 RpcRequestError → 回写对应错误码与消息", async () => {
     const { host, worker } = connectHost(() => {
       throw new RpcRequestError(-32600, "worker 请求缺少 carrier，拒绝");

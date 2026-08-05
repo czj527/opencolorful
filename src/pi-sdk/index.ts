@@ -46,6 +46,7 @@ export type {
   PiSessionHandle,
   PluginSessionTool,
   PluginSessionToolInvokeResult,
+  PluginToolTurnContext,
   WorkspaceToolMode,
 } from "./types.js";
 

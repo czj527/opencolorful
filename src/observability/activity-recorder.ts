@@ -145,7 +145,7 @@ export class ActivityRecorder {
     }
 
     // 平台权威字段与 search_text（FTS 只索引 eventName/category/errorCode/summaryCode，不含 payload 正文）
-    const searchText = this.buildSearchText(entry.eventName, entry.category, payload);
+    const searchText = this.buildSearchText(entry.eventName, entry.category, payload, input.scope);
 
     try {
       // insert + audit 镜像同一事务：活动行存在则镜像必然存在（durable-on-accept 原子性）
@@ -218,7 +218,7 @@ export class ActivityRecorder {
           entry.category,
           envelope.trace.operationId ?? null,
           envelope.scope,
-          this.buildSearchText(entry.eventName, entry.category, envelope.payload),
+          this.buildSearchText(entry.eventName, entry.category, envelope.payload, envelope.scope),
         );
         if (entry.auditMirror !== undefined) {
           this.insertAuditMirror(normalized, entry.auditMirror, envelope.scope);
@@ -230,11 +230,13 @@ export class ActivityRecorder {
     }
   }
 
-  private buildSearchText(eventName: string, category: string, payload: ActivityPayload): string {
+  private buildSearchText(eventName: string, category: string, payload: ActivityPayload, scope?: { pluginId?: string }): string {
     return [
       eventName,
       category,
       typeof payload.summaryCode === "string" ? payload.summaryCode : "",
+      // P1-3：插件 id 进 search_text（/logs 全文搜索可命中普通插件事件）
+      ...(scope?.pluginId !== undefined ? [scope.pluginId] : []),
     ].filter(Boolean).join(" ");
   }
 
