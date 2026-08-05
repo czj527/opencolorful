@@ -1020,3 +1020,36 @@ node scripts/verify-skill-package.mjs tests/fixtures/skills/sdk-showcase-skill
 - 最终验收结论和是否允许合并 `main`。
 
 Phase 14 的 Subagent 计划不得在本节之前提前实现或混入本阶段。
+
+---
+
+### T1 实施记录（2026-08-05，主 Agent 串行冻结）
+
+**内容**：SkillRef/BundleRef/NormalizedSkillManifest/四类状态/兼容等级/SourceAdapter 能力声明/稳定错误码/注入预算/loadHandle 契约、migration v11、skills 路径、Skill 事件目录、契约测试。
+
+**关键冻结决策**：
+- **契约位置**：不新建独立 `packages/skill-protocol` 包（Skill 是纯内容 + Server 侧契约，无跨进程 worker/运行时边界，不像 Plugin 有 IPC 协议）；核心契约放 `src/contracts/skill-protocol.ts`（TypeBox + 手动类型）；`packages/plugin-protocol` 已含 `SkillBundleContributionSchema`（skillsDir），T7 升级登记语义时再扩展。
+- **稳定引用**：`SkillRef{skillId, sourceId, sourceKind, version, contentHash}` 五要素全必填（additionalProperties:false 防伪造）；`skillRefKey = "<skillId>@<sourceId>@<version>"` 作为事件/日志/表主键统一字符串键，不信任名称。
+- **状态模型**：validity/trust/readiness/selection 四类正交；`blocked` 表达安全/依赖阻断（保留绑定与审计证据），`disabled` 只表示用户明确选择；`shadowed` 是解析结果不入注入面。
+- **声明不等于权限**：`requires{plugins,tools,capabilities,bins,env,os}` 与 `allowedTools` 只进 NormalizedManifest 用于 readiness/风险/展示，不产生任何 Grant；普通未知字段保留 `rawFrontmatter` 并诊断，未知高风险字段拒绝。
+- **错误契约**：`SKILL_ERROR_CODES` 稳定枚举（35 个，安装/解析/读取/激活/操作五族），跨进程/日志/审计统一使用 code+reasonCode，不暴露内部细节。
+- **注入预算**：`SKILL_BUDGETS`（32 Skill / 4000 元数据字符 / 256KB 单文件 / 512KB 每轮支持文件 / 依赖深度 4 / 单次 32 / 读取超时 10s）。
+- **migration v11**：8 张表（skills / skill_files / skill_bundles / skill_bundle_items / agent_skill_binding_index / session_skill_bindings / skill_activation_grants / skill_operations）；`agent_skill_binding_index` 明确标注为可从 `agents/<agentId>/skills.json` 重建的查询投影；`CURRENT_SCHEMA_VERSION = 11`。
+- **paths**：`home/skills/{installed,staging,cache,builtin}` + `home/skill-dev-sources/` + `config/skill-sources.json`（全部由 paths.ts 生成）。
+- **事件目录**：`catalog/skill-events.ts` 注册 41 个 activity 点号式事件 + 22 个 audit 下划线式事件（install/update/rollback/uninstall/binding/bundle/source_trust 三件套）；文件型操作 activity 带 auditMirror；读取高频事件以 Trace 为主。
+
+**PI 0.80.10 Skill 接口实测（探索子 agent 验证，T1 要求）与渐进披露假设的偏差**：
+
+1. `ResourceLoader.getSkills()` 返回 `{ skills: Skill[], diagnostics }`；`Skill = { name, description, filePath, baseDir, sourceInfo, disableModelInvocation }`——**不存在 `contentIsFull` 字段，不存在 skillId/metadata**；
+2. **无原生 `get_skill`/`inspect_skill` 工具**；正文读取完全依赖通用 `read` 工具按 `Skill.filePath`（绝对路径）读文件（2000 行 / 50KB 限制）；
+3. 元数据注入是 PI 职责（`formatSkillsForPrompt` → `<available_skills>` XML 含 name/description/location），**被 `hasRead` 门控**——活跃工具集不含 `read` 时技能元数据不进系统提示；
+4. `disableModelInvocation: true` 的技能对模型完全不可见（只能 `/skill:name` 显式加载），PI 模型侧无法实现"仅显式调用但可见"——需平台注入自有 `inspect_skill` 工具补足；
+5. opencolorful 始终传 `minimalResourceLoader`（getSkills 返回空），PI 默认 Skill 发现被完全绕过。
+
+**偏差对 T5 方案的调整（记录，T5 落实）**：
+- 平台向 PI 注入 `Skill[]` 时，`filePath` 必须是受控真实路径（bundle 内路径，经 PathGuard read 规则允许），`baseDir` 为 bundle 根；
+- "正文渐进披露 + 按需读取"在 PI 侧落地为：元数据进系统提示（依赖 read 在活跃工具集）+ 模型用 read 读受控路径；**读取前**由平台挂接校验（哈希/预算/审计，T5 定位 read 工具挂接点）；
+- 平台同时注入 `search_skills`/`inspect_skill` 等 Core 工具（结构化读取，不依赖模型自行 read 绝对路径），满足"explicit-only 可见"与 loadHandle 单 turn 受控读取；
+- `contentIsFull` 语义由平台侧 SkillSnapshot 的"正文未读/已读"状态承载（PI 无此概念，快照层自己维护）。
+
+**针对性测试**（不依赖全量）：tests/contracts/skill-protocol.test.ts（SkillRef/BundleRef/Manifest 正反例/四态/兼容等级/错误码/预算/loadHandle 11 例）、tests/unit/observability-skill-catalog.test.ts（事件登记/命名约定/started-terminal 配对/auditMirror 6 例）、tests/integration/skill-migration.test.ts（全新库 v11/10→11 升级保留数据/拒绝高版本 3 例）；既有 observability-contract/plugin-catalog/config-paths/plugin-migration 32 例无回归。

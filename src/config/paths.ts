@@ -27,6 +27,14 @@ export interface RuntimePaths {
   readonly pluginDevSources: string;
   readonly pluginSources: string;
   readonly pluginSecrets: string;
+  // ── Phase 13 Skill 目录（plans/phase-13.md §9.2）──
+  // 正文仍在文件系统（不可变 Managed Artifact / Linked Source / 缓存 / 内置投影）
+  readonly skillsInstalled: string;
+  readonly skillsStaging: string;
+  readonly skillsCache: string;
+  readonly skillsBuiltin: string;
+  readonly skillDevSources: string;
+  readonly skillSources: string;
 }
 
 export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): RuntimePaths {
@@ -61,5 +69,11 @@ export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): R
     pluginDevSources: path.join(home, "plugin-dev-sources"),
     pluginSources: path.join(config, "plugin-sources.json"),
     pluginSecrets: path.join(auth, "plugin-secrets.json"),
+    skillsInstalled: path.join(home, "skills", "installed"),
+    skillsStaging: path.join(home, "skills", "staging"),
+    skillsCache: path.join(home, "skills", "cache"),
+    skillsBuiltin: path.join(home, "skills", "builtin"),
+    skillDevSources: path.join(home, "skill-dev-sources"),
+    skillSources: path.join(config, "skill-sources.json"),
   };
 }

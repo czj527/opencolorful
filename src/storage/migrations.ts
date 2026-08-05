@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -600,6 +600,125 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
       CREATE INDEX IF NOT EXISTS idx_plugin_operations_plugin ON plugin_operations(plugin_id, status);
     `);
     database.prepare("UPDATE schema_version SET version = 10").run();
+  }
+
+  // v11：Phase 13 Skill 系统事实表（plans/phase-13.md §9.1）。
+  // 事实来源：skills 是安装/版本/状态事实；skill_files 是正文文件清单（正文仍在
+  // 文件系统）；skill_bundles/skill_bundle_items 是版本化 Bundle 组合事实；
+  // agent_skill_binding_index 只是可从 agents/<agentId>/skills.json 重建的查询投影
+  // （skills.json 是 Agent 持久绑定唯一事实来源）；session_skill_bindings 与
+  // skill_activation_grants 以 SQLite 为事实来源（Session 绑定/一次性激活授权）；
+  // skill_operations 记录安装/绑定/激活等操作与补偿状态（中断可恢复）。
+  if (current < 11) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS skills (
+        skill_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('builtin','managed','plugin','workspace','external')),
+        version TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        manifest_json TEXT NOT NULL DEFAULT '{}',
+        validity TEXT NOT NULL CHECK (validity IN ('valid','invalid')),
+        trust TEXT NOT NULL CHECK (trust IN ('trusted','untrusted')),
+        readiness TEXT NOT NULL CHECK (readiness IN ('ready','degraded','blocked','incompatible')),
+        selection TEXT NOT NULL CHECK (selection IN ('implicit','explicit-only','disabled','shadowed')),
+        blocked_reason TEXT,
+        compatibility_level TEXT NOT NULL,
+        provenance_json TEXT NOT NULL DEFAULT '{}',
+        installed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (skill_id, source_id, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_skills_source ON skills(source_kind, source_id);
+      CREATE INDEX IF NOT EXISTS idx_skills_readiness ON skills(readiness);
+
+      CREATE TABLE IF NOT EXISTS skill_files (
+        skill_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        kind TEXT NOT NULL DEFAULT 'support',
+        PRIMARY KEY (skill_id, source_id, version, relative_path)
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_bundles (
+        bundle_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        name TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('builtin','managed','plugin','workspace','external')),
+        source_id TEXT NOT NULL,
+        manifest_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        supersedes_version TEXT,
+        PRIMARY KEY (bundle_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_bundle_items (
+        bundle_id TEXT NOT NULL,
+        bundle_version TEXT NOT NULL,
+        skill_ref_key TEXT NOT NULL,
+        selection TEXT NOT NULL CHECK (selection IN ('implicit','explicit-only','disabled')),
+        ordinal INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (bundle_id, bundle_version, skill_ref_key)
+      );
+
+      -- 查询投影：可从 agents/<agentId>/skills.json 重建（skills.json 是唯一事实来源）
+      CREATE TABLE IF NOT EXISTS agent_skill_binding_index (
+        agent_id TEXT NOT NULL,
+        skill_ref_key TEXT NOT NULL,
+        selection TEXT NOT NULL CHECK (selection IN ('implicit','explicit-only','disabled')),
+        bundle_id TEXT,
+        bundle_version TEXT,
+        pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+        config_revision INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (agent_id, skill_ref_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_skill_binding_agent ON agent_skill_binding_index(agent_id);
+
+      CREATE TABLE IF NOT EXISTS session_skill_bindings (
+        session_id TEXT NOT NULL,
+        skill_ref_key TEXT NOT NULL,
+        selection TEXT NOT NULL CHECK (selection IN ('implicit','explicit-only','disabled')),
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, skill_ref_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_activation_grants (
+        grant_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        skill_ref_key TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        issued_turn_id TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        reason TEXT NOT NULL DEFAULT 'session-install',
+        PRIMARY KEY (grant_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_skill_activation_session ON skill_activation_grants(session_id, skill_ref_key);
+
+      CREATE TABLE IF NOT EXISTS skill_operations (
+        operation_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('install','update','rollback','uninstall','bind','unbind','activate','link','unlink')),
+        source_ref TEXT,
+        agent_id TEXT,
+        session_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('started','completed','failed','compensated')),
+        error_code TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        PRIMARY KEY (operation_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_skill_operations_status ON skill_operations(kind, status);
+    `);
+    database.prepare("UPDATE schema_version SET version = 11").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {
