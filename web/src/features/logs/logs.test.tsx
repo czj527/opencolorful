@@ -571,3 +571,55 @@ describe("LogsPage /logs?plugin= 预筛选", () => {
     expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("");
   });
 });
+
+describe("LogsPage /logs?skill= 预筛选（T7）", () => {
+  it("带 skill 参数：初始加载即带 skillRefKey 独立过滤（非全文搜索），输入框不预填", async () => {
+    window.history.pushState({}, "", "/logs?skill=demo-skill@plg-1@1.2.0");
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    await waitFor(() => {
+      const request = activityRequests().at(-1);
+      expect(request).toBeDefined();
+      const params = new URLSearchParams(request!.split("?")[1] ?? "");
+      expect(params.get("skillRefKey")).toBe("demo-skill@plg-1@1.2.0");
+      expect(params.get("search")).toBeNull();
+      expect(params.get("limit")).toBe("50");
+    });
+    // skill 过滤是独立的 skillRefKey 条件，不污染全文搜索输入框
+    expect((screen.getByLabelText("全文搜索") as HTMLInputElement).value).toBe("");
+  });
+
+  it("skill 参数不干扰 plugin 参数（可同时携带）", async () => {
+    window.history.pushState({}, "", "/logs?plugin=demo.minimal&skill=demo-skill@plg-1@1.2.0");
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    await waitFor(() => {
+      const request = activityRequests().at(-1);
+      expect(request).toBeDefined();
+      const params = new URLSearchParams(request!.split("?")[1] ?? "");
+      expect(params.get("pluginId")).toBe("demo.minimal");
+      expect(params.get("skillRefKey")).toBe("demo-skill@plg-1@1.2.0");
+    });
+  });
+
+  it("无 skill 参数时不发 skillRefKey 过滤参数", async () => {
+    window.history.pushState({}, "", "/logs");
+    renderPage([
+      route("/api/observability/activity", activityPage([activityRow()])),
+    ]);
+    await screen.findByText("system.started");
+
+    await waitFor(() => {
+      const request = activityRequests().at(-1);
+      expect(request).toBeDefined();
+      const params = new URLSearchParams(request!.split("?")[1] ?? "");
+      expect(params.get("skillRefKey")).toBeNull();
+    });
+  });
+});

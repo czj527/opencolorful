@@ -142,6 +142,10 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
       ...(context.req.query("operationId") !== undefined ? { operationId: context.req.query("operationId")! } : {}),
       ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
+      // T7：Skill 事件过滤（payload attributes：skillRefKey/sourceId/bundleRef）
+      ...(context.req.query("skill") !== undefined ? { skillRefKey: context.req.query("skill")! } : {}),
+      ...(context.req.query("source") !== undefined ? { sourceId: context.req.query("source")! } : {}),
+      ...(context.req.query("bundle") !== undefined ? { bundleRef: context.req.query("bundle")! } : {}),
       ...(context.req.query("search") !== undefined ? { search: context.req.query("search")! } : {}),
     };
     const cursor = parseCursor(context.req.query("cursor") ?? undefined);
@@ -258,6 +262,9 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("sessionId") !== undefined ? { sessionId: context.req.query("sessionId")! } : {}),
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
       ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
+      // T7：Skill 审计过滤（strict audit 的 before/afterRevision 与 target 携带 refKey）
+      ...(context.req.query("skill") !== undefined ? { skillRefKey: context.req.query("skill")! } : {}),
+      ...(context.req.query("source") !== undefined ? { sourceId: context.req.query("source")! } : {}),
     };
     const cursor = parseCursor(context.req.query("cursor") ?? undefined);
     const limit = parseOptionalInt(context.req.query("limit") ?? undefined, 50, 200);

@@ -380,6 +380,12 @@ export interface ActivityQuery {
   readonly operationId?: string;
   /** P1-3：按插件过滤 */
   readonly pluginId?: string;
+  /** T7：按 Skill 事件过滤（skillRefKey） */
+  readonly skillRefKey?: string;
+  /** T7：按 Skill 来源过滤（sourceId） */
+  readonly sourceId?: string;
+  /** T7：按 Bundle 引用过滤（bundleRef） */
+  readonly bundleRef?: string;
   readonly search?: string;
 }
 

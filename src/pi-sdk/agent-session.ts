@@ -51,6 +51,13 @@ const MEMORY_TOOLS_EXTENSION_PATH = fs.existsSync(MEMORY_TOOLS_EXTENSION_JS)
   ? MEMORY_TOOLS_EXTENSION_JS
   : MEMORY_TOOLS_EXTENSION_TS;
 
+// Skill Core 工具扩展文件路径
+const SKILL_TOOLS_EXTENSION_JS = path.resolve(__dirname, "skill-tools.js");
+const SKILL_TOOLS_EXTENSION_TS = path.resolve(__dirname, "skill-tools.ts");
+const SKILL_TOOLS_EXTENSION_PATH = fs.existsSync(SKILL_TOOLS_EXTENSION_JS)
+  ? SKILL_TOOLS_EXTENSION_JS
+  : SKILL_TOOLS_EXTENSION_TS;
+
 /** 记忆工具名称列表（始终可用，不受 tool_mode 影响） */
 export const MEMORY_TOOL_NAMES = [
   "search_memory",
@@ -60,11 +67,26 @@ export const MEMORY_TOOL_NAMES = [
   "unpin_memory",
 ] as const;
 
+/**
+ * Skill Core 工具名称列表（T6：extraTools 注册路径，平台提供，不是插件自定义工具）。
+ * 只有 SkillCoreService 注入且注册了 SkillContext 的 Session 才启用。
+ */
+export const SKILL_TOOL_NAMES = [
+  "search_skills",
+  "inspect_skill",
+  "install_skill",
+  "manage_skills",
+  "manage_skill_bundle",
+] as const;
+
 /** 预加载的沙箱扩展（进程级加载一次，工具执行时通过 AsyncLocalStorage 读取 per-Session 上下文） */
 let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
 /** 预加载的记忆工具扩展（进程级加载一次） */
 let memoryToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
+
+/** 预加载的 Skill Core 工具扩展（进程级加载一次） */
+let skillToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
 export interface SandboxExtensionLoadResult {
   readonly errors: readonly {
@@ -123,6 +145,25 @@ async function ensureMemoryToolsExtensionLoaded(): Promise<void> {
     throw new Error(`Memory tools extension failed to load: ${msg}`);
   }
   memoryToolsExtensionsLoaded = result;
+}
+
+async function ensureSkillToolsExtensionLoaded(): Promise<void> {
+  if (skillToolsExtensionsLoaded) return;
+  if (!fs.existsSync(SKILL_TOOLS_EXTENSION_PATH)) {
+    throw new Error(
+      `Skill tools extension not found at ${SKILL_TOOLS_EXTENSION_PATH}. ` +
+      "Run 'npm run build' to compile skill-tools.",
+    );
+  }
+  const result = await discoverAndLoadExtensions(
+    [SKILL_TOOLS_EXTENSION_PATH],
+    path.resolve(__dirname, "..", ".."),
+  );
+  if (result.errors.length > 0) {
+    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
+    throw new Error(`Skill tools extension failed to load: ${msg}`);
+  }
+  skillToolsExtensionsLoaded = result;
 }
 
 function messageText(message: unknown): string {
@@ -291,6 +332,12 @@ function minimalResourceLoader(
         errors.push(...memoryToolsExtensionsLoaded.errors);
       }
 
+      // 始终加载 Skill Core 工具扩展（工具执行时按 per-Session 上下文隔离）
+      if (skillToolsExtensionsLoaded) {
+        extensions.push(...skillToolsExtensionsLoaded.extensions);
+        errors.push(...skillToolsExtensionsLoaded.errors);
+      }
+
       // 按需加载沙箱扩展
       if (useSandbox && sandboxExtensionsLoaded) {
         extensions.push(...sandboxExtensionsLoaded.extensions);
@@ -413,6 +460,7 @@ export async function createPiFauxAgentSession(
   const hasExtraTools = options.extraTools && options.extraTools.length > 0;
   if (hasExtraTools) {
     await ensureMemoryToolsExtensionLoaded();
+    await ensureSkillToolsExtensionLoaded();
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
@@ -519,6 +567,7 @@ export async function createPiAgentSession(
   const hasExtraTools = options.extraTools && options.extraTools.length > 0;
   if (hasExtraTools) {
     await ensureMemoryToolsExtensionLoaded();
+    await ensureSkillToolsExtensionLoaded();
   }
 
   const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;

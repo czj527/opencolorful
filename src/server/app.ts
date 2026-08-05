@@ -27,6 +27,7 @@ import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import { registerPluginDevRoutes, registerPluginRoutes } from "./routes/plugins.js";
+import { registerSkillRoutes } from "./routes/skills.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -50,6 +51,8 @@ export interface ServerAppOptions {
   /** Phase 11 fail-closed 审计（沙箱/工作区/凭据等高风险修改，评审 P0-1） */
   readonly audit?: import("../observability/audit-recorder.js").AuditRecorder;
   readonly pluginFacade?: import("../platform/plugin-facade.js").PluginFacade;
+  /** Phase 13 T6 Skill Core Service（组合根注入；注入后才注册 Skill 路由） */
+  readonly skillCoreService?: import("../runtime/skills/core/skill-core-service.js").SkillCoreService;
   /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
@@ -153,6 +156,8 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
       ...(options.database !== undefined ? { database: options.database } : {}),
       ...(options.pluginFacade !== undefined ? { pluginFacade: options.pluginFacade } : {}),
+      // Phase 13 T6：Skill Core Service（注入后 Agent 会话启用五个 Skill Core 工具）
+      ...(options.skillCoreService !== undefined ? { skillCoreService: options.skillCoreService } : {}),
       // 评审 P1#7b：injectBudgetChars 走真实记忆设置（per-Agent 覆盖 → 全局默认 → 平台默认），
       // 与 start.ts resolveMemorySettings 同一优先级链
       ...(options.preferencesStore !== undefined && options.agentStore !== undefined ? {
@@ -173,6 +178,9 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.pluginFacade !== undefined) {
     registerPluginRoutes(app, { facade: options.pluginFacade });
     registerPluginDevRoutes(app, { facade: options.pluginFacade });
+  }
+  if (options.skillCoreService !== undefined) {
+    registerSkillRoutes(app, { core: options.skillCoreService });
   }
 
   if (options.database !== undefined && options.paths !== undefined) {

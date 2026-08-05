@@ -30,6 +30,12 @@ export interface ActivityFilter {
   readonly operationId?: string;
   /** P1-3：按插件过滤（activity_events.plugin_id 列） */
   readonly pluginId?: string;
+  /** T7：按 Skill 事件 payload attributes 过滤（json_extract；无独立列） */
+  readonly skillRefKey?: string;
+  /** T7：按 Skill 来源过滤（payload attributes.sourceId，如插件 id / 包根路径） */
+  readonly sourceId?: string;
+  /** T7：按 Bundle 引用过滤（payload attributes.bundleRef） */
+  readonly bundleRef?: string;
   readonly search?: string;
 }
 
@@ -191,6 +197,20 @@ export class ObservabilityQuery {
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
     if (filter.pluginId !== undefined) { where.push("plugin_id = ?"); params.push(filter.pluginId); }
+    // T7：skill 相关事件按 payload attributes 过滤（activity_events 无 skill 列，
+    // 不动 migration v11 表结构，用 SQLite JSON1 json_extract 查询 payload_json）
+    if (filter.skillRefKey !== undefined) {
+      where.push("json_extract(payload_json, '$.attributes.skillRefKey') = ?");
+      params.push(filter.skillRefKey);
+    }
+    if (filter.sourceId !== undefined) {
+      where.push("json_extract(payload_json, '$.attributes.sourceId') = ?");
+      params.push(filter.sourceId);
+    }
+    if (filter.bundleRef !== undefined) {
+      where.push("json_extract(payload_json, '$.attributes.bundleRef') = ?");
+      params.push(filter.bundleRef);
+    }
     if (filter.eventName !== undefined) { where.push("event_name = ?"); params.push(filter.eventName); }
     if (filter.category !== undefined) { where.push("category = ?"); params.push(filter.category); }
     if (filter.level !== undefined) { where.push("level = ?"); params.push(filter.level); }
@@ -262,7 +282,7 @@ export class ObservabilityQuery {
   // ─── Audit cursor 分页 ────────────────────────────────────────
 
   queryAudit(
-    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string; pluginId?: string },
+    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string; pluginId?: string; skillRefKey?: string; sourceId?: string },
     cursor: PageCursor | null,
     limit = 50,
   ): PagedResult<AuditRow> {
@@ -279,6 +299,18 @@ export class ObservabilityQuery {
     if (filter.traceId !== undefined) { where.push("trace_id = ?"); params.push(filter.traceId); }
     // P1-3：audit_events 无 plugin_id 列，插件审计按 target（target_kind='plugin'）过滤
     if (filter.pluginId !== undefined) { where.push("target_kind = 'plugin' AND target_id = ?"); params.push(filter.pluginId); }
+    // T7：skill 严格审计（fixPluginSkillToManaged 等）把 refKey 写入
+    // before_revision/after_revision 与 target_id（skill:<refKey>）；source 过滤
+    // 匹配 refKey 的 sourceId 段（skillId@sourceId@version，LIKE 需转义）
+    if (filter.skillRefKey !== undefined) {
+      where.push("(before_revision = ? OR after_revision = ? OR target_id = ?)");
+      params.push(filter.skillRefKey, filter.skillRefKey, `skill:${filter.skillRefKey}`);
+    }
+    if (filter.sourceId !== undefined) {
+      const pattern = `%@${escapeLike(filter.sourceId)}@%`;
+      where.push("(before_revision LIKE ? ESCAPE '\\' OR after_revision LIKE ? ESCAPE '\\')");
+      params.push(pattern, pattern);
+    }
     if (cursor !== null) {
       where.push("(recorded_at < ? OR (recorded_at = ? AND id < ?))");
       params.push(cursor.recordedAt, cursor.recordedAt, cursor.id);
@@ -491,4 +523,9 @@ export class ObservabilityQuery {
   private cursorOf(row: { recordedAt: string; id: number }): PageCursor {
     return { recordedAt: row.recordedAt, id: row.id };
   }
+}
+
+/** LIKE 通配符转义（% _ \ → 反斜杠前缀；配合 ESCAPE '\' 使用）。 */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }

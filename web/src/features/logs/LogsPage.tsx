@@ -33,10 +33,15 @@ export function LogsPage({ api }: LogsPageProps) {
   const [health, setHealth] = useState<ObservabilityHealthResponse | null>(null);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
   // URL 预筛选：/logs?plugin=<pluginId>（插件详情「查看相关日志」入口）→ 活动 tab 初始搜索值；
-  // 无 plugin 参数时为空，行为与之前一致
+  // /logs?skill=<skillRefKey>（Skill 详情「查看相关日志」入口，T7）→ skillRefKey 独立过滤；
+  // 无参数时为空，行为与之前一致
   const [pluginFilter] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("plugin") ?? "";
+  });
+  const [skillFilter] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("skill") ?? "";
   });
 
   useEffect(() => {
@@ -112,8 +117,8 @@ export function LogsPage({ api }: LogsPageProps) {
       </nav>
 
       <div className={styles.content}>
-        {/* P1-3：?plugin= 走独立 plugin_id 过滤（非全文搜索）；无参数时行为不变 */}
-        {tab === "activity" && <ActivityView api={api} initialSearch="" initialPluginId={pluginFilter} />}
+        {/* P1-3：?plugin= 走独立 plugin_id 过滤（非全文搜索）；T7：?skill= 走 skillRefKey 独立过滤；无参数时行为不变 */}
+        {tab === "activity" && <ActivityView api={api} initialSearch="" initialPluginId={pluginFilter} initialSkillRefKey={skillFilter} />}
         {tab === "errors" && <ErrorsView api={api} />}
         {tab === "audit" && <AuditView api={api} auditEpoch={health?.auditEpoch ?? null} />}
         {tab === "performance" && <PerformanceView api={api} />}

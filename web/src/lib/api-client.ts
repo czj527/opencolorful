@@ -285,6 +285,10 @@ export class ApiClient {
       if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
       if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
       if (filter.pluginId !== undefined) params.set("pluginId", filter.pluginId);
+      // T7：Skill 事件过滤（skillRefKey/sourceId/bundleRef）
+      if (filter.skillRefKey !== undefined) params.set("skillRefKey", filter.skillRefKey);
+      if (filter.sourceId !== undefined) params.set("sourceId", filter.sourceId);
+      if (filter.bundleRef !== undefined) params.set("bundleRef", filter.bundleRef);
       if (filter.search !== undefined) params.set("search", filter.search);
     }
     if (cursor !== undefined && cursor !== null) params.set("cursor", cursor);

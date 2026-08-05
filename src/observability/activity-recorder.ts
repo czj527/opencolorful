@@ -231,12 +231,21 @@ export class ActivityRecorder {
   }
 
   private buildSearchText(eventName: string, category: string, payload: ActivityPayload, scope?: { pluginId?: string }): string {
+    const attributes =
+      typeof payload.attributes === "object" && payload.attributes !== null
+        ? (payload.attributes as Record<string, unknown>)
+        : {};
     return [
       eventName,
       category,
       typeof payload.summaryCode === "string" ? payload.summaryCode : "",
       // P1-3：插件 id 进 search_text（/logs 全文搜索可命中普通插件事件）
       ...(scope?.pluginId !== undefined ? [scope.pluginId] : []),
+      // T7：Skill 事件把 skillRefKey/sourceId/bundleRef 进 search_text
+      // （/logs 全文搜索可命中 skill 相关事件；只取字符串型 attributes）
+      ...(["skillRefKey", "sourceId", "bundleRef"] as const)
+        .map((key) => attributes[key])
+        .filter((value): value is string => typeof value === "string"),
     ].filter(Boolean).join(" ");
   }
 

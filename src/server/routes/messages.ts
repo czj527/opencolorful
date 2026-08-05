@@ -21,7 +21,8 @@ import { MemoryJournalStore } from "../../storage/memory/journal-store.js";
 import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
 import { SessionIndex } from "../../storage/session-index.js";
 import { registerMemoryContext } from "../../pi-sdk/memory-tools.js";
-import { MEMORY_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
+import { registerSkillContext } from "../../pi-sdk/skill-tools.js";
+import { MEMORY_TOOL_NAMES, SKILL_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
 import type { PluginSessionTool } from "../../pi-sdk/index.js";
 import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type Database from "better-sqlite3";
@@ -161,6 +162,8 @@ export interface MessageRoutesOptions {
   readonly memorySettingsResolver?: (agentId: string) => MemoryAgentSettings;
   /** Phase 12：插件组合根（绑定 Agent 的插件工具注入主会话） */
   readonly pluginFacade?: PluginFacade;
+  /** Phase 13 T6：Skill Core Service（注入后 Agent 会话启用 search_skills 等五个 Core 工具） */
+  readonly skillCoreService?: import("../../runtime/skills/core/skill-core-service.js").SkillCoreService;
 }
 
 // ensureRuntime 的失败结果：路由层直接转成对应状态码
@@ -285,9 +288,14 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
 
       // 记忆工具：Agent 绑定 + 数据库可用时始终启用
       const hasMemoryTools = !!(view.agentId && database);
-      const extraTools = hasMemoryTools ? [...MEMORY_TOOL_NAMES] : undefined;
-      // 有记忆工具时决不使用 noTools: "all"
-      const noTools = (toolPolicy.shouldDisableAllTools(toolMode) && !hasMemoryTools)
+      // Skill Core 工具（T6）：Agent 绑定 + SkillCoreService 注入时启用
+      const hasSkillTools = view.agentId !== undefined && view.agentId !== null && options.skillCoreService !== undefined;
+      const extraTools =
+        hasMemoryTools || hasSkillTools
+          ? [...(hasMemoryTools ? MEMORY_TOOL_NAMES : []), ...(hasSkillTools ? SKILL_TOOL_NAMES : [])]
+          : undefined;
+      // 有记忆/技能工具时决不使用 noTools: "all"
+      const noTools = (toolPolicy.shouldDisableAllTools(toolMode) && !hasMemoryTools && !hasSkillTools)
         ? ("all" as const)
         : undefined;
       const tools = fileTools.length > 0 ? [...fileTools] : undefined;
@@ -340,6 +348,24 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
       };
 
+      // 构建 Skill Core 上下文（T6：五个 Core 工具按 Session 隔离注册；
+      // 未注册的会话调用工具时 fail-closed 拒绝）
+      let unregisterSkill: (() => void) | undefined;
+      const setupSkillContext = (runtime: SessionRuntime) => {
+        if (view.agentId === undefined || view.agentId === null || options.skillCoreService === undefined) {
+          return;
+        }
+        try {
+          unregisterSkill = registerSkillContext(sessionId, {
+            core: options.skillCoreService,
+            sessionId,
+            agentId: view.agentId,
+          });
+        } catch {
+          // Skill 上下文初始化失败不阻塞会话创建（工具调用时 fail-closed）
+        }
+      };
+
       // 插件工具（P0-1）：按 Agent 绑定过滤，注入主会话（生产接线 buildPluginSessionTools）
       const pluginTools =
         view.agentId !== undefined && view.agentId !== null && options.pluginFacade !== undefined
@@ -371,9 +397,13 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
           workspaceCwd: view.workspaceCwd,
-          onDispose: () => unregisterMemory?.(),
+          onDispose: () => {
+            unregisterMemory?.();
+            unregisterSkill?.();
+          },
         });
         setupMemoryContext(runtime);
+        setupSkillContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
@@ -401,9 +431,13 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(agentHomeDir ? { agentHomeDir } : {}),
           ...(platformHome ? { platformHome } : {}),
           workspaceCwd: view.workspaceCwd,
-          onDispose: () => unregisterMemory?.(),
+          onDispose: () => {
+            unregisterMemory?.();
+            unregisterSkill?.();
+          },
         });
         setupMemoryContext(runtime);
+        setupSkillContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
