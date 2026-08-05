@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import type { RuntimePaths } from "../../../config/paths.js";
@@ -13,7 +14,9 @@ import {
   type SkillSourceAdapter,
   type SkillSourceDiscoveryScope,
   type SkillSourceInspection,
+  type SkillStageOptions,
 } from "./skill-source-adapter.js";
+import { stageLocalPackage } from "./stage-utils.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Managed Skill Source（plans/phase-13.md §8.1 / §9.2）
@@ -74,8 +77,14 @@ export class ManagedSkillSource implements SkillSourceAdapter {
     return inspectLocalDirectory(packageRoot, { version });
   }
 
-  stage(_sourceRef: string): SkillStagedPackage {
-    throw new SkillSourceError("skill_source_unsupported", "staging 由 T3 安装器实现（managed 来源）");
+  stage(sourceRef: string, options?: SkillStageOptions): SkillStagedPackage {
+    const stagingRoot = options?.stagingRoot ?? this.tempLocalStagingDir();
+    return stageLocalPackage(sourceRef, stagingRoot);
+  }
+
+  private tempLocalStagingDir(): string {
+    fs.mkdirSync(this.paths.skillsStaging, { recursive: true });
+    return fs.mkdtempSync(path.join(this.paths.skillsStaging, "local-"));
   }
 
   resolveVersion(sourceRef: string): SkillResolvedVersion {
@@ -84,8 +93,8 @@ export class ManagedSkillSource implements SkillSourceAdapter {
     return { version, contentHash: computeSkillContentHash(packageRoot, { version }) };
   }
 
-  capabilities(): { search: true; install: false; update: false; offline: true } {
-    return { search: true, install: false, update: false, offline: true };
+  capabilities(): { search: true; install: true; update: true; offline: true } {
+    return { search: true, install: true, update: true, offline: true };
   }
 
   /** 版本目录名即版本（无 frontmatter version 依赖）。 */

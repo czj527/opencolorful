@@ -13,6 +13,7 @@ import type {
 } from "../../../contracts/skill-protocol.js";
 import { SkillSourceError } from "../errors.js";
 import { peekSkillManifest, validateSkillPackage, type ManifestPeek, type SkillPackageErrorInfo } from "../validator.js";
+import { assessPackageRisks, type SkillRiskMarker } from "../installer/risk.js";
 
 // 供 Catalog/编排层复用冻结形状（discover 的返回元素）。
 export type { SkillSourceCandidate, SkillSourceCapabilities } from "../../../contracts/skill-protocol.js";
@@ -45,11 +46,18 @@ export interface SkillSourceInspection {
   readonly sizeBytes: number;
   readonly fileCount: number;
   readonly errors: readonly SkillPackageErrorInfo[];
+  /** 结构风险标记（scripts/二进制/未知文件类型；T3 确定性检查进 inspect 结果） */
+  readonly risks?: readonly SkillRiskMarker[];
 }
 
 export interface SkillResolvedVersion {
   readonly version: string;
   readonly contentHash: string;
+}
+
+/** 安装器分配的受控 staging 根（skillsStaging/<operationId>）；缺省由适配器自建临时目录。 */
+export interface SkillStageOptions {
+  readonly stagingRoot?: string;
 }
 
 export interface SkillSourceAdapter {
@@ -58,8 +66,8 @@ export interface SkillSourceAdapter {
   discover(query?: string, scope?: SkillSourceDiscoveryScope): readonly SkillSourceCandidate[];
   /** 读取 provenance / Manifest / 依赖与风险摘要 */
   inspect(sourceRef: string): SkillSourceInspection;
-  /** 将完整 package 放入受控 staging（T3 实现；T2 未实现时抛 skill_source_unsupported） */
-  stage(sourceRef: string): SkillStagedPackage;
+  /** 将完整 package 放入受控 staging（T3 实现） */
+  stage(sourceRef: string, options?: SkillStageOptions): SkillStagedPackage;
   /** 固定版本与内容哈希 */
   resolveVersion(sourceRef: string): SkillResolvedVersion;
   /** 能力声明（搜索/安装/更新/离线） */
@@ -148,7 +156,7 @@ export function scanPackagesInDirectoryWithQuery(
   );
 }
 
-/** inspect 本地目录包：完整校验 + 内容哈希（sourceRef 即包根目录绝对路径）。 */
+/** inspect 本地目录包：完整校验 + 内容哈希 + 结构风险标记（sourceRef 即包根目录绝对路径）。 */
 export function inspectLocalDirectory(sourceRef: string, options: { readonly version?: string } = {}): SkillSourceInspection {
   const packageRoot = path.resolve(sourceRef);
   const validation = validateSkillPackage({ packageRoot, ...(options.version !== undefined ? { version: options.version } : {}) });
@@ -161,6 +169,7 @@ export function inspectLocalDirectory(sourceRef: string, options: { readonly ver
     sizeBytes: validation.sizeBytes,
     fileCount: validation.fileCount,
     errors: validation.errors,
+    risks: assessPackageRisks(packageRoot),
   };
 }
 

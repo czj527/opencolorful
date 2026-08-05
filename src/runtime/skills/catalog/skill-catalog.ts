@@ -255,6 +255,23 @@ export class SkillCatalog {
       environment: input.environment,
     });
   }
+
+  /** 按 skillRefKey 移除登记（卸载用）；返回是否真的存在并移除。 */
+  removeByRefKey(refKey: string): boolean {
+    return this.registry.delete(refKey);
+  }
+
+  /** 移除某 skillId 的全部登记（卸载用）；返回移除数量。 */
+  removeBySkillId(skillId: string): number {
+    let removed = 0;
+    for (const [key, record] of this.registry) {
+      if (record.skillId === skillId) {
+        this.registry.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
 }
 
 // ── 登记快照 ───────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import type { SkillSourceCandidate, SkillStagedPackage } from "../../../contracts/skill-protocol.js";
@@ -12,7 +14,9 @@ import {
   type SkillSourceAdapter,
   type SkillSourceDiscoveryScope,
   type SkillSourceInspection,
+  type SkillStageOptions,
 } from "./skill-source-adapter.js";
+import { stageLocalPackage } from "./stage-utils.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Plugin Skill Bundle Source（plans/phase-13.md §8.1 / §13.1）
@@ -73,8 +77,9 @@ export class PluginSkillSource implements SkillSourceAdapter {
     return inspectLocalDirectory(packageRoot, { version });
   }
 
-  stage(_sourceRef: string): SkillStagedPackage {
-    throw new SkillSourceError("skill_source_unsupported", "staging 由 T3 安装器实现（plugin 来源）");
+  stage(sourceRef: string, options?: SkillStageOptions): SkillStagedPackage {
+    const stagingRoot = options?.stagingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), "ocf-skill-stage-"));
+    return stageLocalPackage(sourceRef, stagingRoot);
   }
 
   resolveVersion(sourceRef: string): SkillResolvedVersion {
@@ -83,8 +88,8 @@ export class PluginSkillSource implements SkillSourceAdapter {
     return { version, contentHash: computeSkillContentHash(packageRoot, { version }) };
   }
 
-  capabilities(): { search: true; install: false; update: false; offline: true } {
-    return { search: true, install: false, update: false, offline: true };
+  capabilities(): { search: true; install: true; update: true; offline: true } {
+    return { search: true, install: true, update: true, offline: true };
   }
 
   private resolveLocalVersion(packageRoot: string): string {

@@ -122,10 +122,16 @@ describe("external 本地目录与 plugin 来源", () => {
     fs.rmSync(base, { recursive: true, force: true });
   });
 
-  it("stage 由 T3 实现：当前抛 skill_source_unsupported（fail-closed）", () => {
+  it("stage 由 T3 实现：完整包可暂存，无效路径抛 SkillSourceError", () => {
     const { paths, home } = tempPaths();
     const source = new BuiltinSkillSource(paths);
-    expect(() => source.stage("/tmp/x")).toThrow(SkillSourceError);
+    // 不存在/非目录 → skill_source_not_found / skill_not_a_complete_package
+    expect(() => source.stage(path.join(home, "missing"))).toThrow(SkillSourceError);
+    const pkg = createSkillPackage(paths.skillsBuiltin, { name: "builtin-skill" });
+    const staged = source.stage(pkg);
+    expect(staged.packageRoot).toBeTruthy();
+    expect(staged.contentHash.startsWith("sha256-")).toBe(true);
+    expect(fs.existsSync(path.join(staged.packageRoot, "SKILL.md"))).toBe(true);
     fs.rmSync(home, { recursive: true, force: true });
   });
 });
