@@ -418,6 +418,9 @@ export class RuntimeHost {
       contributionKind: input.contributionKind,
       contributionId: input.contributionId,
       attempt: instance.attempt,
+      // §十一"每次工具调用记录实际插件版本和 snapshot id"：in-flight 冻结快照
+      // 的 snapshotId 进执行生命周期 payload（工具调用可回放/诊断）
+      ...(input.snapshot !== undefined ? { snapshotId: input.snapshot.snapshotId } : {}),
     });
 
     try {
@@ -877,6 +880,8 @@ export class RuntimeHost {
     readonly contributionKind: string;
     readonly contributionId: string;
     readonly attempt: number;
+    /** §十一：in-flight 冻结快照 id（工具调用回放/诊断） */
+    readonly snapshotId?: string;
   }): {
     complete(): void;
     fail(message: string, errorCode: string): void;
@@ -891,6 +896,7 @@ export class RuntimeHost {
       pluginId: options.pluginId,
       version: options.version,
       runtimeKind: options.runtimeKind,
+      ...(options.snapshotId !== undefined ? { snapshotId: options.snapshotId } : {}),
     };
     const handle = instrument.startLifecycle({
       startEventName: "plugin.execution.started",

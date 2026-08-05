@@ -266,7 +266,14 @@ export function runStrictAuditLifecycle<T>(options: StrictAuditLifecycleOptions,
         eventName: options.failedEventName,
         payload: {
           ...basePayload("denied"),
-          reasonCode: "write_failed",
+          // P1：failed 终态 reasonCode 区分失败来源——writeCommitted 为 true 时
+          // 领域写入已成功，失败发生在 completed 审计（随后才补偿），不能记成
+          // 领域写入失败（否则日志形成错误事实）
+          reasonCode: writeCommitted
+            ? compensation === "rollback-failed"
+              ? "compensation_failed"
+              : "completed_audit_failed"
+            : "domain_write_failed",
           compensation,
         },
         actor,

@@ -71,27 +71,31 @@ export function buildPluginSessionTools(
           name: descriptor.name,
           ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
           ...(descriptor.inputSchema !== undefined ? { inputSchema: descriptor.inputSchema } : {}),
-          turnContext,
-          invoke: async (params: unknown, signal?: AbortSignal) => {
-            const frozen = turnContext.current;
-            // P1-2：冻结失败 fail-closed——本 turn 该插件工具禁用，不执行、不降级实时权限
-            if (frozen?.error !== undefined) {
-              return {
-                ok: false as const,
-                code: "snapshot-error",
-                message: `插件 ${descriptor.pluginId} 快照冻结失败，本 turn 工具已禁用：${frozen.error}`,
-              };
-            }
-            const result = await facade.hostApi.tools.invoke({
-              pluginId: descriptor.pluginId,
-              contributionId: descriptor.contributionId,
-              params,
-              agentId,
-              sessionId,
-              ...(frozen?.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
-              ...(frozen?.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
-              ...(signal !== undefined ? { signal } : {}),
-            });
+            turnContext,
+            invoke: async (params: unknown, signal?: AbortSignal) => {
+              const frozen = turnContext.current;
+              // P0/P1-2：未冻结或冻结失败一律 fail-closed——本 turn 该插件工具
+              // 禁用，不执行、不降级实时权限（权限边界不容许 fail-open）
+              if (frozen === undefined || !frozen.ok) {
+                return {
+                  ok: false as const,
+                  code: "snapshot-error",
+                  message:
+                    frozen?.error !== undefined
+                      ? `插件 ${descriptor.pluginId} 快照冻结失败，本 turn 工具已禁用：${frozen.error}`
+                      : `插件 ${descriptor.pluginId} 快照未冻结，本 turn 工具已禁用`,
+                };
+              }
+              const result = await facade.hostApi.tools.invoke({
+                pluginId: descriptor.pluginId,
+                contributionId: descriptor.contributionId,
+                params,
+                agentId,
+                sessionId,
+                ...(frozen.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
+                ...(frozen.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
+                ...(signal !== undefined ? { signal } : {}),
+              });
             return result.ok
               ? { ok: true as const, result: result.result }
               : { ok: false as const, code: result.code, message: result.message };
@@ -104,10 +108,12 @@ export function buildPluginSessionTools(
 }
 
 /**
- * P0-2 turn 快照工厂（模块级导出供测试直接复用，不复制逻辑）：每 turn 开始
+ * P0-2/P0 turn 快照工厂（模块级导出供测试直接复用，不复制逻辑）：每 turn 开始
  * 冻结绑定插件的授权/绑定状态（ExecutionSnapshotService.create），in-flight
- * 工具调用以冻结态为准。P1-2：冻结失败返回 { error }（invoke 侧 fail-closed），
- * 绝不吞成 undefined 走实时权限——权限边界不容许静默 fail-open。
+ * 工具调用以冻结态为准。
+ * - 返回成功/失败判别联合（PluginToolTurnContext）：插件未激活、运行实例缺失、
+ *   创建异常一律返回 { ok: false }——invoke 侧 fail-closed，绝不静默降级实时权限；
+ * - 禁止用 undefined 表示失败（调用方把 undefined 视为失败，见 SessionRuntime.beginTurn）。
  */
 export function buildPluginTurnSnapshotFactory(
   facade: PluginFacade,
@@ -116,23 +122,23 @@ export function buildPluginTurnSnapshotFactory(
     try {
       const active = facade.get(pluginId);
       if (active === undefined) {
-        return undefined;
+        return { ok: false, error: `插件 ${pluginId} 未激活，无法冻结执行快照` };
       }
       const instance = facade.runtimeHost.getInstance(pluginId);
       if (instance === undefined) {
-        return undefined;
+        return { ok: false, error: `插件 ${pluginId} 没有运行实例，无法冻结执行快照` };
       }
-      return facade.snapshots.create({
+      const created = facade.snapshots.create({
         pluginId,
         pluginVersion: active.version,
         runtimeKind: instance.kind,
         runtimeInstanceId: instance.runtimeInstanceId,
         agentId,
       });
+      return { ok: true, snapshot: created.snapshot, state: created.state };
     } catch (error) {
       return {
-        snapshot: undefined,
-        state: undefined,
+        ok: false,
         error: error instanceof Error ? error.message.slice(0, 400) : `插件 ${pluginId} 快照冻结失败`,
       };
     }

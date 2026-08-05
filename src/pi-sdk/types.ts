@@ -64,15 +64,14 @@ export interface PluginSessionTool {
 }
 
 /**
- * turn 级冻结的授权/绑定状态（in-flight turn 内工具调用以它为准）。
- * P1-2：冻结失败时携带 error——invoke 必须 fail-closed（拒绝执行），
- * 不允许静默降级为实时权限（权限边界不容许 fail-open）。
+ * turn 级冻结结果（P0/P1-2）：成功携带不可变 snapshot/state；失败携带 error。
+ * 明确的成功/失败判别联合——禁止用 undefined 表示失败（否则 invoke 侧会
+ * 不带快照按实时权限执行，构成 fail-open）。同一插件在一个 turn 内所有工具
+ * 共享同一冻结结果（一个 in-flight turn 一个 snapshotId）。
  */
-export interface PluginToolTurnContext {
-  readonly snapshot: unknown;
-  readonly state: unknown;
-  readonly error?: string;
-}
+export type PluginToolTurnContext =
+  | { readonly ok: true; readonly snapshot: unknown; readonly state: unknown }
+  | { readonly ok: false; readonly error: string };
 
 export type PluginSessionToolInvokeResult =
   | { readonly ok: true; readonly result: unknown }

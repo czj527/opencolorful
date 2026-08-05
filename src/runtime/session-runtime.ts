@@ -60,10 +60,12 @@ export interface SessionRuntimeOptions {
   /** 会话级插件工具（P0-1：宿主按 Agent 绑定过滤后注入 PI 工具注册表） */
   readonly pluginTools?: readonly PluginSessionTool[];
   /**
-   * P0-2 turn 快照工厂：每 turn 开始冻结绑定插件的授权/绑定状态
+   * P0-2/P0 turn 快照工厂：每 turn 开始冻结绑定插件的授权/绑定状态
    * （ExecutionSnapshotService.create），in-flight turn 内工具调用以冻结态为准。
+   * 返回成功/失败判别联合（PluginToolTurnContext）——冻结失败（插件未激活/
+   * 无运行实例/创建异常）必须显式返回失败，禁止 undefined 静默降级实时权限。
    */
-  readonly snapshotFactory?: (pluginId: string, agentId: string) => PluginToolTurnContext | undefined;
+  readonly snapshotFactory?: (pluginId: string, agentId: string) => PluginToolTurnContext;
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -217,27 +219,38 @@ export class SessionRuntime {
   /**
    * P0-2 turn 冻结：对每个插件工具按 snapshotFactory 冻结授权/绑定状态，
    * 写入 tool.turnContext.current（invoke 闭包读取后传给 ToolService）。
-   * P1-2：冻结失败（factory 抛错或返回 error）时写入 { error }——invoke 侧
-   * fail-closed 拒绝执行，绝不静默降级为实时权限；无 snapshotFactory（未接入
-   * 插件系统）时不设置（调用方按实时状态执行，此时也没有插件工具注入）。
+   * - P0：冻结失败（factory 抛错/返回 undefined/返回 { ok: false }）一律写入
+   *   失败结果——invoke 侧 fail-closed 拒绝执行，绝不静默降级为实时权限；
+   * - P1-2：按 pluginId memoize——同一插件全部工具共享同一冻结快照
+   *   （一次 in-flight turn 一个 snapshotId，§十一"一次 turn 使用同一快照"）；
+   * - 无 snapshotFactory（未接入插件系统）时不设置（此时也没有插件工具注入）。
    */
   private beginTurn(): void {
     if (this.snapshotFactory === undefined) {
       return;
     }
+    const frozenByPlugin = new Map<string, PluginToolTurnContext>();
     for (const tool of this.pluginTools) {
       if (tool.turnContext === undefined) {
         continue;
       }
-      try {
-        tool.turnContext.current = this.snapshotFactory(tool.pluginId, this.agentId ?? "");
-      } catch (error) {
-        tool.turnContext.current = {
-          snapshot: undefined,
-          state: undefined,
-          error: error instanceof Error ? error.message.slice(0, 400) : "插件快照冻结失败",
-        };
+      let frozen = frozenByPlugin.get(tool.pluginId);
+      if (frozen === undefined) {
+        try {
+          const result = this.snapshotFactory(tool.pluginId, this.agentId ?? "");
+          frozen =
+            result ??
+            // 防御：工厂返回 undefined 视为冻结失败（禁止 undefined 表示成功）
+            { ok: false, error: `插件 ${tool.pluginId} 快照冻结返回空结果，本 turn 工具已禁用` };
+        } catch (error) {
+          frozen = {
+            ok: false,
+            error: error instanceof Error ? error.message.slice(0, 400) : "插件快照冻结失败",
+          };
+        }
+        frozenByPlugin.set(tool.pluginId, frozen);
       }
+      tool.turnContext.current = frozen;
     }
   }
 

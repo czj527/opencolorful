@@ -12,6 +12,8 @@ import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PluginFacade } from "../../src/platform/plugin-facade.js";
 import { createPiAgentSession, createInMemorySession, type PluginSessionTool } from "../../src/pi-sdk/index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
+import { SessionRuntime } from "../../src/runtime/session-runtime.js";
+import type { ModelService } from "../../src/runtime/model-service.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -102,8 +104,10 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线�
     const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
     const frozen = snapshotFactory("example.sdk-showcase", "agent-a");
     expect(frozen).toBeDefined();
-    expect(frozen!.snapshot).toBeDefined();
-    const snapshot = frozen!.snapshot as { contributions: readonly string[] };
+    if (frozen === undefined || !frozen.ok) {
+      throw new Error("冻结应成功");
+    }
+    const snapshot = frozen.snapshot as { contributions: readonly string[] };
     // 快照不可变（deepFreeze）：展开的贡献集 = 该插件全部登记贡献（"允许全部"语义）
     expect(snapshot.contributions).toContain("echo");
     expect(snapshot.contributions).toContain("delete-file");
@@ -169,14 +173,60 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线�
     const tools = buildPluginSessionTools(facade, "agent-a", "s1");
     const tool = tools.find((t) => t.qualifiedName === "example.sdk-showcase.echo")!;
 
-    // 冻结失败（如插件中途卸载导致 create 抛错）：生产 factory 返回 { error }
-    // （SessionRuntime.beginTurn 生产路径对抛错同样包装为 { error }）
-    tool.turnContext!.current = { snapshot: undefined, state: undefined, error: "插件未绑定或已禁用，无法创建执行快照" };
+    // 冻结失败（如插件中途卸载导致 create 抛错）：生产 factory 返回 { ok: false }
+    // （SessionRuntime.beginTurn 生产路径对抛错/空结果同样包装为失败）
+    tool.turnContext!.current = { ok: false, error: "插件未绑定或已禁用，无法创建执行快照" };
     const result = await tool.invoke({ text: "must-not-run" });
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("snapshot-error");
       expect(result.message).toContain("快照冻结失败");
+    }
+  });
+
+  it("P0 插件/Runtime 缺失时冻结返回失败（不再 undefined 降级实时权限）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
+    const tools = buildPluginSessionTools(facade, "agent-a", "s1");
+    const tool = tools.find((t) => t.qualifiedName === "example.sdk-showcase.echo")!;
+
+    // 复现第四轮场景：turn 开始时插件已禁用（无运行实例）→ 冻结必须显式失败
+    await facade.disable("example.sdk-showcase");
+    const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
+    const frozen = snapshotFactory("example.sdk-showcase", "agent-a");
+    // 修复前：undefined（invoke 侧按实时状态执行 = fail-open）；修复后：显式失败
+    expect(frozen).toBeDefined();
+    if (frozen === undefined) {
+      throw new Error("冻结结果不应为 undefined");
+    }
+    expect(frozen.ok).toBe(false);
+    if (!frozen.ok) {
+      expect(frozen.error).toContain("运行实例");
+    }
+
+    // 同一 turn（冻结失败结果仍在 turnContext）下调用 → fail-closed，绝不执行
+    tool.turnContext!.current = frozen;
+    const result = await tool.invoke({ text: "should-have-failed-closed" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("snapshot-error");
+      expect(result.message).toContain("已禁用");
+    }
+
+    // 即使此后插件重新启用（新 Runtime），本 turn 仍持有失败冻结 → 依旧 fail-closed
+    await facade.enable("example.sdk-showcase");
+    expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+    const afterReenable = await tool.invoke({ text: "still-must-not-run" });
+    expect(afterReenable.ok).toBe(false);
+    if (!afterReenable.ok) {
+      expect(afterReenable.code).toBe("snapshot-error");
     }
   });
 
@@ -200,8 +250,11 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线�
     const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
     const frozen = snapshotFactory("example.sdk-showcase", "agent-a");
     expect(frozen).toBeDefined();
+    if (frozen === undefined || !frozen.ok) {
+      throw new Error("冻结应成功");
+    }
     pluginTools[0]!.turnContext!.current = frozen;
-    const frozenSnapshot = frozen!.snapshot as { pluginId: string; grantRevision: number };
+    const frozenSnapshot = frozen.snapshot as { pluginId: string; grantRevision: number };
 
     // faux 模型 + createPiAgentSession + customTools（PI 注册表注入）
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "main-session-faux-"));
@@ -273,6 +326,164 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线�
       }
     }
     expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+  });
+
+  it("生产链全闭环：SessionRuntime（生产类）+ beginTurn 冻结 + faux tool_call → worker 执行（无条件事件断言）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    facade.bind("agent-a", "example.sdk-showcase", ["echo"]);
+    expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+
+    const sessionId = "prod-chain-session";
+    // 生产接线：buildPluginSessionTools（invoke 闭包 + turnContext 槽）+
+    // buildPluginTurnSnapshotFactory（beginTurn 每 turn 调用的工厂）
+    const pluginTools = buildPluginSessionTools(facade, "agent-a", sessionId);
+    const snapshotFactory = buildPluginTurnSnapshotFactory(facade);
+    expect(pluginTools).toHaveLength(1);
+
+    // faux 模型（真实模型分支等价物：ModelService stub 提供 faux provider 实例）
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "prod-chain-faux-"));
+    temporaryDirectories.push(dir);
+    const faux = fauxProvider();
+    const modelRuntime = await ModelRuntime.create({ authPath: dir, modelsPath: null, allowModelNetwork: false });
+    modelRuntime.registerProvider("faux", {
+      name: "Faux",
+      baseUrl: "http://localhost:0",
+      api: faux.provider as never,
+      streamSimple: faux.provider.stream as never,
+      models: [{ id: "faux-1", name: "Faux Model", reasoning: false, input: ["text"] as const, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 }],
+    });
+    await modelRuntime.setRuntimeApiKey("faux", "dummy-key");
+    const model = modelRuntime.getModel("faux", "faux-1");
+    if (model === undefined) {
+      throw new Error("faux 模型未注册");
+    }
+    const modelServiceStub = {
+      resolveModel: () => ({ runtime: modelRuntime, model }),
+      getRuntime: () => ({ resolveModel: () => ({ runtime: modelRuntime, model }) }),
+    } as unknown as ModelService;
+
+    // SessionRuntime（生产类）：真实模型分支 → createPiAgentSession(customTools) →
+    // prompt 时 beginTurn（生产）每 turn 冻结 → PI 工具执行器 → invoke 闭包（生产）
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const sessionHandle = createInMemorySession(dir);
+    const runtime = await SessionRuntime.create({
+      sessionId,
+      cwd: dir,
+      authPath: path.join(dir, "auth.json"),
+      publish: (event) => events.push(event as { type: string; payload: Record<string, unknown> }),
+      sessionHandle,
+      modelService: modelServiceStub,
+      resolveProviderId: "faux",
+      resolveModelId: "faux-1",
+      agentId: "agent-a",
+      pluginTools,
+      snapshotFactory,
+    });
+
+    // faux 模型发出插件 tool_call（qualifiedName 命名空间）
+    faux.setResponses([fauxAssistantMessage([fauxToolCall("example.sdk-showcase.echo", { text: "prod-chain" })])]);
+    const run = runtime.prompt("请调用 echo 工具");
+    await run.completed;
+
+    // 无条件断言（公开事件流，不依赖内部 _handle）：tool.started（含插件工具名）+
+    // tool.completed（结果回写会话，isError=false）
+    const toolStarted = events.filter((e) => e.type === "tool.started");
+    expect(toolStarted.length).toBeGreaterThan(0);
+    expect(toolStarted[0]!.payload["toolName"]).toBe("example.sdk-showcase.echo");
+    const toolCompleted = events.filter((e) => e.type === "tool.completed" && e.payload["isError"] !== true);
+    expect(toolCompleted.length).toBeGreaterThan(0);
+    // PI 工具结果以双层 JSON 回写：content[0].text = JSON.stringify(worker 返回值)
+    const resultText = String(toolCompleted[0]!.payload["result"] ?? "");
+    expect(resultText).toContain("echoed");
+    expect(resultText).toContain("prod-chain");
+    const parsed = JSON.parse(resultText) as { content?: Array<{ text?: string }> };
+    const echoed = JSON.parse(parsed.content?.[0]?.text ?? "{}") as { echoed?: string };
+    expect(echoed.echoed).toBe("prod-chain");
+
+    // turn 完成事件存在；插件 worker 健康（工具经 RuntimeHost → node worker 真实执行）
+    expect(events.some((e) => e.type === "turn.completed" || e.type === "agent.completed")).toBe(true);
+    expect(facade.runtimeHost.isHealthy("example.sdk-showcase")).toBe(true);
+  });
+
+  it("P1-2 快照按 pluginId 复用：同一插件多工具一次 turn 只冻结一次（同一 snapshotId）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    await installShowcase(facade);
+    // 空列表绑定 → echo 与 delete-file 都注入（同插件两个工具）
+    facade.bind("agent-a", "example.sdk-showcase", []);
+    const pluginTools = buildPluginSessionTools(facade, "agent-a", "memoize-session");
+    expect(pluginTools.map((t) => t.qualifiedName).sort()).toEqual([
+      "example.sdk-showcase.delete-file",
+      "example.sdk-showcase.echo",
+    ]);
+
+    // spy factory：记录调用次数与产生的 snapshotId（beginTurn 每 turn 调用）
+    const baseFactory = buildPluginTurnSnapshotFactory(facade);
+    const calls: Array<{ pluginId: string; snapshotId: string | null }> = [];
+    const spyFactory = (pluginId: string, agentId: string) => {
+      const result = baseFactory(pluginId, agentId);
+      calls.push({
+        pluginId,
+        snapshotId: result !== undefined && result.ok
+          ? (result.snapshot as { snapshotId: string }).snapshotId
+          : null,
+      });
+      return result;
+    };
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memoize-faux-"));
+    temporaryDirectories.push(dir);
+    const faux = fauxProvider();
+    const modelRuntime = await ModelRuntime.create({ authPath: dir, modelsPath: null, allowModelNetwork: false });
+    modelRuntime.registerProvider("faux", {
+      name: "Faux",
+      baseUrl: "http://localhost:0",
+      api: faux.provider as never,
+      streamSimple: faux.provider.stream as never,
+      models: [{ id: "faux-1", name: "Faux Model", reasoning: false, input: ["text"] as const, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 }],
+    });
+    await modelRuntime.setRuntimeApiKey("faux", "dummy-key");
+    const model = modelRuntime.getModel("faux", "faux-1")!;
+    const modelServiceStub = {
+      resolveModel: () => ({ runtime: modelRuntime, model }),
+      getRuntime: () => ({ resolveModel: () => ({ runtime: modelRuntime, model }) }),
+    } as unknown as ModelService;
+
+    const runtime = await SessionRuntime.create({
+      sessionId: "memoize-session",
+      cwd: dir,
+      authPath: path.join(dir, "auth.json"),
+      publish: () => {},
+      sessionHandle: createInMemorySession(dir),
+      modelService: modelServiceStub,
+      resolveProviderId: "faux",
+      resolveModelId: "faux-1",
+      agentId: "agent-a",
+      pluginTools,
+      snapshotFactory: spyFactory,
+    });
+
+    // 一次 turn（无 tool_call）：beginTurn 遍历两个工具——memoize 后同插件只冻结一次
+    faux.setResponses([fauxAssistantMessage("你好")]);
+    const run = runtime.prompt("你好");
+    await run.completed;
+
+    const showcaseCalls = calls.filter((c) => c.pluginId === "example.sdk-showcase");
+    // 修复前：每工具各调一次（2 个 snapshotId）；修复后：同插件共享一次冻结
+    expect(showcaseCalls).toHaveLength(1);
+    expect(showcaseCalls[0]!.snapshotId).not.toBeNull();
   });
 
   it("HTTP 生产链冒烟：messages 路由 → ensureRuntime → 绑定插件会话正常 turn", async () => {

@@ -394,7 +394,7 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
   });
 
   it("P1-1 invoke 携带冻结 snapshot/state → worker 嵌套 Host API 收到同一冻结视图", async () => {
-    const { broker, host } = createEnv(PLUGIN, "node-process");
+    const { broker, host, db } = createEnv(PLUGIN, "node-process");
     // 注册回显冻结上下文的 broker API（验证 broker.call 收到的 snapshot/state）
     broker.registerApi({
       name: "host.echo-frozen-context",
@@ -438,6 +438,10 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
       // 嵌套 Host 请求与工具入口同一冻结授权视图（非实时权限）
       expect(result.result).toEqual({ host: { snapshotId: "snap-p1-1", snapshotPlugin: PLUGIN, stateFrozen: true } });
     }
+    // P1-2（§十一）：执行生命周期 payload 记录实际快照 id（工具调用可回放/诊断）
+    const executionRows = queryActivity(db, "plugin.execution.started");
+    const snapshotRow = executionRows.find((row) => String(row.payload_json).includes("snap-p1-1"));
+    expect(snapshotRow).toBeDefined();
     await host.stop(PLUGIN, "shutdown");
   });
 

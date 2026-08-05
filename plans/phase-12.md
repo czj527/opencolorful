@@ -1299,9 +1299,20 @@ Phase 12 专项门：
 
 **验证**：T14 针对性测试（plugin-main-session 6（含 HTTP 生产链冒烟）、plugin-runtime-host 29（含 P1-1 冻结视图）、plugin-config-secret 19（含 compensation 4 场景））+ 全量质量门复跑（vitest 113/1315、web 375/375、web build、tsc build、imports、protocol 构建）。
 
+**T15 修复轮（2026-08-05，第四轮复审：P0×1 + P1×3）**——复审确认主体质量明显提高，剩余快照失败语义与生产链测试闭环问题，本轮全部修复：
+
+| 编号 | 问题 | 修复 |
+|---|---|---|
+| P0 | 冻结工厂在插件未激活/无运行实例时返回 `undefined` → 工具入口按实时状态执行（fail-open，已复现 disable→freeze→enable 后旧 turn 在新 Runtime 成功执行） | `PluginToolTurnContext` 改**成功/失败判别联合**（`{ ok: true, snapshot, state } \| { ok: false, error }`）；`buildPluginTurnSnapshotFactory` 对 active/instance 缺失返回显式失败；`SessionRuntime.beginTurn` 对 undefined/抛错防御性包装为失败；invoke 闭包对"未冻结/失败"一律 fail-closed（`snapshot-error`）；回归测试复现原场景：disable 冻结 → enable 后本 turn 仍拒绝 |
+| P1 | failed 终态 reasonCode 固定 `write_failed`（写入成功但 completed 审计失败时形成错误事实） | 按 `writeCommitted` + 补偿结果区分：`domain_write_failed`（write 抛错）/ `completed_audit_failed`（写入成功审计失败，含已补偿与未补偿）/ `compensation_failed`（补偿自身抛错）；4 个补偿测试加 reasonCode 断言 |
+| P1 | 同一插件多工具每 turn 生成多个 snapshotId（§十一要求一次 turn 同一快照）；snapshotId 无生产消费者（execution payload 不记录） | `beginTurn` 按 **pluginId memoize**（同插件全部工具共享同一冻结结果）；`RuntimeHost` execution 生命周期 payload 记录 `snapshotId`（§十一"每次工具调用记录实际插件版本和 snapshot id"）；memoize spy 测试（两工具 → factory 仅一次）+ P1-1 测试断言 execution payload 含 snapshotId |
+| P1 | 生产链测试仍未闭环：手工设置 turnContext、二次 invoke、`_handle` 条件断言、HTTP 只断言 202 | 新增**生产链全闭环测试**：`SessionRuntime`（生产类真实模型分支）+ 生产 `buildPluginSessionTools`/`buildPluginTurnSnapshotFactory` + faux tool_call → beginTurn（生产）→ PI 工具执行器 → worker 真实执行，**无条件断言公开事件流**（`tool.started` 插件工具名 + `tool.completed` 结果双层 JSON 回显 + turn 完成）；HTTP 冒烟保留 |
+
+**验证**：T15 针对性测试（plugin-main-session 9（含 P0 复现回归、生产链全闭环、memoize spy）、plugin-runtime-host 29（含 execution payload snapshotId）、plugin-config-secret 19（reasonCode 4 场景））+ 全量质量门复跑（vitest、web 375、web build、tsc build、imports、protocol、e2e 56）。
+
 ### 最终验收结论
 
-自动化质量门全部通过（T1-T10 与 T11/T12/T13 修复轮）；两轮评审阻断项均已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）作为人工验收步骤；主会话工具回路已有集成测试闭环（faux 模型驱动 tool_call → worker 执行），偏差 #7 已移除。
+自动化质量门全部通过（T1-T10 与 T11-T15 修复轮）；三轮评审阻断项均已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）作为人工验收步骤；主会话工具回路已有生产链全闭环集成测试（SessionRuntime 生产类 + faux 驱动 tool_call → worker 执行，无条件事件断言），偏差 #7 已移除。
 ### T1 实施记录（2026-08-04，主 Agent 串行冻结）
 
 **内容**：协议包、Manifest v1、路径、migration v10、插件事件目录、import boundary 全部冻结。

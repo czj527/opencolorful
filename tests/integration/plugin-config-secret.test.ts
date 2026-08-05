@@ -327,8 +327,10 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_failed",
     ]);
     // P1-4 可验证补偿：failed 终态记录补偿结果（写入已生效且 rollback 成功）
-    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string; reasonCode?: string };
     expect(failedPayload.compensation).toBe("rolled-back");
+    // P1 reasonCode 区分：写入已成功，失败发生在 completed 审计（而非领域写入）
+    expect(failedPayload.reasonCode).toBe("completed_audit_failed");
   });
 
   it("write 自身抛错：视为副作用未生效，不调用 rollback", () => {
@@ -349,8 +351,10 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_failed",
     ]);
     // P1-4：写入未生效（副作用从未产生）→ 补偿不适用
-    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string; reasonCode?: string };
     expect(failedPayload.compensation).toBe("not-applicable");
+    // P1 reasonCode 区分：write 自身抛错 → 领域写入失败
+    expect(failedPayload.reasonCode).toBe("domain_write_failed");
   });
 
   it("rollback 补偿自身抛错：failed 终态记录 rollback-failed（数据可能停留变更后状态）", () => {
@@ -368,8 +372,10 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_started",
       "audit.plugin.secret_change_failed",
     ]);
-    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string; reasonCode?: string };
     expect(failedPayload.compensation).toBe("rollback-failed");
+    // P1 reasonCode 区分：补偿自身失败 → compensation_failed
+    expect(failedPayload.reasonCode).toBe("compensation_failed");
   });
 
   it("写入已生效但未提供 rollback 钩子：failed 终态如实记录 uncompensated", () => {
@@ -385,8 +391,10 @@ describe("runStrictAuditLifecycle：审计失败补偿（P0-3）", () => {
       "audit.plugin.secret_change_started",
       "audit.plugin.secret_change_failed",
     ]);
-    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string };
+    const failedPayload = JSON.parse(rows[1]!.payload_json as string) as { compensation?: string; reasonCode?: string };
     expect(failedPayload.compensation).toBe("uncompensated");
+    // P1 reasonCode 区分：写入已成功、无补偿钩子 → completed 审计失败
+    expect(failedPayload.reasonCode).toBe("completed_audit_failed");
   });
 
   it("成功路径：写入与 completed 均落账，不调用 rollback", () => {
