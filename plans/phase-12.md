@@ -1,6 +1,6 @@
 # Phase 12：通用插件系统与生态兼容层
 
-**状态：已实施（T1-T10 完成 + 评审修复轮 T11 完成，2026-08-04），待用户真实验收** | 建议分支：`phase-12-plugin-system`
+**状态：已完成并通过最终验收（T1-T16，2026-08-05）** | 实施分支：`phase-12-plugin-system`
 **基线：** `main`（Phase 10.5 / Phase 11 合并点，`2d15610`）
 **架构权威：** 本文（审定后）；如实施期拆出 `docs/plugin-architecture.md`，该文档只承载稳定架构，范围与验收仍以本计划为准
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 12
@@ -1312,7 +1312,7 @@ Phase 12 专项门：
 
 ### 最终验收结论
 
-自动化质量门全部通过（T1-T10 与 T11-T15 修复轮）；三轮评审阻断项均已修复；`phase-12-plugin-system` 分支待用户（创建者）审查验证后决定是否合并到 main。真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）作为人工验收步骤；主会话工具回路已有生产链全闭环集成测试（SessionRuntime 生产类 + faux 驱动 tool_call → worker 执行，无条件事件断言），偏差 #7 已移除。
+自动化质量门全部通过（T1-T10 与 T11-T16 修复轮）；五轮外部复审发现的 P0/P1 阻断项均已闭环。2026-08-05 独立最终验收确认：Server 113 files / 1319 tests、Web 375 tests、Playwright 56/56、TypeScript、PI/Plugin import boundary、Protocol/SDK 与生产构建全部通过，批准合并到 `main`。主会话工具回路已有生产链全闭环集成测试（SessionRuntime 生产类 + faux 驱动 tool_call → worker 执行，无条件事件断言），偏差 #7 已移除。
 ### T1 实施记录（2026-08-04，主 Agent 串行冻结）
 
 **内容**：协议包、Manifest v1、路径、migration v10、插件事件目录、import boundary 全部冻结。
@@ -1377,4 +1377,4 @@ Phase 12 专项门：
 
 ### 最终验收结论
 
-待用户（创建者）审查 `phase-12-plugin-system` 分支后决定是否合并到 main。自动化质量门全部通过；真实验收（浏览器安装 Showcase → 权限确认 → 绑定 Agent → 调用工具 → 热重载 → 禁用卸载）可作为人工验收步骤执行。
+Phase 12 于 2026-08-05 通过独立最终验收并批准合并到 `main`。T16 已关闭旧快照安全拒绝无日志的最后一个 P1 缺口；自动化质量门全部通过，插件安装、授权、Agent 绑定、工具调用、热重载、禁用与卸载均已有真实 E2E 覆盖。
