@@ -238,7 +238,8 @@ describe("migration v7（记忆 Agent 审批与优先级）", () => {
       .pluck()
       .get() as number;
     expect(version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(10);
+    // Phase 13（T1）：CURRENT_SCHEMA_VERSION 已升至 11（Skill 事实表）
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
     const tables = tableNames(database);
     expect(tables).toContain("memory_mutation_proposals");
     expect(tables).toContain("activity_events");
