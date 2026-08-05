@@ -1,4 +1,15 @@
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
+import type { ResourceDiagnostic, Skill } from "@earendil-works/pi-coding-agent";
+
+/**
+ * T5：注入 ResourceLoader.getSkills() 的 PI Skill pointer 集合
+ * （ResolveOutput/Turn Snapshot → buildPiSkills 的产物；正文渐进披露走
+ * SkillContentService，不在此注入正文）。缺省为空，保持既有行为不变。
+ */
+export interface PiResourceSkills {
+  readonly skills: readonly Skill[];
+  readonly diagnostics: readonly ResourceDiagnostic[];
+}
 
 export interface PiSessionUsageStats {
   readonly tokens: {
@@ -195,6 +206,8 @@ export interface PiFauxAgentOptions {
   readonly sessionHandle?: PiSessionHandle;
   readonly thinkingLevel?: PiThinkingLevel;
   readonly systemPrompt?: string;
+  /** T5：PI Skill pointer 注入（缺省空，行为不变） */
+  readonly skills?: PiResourceSkills;
 }
 
 export interface PiResolvedModel {
@@ -217,4 +230,6 @@ export interface PiAgentSessionOptions {
   readonly noTools?: "all";
   readonly thinkingLevel?: PiThinkingLevel;
   readonly systemPrompt?: string;
+  /** T5：PI Skill pointer 注入（缺省空，行为不变） */
+  readonly skills?: PiResourceSkills;
 }

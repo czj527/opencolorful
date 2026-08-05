@@ -28,6 +28,7 @@ import type {
   PiAgentSessionHandle,
   PiAgentSessionOptions,
   PiFauxAgentOptions,
+  PiResourceSkills,
   PiSessionUsageStats,
   PluginSessionTool,
 } from "./types.js";
@@ -276,6 +277,7 @@ function mapRemainingEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
 function minimalResourceLoader(
   systemPrompt?: string,
   useSandbox?: boolean,
+  skills?: PiResourceSkills,
 ): ResourceLoader {
   return {
     getExtensions: () => {
@@ -301,7 +303,11 @@ function minimalResourceLoader(
         runtime,
       };
     },
-    getSkills: () => ({ skills: [], diagnostics: [] }),
+    // T5：注入解析结果（默认仍为空数组，保证既有行为不变）；正文不在此返回
+    getSkills: () =>
+      skills !== undefined
+        ? { skills: [...skills.skills], diagnostics: [...skills.diagnostics] }
+        : { skills: [], diagnostics: [] },
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
@@ -424,6 +430,7 @@ export async function createPiFauxAgentSession(
     resourceLoader: minimalResourceLoader(
       options.systemPrompt,
       !!toolPolicy,
+      options.skills,
     ),
     ...(hasExtraTools
       ? { tools: [...options.extraTools!] }
@@ -529,6 +536,7 @@ export async function createPiAgentSession(
     resourceLoader: minimalResourceLoader(
       options.systemPrompt,
       !!toolPolicy,
+      options.skills,
     ),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };

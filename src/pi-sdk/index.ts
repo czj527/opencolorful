@@ -29,6 +29,8 @@ import { registerSessionManager } from "./session-manager-registry.js";
 export { assertPiSdkVersion, EXPECTED_PI_SDK_VERSION, getPiSdkVersion } from "./version.js";
 export { createPiModelRuntime } from "./model-runtime.js";
 export { createPiAgentSession, createPiFauxAgentSession } from "./agent-session.js";
+export { buildPiSkills, buildPiSkillsFromSnapshot } from "./skill-loader.js";
+export type { PiSkillLoadOptions, PiSkillsLoadResult } from "./skill-loader.js";
 export type {
   HistoryToolCall,
   OfflineCompletionResult,
@@ -43,6 +45,7 @@ export type {
   PiModelSummary,
   PiProviderDefinition,
   PiResolvedModel,
+  PiResourceSkills,
   PiSessionHandle,
   PluginSessionTool,
   PluginSessionToolInvokeResult,
