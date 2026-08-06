@@ -15,6 +15,8 @@ export interface ButtonProps {
   readonly "aria-label"?: string;
   readonly title?: string;
   readonly className?: string;
+  /** 测试/自动化定位钩子（透传到 <button> 节点） */
+  readonly "data-testid"?: string;
 }
 
 const sizeClass: Record<ButtonSize, string | undefined> = {
@@ -57,6 +59,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
   const ariaLabel = rest["aria-label"];
   const title = rest.title;
+  const testId = rest["data-testid"];
 
   const buttonProps: ButtonHTMLAttributes<HTMLButtonElement> = {
     type,
@@ -69,6 +72,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   }
   if (title !== undefined) {
     buttonProps.title = title;
+  }
+  if (testId !== undefined) {
+    (buttonProps as Record<string, string>)["data-testid"] = testId;
   }
 
   return (

@@ -1,5 +1,6 @@
 import { runChatCommand } from "./chat-command.js";
 import { runPluginsCommand } from "./commands/plugins.js";
+import { runSkillsCommand } from "./commands/skills.js";
 import { runServerCommand } from "./server-command.js";
 import { runSupervisorCommand } from "./supervisor-command.js";
 
@@ -21,7 +22,11 @@ async function main(): Promise<void> {
     await runPluginsCommand(args);
     return;
   }
-  throw new Error("用法: agent <server|supervisor|chat|plugins> [...args]");
+  if (scope === "skills") {
+    await runSkillsCommand(args);
+    return;
+  }
+  throw new Error("用法: agent <server|supervisor|chat|plugins|skills> [...args]");
 }
 
 main().catch((error: unknown) => {

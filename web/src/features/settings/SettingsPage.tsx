@@ -27,6 +27,7 @@ import { navigateToAgentNew, navigateToAgentEdit } from "../../app/page-router.j
 import { AgentsSection } from "./sections/AgentsSection.js";
 import { UsageSection } from "./sections/UsageSection.js";
 import { PluginsSettingsSection } from "../plugins/PluginsSettingsSection.js";
+import { SkillsSettingsSection } from "./sections/SkillsSettingsSection.js";
 import { SettingsSection } from "./widgets/index.js";
 import styles from "./SettingsPage.module.css";
 
@@ -44,6 +45,7 @@ const SECTION_META: Record<SettingsSectionId, { title: string; description: stri
   layout: { title: "界面与布局", description: "调整侧栏宽度、焦点模式、动态效果与显示偏好。" },
   agents: { title: "Agent 管理", description: "管理 Agent 身份、个性与回复风格。" },
   plugins: { title: "插件", description: "插件中心：已安装、发现、权限、开发与来源。绑定与权限变更从下一 turn 生效。" },
+  skills: { title: "技能", description: "Skill 管理中心：已安装、发现、来源信任、Bundle、诊断与开发态。" },
   logs: { title: "日志与诊断", description: "Supervisor 和 Agent Server 运行日志。" },
   usage: { title: "用量统计", description: "查看 Token 消耗与缓存命中情况，支持按时间范围筛选。" },
   runtime: { title: "运行时与关于", description: "当前进程状态与版本信息。" },
@@ -348,6 +350,13 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
     return (
       <SettingsSection title={meta.title} description={meta.description} testId="settings-section-plugins">
         <PluginsSettingsSection />
+      </SettingsSection>
+    );
+  }
+  if (active === "skills") {
+    return (
+      <SettingsSection title={meta.title} description={meta.description} testId="settings-section-skills">
+        <SkillsSettingsSection />
       </SettingsSection>
     );
   }

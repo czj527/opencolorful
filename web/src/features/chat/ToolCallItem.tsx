@@ -1,5 +1,6 @@
 import type { ToolCall } from "./chat-state.js";
 import { Wrench, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { SkillInstallToolCard, isSkillInstallCardResult } from "../skills/SkillInstallToolCard.js";
 import styles from "./ToolCallItem.module.css";
 
 interface ToolCallItemProps {
@@ -20,6 +21,19 @@ const statusBorderClass: Record<ToolCall["status"], string | undefined> = {
 
 export function ToolCallItem({ toolCall }: ToolCallItemProps) {
   const { toolName, status, result, delta } = toolCall;
+
+  // Phase 13 T8：install_skill 工具调用 → 会话内安装状态卡
+  // （风险确认用可追踪的一次性审批卡，不用普通弹窗承载完整安装流程）
+  if (toolName === "install_skill" && (isSkillInstallCardResult(result) || status === "running")) {
+    return (
+      <SkillInstallToolCard
+        toolName={toolName}
+        status={status}
+        result={result}
+        {...(delta !== undefined ? { delta } : {})}
+      />
+    );
+  }
 
   const cardClass = [
     styles.toolCall ?? "",

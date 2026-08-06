@@ -20,6 +20,7 @@
     "build:sdk": "npm run build -w @opencolorful/plugin-sdk && npm run build -w @opencolorful/plugin-runtime && npm run build -w @opencolorful/plugin-components",
     "check:pi-imports": "node scripts/verify-pi-sdk-imports.mjs",
     "check:plugin-imports": "node scripts/verify-plugin-imports.mjs",
+    "check:skill-package": "node scripts/verify-skill-package.mjs examples/skills/sdk-showcase-skill",
     "cli": "tsx src/cli/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -193,9 +193,16 @@ export class SkillContentService {
   private async readMainFile(snapshot: SkillSnapshot, ref: SkillRef, refKey: string, rootPath: string, absPath: string): Promise<Buffer> {
     const verified = this.verifiedPackages.get(snapshot.snapshotId);
     if (verified === undefined || !verified.has(refKey)) {
+      // 与注册同源校验：生产安装路径（installer → buildStagedPackage）登记的是
+      // 版本参与哈希（version 盐）；测试/本地 ingest 路径登记的是无盐哈希。
+      // 两种注册风格都必须能通过校验，但只有与登记哈希完全一致才放行（fail-closed）。
       let actualHash: string;
       try {
+        const version = ref.version;
         actualHash = computeSkillContentHash(rootPath);
+        if (actualHash !== ref.contentHash && version !== undefined && version !== "") {
+          actualHash = computeSkillContentHash(rootPath, { version });
+        }
       } catch (error) {
         if (error instanceof SkillPathError) {
           throw error;

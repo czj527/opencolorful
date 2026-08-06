@@ -9,6 +9,8 @@ import {
 } from "../../app/page-router.js";
 import { AgentForm, ConfirmDiscard, type AgentFormDraft } from "./index.js";
 import { AgentPluginsSection } from "./AgentPluginsSection.js";
+import { AgentSkillsSection } from "../skills/AgentSkillsSection.js";
+import { SkillApiClient } from "../../lib/skill-api.js";
 import styles from "./AgentEditPage.module.css";
 
 function extractAgentId(): string {
@@ -45,6 +47,8 @@ export function AgentEditPage(props: AgentEditPageProps) {
   const agentId = extractAgentId();
   // Agent 插件绑定独立于身份/底色编辑；Server /api/agents/:id/plugins 未接线时该区域自行降级
   const pluginApi = useMemo(() => new PluginApiClient(""), []);
+  // Phase 13 T8：Skill 绑定/选择/学习策略（/api/agents/:id/skills，未接线时区域自行降级）
+  const skillApi = useMemo(() => new SkillApiClient(""), []);
   const [draft, setDraft] = useState<AgentFormDraft | null>(null);
   const [original, setOriginal] = useState<AgentFormDraft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -278,6 +282,8 @@ export function AgentEditPage(props: AgentEditPageProps) {
       />
 
       <AgentPluginsSection agentId={agentId} pluginApi={pluginApi} />
+
+      <AgentSkillsSection agentId={agentId} skillApi={skillApi} />
 
       <ConfirmDiscard
         open={showDiscard}

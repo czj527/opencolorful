@@ -1,4 +1,4 @@
-export type SettingsSectionId = "models" | "defaults" | "layout" | "agents" | "plugins" | "logs" | "usage" | "runtime" | "future";
+export type SettingsSectionId = "models" | "defaults" | "layout" | "agents" | "plugins" | "skills" | "logs" | "usage" | "runtime" | "future";
 
 export interface SettingsSectionMeta {
   readonly id: SettingsSectionId;
@@ -13,6 +13,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionMeta[] = [
   { id: "layout", label: "界面与布局", group: "general", available: true },
   { id: "agents", label: "Agent 管理", group: "general", available: true },
   { id: "plugins", label: "插件", group: "general", available: true },
+  { id: "skills", label: "技能", group: "general", available: true },
   { id: "logs", label: "日志与诊断", group: "general", available: true },
   { id: "usage", label: "用量统计", group: "general", available: true },
   { id: "runtime", label: "运行时与关于", group: "general", available: true },

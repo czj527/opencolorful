@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type PageRoute = "workspace" | "settings" | "plugins" | "memory" | "session-new" | "agent-new" | "agent-edit" | "logs";
+export type PageRoute = "workspace" | "settings" | "plugins" | "skills" | "memory" | "session-new" | "agent-new" | "agent-edit" | "logs";
 
 interface AgentFormHistoryState extends Record<string, unknown> {
   readonly __agentFormEntry?: boolean;
@@ -45,6 +45,7 @@ export function routeFromPathname(pathname: string): PageRoute {
   if (clean === "/memory" || clean.startsWith("/memory/")) return "memory";
   if (clean === "/logs" || clean.startsWith("/logs/")) return "logs";
   if (clean === "/plugins" || clean.startsWith("/plugins/")) return "plugins";
+  if (clean === "/skills" || clean.startsWith("/skills/")) return "skills";
   if (clean === "/new" || clean.startsWith("/new/")) return "session-new";
   if (clean === "/agents/new" || clean.startsWith("/agents/new/")) return "agent-new";
   if (clean.startsWith("/agents/")) return "agent-edit";
@@ -100,6 +101,12 @@ export function navigateToLogs(): void {
 export function navigateToPlugins(): void {
   if (typeof window === "undefined") return;
   history.pushState({}, "", "/plugins");
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function navigateToSkills(): void {
+  if (typeof window === "undefined") return;
+  history.pushState({}, "", "/skills");
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

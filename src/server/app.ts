@@ -28,6 +28,7 @@ import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
 import { registerPluginDevRoutes, registerPluginRoutes } from "./routes/plugins.js";
 import { registerSkillRoutes } from "./routes/skills.js";
+import { registerSkillAdminRoutes } from "./routes/skill-admin.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
 
@@ -53,6 +54,8 @@ export interface ServerAppOptions {
   readonly pluginFacade?: import("../platform/plugin-facade.js").PluginFacade;
   /** Phase 13 T6 Skill Core Service（组合根注入；注入后才注册 Skill 路由） */
   readonly skillCoreService?: import("../runtime/skills/core/skill-core-service.js").SkillCoreService;
+  /** Phase 13 T8 Skill 管理 Service（来源信任/Linked Source/Bundle/详情等管理面端点） */
+  readonly skillAdminService?: import("../runtime/skills/core/skill-admin-service.js").SkillAdminService;
   /** Phase 10 手动 flush 的实际执行钩子（封存 + 重建 Markdown/事件索引） */
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
@@ -181,6 +184,10 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.skillCoreService !== undefined) {
     registerSkillRoutes(app, { core: options.skillCoreService });
+  }
+  // Phase 13 T8 管理面端点（来源信任/Linked Source/Bundle/文件树/详情/学习策略）
+  if (options.skillCoreService !== undefined && options.skillAdminService !== undefined) {
+    registerSkillAdminRoutes(app, { core: options.skillCoreService, admin: options.skillAdminService });
   }
 
   if (options.database !== undefined && options.paths !== undefined) {
