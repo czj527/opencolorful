@@ -25,6 +25,12 @@ import {
 export interface PluginBindingStatus {
   readonly pluginId: string;
   readonly enabled: boolean;
+  /**
+   * T13（P0-2）：Agent 绑定允许的 contribution id 白名单。
+   * 空数组 = 全部启用（协议语义）；非空 = 只允许明确列出的 contribution。
+   * Skill 授权按此过滤（skill-bundle.contributionId 白名单）。
+   */
+  readonly contributions?: readonly string[];
 }
 
 export interface PluginAwareReadinessInput {

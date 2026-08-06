@@ -334,7 +334,9 @@ describe("SkillContentService", () => {
           contentHash: registered.skillRef.contentHash,
           issuedTurnId: "turn-1",
           expiresAt: "2026-01-02T00:00:00.000Z",
-          consumedAt: "2026-01-01T00:00:01.000Z",
+          // T13（P0-4）：grant 一次性——只有未消费（consumedAt=null）才授权；
+          // 已消费 grant 用于验证 fail-closed（见下一条断言）
+          consumedAt: null,
           reason: "session-install",
         },
       ],
@@ -342,6 +344,27 @@ describe("SkillContentService", () => {
     service = new SkillContentService({ catalog, snapshots, grants: overlay, now: () => nowValue });
     const result = await service.readSkillBody({ snapshot, skillRef: registered.skillRef });
     expect(result.body).toContain("body");
+
+    // 一次性：grant 已消费 → 同一 overlay 不再授权（fail-closed）
+    const consumedOverlay: SkillActivationOverlayReader = {
+      listBySession: () => [
+        {
+          grantId: "grant-live",
+          agentId: "agent-1",
+          sessionId: "session-1",
+          skillRefKey: refKey,
+          contentHash: registered.skillRef.contentHash,
+          issuedTurnId: "turn-1",
+          expiresAt: "2026-01-02T00:00:00.000Z",
+          consumedAt: "2026-01-01T00:00:01.000Z",
+          reason: "session-install",
+        },
+      ],
+    };
+    service = new SkillContentService({ catalog, snapshots, grants: consumedOverlay, now: () => nowValue });
+    await expect(service.readSkillBody({ snapshot, skillRef: registered.skillRef })).rejects.toMatchObject({
+      code: "skill_not_in_snapshot",
+    });
   });
 
   it("SkillError 错误码稳定（reasonCode 来自冻结枚举）", async () => {

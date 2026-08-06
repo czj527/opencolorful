@@ -299,7 +299,17 @@ export class SkillContentService {
         : []),
     ];
     for (const grant of grants) {
-      if (grant.skillRefKey === refKey && grant.contentHash === ref.contentHash && grant.expiresAt >= nowIso) {
+      // T13（P0-4）：grant 一次性——consumedAt 非空（读取后被消费/撤销）不再授权，
+      // 禁止同 grant 重复读取。快照摘要是冻结对象，消费状态以实时 store 为准
+      // （读取成功后 consumeActivationGrant 写入 consumedAt，后续读取不再授权）。
+      let consumedAt = grant.consumedAt;
+      if (this.deps.grants !== undefined) {
+        const live = this.deps.grants.listBySession(snapshot.sessionId).find((record) => record.grantId === grant.grantId);
+        if (live !== undefined) {
+          consumedAt = live.consumedAt;
+        }
+      }
+      if (consumedAt === null && grant.skillRefKey === refKey && grant.contentHash === ref.contentHash && grant.expiresAt >= nowIso) {
         return grant;
       }
     }

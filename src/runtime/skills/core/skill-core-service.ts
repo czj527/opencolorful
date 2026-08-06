@@ -741,6 +741,11 @@ export class SkillCoreService {
       }
       visible = kept;
     }
+    // T13（P0-1）：构造前先移除旧快照——冻结失败抛错时 fail-closed，不保留
+    // 上一 Turn 的旧快照（否则 read 链路仍按旧可见集授权）
+    if (sessionId !== undefined && sessionId !== "") {
+      this.turnSnapshots.delete(sessionId);
+    }
     const snapshot = this.deps.snapshots.createSkillSnapshot({
       agentId: agentId === "" ? ANONYMOUS_AGENT_ID : agentId,
       sessionId: sessionId ?? "",
@@ -752,12 +757,19 @@ export class SkillCoreService {
         gated,
         diagnostics,
       },
-      ...(sessionId !== undefined
-        ? { activationGrants: this.deps.sessionService.listActiveGrants(sessionId) }
+      // T13（P0-4）：activation grant 只附着签发它的 Turn——跨 Turn 不得带入
+      // 后续快照（"一次消费、只附着当前 Turn、禁止跨 Turn 重放"）
+      ...(sessionId !== undefined && turnId !== undefined
+        ? {
+            activationGrants: this.deps.sessionService
+              .listActiveGrants(sessionId)
+              .filter((grant) => grant.issuedTurnId === turnId),
+          }
         : {}),
     });
     const loaded = buildPiSkillsFromSnapshot(snapshot);
-    // T11（P0-2）：冻结快照入槽供 read 工具受控读取（新 turn 覆盖旧 turn）
+    // T13（P0-1）：冻结成功后入槽（新 turn 覆盖旧 turn）——构造失败路径已在
+    // 上方 createSkillSnapshot 抛错前删除旧槽（见下），fail-closed 不保留旧快照
     if (sessionId !== undefined && sessionId !== "") {
       this.turnSnapshots.set(sessionId, { turnId: turnId ?? "", snapshot });
     }
@@ -814,24 +826,42 @@ export class SkillCoreService {
     };
 
     // 1. 当前 turn 可见/授权候选：冻结快照 entries + 当前 turn active grants
-    //    （T12 P0-2：会话内安装后同一 turn 立即受控读取——grant 匹配精确 SkillRef）
-    const candidates: { readonly rootPath: string; readonly skillRef: SkillRef }[] = [];
+    //    （T12 P0-2：会话内安装后同一 turn 立即受控读取——grant 匹配精确 SkillRef；
+    //     T13 P0-4：grant 只附着签发它的 Turn，issuedTurnId 与冻结 turnId 一致才纳入）
+    const candidates: { readonly rootPath: string; readonly skillRef: SkillRef; readonly grantId?: string }[] = [];
     if (frozen !== undefined) {
       for (const entry of frozen.snapshot.entries) {
         candidates.push({ rootPath: entry.rootPath, skillRef: entry.skillRef });
       }
     }
-    if (this.deps.sessionService !== undefined) {
+    if (this.deps.sessionService !== undefined && frozen !== undefined) {
       for (const grant of this.deps.sessionService.listActiveGrants(input.sessionId)) {
+        if (grant.issuedTurnId !== frozen.turnId) {
+          continue; // 跨 Turn grant 不纳入（禁止跨 Turn 重放）
+        }
         const registered = this.deps.catalog.findByRefKey(grant.skillRefKey);
         if (registered !== undefined) {
-          candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef });
+          candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef, grantId: grant.grantId });
         }
       }
     }
     for (const candidate of candidates) {
       const outcome = await read(candidate.rootPath, candidate.skillRef, "当前 Turn 可见 Skill");
       if (outcome.status !== "not-a-skill-file") {
+        // T13（P0-4）：经 grant 路径读取成功后消费该 grant（一次性）——同一 grant
+        // 不得重复读取；消费失败（并发已消费）不阻塞已完成的读取
+        if (outcome.status === "ok" && candidate.grantId !== undefined && this.deps.sessionService !== undefined) {
+          try {
+            this.deps.sessionService.consumeActivationGrant({
+              grantId: candidate.grantId,
+              sessionId: input.sessionId,
+              skillRef: candidate.skillRef,
+              contentHash: candidate.skillRef.contentHash,
+            });
+          } catch {
+            // 消费竞争失败（已被并发消费/撤销）：读取已完成，不改变结果
+          }
+        }
         return outcome;
       }
     }

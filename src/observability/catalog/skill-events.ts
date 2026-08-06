@@ -63,6 +63,9 @@ export const skillActivityEntries: readonly EventCatalogEntry[] = [
   // ── 激活授权（Session 内安装即时生效）──
   entry({ eventName: "skill.activation.granted", eventVersion: 1, channel: "activity", category: "skill", defaultLevel: "info", lifecycleRole: "point", ...notable }),
   entry({ eventName: "skill.activation.consumed", eventVersion: 1, channel: "activity", category: "skill", defaultLevel: "info", lifecycleRole: "point", ...routine }),
+  // T13（P1）：补偿撤销事件注册——ActivityRecorder 未登记的事件会 rejected 且
+  // 证据静默丢失（loadHandle 失败补偿撤销 grant 的审计证据必须落库）
+  entry({ eventName: "skill.activation.revoked", eventVersion: 1, channel: "activity", category: "skill", defaultLevel: "warn", lifecycleRole: "point", ...notable }),
   entry({ eventName: "skill.activation.expired", eventVersion: 1, channel: "activity", category: "skill", defaultLevel: "warn", lifecycleRole: "point", ...routine }),
   entry({ eventName: "skill.activation.rejected", eventVersion: 1, channel: "activity", category: "skill", defaultLevel: "warn", lifecycleRole: "point", ...notable }),
 ];

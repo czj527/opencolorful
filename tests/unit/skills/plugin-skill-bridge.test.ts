@@ -393,7 +393,120 @@ describe("PluginSkillBridge.listAgentBoundPluginSkills（T12 P0-3）", () => {
   });
 });
 
+
+
+describe("PluginSkillBridge.listAgentBoundPluginSkills（T13 P0-2/P0-3 生产级回归）", () => {
+  function makeBundledState(input: {
+    readonly getActiveVersion: () => string;
+    readonly bundles: { readonly contributionId: string; readonly skillsDir: string }[];
+    readonly bindings: (agentId: string) => readonly { readonly pluginId: string; readonly enabled: boolean; readonly contributions?: readonly string[] }[];
+  }): PluginSkillStatePort {
+    return {
+      isEnabled() {
+        return true;
+      },
+      activeVersion() {
+        return input.getActiveVersion();
+      },
+      listPluginIds() {
+        return ["plg-1"];
+      },
+      listSkillBundles(pluginId) {
+        if (pluginId !== "plg-1") {
+          return [];
+        }
+        return input.bundles.map((bundle) => ({
+          pluginId,
+          contributionId: bundle.contributionId,
+          version: input.getActiveVersion(),
+          name: bundle.contributionId,
+          skillsDir: bundle.skillsDir,
+        }));
+      },
+      listAgentBindings(agentId) {
+        return input.bindings(agentId);
+      },
+    };
+  }
+
+  it("P0-2：contribution 白名单——只绑定 events（未绑定 skills）→ 插件 Skill 不可见；绑定 skills → 可见；空数组 = 全部", () => {
+    const harness = createT6Harness();
+    // 两个 bundle 各自独立的 skillsDir（同一 skills/ 根无法区分 contribution）
+    const skillsDir = makePluginSkillsDir(harness, "plg-1", "1.0.0", "whitelist-skill");
+    const eventsDir = path.join(harness.home, "plugins", "installed", "plg-1", "1.0.0", "events-skill-bundle");
+    makeSkillPackageAt(eventsDir, "events-skill", { name: "events-skill" });
+
+    const state = makeBundledState({
+      getActiveVersion: () => "1.0.0",
+      bundles: [
+        { contributionId: "skills", skillsDir },
+        { contributionId: "events", skillsDir: eventsDir },
+      ],
+      bindings: (agentId) => (agentId === "agent-1" ? [{ pluginId: "plg-1", enabled: true, contributions: ["events"] }] : []),
+    });
+    const bridge = new PluginSkillBridge({ catalog: harness.catalog, paths: harness.paths, environment: makeEnv(), state, audit: harness.audit });
+    bridge.syncPluginSkills("plg-1");
+
+    // 只绑定 events contribution：skill-bundle "skills" 的贡献不可见
+    const eventsOnly = bridge.listAgentBoundPluginSkills("agent-1");
+    expect(eventsOnly.map((skill) => skill.skillId)).not.toContain("whitelist-skill");
+
+    // 绑定 skills contribution → 可见
+    const stateSkills = makeBundledState({
+      getActiveVersion: () => "1.0.0",
+      bundles: [
+        { contributionId: "skills", skillsDir },
+        { contributionId: "events", skillsDir: eventsDir },
+      ],
+      bindings: () => [{ pluginId: "plg-1", enabled: true, contributions: ["skills"] }],
+    });
+    const bridgeSkills = new PluginSkillBridge({ catalog: harness.catalog, paths: harness.paths, environment: makeEnv(), state: stateSkills, audit: harness.audit });
+    const skillsOnly = bridgeSkills.listAgentBoundPluginSkills("agent-1");
+    expect(skillsOnly.map((skill) => skill.skillId)).toContain("whitelist-skill");
+
+    // 空数组 = 全部启用（协议语义）→ 两个 bundle 的 Skill 都可见
+    const stateAll = makeBundledState({
+      getActiveVersion: () => "1.0.0",
+      bundles: [
+        { contributionId: "skills", skillsDir },
+        { contributionId: "events", skillsDir: eventsDir },
+      ],
+      bindings: () => [{ pluginId: "plg-1", enabled: true, contributions: [] }],
+    });
+    const bridgeAll = new PluginSkillBridge({ catalog: harness.catalog, paths: harness.paths, environment: makeEnv(), state: stateAll, audit: harness.audit });
+    const all = bridgeAll.listAgentBoundPluginSkills("agent-1");
+    expect(all.map((skill) => skill.skillId)).toEqual(expect.arrayContaining(["whitelist-skill", "events-skill"]));
+  });
+
+  it("P0-3：activeVersion 过滤——1.0.0 更新到 2.0.0 后只返回 active 版本（旧版本保留供 rollback 但不进当前 Turn）", () => {
+    const harness = createT6Harness();
+    // 两个版本目录（skillId 同名，版本不同）；active 版本可切换
+    const dirV1 = makePluginSkillsDir(harness, "plg-1", "1.0.0", "ver-skill");
+    const dirV2 = makePluginSkillsDir(harness, "plg-1", "2.0.0", "ver-skill");
+    let activeVersion = "1.0.0";
+    const state = makeBundledState({
+      getActiveVersion: () => activeVersion,
+      bundles: [{ contributionId: "skills", skillsDir: activeVersion === "1.0.0" ? dirV1 : dirV2 }],
+      bindings: () => [{ pluginId: "plg-1", enabled: true, contributions: ["skills"] }],
+    });
+    const bridge = new PluginSkillBridge({ catalog: harness.catalog, paths: harness.paths, environment: makeEnv(), state, audit: harness.audit });
+    // 1.0.0 激活时 sync → v1 登记
+    bridge.syncPluginSkills("plg-1");
+    expect(harness.catalog.list({ sourceKind: "plugin" }).some((skill) => skill.skillRef.version === "1.0.0")).toBe(true);
+
+    // 更新到 2.0.0：active 切换后再次 sync → v2 追加、v1 保留（rollback 需要）
+    activeVersion = "2.0.0";
+    bridge.syncPluginSkills("plg-1");
+    const catalogVersions = harness.catalog.list({ sourceKind: "plugin" }).filter((skill) => skill.skillId === "ver-skill");
+    expect(catalogVersions.length).toBeGreaterThanOrEqual(2);
+
+    // listAgentBoundPluginSkills 只返回 active（2.0.0）——历史版本不进当前 Turn
+    const bound = bridge.listAgentBoundPluginSkills("agent-1");
+    expect(bound.length).toBeGreaterThan(0);
+    expect(bound.every((skill) => skill.skillRef.version === "2.0.0")).toBe(true);
+  });
 });
+}); // PluginSkillBridge.initialize / 端口适配
 
 /** 捕获 SkillError 稳定 reasonCode（跨语言消息不参与断言）。 */
 function errorCodeOf(action: () => unknown): string {

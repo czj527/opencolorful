@@ -73,7 +73,11 @@ export interface PluginSkillStatePort {
   listPluginIds(): readonly string[];
   /** 插件声明的 skill-bundle 贡献（含绝对 skillsDir） */
   listSkillBundles(pluginId: string): readonly PluginSkillBundleContribution[];
-  /** Agent 插件绑定视图（binding 行 + enabled 位） */
+  /**
+   * Agent 插件绑定视图（binding 行 + enabled 位 + contributions 白名单）。
+   * contributions 为空数组 = 全部 contribution 启用（协议语义）；
+   * 非空 = 只允许明确列出的 contribution id（T13 P0-2：白名单参与授权）。
+   */
   listAgentBindings(agentId: string): readonly PluginBindingStatus[];
 }
 
@@ -296,24 +300,56 @@ export class PluginSkillBridge implements PluginSkillBundleProvider {
   }
 
   /**
-   * T12（P0-3）：当前 Agent 已绑定且启用的插件贡献的 Catalog 插件 Skill
-   * （精确 SkillRef，含 contentHash）。解析时作为固定引用加入候选池——
-   * 已绑定插件的 Skill 对 Agent 可见（不再因未固定而 gated）；blocked 来源
-   * 仍由 overlayStatus/assertReadable 在读取时 fail-closed 拦截。
+   * T12（P0-3）+ T13（P0-2/P0-3）：当前 Agent 已绑定且启用插件的 Catalog
+   * 插件 Skill（精确 SkillRef）。
+   * - 绑定 enabled + 插件全局 enabled（activeVersion 存在）；
+   * - T13（P0-2）：binding.contributions 白名单——非空时只开放明确列出的
+   *   skill-bundle contributionId（空 = 全部启用，协议语义）；
+   * - T13（P0-3）：只开放 active 版本（历史版本保留供 rollback，不进当前
+   *   Turn 可见集）；
+   * - blocked 来源仍由 overlayStatus/assertReadable 在读取时 fail-closed 拦截。
    */
   listAgentBoundPluginSkills(agentId: string): readonly RegisteredSkill[] {
-    const boundEnabled = new Set(
-      this.deps.state
-        .listAgentBindings(agentId)
-        .filter((binding) => binding.enabled)
-        .map((binding) => binding.pluginId),
-    );
-    if (boundEnabled.size === 0) {
+    const bindings = this.deps.state.listAgentBindings(agentId).filter((binding) => binding.enabled);
+    if (bindings.length === 0) {
       return [];
     }
-    return this.deps.catalog
-      .list({ sourceKind: "plugin" })
-      .filter((skill) => boundEnabled.has(skill.sourceId));
+    const result: RegisteredSkill[] = [];
+    for (const binding of bindings) {
+      const pluginId = binding.pluginId;
+      const activeVersion = this.deps.state.activeVersion(pluginId);
+      if (activeVersion === undefined) {
+        continue; // 插件未启用（无 active 版本）
+      }
+      const bundles = this.deps.state.listSkillBundles(pluginId);
+      if (bundles.length === 0) {
+        continue;
+      }
+      const contributions = binding.contributions ?? [];
+      const allowedBundles =
+        contributions.length === 0
+          ? bundles
+          : bundles.filter((bundle) => contributions.includes(bundle.contributionId));
+      if (allowedBundles.length === 0) {
+        continue; // 白名单非空但不含任何 skill-bundle 贡献 → 无 Skill 可见
+      }
+      for (const skill of this.deps.catalog.list({ sourceKind: "plugin" })) {
+        if (skill.sourceId !== pluginId) {
+          continue;
+        }
+        if (skill.skillRef.version !== activeVersion) {
+          continue; // 历史版本：保留供 rollback，不进当前 Turn
+        }
+        const owned = allowedBundles.some((bundle) => {
+          const rel = path.relative(bundle.skillsDir, skill.rootPath);
+          return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+        });
+        if (owned) {
+          result.push(skill);
+        }
+      }
+    }
+    return result;
   }
 
   // ── 固定到 Managed Store（独立操作，不走安装器流水线）────────────
@@ -532,8 +568,8 @@ export interface PluginFacadeStatePortInput {
     readonly description?: string;
     readonly skillsDir?: string;
   }[];
-  /** facade.bindings.listByAgent(agentId)（AgentPluginBinding[]） */
-  readonly listAgentBindings: (agentId: string) => readonly { readonly pluginId: string; readonly enabled: boolean }[];
+  /** facade.bindings.listByAgent(agentId)（AgentPluginBinding[]；T13 保留 contributions 白名单） */
+  readonly listAgentBindings: (agentId: string) => readonly { readonly pluginId: string; readonly enabled: boolean; readonly contributions?: readonly string[] }[];
 }
 
 /**
@@ -589,7 +625,12 @@ export function createPluginFacadeStatePort(input: PluginFacadeStatePortInput): 
       return result;
     },
     listAgentBindings(agentId) {
-      return input.listAgentBindings(agentId).map((binding) => ({ pluginId: binding.pluginId, enabled: binding.enabled }));
+      // T13（P0-2）：保留 contributions 白名单（Skill 授权过滤依据）
+      return input.listAgentBindings(agentId).map((binding) => ({
+        pluginId: binding.pluginId,
+        enabled: binding.enabled,
+        ...(binding.contributions !== undefined ? { contributions: binding.contributions } : {}),
+      }));
     },
   };
 }

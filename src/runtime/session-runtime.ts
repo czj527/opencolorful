@@ -295,6 +295,11 @@ export class SessionRuntime {
             },
           ],
         };
+        // T13（P0-1）：冻结失败必须 fail-closed——清空上一轮遗留的 Skill 只读根，
+        // 否则 PathGuard 动态规则残留会让 read 回退原始读取继续访问已失效权限
+        if (this.sandboxService !== null) {
+          this.sandboxService.setReadOnlyRoots([], "skill-root-read");
+        }
       }
     }
     if (this.snapshotFactory === undefined) {

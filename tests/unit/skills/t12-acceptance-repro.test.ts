@@ -27,11 +27,81 @@ function setup(): T6Harness {
   return harness;
 }
 
-function skillRootOf(harness: T6Harness, skillRef: { readonly skillId: string; readonly sourceId: string }): string {
-  // managed 安装目录：<home>/skills/installed/<skillId>/<version>
-  const registered = harness.catalog.list({}).find((skill) => skillRefKey(skill.skillRef) === skillRefKey(skill.skillRef));
+
+// ── T13 第三轮验收复现：P0-1 冻结失败 / P0-4 grant 一次性与跨 Turn ──
+
+describe("T13 P0-1：Turn 快照冻结失败 → fail-closed（不保留旧快照/旧权限）", () => {
+  it("turn1 冻结成功可读 → turn2 冻结抛错 → 之后同一路径不再 ok（旧快照已移除）", async () => {
+    const harness = setup();
+    const dir = harness.makePackage("t13f-src", { name: "t13f-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "t13f-skill", version: "1.0.0" });
+    const ref = harness.catalog.list({}).find((skill) => skill.skillId === "t13f-skill")?.skillRef;
+    if (ref === undefined) throw new Error("skill 未登记");
+    const root = skillRootOf(harness, ref);
+
+    harness.sessionService.bindTemporary({ sessionId: "session-1", skillRef: ref });
+    // turn1：冻结成功 → 可读
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-1", turnId: "turn-1" });
+    const turn1 = await harness.core.readSkillFileForSession({ sessionId: "session-1", absPath: path.join(root, "SKILL.md") });
+    expect(turn1.status).toBe("ok");
+
+    // turn2：冻结抛错（注入 snapshots 构造失败）
+    const deps = (harness.core as unknown as { deps: Record<string, unknown> }).deps;
+    const realSnapshots = deps.snapshots;
+    deps.snapshots = {
+      createSkillSnapshot: () => {
+        throw new Error("freeze failed");
+      },
+    };
+    expect(() => harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-1", turnId: "turn-2" })).toThrow("freeze failed");
+    deps.snapshots = realSnapshots;
+
+    // turn3 起：旧快照不保留 → 无冻结快照 → 不返回 ok（fail-closed）
+    const after = await harness.core.readSkillFileForSession({ sessionId: "session-1", absPath: path.join(root, "SKILL.md") });
+    expect(after.status).not.toBe("ok");
+  });
+});
+
+describe("T13 P0-4：activation grant 一次性 + 只附着当前 Turn", () => {
+  it("同 turn 安装后 grant 读取 ok → 同 turn 二次读取 denied（一次性）→ 下一 turn 冻结不含跨 turn grant", async () => {
+    const harness = setup();
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-1", turnId: "turn-1" });
+    const dir = harness.makePackage("t13g-src", { name: "t13g-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "t13g-skill", version: "1.0.0" });
+    const result = harness.core.install({ sourceRef: dir, kind: "local", sessionId: "session-1", turnId: "turn-1" });
+    expect(result.status).toBe("installed");
+    if (result.status !== "installed" || result.skillRef === undefined) throw new Error("安装失败");
+    const registered = harness.catalog.resolveBySkillRef(result.skillRef);
+
+    // 第一次 grant 路径读取：ok（一次性）
+    const first = await harness.core.readSkillFileForSession({ sessionId: "session-1", absPath: path.join(registered.rootPath, "SKILL.md") });
+    expect(first.status).toBe("ok");
+    // 同一 turn 第二次读取：grant 已消费 → 不再授权（同路径既不在冻结快照 entries，
+    // 也没有可用 grant → 落在已登记 Skill 根内 → denied）
+    const second = await harness.core.readSkillFileForSession({ sessionId: "session-1", absPath: path.join(registered.rootPath, "SKILL.md") });
+    expect(second.status).toBe("denied");
+    if (second.status === "denied") {
+      expect(second.reasonCode).toBe("skill_not_in_snapshot");
+    }
+
+    // grant 已一次性消费：listActiveGrants 不再返回（不进任何后续 Turn 快照，
+    // 禁止跨 Turn 重放——验收复现"继续出现在下一 Turn 快照"已消除）
+    expect(harness.sessionService.listActiveGrants("session-1")).toHaveLength(0);
+
+    // 下一 turn 冻结：grant 不跨 turn（快照 activationGrants 只含签发 turn）；
+    // 该 Skill 因 session 临时绑定在 turn2 仍可见 → 经 entry 路径正常受控读取
+    // （这是绑定语义，不是 grant 授权；grant 一次性与 turn 隔离已由上述断言覆盖）
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-1", turnId: "turn-2" });
+    const turn2 = await harness.core.readSkillFileForSession({ sessionId: "session-1", absPath: path.join(registered.rootPath, "SKILL.md") });
+    expect(turn2.status).toBe("ok");
+  });
+});
+
+function skillRootOf(harness: T6Harness, ref: { readonly skillId: string; readonly sourceId: string; readonly sourceKind: "builtin" | "managed" | "plugin" | "workspace" | "external"; readonly version: string; readonly contentHash: string }): string {
+  // T13（P2）：按精确 skillRefKey 查找（原实现与自身比较恒 true，无法验证多 Skill）
+  const registered = harness.catalog.findByRefKey(skillRefKey(ref));
   if (registered === undefined) {
-    throw new Error(`Skill 未登记：${skillRef.skillId}`);
+    throw new Error(`Skill 未登记：${ref.skillId}`);
   }
   return registered.rootPath;
 }
