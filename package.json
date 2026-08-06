@@ -27,7 +27,8 @@
     "check": "npm run check:pi-imports && npm run check:plugin-imports && npm run build:protocol && npm run build:sdk && npm run typecheck && npm run test && npm run build && npm run web:test && npm run web:build",
     "web:dev": "npm run dev --workspace=web",
     "web:build": "npm run build --workspace=web",
-    "web:test": "npm run test --workspace=web"
+    "web:test": "npm run test --workspace=web",
+    "test:skills-live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.10",

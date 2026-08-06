@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "note": "Phase 13 T9 可选 live 测试锁定清单（plans/phase-13.md §18.7）。默认 CI 不读取本文件；仅 `npm run test:skills-live` 使用。每条目锁定：来源仓库 + pinned commit（不可变）+ 包内文件清单 + packageHash（sha256，按排序 relpath + \\0 + 字节 拼接）。verified=true 的条目下载后必须哈希一致，否则测试失败（安全红线）；网络不可达/未验证条目只输出诊断并跳过，不污染默认质量门。",
+  "entries": [
+    {
+      "id": "humanizer",
+      "ecosystem": "hermes",
+      "displayName": "Humanizer（Hermes Agent 内置技能，instruction-only）",
+      "version": "2.5.1",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/NousResearch/hermes-agent/blob/01a1037d1e6d7b6eb96a786ef282c3aea4818194/skills/creative/humanizer/LICENSE",
+      "sourceUrl": "https://github.com/NousResearch/hermes-agent/tree/01a1037d1e6d7b6eb96a786ef282c3aea4818194/skills/creative/humanizer",
+      "pinnedCommit": "01a1037d1e6d7b6eb96a786ef282c3aea4818194",
+      "downloadBase": "https://raw.githubusercontent.com/NousResearch/hermes-agent/01a1037d1e6d7b6eb96a786ef282c3aea4818194/",
+      "files": [
+        "skills/creative/humanizer/SKILL.md",
+        "skills/creative/humanizer/LICENSE"
+      ],
+      "packageHash": "8bbe930d1db4de26d65015657446de221f01c75ba1ad9170bea1efad92a4917d",
+      "instructionsOnly": true,
+      "windowsOk": true,
+      "paywall": "none",
+      "verified": true,
+      "note": "真实 Hermes Agent 内置技能：platforms 复数 + metadata.hermes.tags（T9 重写路径）。正文 647 行纯指令，无脚本/二进制。",
+      "packagePrefix": "skills/creative/humanizer"
+    },
+    {
+      "id": "openclaw-brand",
+      "ecosystem": "openclaw",
+      "displayName": "OpenClaw Brand（ClawHub 官方 skills-lock.json 索引的技能包，instruction-only）",
+      "version": "102761ba",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/openclaw/carapace/blob/102761ba9e25102790c5d5d5d9e198ddd996c1ad/LICENSE",
+      "sourceUrl": "https://github.com/openclaw/carapace/tree/102761ba9e25102790c5d5d5d9e198ddd996c1ad/openclaw-brand",
+      "pinnedCommit": "102761ba9e25102790c5d5d5d9e198ddd996c1ad",
+      "downloadBase": "https://raw.githubusercontent.com/openclaw/carapace/102761ba9e25102790c5d5d5d9e198ddd996c1ad/",
+      "files": [
+        "openclaw-brand/SKILL.md",
+        "openclaw-brand/references/identity.md",
+        "openclaw-brand/references/asset-rights.md"
+      ],
+      "packageHash": "dca954222c63620878987728f9ace050a752ae97c0afc8ed0b502e69b1947fa0",
+      "instructionsOnly": true,
+      "windowsOk": true,
+      "paywall": "none",
+      "verified": true,
+      "note": "ClawHub 官方 skills-lock.json 已索引（source openclaw/carapace，skillPath openclaw-brand/SKILL.md）。纯指令 + references/，无 metadata.openclaw → pi-compatible 等级（真实 ClawHub 包常态）。版本锁定为 pinned commit（frontmatter 无版本字段）。",
+      "packagePrefix": "openclaw-brand"
+    },
+    {
+      "id": "transcript-youtube",
+      "ecosystem": "hermes",
+      "displayName": "Transcript（社区 Hermes 技能：真实块序列映射项形态 required_environment_variables）",
+      "version": "1.5.0",
+      "license": "MIT",
+      "licenseUrl": "https://github.com/ZeroPointRepo/youtube-skills/blob/main/LICENSE",
+      "sourceUrl": "https://github.com/ZeroPointRepo/youtube-skills/tree/main/skills/transcript",
+      "pinnedCommit": "unverified",
+      "downloadBase": "https://raw.githubusercontent.com/ZeroPointRepo/youtube-skills/main/",
+      "files": [
+        "skills/transcript/SKILL.md",
+        "skills/transcript/references/auth-setup.md"
+      ],
+      "packageHash": "unverified",
+      "instructionsOnly": true,
+      "windowsOk": true,
+      "paywall": "freemium-transcriptapi",
+      "verified": false,
+      "note": "候选示例（未验证）：展示真实块序列映射项形态。需先验证 main 分支 SHA 并回填 pinnedCommit/packageHash 才能启用（README 有验证步骤）。运行时需外部 API Key（免费档），仅作转换形态验证候选。"
+    }
+  ]
+}
