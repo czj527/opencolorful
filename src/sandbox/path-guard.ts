@@ -42,6 +42,28 @@ export class PathGuard {
   }
 
   /**
+   * T12（P0-1）：按 reason 整体替换动态规则——当前 Turn 的 Skill 根集合必须
+   * 原子替换，上一轮解绑/停用/插件禁用后的旧根不得继续放行（否则 read 回退
+   * 原始读取可绕过当前 Snapshot）。reason 相同的旧规则全部移除后追加新规则。
+   */
+  replaceRulesByReason(reason: string, rules: readonly PathRule[]): void {
+    const kept: PathRule[] = [];
+    for (const rule of this.extraRules) {
+      if (rule.reason === reason) {
+        continue;
+      }
+      kept.push(rule);
+    }
+    for (const rule of rules) {
+      if (!kept.some((existing) => existing.path === rule.path && existing.level === rule.level)) {
+        kept.push(rule);
+      }
+    }
+    this.extraRules.length = 0;
+    this.extraRules.push(...kept);
+  }
+
+  /**
    * 检查单个路径是否允许指定操作。
    *
    * 流程：

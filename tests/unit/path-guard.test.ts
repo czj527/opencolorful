@@ -378,4 +378,28 @@ describe("PathGuard.addRule（T11 P0-2：运行时动态规则）", () => {
   });
 });
 
+
+describe("PathGuard.replaceRulesByReason（T12 P0-1：按 reason 整体替换）", () => {
+  it("同 reason 旧规则被移除（上一轮 Skill 根不再放行），新规则生效", () => {
+    // workspace 外路径 + BLOCKED 默认：只读放行只可能来自动态规则
+    const guard = new PathGuard(makeTestPolicy({ defaultLevel: "BLOCKED" }));
+    const oldRoot = path.join(os.homedir(), ".opencolorful", "skills", "old-skill");
+    const newRoot = path.join(os.homedir(), ".opencolorful", "skills", "new-skill");
+    fs.mkdirSync(oldRoot, { recursive: true });
+    fs.mkdirSync(newRoot, { recursive: true });
+
+    guard.addRule({ path: oldRoot + path.sep, level: "READ_ONLY", reason: "skill-root-read" });
+    expect(guard.check("read", path.join(oldRoot, "SKILL.md")).allowed).toBe(true);
+
+    // 下一轮整体替换：old 移除、new 加入
+    guard.replaceRulesByReason("skill-root-read", [{ path: newRoot + path.sep, level: "READ_ONLY", reason: "skill-root-read" }]);
+    expect(guard.check("read", path.join(oldRoot, "SKILL.md")).allowed).toBe(false);
+    expect(guard.check("read", path.join(newRoot, "SKILL.md")).allowed).toBe(true);
+    // 其他 reason 的动态规则不受影响
+    guard.addRule({ path: os.homedir() + path.sep, level: "READ_ONLY", reason: "other-reason" });
+    guard.replaceRulesByReason("skill-root-read", []);
+    expect(guard.check("read", path.join(os.homedir(), "keep.txt")).allowed).toBe(true);
+  });
+});
+
 });

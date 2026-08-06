@@ -258,6 +258,11 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
     ...(pluginBridge !== undefined
       ? { sourceReadable: (skillRef) => pluginBridge.assertPluginSkillReadable(skillRef) }
       : {}),
+    // T12（P0-2）：生产注入实时 activation grant overlay——会话内安装后同一 turn
+    // 经 read 链路（readSkillFileForSession / ContentService overlay）立即受控读取
+    grants: {
+      listBySession: (sessionId) => sessionService.listActiveGrants(sessionId),
+    },
   });
 
   // ── Core Service ──────────────────────────────────────────────
@@ -282,6 +287,8 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
           pluginOverlay: {
             assertReadable: (skillRef) => pluginBridge.assertPluginSkillReadable(skillRef),
             overlayStatus: (skill, agentId) => pluginBridge.overlayStatus(skill, agentId),
+            // T12（P0-3）：Agent 已绑定且启用插件的 Skill 贡献作为固定引用加入可见池
+            listAgentBoundPluginSkills: (agentId) => pluginBridge.listAgentBoundPluginSkills(agentId),
           },
         }
       : {}),

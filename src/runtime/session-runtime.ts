@@ -201,7 +201,9 @@ export class SessionRuntime {
           : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-        ...(sandboxService ? { toolPolicy } : {}),
+        // T12（P1-1）：无 Agent Session（无 SandboxService）但注入 skillRead 时
+        // 也传 toolPolicy——沙箱扩展上下文据此构造，read 工具才能命中受控路径
+        ...(sandboxService || options.skillRead !== undefined ? { toolPolicy } : {}),
         ...(options.extraTools ? { extraTools: options.extraTools } : {}),
         // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
         ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
@@ -228,7 +230,9 @@ export class SessionRuntime {
         ...(options.noTools ? { noTools: options.noTools } : {}),
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-        ...(sandboxService ? { toolPolicy } : {}),
+        // T12（P1-1）：无 Agent Session（无 SandboxService）但注入 skillRead 时
+        // 也传 toolPolicy——沙箱扩展上下文据此构造，read 工具才能命中受控路径
+        ...(sandboxService || options.skillRead !== undefined ? { toolPolicy } : {}),
         // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
         ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
         // T11（P0-2）：read 工具 Skill 受控读取端口（沙箱扩展上下文）
@@ -271,16 +275,15 @@ export class SessionRuntime {
           sessionId: this.sessionId,
           turnId,
         });
-        // T11（P0-2）：冻结后把可见 Skill 根同步为沙箱只读根——read/grep/find/ls
-        // 可在 Skill 目录工作；正文读取仍优先走 SkillContentService 受控路径。
-        // 快照变化时旧根规则保留（只读放行无副作用），新根追加（幂等去重）。
+        // T12（P0-1）：按当前 Turn 可见 Skill 根**整体替换**沙箱只读根——
+        // 上一轮解绑/停用/插件禁用后的旧根必须移除，否则 PathGuard 动态规则
+        // 残留会让 read 回退原始读取绕过当前 Snapshot。正文读取仍优先走
+        // SkillContentService 受控路径。
         if (this.sandboxService !== null) {
           const roots = this.skillsSlotRef.current.skills
             .map((skill) => skill.baseDir)
             .filter((baseDir): baseDir is string => typeof baseDir === "string" && baseDir.length > 0);
-          if (roots.length > 0) {
-            this.sandboxService.addReadOnlyRoots(roots, "skill-root-read");
-          }
+          this.sandboxService.setReadOnlyRoots(roots, "skill-root-read");
         }
       } catch (error) {
         this.skillsSlotRef.current = {

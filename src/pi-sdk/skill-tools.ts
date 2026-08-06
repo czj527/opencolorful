@@ -199,6 +199,8 @@ export default function (pi: ExtensionAPI): void {
         ...(raw.kind !== undefined ? { kind: raw.kind } : {}),
         ...(raw.skillRef !== undefined ? { skillRef: raw.skillRef } : {}),
         ...(raw.readBody === true ? { readBody: true } : {}),
+        // T12（P0-2）：readBody 优先消费安装结果返回的 loadHandle（一次性句柄）
+        ...(raw.loadHandle !== undefined ? { loadHandle: raw.loadHandle } : {}),
         ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
         sessionId: ctx.sessionId,
         turnId: resolveTurnId(ctx),

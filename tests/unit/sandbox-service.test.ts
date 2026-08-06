@@ -91,6 +91,33 @@ describe("SandboxService", () => {
     expect(readOutside.allowed).toBe(false); // 只放行根内
   });
 
+
+  // ── T12 P0-1：setReadOnlyRoots 整体替换（旧 Skill 根移除）─────────────────
+  it("setReadOnlyRoots(): 同 reason 整体替换——旧根不再放行，新根生效", () => {
+    const cwd = path.join(os.homedir(), "projects", "skill-app");
+    const agent = makeAgent({ defaultCwd: cwd });
+    const svc = SandboxService.create({
+      agentSettings: agent,
+      agentId: "agent-1",
+      agentHomeDir,
+      platformHome,
+    });
+    const oldRoot = path.join(os.homedir(), ".opencolorful", "skills", "old");
+    const newRoot = path.join(os.homedir(), ".opencolorful", "skills", "new");
+    svc.setReadOnlyRoots([oldRoot], "skill-root-read");
+    const guard = svc.getPathGuard();
+    expect(guard.check("read", path.join(oldRoot, "SKILL.md")).allowed).toBe(true);
+
+    // 下一轮（解绑/停用）整体替换：old 移除、new 加入
+    svc.setReadOnlyRoots([newRoot], "skill-root-read");
+    expect(guard.check("read", path.join(oldRoot, "SKILL.md")).allowed).toBe(false);
+    expect(guard.check("read", path.join(newRoot, "SKILL.md")).allowed).toBe(true);
+
+    // 空集合 → 全部 Skill 根只读放行移除（fail-closed：无残留放行）
+    svc.setReadOnlyRoots([], "skill-root-read");
+    expect(guard.check("read", path.join(newRoot, "SKILL.md")).allowed).toBe(false);
+  });
+
   it("create() produces a valid SandboxService for an agent with defaultCwd", () => {
     const cwd = path.join(os.homedir(), "projects", "my-app");
     const agent = makeAgent({ defaultCwd: cwd });

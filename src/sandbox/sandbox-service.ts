@@ -5,6 +5,7 @@ import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
 import type {
   FileOperation,
   PathCheckResult,
+  PathRule,
 } from "../contracts/sandbox.js";
 import { instrument } from "../observability/instrument.js";
 import { PathGuard } from "./path-guard.js";
@@ -74,25 +75,25 @@ export class SandboxService {
    * 本规则只兜底沙箱策略层。幂等：同一根重复注册不产生重复规则。
    */
   addReadOnlyRoots(roots: readonly string[], reason: string): void {
-    let added = 0;
-    for (const root of roots) {
-      const normalized = path.resolve(root);
-      if (this.readOnlyRoots.has(normalized)) {
-        continue;
-      }
-      this.readOnlyRoots.add(normalized);
-      this.pathGuard.addRule({
-        path: normalized.endsWith(path.sep) ? normalized : `${normalized}${path.sep}`,
-        level: "READ_ONLY",
-        reason,
-      });
-      added += 1;
-    }
-    if (added > 0) {
-      instrument.debug("sandbox.read_only_roots.added", "追加只读根", {
-        count: String(added),
-        reason,
-      });
+    this.setReadOnlyRoots([...this.readOnlyRoots, ...roots], reason);
+  }
+
+  /**
+   * T12（P0-1）：整体替换某一类只读根（按 reason 分组）。每轮 turn 冻结后
+   * 调用，保证上一轮解绑/停用/插件禁用后的旧 Skill 根被移除——否则 PathGuard
+   * 动态规则残留会让回退原始读取绕过当前 Turn Snapshot。幂等：同根不重复。
+   */
+  setReadOnlyRoots(roots: readonly string[], reason: string): void {
+    const normalized = [...new Set(roots.map((root) => path.resolve(root)))];
+    const rules: PathRule[] = normalized.map((root) => ({
+      path: root.endsWith(path.sep) ? root : `${root}${path.sep}`,
+      level: "READ_ONLY",
+      reason,
+    }));
+    this.pathGuard.replaceRulesByReason(reason, rules);
+    this.readOnlyRoots.clear();
+    for (const root of normalized) {
+      this.readOnlyRoots.add(root);
     }
   }
 

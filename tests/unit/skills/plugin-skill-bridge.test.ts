@@ -343,6 +343,56 @@ describe("PluginSkillBridge.initialize / 端口适配", () => {
     expect(bundles[0]!.skillsDir).toBe(path.join(versionDir, "skills"));
     expect(skillsDir).toBeTruthy();
   });
+
+describe("PluginSkillBridge.listAgentBoundPluginSkills（T12 P0-3）", () => {
+  it("Agent 已绑定且启用的插件贡献 → 返回精确 SkillRef；未绑定/未启用/未登记 → 空", () => {
+    const harness = createT6Harness();
+    const skillsDir = makePluginSkillsDir(harness, "plg-1", "1.0.0", "bound-skill");
+    const skillsDir2 = makePluginSkillsDir(harness, "plg-2", "1.0.0", "other-skill");
+    const state: PluginSkillStatePort = {
+      isEnabled(pluginId) {
+        return pluginId === "plg-1" || pluginId === "plg-2";
+      },
+      activeVersion(pluginId) {
+        return pluginId === "plg-1" || pluginId === "plg-2" ? "1.0.0" : undefined;
+      },
+      listPluginIds() {
+        return ["plg-1", "plg-2"];
+      },
+      listSkillBundles(pluginId) {
+        if (pluginId === "plg-1") {
+          return [{ pluginId, contributionId: "b-1", version: "1.0.0", name: "B1", skillsDir }];
+        }
+        if (pluginId === "plg-2") {
+          return [{ pluginId, contributionId: "b-2", version: "1.0.0", name: "B2", skillsDir: skillsDir2 }];
+        }
+        return [];
+      },
+      listAgentBindings(agentId) {
+        // agent-1 绑定并启用 plg-1；plg-2 未绑定；agent-2 无绑定
+        if (agentId === "agent-1") {
+          return [
+            { pluginId: "plg-1", enabled: true },
+            { pluginId: "plg-2", enabled: false },
+          ];
+        }
+        return [];
+      },
+    };
+    const bridge = new PluginSkillBridge({ catalog: harness.catalog, paths: harness.paths, environment: makeEnv(), state, audit: harness.audit });
+    bridge.syncPluginSkills("plg-1");
+    bridge.syncPluginSkills("plg-2");
+
+    // agent-1：绑定且启用 plg-1 → 返回其贡献；plg-2 绑定但停用 → 不返回
+    const bound = bridge.listAgentBoundPluginSkills("agent-1");
+    const boundIds = bound.map((skill) => skill.skillId);
+    expect(boundIds).toContain("bound-skill");
+    expect(boundIds).not.toContain("other-skill");
+    // 无绑定 Agent → 空
+    expect(bridge.listAgentBoundPluginSkills("agent-2")).toHaveLength(0);
+  });
+});
+
 });
 
 /** 捕获 SkillError 稳定 reasonCode（跨语言消息不参与断言）。 */

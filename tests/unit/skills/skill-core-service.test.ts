@@ -765,6 +765,39 @@ describe("P1-9：激活授权/loadHandle 签发失败 → failed（不静默 ins
   });
 });
 
+
+// ── P0-3：Agent 插件绑定贡献进入可见集 ──────────────────────────
+
+describe("P0-3：绑定插件贡献对 Agent 可见（pluginOverlay 接入）", () => {
+  it("未绑定 Agent → 插件 Skill 不可见；绑定并启用 → 进入可见集（readiness overlay）", () => {
+    const harness = setup();
+    // 登记 plugin 来源 Skill（sourceId = 插件 id）
+    const dir = harness.makePackage("plg-src", { name: "plg-skill", version: "1.0.0" });
+    const registered = harness.catalog.ingestCandidate({
+      candidate: makeCandidate(path.resolve(dir), "plugin", "plg-skill", "1.0.0"),
+      inspection: makeInspection(path.resolve(dir), "1.0.0"),
+      trusted: true,
+      environment: makeEnv(),
+    });
+    // 注入 pluginOverlay（模拟 PluginSkillBridge：agent-1 已绑定且启用该插件）
+    const deps = (harness.core as unknown as { deps: Record<string, unknown> }).deps;
+    deps.pluginOverlay = {
+      assertReadable: () => undefined,
+      overlayStatus: (skill: { status: { readiness: string } }) => skill.status,
+      listAgentBoundPluginSkills: (agentId: string) =>
+        agentId === "agent-1" ? [harness.catalog.findByRefKey(skillRefKey(registered.skillRef))!] : [],
+    };
+
+    // 未绑定插件贡献 → 不可见（P0-5：未固定 plugin 候选 gated）
+    const before = harness.core.buildPiSkillsForTurn({ agentId: "agent-2", sessionId: "session-1", turnId: "turn-1" });
+    expect(before.skills.map((skill) => skill.name)).not.toContain("plg-skill");
+
+    // 绑定并启用 → 固定引用进入可见集
+    const after = harness.core.buildPiSkillsForTurn({ agentId: "agent-1", sessionId: "session-1", turnId: "turn-1" });
+    expect(after.skills.map((skill) => skill.name)).toContain("plg-skill");
+  });
+});
+
 function skillRefKeyOf(harness: T6Harness, ref: SkillRef): string {
   const registered = harness.catalog.resolveBySkillRef(ref);
   return skillRefKey(registered.skillRef);

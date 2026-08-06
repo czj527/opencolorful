@@ -241,6 +241,34 @@ export class SessionSkillService {
     return { status: "consumed", grant: consumed };
   }
 
+  /**
+   * T12（P1-2）：撤销一次性激活授权（补偿路径）——loadHandle 签发失败等后续
+   * 步骤异常时调用，把刚签发的 grant 标记为已消费（append-only 证据保留，
+   * listActiveGrants 不再返回），并记录 skill.activation.revoked 事件。
+   * 撤销失败抛错（fail-closed：不得静默保留"结果失败但授权仍有效"的状态）。
+   */
+  revokeActivationGrant(input: { readonly grantId: string; readonly sessionId: string; readonly reason?: string }): void {
+    this.validateSessionId(input.sessionId);
+    const revokedAt = this.now().toISOString();
+    if (!this.deps.grants.markConsumed(input.grantId, revokedAt)) {
+      throw new SkillError("skill_activation_denied", `激活授权撤销失败：${input.grantId}（不存在或已被消费）`);
+    }
+    const scope: EventScope = { sessionId: input.sessionId };
+    instrument.activity({
+      eventName: "skill.activation.revoked",
+      actor: { kind: "system", id: "skill-session" },
+      executor: EXECUTOR,
+      scope,
+      payload: {
+        summaryCode: "skill_activation_revoked",
+        attributes: {
+          grantId: input.grantId,
+          ...(input.reason !== undefined ? { reason: input.reason.slice(0, 96) } : {}),
+        },
+      },
+    });
+  }
+
   // ── 内部辅助 ─────────────────────────────────────────────────
 
   private emitRejected(reasonCode: "skill_activation_expired" | "skill_activation_reused" | "skill_activation_denied", grant: SkillActivationGrantRecord, sessionId: string): void {

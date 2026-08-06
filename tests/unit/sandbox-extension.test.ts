@@ -274,4 +274,51 @@ describe("sandbox extension tool wrapping", () => {
       "bash-disabled",
     );
   });
+
+  it("T11/T12（P0-2/P1-1）：read 工具经 ctx.skillRead 三态路由——ok 返回受控正文；denied 抛错不回退", async () => {
+    const read = tool(registerTools(), "read");
+    const workspace = tempDir();
+    fs.writeFileSync(path.join(workspace, "plain.txt"), "plain-content");
+    const skillFile = path.join(workspace, "skills", "alpha", "SKILL.md");
+    fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+    fs.writeFileSync(skillFile, "受控正文", "utf8");
+
+    // ok：命中 Skill 根 → 直接返回 ContentService 受控正文（不触发 assertFilePath）
+    const okContext: SandboxContext = {
+      toolPolicy: fullWorkspacePolicy(workspace),
+      sessionCwd: workspace,
+      allowBash: false,
+      skillRead: async ({ absPath }) =>
+        absPath === path.resolve(skillFile)
+          ? { status: "ok", body: "受控正文", truncated: false, skillRefKey: "alpha@x@1", relativePath: "SKILL.md" }
+          : { status: "not-a-skill-file", reason: "outside" },
+    };
+    registerSandboxContext("s-ok", okContext);
+    const okResult = await execute(read, { path: path.resolve(skillFile) }, { sessionManager: { getSessionId: () => "s-ok" } });
+    expect(JSON.stringify(okResult)).toContain("受控正文");
+
+    // denied：命中 Skill 根但读取被拒 → 抛错（fail-closed，不回退原始读取）
+    const deniedContext: SandboxContext = {
+      toolPolicy: fullWorkspacePolicy(workspace),
+      sessionCwd: workspace,
+      allowBash: false,
+      skillRead: async () => ({ status: "denied", reasonCode: "skill_not_in_snapshot", reason: "已解绑" }),
+    };
+    registerSandboxContext("s-denied", deniedContext);
+    await expect(
+      execute(read, { path: path.resolve(skillFile) }, { sessionManager: { getSessionId: () => "s-denied" } }),
+    ).rejects.toThrow("Skill read denied");
+
+    // not-a-skill-file：不在 Skill 根 → 回退普通沙箱读取（assertFilePath 放行）
+    const fallbackContext: SandboxContext = {
+      toolPolicy: fullWorkspacePolicy(workspace),
+      sessionCwd: workspace,
+      allowBash: false,
+      skillRead: async () => ({ status: "not-a-skill-file", reason: "outside" }),
+    };
+    registerSandboxContext("s-plain", fallbackContext);
+    const plainResult = await execute(read, { path: path.resolve(path.join(workspace, "plain.txt")) }, { sessionManager: { getSessionId: () => "s-plain" } });
+    expect(JSON.stringify(plainResult)).toContain("plain-content");
+  });
+
 });

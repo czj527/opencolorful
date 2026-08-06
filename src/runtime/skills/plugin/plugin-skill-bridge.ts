@@ -295,6 +295,27 @@ export class PluginSkillBridge implements PluginSkillBundleProvider {
     return { ...base, plugins: bound };
   }
 
+  /**
+   * T12（P0-3）：当前 Agent 已绑定且启用的插件贡献的 Catalog 插件 Skill
+   * （精确 SkillRef，含 contentHash）。解析时作为固定引用加入候选池——
+   * 已绑定插件的 Skill 对 Agent 可见（不再因未固定而 gated）；blocked 来源
+   * 仍由 overlayStatus/assertReadable 在读取时 fail-closed 拦截。
+   */
+  listAgentBoundPluginSkills(agentId: string): readonly RegisteredSkill[] {
+    const boundEnabled = new Set(
+      this.deps.state
+        .listAgentBindings(agentId)
+        .filter((binding) => binding.enabled)
+        .map((binding) => binding.pluginId),
+    );
+    if (boundEnabled.size === 0) {
+      return [];
+    }
+    return this.deps.catalog
+      .list({ sourceKind: "plugin" })
+      .filter((skill) => boundEnabled.has(skill.sourceId));
+  }
+
   // ── 固定到 Managed Store（独立操作，不走安装器流水线）────────────
 
   /**

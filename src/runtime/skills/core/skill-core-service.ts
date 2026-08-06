@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 import { type Static, Type } from "typebox";
@@ -111,6 +112,13 @@ export const SkillInspectArgsSchema = Type.Object(
     kind: Type.Optional(SkillInstallSourceKindSchema),
     skillRef: Type.Optional(SkillRefSchema),
     readBody: Type.Optional(Type.Boolean()),
+    /**
+     * T12（P0-2）：readBody=true 时优先消费的 loadHandle（会话内安装结果返回的
+     * 一次性句柄）。提供时经 LoadHandleRegistry 消费后受控读取；未提供时维持
+     * 原有路径（activation grant overlay 或按需签发）。安装返回的 loadHandle
+     * 因此有明确消费链，不再成为无消费者的孤儿句柄。
+     */
+    loadHandle: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false },
 );
@@ -610,6 +618,12 @@ export interface SkillCoreServiceDeps {
     assertReadable(skillRef: SkillRef): void;
     /** 插件 Skill 状态覆盖（readiness/selection 按插件当前状态；插件来源用） */
     overlayStatus(skill: RegisteredSkill, agentId?: string): SkillStatus;
+    /**
+     * T12（P0-3）：当前 Agent 已绑定且启用的插件贡献的 Catalog 插件 Skill
+     * （精确 SkillRef）。解析时作为固定引用加入候选池——已绑定插件的 Skill
+     * 必须可见（resolver 不再因"未固定"而 gated），叠加 overlayStatus 状态。
+     */
+    listAgentBoundPluginSkills(agentId: string): readonly RegisteredSkill[];
   };
   readonly actor?: ActorRef;
   readonly now?: () => Date;
@@ -671,13 +685,24 @@ export class SkillCoreService {
     // P1-7：Session 临时绑定（agent/无 agent 会话都合并；只取 active，过期项不进入）
     const bindings = sessionId !== undefined && sessionId !== "" ? this.resolveSessionBindings(sessionId) : { pinnedRefs: [] as SkillRef[], diagnostics: [] as ResolutionDiagnostic[] };
     const diagnostics: ResolutionDiagnostic[] = [...bindings.diagnostics];
+    // T12（P0-3）：Agent 已绑定且启用插件的 Skill 贡献作为固定引用加入解析——
+    // 绑定插件必须可见（resolver 不再因"未固定 plugin 候选"而 gated）
+    let extraPinnedRefs: readonly SkillRef[] = bindings.pinnedRefs;
+    if (agentId !== "" && this.deps.pluginOverlay !== undefined) {
+      const boundPluginSkills = this.deps.pluginOverlay.listAgentBoundPluginSkills(agentId);
+      if (boundPluginSkills.length > 0) {
+        extraPinnedRefs = [...extraPinnedRefs, ...boundPluginSkills.map((skill) => skill.skillRef)];
+      }
+    }
     const view =
       agentId === ""
         ? this.deps.catalog.listByAgent({ agentId: ANONYMOUS_AGENT_ID, pinnedRefs: bindings.pinnedRefs, environment: this.deps.environment })
-        : this.deps.agentService.listAgentSkills(agentId, this.deps.environment, this.deps.catalog, bindings.pinnedRefs);
+        : this.deps.agentService.listAgentSkills(agentId, this.deps.environment, this.deps.catalog, extraPinnedRefs);
     diagnostics.push(...view.diagnostics);
-    // T11（P0-3）：插件 Skill overlay——未启用/禁用/卸载的插件 Skill 从可见集剔除
-    // （fail-closed：不暴露给模型）；剔除项进 gated 并保留诊断
+    // T11（P0-3）+ T12（P0-3）：插件 Skill overlay——未启用/禁用/卸载的插件 Skill
+    // 从可见集剔除（fail-closed：不暴露给模型）；剔除项进 gated 并保留诊断。
+    // 已绑定插件 Skill 的 readiness 用 overlayStatus(skill, agentId) 重算
+    // （requires.plugins 按真实绑定；blocked 来源仍拦截）
     let visible = view.visible;
     const gated: import("../resolver.js").ResolvedSkill[] = [...view.gated];
     if (this.deps.pluginOverlay !== undefined) {
@@ -687,14 +712,27 @@ export class SkillCoreService {
           kept.push(resolved);
           continue;
         }
+        let status = resolved.status;
+        const registered = this.deps.catalog.findByRefKey(resolved.skillRefKey);
+        if (registered !== undefined) {
+          try {
+            status = this.deps.pluginOverlay.overlayStatus(registered, agentId === "" ? undefined : agentId);
+          } catch {
+            // overlayStatus 失败不改变基线（assertReadable 兜底）
+          }
+        }
+        if (status.readiness === "blocked" || status.readiness === "incompatible") {
+          gated.push({ ...resolved, status });
+          continue;
+        }
         try {
           this.deps.pluginOverlay.assertReadable(resolved.skillRef);
-          kept.push(resolved);
+          kept.push({ ...resolved, status });
         } catch (error) {
           gated.push({
             ...resolved,
             status: {
-              ...resolved.status,
+              ...status,
               readiness: "blocked",
               ...(error instanceof Error ? { blockedReason: error.message.slice(0, 200) } : {}),
             },
@@ -727,51 +765,94 @@ export class SkillCoreService {
   }
 
   /**
-   * T11（P0-2）：read 工具路由——按绝对路径从当前 turn 冻结快照的可见 Skill
-   * 根匹配，命中则经 SkillContentService 受控读取（成员/哈希/预算/超时校验）。
+   * T11（P0-2）+ T12（P0-1/P0-2）：read 工具路由——按绝对路径从当前 turn 的
+   * 可见 Skill（冻结快照 entries + 当前 turn active grants，覆盖会话内安装）
+   * 匹配，命中则经 SkillContentService 受控读取（成员/哈希/预算/超时校验）。
    * 三态结果：
    * - ok：受控读取的正文（SKILL.md 或支持文件；relativePath 由 rootPath 换算）；
-   * - not-a-skill-file：无冻结快照或路径不在任何可见 Skill 根内——调用方回退
-   *   到普通沙箱读取（不改变普通文件行为）；
-   * - denied：命中 Skill 根但受控读取被拒（fail-closed，调用方不得回退裸读）。
+   * - not-a-skill-file：Skill 系统未接入、或无冻结快照且路径不在任何已登记
+   *   Skill 根内——调用方回退到普通沙箱读取（不改变普通文件行为）；
+   * - denied：canonical 路径落在任意已登记 Skill 根，但不在当前 Turn 可见集/
+   *   激活授权中（已解绑/停用/插件禁用），或受控读取被拒——fail-closed，
+   *   调用方不得回退裸读（防 Junction 别名绕过哈希/清单/预算/审计）。
    */
   async readSkillFileForSession(input: { readonly sessionId: string; readonly absPath: string }): Promise<SkillFileReadOutcome> {
     const frozen = this.turnSnapshots.get(input.sessionId);
-    if (frozen === undefined) {
-      return { status: "not-a-skill-file", reason: "当前 Session 无冻结 Skill 快照（Skill 系统未接入或尚无 turn）" };
-    }
-    if (this.deps.contentService === undefined) {
-      return { status: "not-a-skill-file", reason: "SkillContentService 未就绪" };
-    }
     const absPath = path.resolve(input.absPath);
-    for (const entry of frozen.snapshot.entries) {
-      const rel = path.relative(entry.rootPath, absPath);
+    const absCanonical = canonicalResolve(absPath);
+    const read = (rootPath: string, skillRef: SkillRef, origin: string): Promise<SkillFileReadOutcome> => {
+      if (this.deps.contentService === undefined) {
+        return Promise.resolve({ status: "not-a-skill-file" as const, reason: "SkillContentService 未就绪" });
+      }
+      const rel = path.relative(canonicalResolve(rootPath), absCanonical);
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
-        continue; // 目录本身/根外：不属于该 Skill 文件（目录不读正文）
+        return Promise.resolve({ status: "not-a-skill-file" as const, reason: `路径不在 ${origin} 根内` });
+      }
+      const snapshot =
+        frozen !== undefined
+          ? frozen.snapshot
+          : undefined;
+      // 无冻结快照（Skill 系统未接入 turn）→ 不作为 Skill 文件处理
+      if (snapshot === undefined) {
+        return Promise.resolve({ status: "not-a-skill-file" as const, reason: "当前 Session 无冻结 Skill 快照" });
       }
       const relativePath = rel.split(path.sep).join("/");
-      try {
-        const read = await this.deps.contentService.readSkillBody({
-          snapshot: frozen.snapshot,
-          skillRef: entry.skillRef,
+      return this.deps.contentService!.readSkillBody({ snapshot, skillRef, relativePath }).then(
+        (result) => ({
+          status: "ok" as const,
+          body: result.body,
+          truncated: result.truncated,
+          skillRefKey: skillRefKey(skillRef),
           relativePath,
-        });
-        return {
-          status: "ok",
-          body: read.body,
-          truncated: read.truncated,
-          skillRefKey: entry.skillRefKey,
-          relativePath,
-        };
-      } catch (error) {
-        return {
-          status: "denied",
+        }),
+        (error) => ({
+          status: "denied" as const,
           reasonCode: extractReasonCode(error),
           reason: error instanceof Error ? error.message.slice(0, 240) : "Skill 文件受控读取被拒绝",
-        };
+        }),
+      );
+    };
+
+    // 1. 当前 turn 可见/授权候选：冻结快照 entries + 当前 turn active grants
+    //    （T12 P0-2：会话内安装后同一 turn 立即受控读取——grant 匹配精确 SkillRef）
+    const candidates: { readonly rootPath: string; readonly skillRef: SkillRef }[] = [];
+    if (frozen !== undefined) {
+      for (const entry of frozen.snapshot.entries) {
+        candidates.push({ rootPath: entry.rootPath, skillRef: entry.skillRef });
       }
     }
-    return { status: "not-a-skill-file", reason: "路径不在当前 turn 可见 Skill 根内" };
+    if (this.deps.sessionService !== undefined) {
+      for (const grant of this.deps.sessionService.listActiveGrants(input.sessionId)) {
+        const registered = this.deps.catalog.findByRefKey(grant.skillRefKey);
+        if (registered !== undefined) {
+          candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef });
+        }
+      }
+    }
+    for (const candidate of candidates) {
+      const outcome = await read(candidate.rootPath, candidate.skillRef, "当前 Turn 可见 Skill");
+      if (outcome.status !== "not-a-skill-file") {
+        return outcome;
+      }
+    }
+
+    // 2. 未命中可见集，但 canonical 路径落在任意已登记 Skill 根内 → denied
+    //    （T12 P0-1：上一轮可见、本轮解绑/停用/插件禁用；Junction 别名经
+    //    canonical 化后同样命中——fail-closed，绝不回退裸读）
+    if (frozen !== undefined && this.deps.contentService !== undefined) {
+      for (const skill of this.deps.catalog.list({})) {
+        const rel = path.relative(canonicalResolve(skill.rootPath), absCanonical);
+        if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+          return {
+            status: "denied",
+            reasonCode: "skill_not_in_snapshot",
+            reason: "路径落在 Skill 存储区但不在当前 Turn 可见集（已解绑/停用/插件禁用），拒绝读取",
+          };
+        }
+      }
+    }
+
+    return { status: "not-a-skill-file", reason: "路径不在任何 Skill 根内" };
   }
 
   /**
@@ -916,7 +997,7 @@ export class SkillCoreService {
 
   // ── inspect_skill ─────────────────────────────────────────────
 
-  async inspect(input: { readonly sourceRef?: string; readonly kind?: SkillInstallSourceKind; readonly skillRef?: SkillRef; readonly sessionId?: string; readonly readBody?: boolean; readonly agentId?: string; readonly turnId?: string }): Promise<SkillInspectResult> {
+  async inspect(input: { readonly sourceRef?: string; readonly kind?: SkillInstallSourceKind; readonly skillRef?: SkillRef; readonly sessionId?: string; readonly readBody?: boolean; readonly agentId?: string; readonly turnId?: string; readonly loadHandle?: string }): Promise<SkillInspectResult> {
     const hasSkillRef = input.skillRef !== undefined;
     const hasSource = input.sourceRef !== undefined && input.sourceRef !== "";
     if (!hasSkillRef && !hasSource) {
@@ -1026,18 +1107,31 @@ export class SkillCoreService {
           turnId,
           resolveOutput,
         });
-        const handle = this.deps.loadHandles.issueLoadHandle({
-          turnId,
-          sessionId: input.sessionId,
-          skillRef: registered.skillRef,
-          contentHash: registered.contentHash,
-          ttlMs: this.deps.loadHandleTtlMs ?? DEFAULT_LOAD_HANDLE_TTL_MS,
-        });
-        const consumed = this.deps.loadHandles.consumeLoadHandle({ handleId: handle.handleId, turnId, sessionId: input.sessionId });
-        if (consumed.status !== "granted") {
-          return { ...result, ok: false, reasonCode: consumed.reasonCode, reason: consumed.reason };
+        // T12（P0-2）：readBody 优先消费调用方传入的 loadHandle（会话内安装结果
+        // 返回的一次性句柄——否则安装返回的 loadHandle 没有读取消费者）；未提供
+        // 时维持原有按需签发路径。
+        let handle: { readonly skillRef: SkillRef; readonly contentHash: string };
+        if (input.loadHandle !== undefined) {
+          const consumed = this.deps.loadHandles.consumeLoadHandle({ handleId: input.loadHandle, turnId, sessionId: input.sessionId });
+          if (consumed.status !== "granted") {
+            return { ...result, ok: false, reasonCode: consumed.reasonCode, reason: consumed.reason };
+          }
+          handle = consumed.handle;
+        } else {
+          const issued = this.deps.loadHandles.issueLoadHandle({
+            turnId,
+            sessionId: input.sessionId,
+            skillRef: registered.skillRef,
+            contentHash: registered.contentHash,
+            ttlMs: this.deps.loadHandleTtlMs ?? DEFAULT_LOAD_HANDLE_TTL_MS,
+          });
+          const consumed = this.deps.loadHandles.consumeLoadHandle({ handleId: issued.handleId, turnId, sessionId: input.sessionId });
+          if (consumed.status !== "granted") {
+            return { ...result, ok: false, reasonCode: consumed.reasonCode, reason: consumed.reason };
+          }
+          handle = consumed.handle;
         }
-        const read = await this.deps.contentService.readSkillBody({ snapshot, skillRef: registered.skillRef, handle: consumed.handle });
+        const read = await this.deps.contentService.readSkillBody({ snapshot, skillRef: registered.skillRef, handle });
         return {
           ...result,
           body: read.body,
@@ -1252,6 +1346,26 @@ export class SkillCoreService {
         });
         loadHandle = handle.handleId;
       } catch (error) {
+        // T12（P1-2）：loadHandle 签发失败必须撤销刚签发的 activation grant——
+        // 不得遗留"结果 failed 但当前 turn 授权仍有效"的不一致状态（补偿证据保留）
+        if (grantId !== undefined) {
+          try {
+            this.deps.sessionService.revokeActivationGrant({ grantId, sessionId, reason: "load-handle-issue-failed" });
+          } catch (revokeError) {
+            // 撤销失败也要返回 failed（fail-closed：不假装成功）
+            return {
+              status: "failed",
+              skillRef: installed.skillRef,
+              skillRefKey: installed.skillRefKey,
+              operationId: installed.operationId,
+              idempotent: installed.idempotent,
+              agentBinding,
+              loadHandle: null,
+              reasonCode: "skill_operation_failed",
+              reason: `安装与绑定已完成，但 loadHandle 签发失败且授权补偿撤销失败（${revokeError instanceof Error ? revokeError.message : "未知错误"}）`,
+            };
+          }
+        }
         return {
           status: "failed",
           skillRef: installed.skillRef,
@@ -1261,7 +1375,7 @@ export class SkillCoreService {
           agentBinding,
           loadHandle: null,
           reasonCode: "skill_operation_failed",
-          reason: `安装与绑定已完成，但 loadHandle 签发失败（${error instanceof Error ? error.message : "未知错误"}），当前 turn 无法受控读取，可重试`,
+          reason: `安装与绑定已完成，但 loadHandle 签发失败（${error instanceof Error ? error.message : "未知错误"}），activation grant 已撤销，当前 turn 无法受控读取，可重试`,
         };
       }
     }
@@ -1831,4 +1945,29 @@ export function extractReasonCode(error: unknown): SkillErrorCode {
     return error.code;
   }
   return "skill_operation_failed";
+}
+
+/**
+ * T12（P0-1）：路径 canonical 化（消除符号链接/Junction），与 PathGuard 语义
+ * 一致——路径存在 → realpath；不存在 → 向上遍历到最近存在的祖先拼接剩余
+ * 相对路径。用于 Skill 根匹配，防止 Junction 别名绕过当前 Turn 快照检查。
+ */
+function canonicalResolve(targetPath: string): string {
+  try {
+    return fs.realpathSync.native(targetPath);
+  } catch {
+    let current = targetPath;
+    while (true) {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return targetPath;
+      }
+      try {
+        const realParent = fs.realpathSync.native(parent);
+        return path.join(realParent, path.relative(parent, targetPath));
+      } catch {
+        current = parent;
+      }
+    }
+  }
 }

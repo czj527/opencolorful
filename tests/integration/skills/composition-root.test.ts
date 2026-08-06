@@ -257,4 +257,6 @@ describe("Phase 13 T10 组合根验收", () => {
     const pluginSkills = composition.catalog.list({ sourceKind: "plugin" });
     expect(Array.isArray(pluginSkills)).toBe(true);
   });
+
+
 });
