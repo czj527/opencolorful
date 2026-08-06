@@ -136,6 +136,18 @@ export class SessionSkillService {
   }
 
   /**
+   * T13（自审）：Session 全部 activation grant（**不过滤**——含已消费/已过期）。
+   * 供 ContentService overlay 交叉验证快照摘要的实时消费状态：快照是冻结对象，
+   * 摘要里的 consumedAt 不能反映读取后的消费；必须按 grantId 从原始记录取
+   * 实时 consumedAt，否则已消费 grant 会经快照摘要授权路径继续放行（P0-4
+   * 一次性契约不完整）。
+   */
+  listGrantsBySession(sessionId: string): readonly SkillActivationGrantRecord[] {
+    this.validateSessionId(sessionId);
+    return this.deps.grants.listBySession(sessionId);
+  }
+
+  /**
    * T10：当前 Session 未消费且未过期的激活授权（turn 快照冻结摘要用）。
    * 只暴露摘要字段（grantId/skillRefKey/contentHash/issuedTurnId/expiresAt/consumedAt），
    * 不暴露任何 Secret 或正文。

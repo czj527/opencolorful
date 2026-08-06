@@ -259,9 +259,12 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
       ? { sourceReadable: (skillRef) => pluginBridge.assertPluginSkillReadable(skillRef) }
       : {}),
     // T12（P0-2）：生产注入实时 activation grant overlay——会话内安装后同一 turn
-    // 经 read 链路（readSkillFileForSession / ContentService overlay）立即受控读取
+    // 经 read 链路（readSkillFileForSession / ContentService overlay）立即受控读取。
+    // T13（自审）：必须用**不过滤**的 listGrantsBySession——findOverlayGrant 按
+    // grantId 交叉验证快照摘要的实时 consumedAt；若用 listActiveGrants（过滤已消费），
+    // 已消费 grant 在原始记录里找不到 → 回退冻结摘要值（null）→ 仍授权（绕过一次性）
     grants: {
-      listBySession: (sessionId) => sessionService.listActiveGrants(sessionId),
+      listBySession: (sessionId) => sessionService.listGrantsBySession(sessionId),
     },
   });
 

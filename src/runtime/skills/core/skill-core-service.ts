@@ -682,6 +682,11 @@ export class SkillCoreService {
   buildPiSkillsForTurn(input: { readonly agentId?: string; readonly sessionId?: string; readonly turnId?: string }): PiResourceSkills {
     const { sessionId, turnId } = input;
     const agentId = input.agentId ?? "";
+    // T13（P0-1）：冻结开始即移除旧快照——任何后续失败（view 解析/快照构造）
+    // 都 fail-closed，不保留上一 Turn 的旧快照（否则 read 链路仍按旧可见集授权）
+    if (sessionId !== undefined && sessionId !== "") {
+      this.turnSnapshots.delete(sessionId);
+    }
     // P1-7：Session 临时绑定（agent/无 agent 会话都合并；只取 active，过期项不进入）
     const bindings = sessionId !== undefined && sessionId !== "" ? this.resolveSessionBindings(sessionId) : { pinnedRefs: [] as SkillRef[], diagnostics: [] as ResolutionDiagnostic[] };
     const diagnostics: ResolutionDiagnostic[] = [...bindings.diagnostics];
@@ -740,11 +745,6 @@ export class SkillCoreService {
         }
       }
       visible = kept;
-    }
-    // T13（P0-1）：构造前先移除旧快照——冻结失败抛错时 fail-closed，不保留
-    // 上一 Turn 的旧快照（否则 read 链路仍按旧可见集授权）
-    if (sessionId !== undefined && sessionId !== "") {
-      this.turnSnapshots.delete(sessionId);
     }
     const snapshot = this.deps.snapshots.createSkillSnapshot({
       agentId: agentId === "" ? ANONYMOUS_AGENT_ID : agentId,

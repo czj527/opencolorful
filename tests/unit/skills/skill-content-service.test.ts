@@ -282,6 +282,55 @@ describe("SkillContentService", () => {
     expect(result.body).toContain("body");
   });
 
+  it("T13 自审：快照摘要含 grant 但实时 store 已消费 → fail-closed（一次性不绕过）", async () => {
+    const dir = path.join(root, "granted-consumed");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: gc\ndescription: g\n---\nbody", "utf8");
+    const registered = ingestPackage(catalog, dir, "managed", makeEnv());
+    const refKey = `${registered.skillRef.skillId}@${registered.skillRef.sourceId}@${registered.skillRef.version}`;
+    // 快照冻结时 grant 未消费（摘要 consumedAt=null）
+    const snapshot = snapshots.createSkillSnapshot({
+      agentId: "agent-1",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      resolveOutput: { visible: [], shadowed: [], disabled: [], gated: [], diagnostics: [] },
+      activationGrants: [
+        {
+          grantId: "grant-gc",
+          agentId: "agent-1",
+          sessionId: "session-1",
+          skillRefKey: refKey,
+          contentHash: registered.skillRef.contentHash,
+          issuedTurnId: "turn-1",
+          expiresAt: "2026-01-02T00:00:00.000Z",
+          consumedAt: null,
+          reason: "test",
+        },
+      ],
+    });
+    // 实时 overlay：返回原始记录（含已消费）——模拟读取后 consumeActivationGrant
+    // 写入 consumedAt。快照摘要是冻结对象，消费状态必须按实时 store 交叉验证
+    const overlay: SkillActivationOverlayReader = {
+      listBySession: () => [
+        {
+          grantId: "grant-gc",
+          agentId: "agent-1",
+          sessionId: "session-1",
+          skillRefKey: refKey,
+          contentHash: registered.skillRef.contentHash,
+          issuedTurnId: "turn-1",
+          expiresAt: "2026-01-02T00:00:00.000Z",
+          consumedAt: "2026-01-01T00:00:01.000Z",
+          reason: "test",
+        },
+      ],
+    };
+    service = new SkillContentService({ catalog, snapshots, grants: overlay, now: () => nowValue });
+    await expect(service.readSkillBody({ snapshot, skillRef: registered.skillRef })).rejects.toMatchObject({
+      code: "skill_not_in_snapshot",
+    });
+  });
+
   it("激活授权已过期 → skill_not_in_snapshot（fail-closed）", async () => {
     const dir = path.join(root, "granted-expired");
     fs.mkdirSync(dir, { recursive: true });
