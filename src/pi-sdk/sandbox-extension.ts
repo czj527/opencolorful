@@ -28,11 +28,28 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { ToolPolicy } from "../runtime/tool-policy.js";
+import type { SkillFileReadOutcome } from "./types.js";
 
 export interface SandboxContext {
   readonly toolPolicy: ToolPolicy;
   readonly sessionCwd: string;
   readonly allowBash: boolean;
+  /**
+   * T11（P0-2）：read 工具的 Skill 文件受控读取端口。
+   * - ok → 直接返回正文（SkillContentService 哈希/预算校验已执行）；
+   * - not-a-skill-file → 回退普通沙箱读取（不改变普通文件行为）；
+   * - denied → 命中 Skill 根但读取被拒，抛错（fail-closed，绝不回退裸读）。
+   */
+  readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
+}
+
+/**
+ * T11（P0-2）：外部（SessionRuntime）注入的沙箱上下文扩展——只允许 skillRead
+ * 端口；toolPolicy/sessionCwd/allowBash 一律由 agent-session 内部构造，
+ * 防止外部伪造沙箱策略。
+ */
+export interface SandboxContextOverrides {
+  readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
 }
 
 interface SandboxContextState {
@@ -128,6 +145,27 @@ export default function (pi: ExtensionAPI): void {
       const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
+      // T11（P0-2）：Skill 文件优先走受控读取（成员/哈希/预算校验）。
+      // 三态：ok 直接返回；not-a-skill-file 回退普通沙箱读取；denied 抛错
+      // （命中 Skill 根但读取被拒——fail-closed，绝不回退裸读绕过校验）。
+      if (ctx.skillRead !== undefined) {
+        const outcome = await ctx.skillRead({ absPath });
+        if (outcome.status === "ok") {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: outcome.body,
+                ...(outcome.truncated ? { truncated: true } : {}),
+              },
+            ],
+            details: undefined,
+          };
+        }
+        if (outcome.status === "denied") {
+          throw new Error(`Skill read denied (${outcome.reasonCode}): ${outcome.reason}`);
+        }
+      }
       ctx.toolPolicy.assertFilePath("read", absPath);
       return origRead.execute(toolCallId, { ...p, path: absPath }, signal, onUpdate);
     },

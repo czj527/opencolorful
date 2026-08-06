@@ -43,8 +43,8 @@ describe("T5 集成：Resolve → Snapshot → PI loader → ContentService → 
     fs.writeFileSync(path.join(dir, "references", "guide.md"), "# Guide\n详情内容", "utf8");
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
 
-    // 2. 解析 → 快照
-    const resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
+    // 2. 解析 → 快照（T11 P0-5：managed 安装默认绑定当前 Agent → 固定引用进入可见集）
+    const resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [registered.skillRef], environment: makeEnv() });
     expect(resolve.visible).toHaveLength(1);
     const snapshot = snapshots.createSkillSnapshot({
       agentId: "agent-1",
@@ -77,7 +77,7 @@ describe("T5 集成：Resolve → Snapshot → PI loader → ContentService → 
   it("loadHandle 全流程：签发 → 消费 → 受控读取（哈希仍校验）", async () => {
     const dir = createSkillPackage(root, { name: "handle-skill", version: "1.0.0" });
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    const resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
+    const resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [registered.skillRef], environment: makeEnv() });
     const snapshot = snapshots.createSkillSnapshot({
       agentId: "agent-1",
       sessionId: "session-1",
@@ -114,7 +114,7 @@ describe("T5 集成：Resolve → Snapshot → PI loader → ContentService → 
     // 即使持有有效 handle，内容被篡改仍 fail-closed（哈希校验在 ContentService）
     const tampered = createSkillPackage(root, { name: "tamper-skill", version: "1.0.0" });
     const tamperRegistered = ingestPackage(catalog, tampered, "managed", makeEnv());
-    const tamperResolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
+    const tamperResolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [tamperRegistered.skillRef], environment: makeEnv() });
     const tamperSnapshot = snapshots.createSkillSnapshot({
       agentId: "agent-1",
       sessionId: "session-1",
@@ -143,13 +143,13 @@ describe("T5 集成：Resolve → Snapshot → PI loader → ContentService → 
       agentId: "agent-1",
       sessionId: "session-1",
       turnId: "turn-1",
-      resolveOutput: catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() }),
+      resolveOutput: catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [v1.skillRef], environment: makeEnv() }),
     });
 
-    // 会话内安装 v2（新版本登记到不同目录，snapshotId 不变，旧快照不修改）
+    // 会话内安装 v2（新版本登记到不同目录并换绑，旧快照不修改）
     const dirV2 = makeSkillPackageAt(root, "v2/evolving", { name: "evolving", version: "2.0.0", body: "v2 正文" });
-    ingestPackage(catalog, dirV2, "managed", makeEnv());
-    const turn2Resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
+    const v2 = ingestPackage(catalog, dirV2, "managed", makeEnv());
+    const turn2Resolve = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [v2.skillRef], environment: makeEnv() });
     const snapshotTurn2 = snapshots.createSkillSnapshot({
       agentId: "agent-1",
       sessionId: "session-1",

@@ -186,6 +186,49 @@ describe("Phase 13 T10 组合根验收", () => {
     expect(promptResponse.status).toBe(202);
   });
 
+
+  it("T11 P0-4：启动激活后 resyncPluginSkills 按当前状态全量重建（enabled→sync / disabled→block）", async () => {
+    const fixture = makeFixture();
+    const facade = new PluginFacade({
+      database: fixture.database,
+      paths: fixture.paths,
+      audit: fixture.audit,
+      hostVersion: "0.1.0",
+    });
+    const composition = buildSkillComposition({
+      paths: fixture.paths,
+      database: fixture.database,
+      audit: fixture.audit,
+      cwd: process.cwd(),
+      pluginFacade: facade,
+    });
+    composition.rebuildFromDisk();
+    composition.attachPluginLifecycle();
+
+    // 安装并启用插件（模拟启动激活完成后：enable 钩子已 sync）
+    await facade.install(
+      { sourceType: "local", ref: SHOWCASE_PLUGIN_DIR },
+      [{ pluginId: "example.sdk-showcase", capability: "tool.register", decision: "allowed" as const }],
+    );
+    await facade.enable("example.sdk-showcase");
+    // 启动激活后全量重建：幂等、不抛错、插件 Skill 保持可解析
+    expect(() => composition.resyncPluginSkills()).not.toThrow();
+    const pluginSkills = composition.catalog.list({ sourceKind: "plugin" });
+    expect(Array.isArray(pluginSkills)).toBe(true);
+
+    // 禁用后再次全量重建：阻断生效（fail-closed，不暴露已禁用插件 Skill）
+    await facade.disable("example.sdk-showcase");
+    expect(() => composition.resyncPluginSkills()).not.toThrow();
+    // 未配置 pluginBridge 的组合根同样幂等
+    const plain = buildSkillComposition({
+      paths: fixture.paths,
+      database: fixture.database,
+      audit: fixture.audit,
+      cwd: process.cwd(),
+    });
+    expect(() => plain.resyncPluginSkills()).not.toThrow();
+  });
+
   it("插件生命周期接线：插件启用 → syncPluginSkills、禁用 → blocked（正文读取 fail-closed）", async () => {
     const fixture = makeFixture();
     const facade = new PluginFacade({

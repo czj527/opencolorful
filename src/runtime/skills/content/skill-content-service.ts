@@ -58,6 +58,11 @@ export interface SkillContentServiceDeps {
   readonly snapshots: SkillSnapshotService;
   /** 激活授权 overlay（会话内安装后当前 turn 生效；缺省只认快照冻结摘要） */
   readonly grants?: SkillActivationOverlayReader;
+  /**
+   * T11（P0-3）：来源可读性检查（PluginSkillBridge 适配）——插件禁用/卸载后
+   * 正文读取 fail-closed（抛错拒绝）。缺省放行（非插件场景）。
+   */
+  readonly sourceReadable?: (skillRef: SkillRef) => void;
   readonly budgets?: Partial<SkillContentBudgets>;
   readonly now?: () => Date;
   /** 受控读取实现（测试注入：模拟超时/失败；缺省 bounded readFile） */
@@ -117,6 +122,18 @@ export class SkillContentService {
     // 生命周期：started → 全部校验与读取 → completed/failed（只记录元数据）
     this.emitStarted(input.snapshot, refKey, relativePath, operationId);
     try {
+      // ── 0. 来源可读性检查（T11 P0-3：插件禁用/卸载 → fail-closed） ──
+      if (this.deps.sourceReadable !== undefined) {
+        try {
+          this.deps.sourceReadable(ref);
+        } catch (error) {
+          throw new SkillError(
+            "skill_content_read_denied",
+            `Skill 来源已阻断，正文读取拒绝：${error instanceof Error ? error.message.slice(0, 200) : "unknown"}`,
+          );
+        }
+      }
+
       // ── 1. 成员检查：Snapshot entries 或激活授权 overlay（fail-closed） ──
       const inEntries = input.snapshot.entries.some(
         (entry) => entry.skillRefKey === refKey && entry.skillRef.contentHash === ref.contentHash,

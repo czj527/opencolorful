@@ -66,6 +66,31 @@ afterEach(() => {
 
 describe("SandboxService", () => {
   // ── 1. create() 为有 defaultCwd 的 Agent 生成有效的 SandboxService ──
+
+  // ── T11 P0-2：addReadOnlyRoots 追加只读根（Skill 根）────────────────
+  it("addReadOnlyRoots(): Skill 根只读放行 read，write 仍拒绝；幂等去重", () => {
+    const cwd = path.join(os.homedir(), "projects", "skill-app");
+    const agent = makeAgent({ defaultCwd: cwd });
+    const svc = SandboxService.create({
+      agentSettings: agent,
+      agentId: "agent-1",
+      agentHomeDir,
+      platformHome,
+    });
+    const skillRoot = path.join(os.homedir(), ".opencolorful", "skills", "alpha");
+    svc.addReadOnlyRoots([skillRoot], "skill-root-read");
+    svc.addReadOnlyRoots([skillRoot], "skill-root-read"); // 幂等
+
+    const guard = svc.getPathGuard();
+    const readResult = guard.check("read", path.join(skillRoot, "SKILL.md"));
+    expect(readResult.allowed).toBe(true);
+    expect(readResult.reason).toContain("skill-root-read");
+    const writeResult = guard.check("write", path.join(skillRoot, "SKILL.md"));
+    expect(writeResult.allowed).toBe(false);
+    const readOutside = guard.check("read", path.join(skillRoot, "..", "beta", "SKILL.md"));
+    expect(readOutside.allowed).toBe(false); // 只放行根内
+  });
+
   it("create() produces a valid SandboxService for an agent with defaultCwd", () => {
     const cwd = path.join(os.homedir(), "projects", "my-app");
     const agent = makeAgent({ defaultCwd: cwd });

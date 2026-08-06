@@ -50,6 +50,7 @@ export type {
   PluginSessionTool,
   PluginSessionToolInvokeResult,
   PluginToolTurnContext,
+  SkillFileReadOutcome,
   WorkspaceToolMode,
 } from "./types.js";
 

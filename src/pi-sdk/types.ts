@@ -11,6 +11,24 @@ export interface PiResourceSkills {
   readonly diagnostics: readonly ResourceDiagnostic[];
 }
 
+/**
+ * T11（P0-2）：read 工具的 Skill 文件受控读取结果（三态）。
+ * - ok：经 SkillContentService 受控读取（成员/哈希/预算校验）的正文；
+ * - not-a-skill-file：路径不在当前 turn 冻结快照的可见 Skill 根内——
+ *   调用方回退到普通沙箱路径（不改写普通文件读取行为）；
+ * - denied：路径命中 Skill 根但受控读取被拒（fail-closed，绝不回退裸读）。
+ */
+export type SkillFileReadOutcome =
+  | {
+      readonly status: "ok";
+      readonly body: string;
+      readonly truncated: boolean;
+      readonly skillRefKey: string;
+      readonly relativePath: string;
+    }
+  | { readonly status: "not-a-skill-file"; readonly reason: string }
+  | { readonly status: "denied"; readonly reasonCode: string; readonly reason: string };
+
 export interface PiSessionUsageStats {
   readonly tokens: {
     readonly input: number;

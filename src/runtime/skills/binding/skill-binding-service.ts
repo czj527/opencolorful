@@ -342,11 +342,18 @@ export class AgentSkillService {
 
   /**
    * 组合 skills.json + Catalog.listByAgent：
-   * - pinnedRefs = directSkillRefs + 已解析 Bundle 项（精确 SkillRef）；
+   * - pinnedRefs = directSkillRefs + 已解析 Bundle 项（精确 SkillRef）+ extraPinnedRefs
+   *   （T11 P1-7：Session 临时绑定合并——会话内安装建立的临时绑定与 Agent 持久
+   *   绑定一起进入解析；无 Agent 会话不走本方法，由 Core 单独解析）；
    * - selectionOverrides = overrides；
    * - Bundle 项缺失（未在 Catalog）→ 诊断（skill_unknown_skillref，不静默回退）。
    */
-  listAgentSkills(agentId: string, environment: ReadinessEnvironment, catalog: SkillCatalog = this.deps.catalog): AgentSkillsView {
+  listAgentSkills(
+    agentId: string,
+    environment: ReadinessEnvironment,
+    catalog: SkillCatalog = this.deps.catalog,
+    extraPinnedRefs: readonly SkillRef[] = [],
+  ): AgentSkillsView {
     this.validateAgentId(agentId);
     const config = this.deps.configStore.getSkillsConfig(agentId);
     const { resolved, missing } = resolveAllBundleItems({
@@ -354,7 +361,7 @@ export class AgentSkillService {
       catalog: this.deps.catalog,
       config,
     });
-    const pinnedRefs = [...config.directSkillRefs, ...resolved.map((item) => item.skillRef)];
+    const pinnedRefs = [...config.directSkillRefs, ...resolved.map((item) => item.skillRef), ...extraPinnedRefs];
     const output = catalog.listByAgent({
       agentId,
       pinnedRefs,

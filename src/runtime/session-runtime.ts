@@ -13,6 +13,7 @@ import {
   type PiSessionHandle,
   type PluginSessionTool,
   type PluginToolTurnContext,
+  type SkillFileReadOutcome,
 } from "../pi-sdk/index.js";
 import { SandboxService } from "../sandbox/sandbox-service.js";
 import { ToolPolicy } from "./tool-policy.js";
@@ -68,11 +69,17 @@ export interface SessionRuntimeOptions {
    */
   readonly snapshotFactory?: (pluginId: string, agentId: string) => PluginToolTurnContext;
   /**
-   * T10（Phase 13）：PI Skill pointer 注入（静态或函数形式）。函数形式在 PI
-   * 每次 getSkills 调用（每 turn 重建系统提示）时求值——由宿主每 turn 更新槽，
-   * 实现 Skill 快照每 turn 冻结（元数据常驻、正文渐进披露）。
+   * T11（Phase 13 验收 P0-1/P1-8）：Skill 元数据冻结工厂——beginTurn 以真实
+   * turnId 调用，结果写入内部槽（PI 每 turn 重建系统提示时读取）。工厂抛错或
+   * 返回空 → 槽置空 + error 诊断（fail-closed，绝不保留上一 turn 的旧 Skill
+   * pointer 暴露给模型）。
    */
-  readonly skills?: PiResourceSkills | (() => PiResourceSkills);
+  readonly skillSnapshotFactory?: (input: { readonly agentId: string; readonly sessionId: string; readonly turnId: string }) => PiResourceSkills;
+  /**
+   * T11（P0-2）：read 工具 Skill 文件受控读取端口（闭包引用
+   * SkillCoreService.readSkillFileForSession）。注入后传给沙箱扩展上下文。
+   */
+  readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -101,6 +108,11 @@ export class SessionRuntime {
   /** 会话级插件工具（P0-1/P0-2：注入 PI 注册表；每 turn 冻结快照） */
   private readonly pluginTools: readonly PluginSessionTool[];
   private readonly snapshotFactory: SessionRuntimeOptions["snapshotFactory"];
+  /** T11：Skill 元数据槽（beginTurn 每 turn 冻结写入；PI loader 每 turn 读取） */
+  private readonly skillsSlotRef: { current: PiResourceSkills };
+  private readonly skillSnapshotFactory: SessionRuntimeOptions["skillSnapshotFactory"];
+  /** T11（P0-2）：沙箱服务（turn 冻结后同步 Skill 只读根） */
+  private readonly sandboxService: SandboxService | null;
 
   private constructor(
     readonly sessionId: string,
@@ -111,13 +123,18 @@ export class SessionRuntime {
     options: SessionRuntimeOptions,
     private readonly onDispose?: () => void,
     readonly systemPrompt?: string,
+    skillsSlotRef?: { current: PiResourceSkills },
+    sandboxService?: SandboxService | null,
   ) {
+    this.skillsSlotRef = skillsSlotRef ?? { current: { skills: [], diagnostics: [] } };
+    this.sandboxService = sandboxService ?? null;
     this.toolPolicy = toolPolicy;
     this.agentId = options.agentId;
     this.providerId = options.resolveProviderId ?? options.providerId;
     this.modelId = options.resolveModelId ?? options.modelId;
     this.pluginTools = options.pluginTools ?? [];
     this.snapshotFactory = options.snapshotFactory;
+    this.skillSnapshotFactory = options.skillSnapshotFactory;
     this.unsubscribe = agent.subscribe((event) => {
       this.observePiEvent(event);
       const mapper = this.mapper ?? this.resolveControlMapper(event);
@@ -163,6 +180,8 @@ export class SessionRuntime {
 
     // ── Agent session 创建 ───────────────────────────────────────
     let agent: PiAgentSessionHandle;
+    // T11：Skill 元数据槽（beginTurn 冻结；loader 闭包读取同一引用）
+    const skillsSlotRef: { current: PiResourceSkills } = { current: { skills: [], diagnostics: [] } };
 
     if (options.faux !== undefined) {
       if (!options.sessionDir || !options.providerId || !options.modelId) {
@@ -184,6 +203,10 @@ export class SessionRuntime {
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         ...(sandboxService ? { toolPolicy } : {}),
         ...(options.extraTools ? { extraTools: options.extraTools } : {}),
+        // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
+        ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
+        // T11（P0-2）：read 工具 Skill 受控读取端口（沙箱扩展上下文）
+        ...(options.skillRead !== undefined ? { sandboxContext: { skillRead: options.skillRead } } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -206,8 +229,10 @@ export class SessionRuntime {
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         ...(sandboxService ? { toolPolicy } : {}),
-        // T10：PI Skill pointer（静态或每 turn 求值的函数槽）
-        ...(options.skills !== undefined ? { skills: options.skills } : {}),
+        // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
+        ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
+        // T11（P0-2）：read 工具 Skill 受控读取端口（沙箱扩展上下文）
+        ...(options.skillRead !== undefined ? { sandboxContext: { skillRead: options.skillRead } } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");
@@ -222,6 +247,8 @@ export class SessionRuntime {
       options,
       options.onDispose,
       options.systemPrompt,
+      skillsSlotRef,
+      sandboxService,
     );
   }
 
@@ -234,7 +261,39 @@ export class SessionRuntime {
    *   （一次 in-flight turn 一个 snapshotId，§十一"一次 turn 使用同一快照"）；
    * - 无 snapshotFactory（未接入插件系统）时不设置（此时也没有插件工具注入）。
    */
-  private beginTurn(): void {
+  private beginTurn(turnId: string): void {
+    // T11：Skill 元数据冻结（P0-1 真实 turnId；P1-8 fail-closed——冻结失败
+    // 置空 + error 诊断，绝不保留上一 turn 的旧 Skill pointer）
+    if (this.skillSnapshotFactory !== undefined) {
+      try {
+        this.skillsSlotRef.current = this.skillSnapshotFactory({
+          agentId: this.agentId ?? "",
+          sessionId: this.sessionId,
+          turnId,
+        });
+        // T11（P0-2）：冻结后把可见 Skill 根同步为沙箱只读根——read/grep/find/ls
+        // 可在 Skill 目录工作；正文读取仍优先走 SkillContentService 受控路径。
+        // 快照变化时旧根规则保留（只读放行无副作用），新根追加（幂等去重）。
+        if (this.sandboxService !== null) {
+          const roots = this.skillsSlotRef.current.skills
+            .map((skill) => skill.baseDir)
+            .filter((baseDir): baseDir is string => typeof baseDir === "string" && baseDir.length > 0);
+          if (roots.length > 0) {
+            this.sandboxService.addReadOnlyRoots(roots, "skill-root-read");
+          }
+        }
+      } catch (error) {
+        this.skillsSlotRef.current = {
+          skills: [],
+          diagnostics: [
+            {
+              type: "error",
+              message: `Skill 快照冻结失败：${error instanceof Error ? error.message.slice(0, 200) : "unknown"}`,
+            },
+          ],
+        };
+      }
+    }
     if (this.snapshotFactory === undefined) {
       return;
     }
@@ -310,8 +369,8 @@ export class SessionRuntime {
     });
 
     // P0-2：turn 开始冻结绑定插件的授权/绑定快照——本 turn 内工具调用以冻结态为准，
-    // 绑定/授权在 turn 中途的变更不影响 in-flight 执行
-    this.beginTurn();
+    // 绑定/授权在 turn 中途的变更不影响 in-flight 执行；T11：同处冻结 Skill 元数据
+    this.beginTurn(turnId);
 
     return instrument.runWithTrace({ trace }, () => {
       void this.runPrompt(text, started.streamId, mapper, controller);

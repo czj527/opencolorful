@@ -175,9 +175,38 @@ export function resolveSkillCandidates(input: ResolveInput): ResolveOutput {
       candidate,
       selection: effectiveSelection(overrides[skillRefKey(candidate.skillRef)] ?? candidate.status.selection),
     }));
-    const explicitOnly = effective.filter((entry) => entry.selection === "explicit-only");
-    const pool = explicitOnly.length > 0 ? explicitOnly : effective;
-    const valid = pool.filter((entry) => entry.candidate.status.validity === "valid");
+    // T11（P0-5）：未固定 managed/plugin/external 候选对当前 Agent 不可见——
+    // 安装默认只绑定当前 Agent（§11.5），未绑定来源不进入可见集；
+    // builtin（平台随版本提供）与 workspace（session 工作区解析）保持全局可见。
+    // 未绑定候选进 gated + 诊断（不静默丢弃，可查原因）。
+    const agentVisibleKinds: ReadonlySet<SkillSourceKind> = new Set(["builtin", "workspace"]);
+    const unbound: typeof effective = [];
+    const pool = effective.filter((entry) => {
+      if (agentVisibleKinds.has(entry.candidate.sourceKind)) {
+        return true;
+      }
+      unbound.push(entry);
+      return false;
+    });
+    if (unbound.length > 0) {
+      for (const entry of unbound) {
+        gated.push(toResolved(entry.candidate, diagnoseReadiness(entry.candidate.manifest, environment), entry.selection, false));
+      }
+      diagnostics.push({
+        skillId,
+        code: "skill_unknown_skillref",
+        message: `${unbound.length} 个未绑定候选（managed/plugin/external）不进入当前 Agent 可见集（安装默认只绑定当前 Agent）`,
+      });
+    }
+    if (pool.length === 0) {
+      // 全部候选未绑定：已进 gated + 诊断，不再走 manifest 无效分支（避免重复/误报）
+      continue;
+    }
+    const explicitOnly = pool.filter((entry) => entry.selection === "explicit-only");
+    const pool2 = explicitOnly.length > 0 ? explicitOnly : pool;
+    // explicit-only 排除的同名候选 → shadowed（同池中未被显式选择的项不进入可见集，也不消失）
+    const excludedByExplicitOnly = explicitOnly.length > 0 ? pool.filter((entry) => entry.selection !== "explicit-only") : [];
+    const valid = pool2.filter((entry) => entry.candidate.status.validity === "valid");
 
     if (valid.length === 0) {
       for (const entry of effective) {
@@ -195,7 +224,8 @@ export function resolveSkillCandidates(input: ResolveInput): ResolveOutput {
     const winner = pickWinner(valid);
     const winnerDiagnosis = diagnoseReadiness(winner.candidate.manifest, environment);
     const resolved = toResolved(winner.candidate, winnerDiagnosis, winner.selection, false);
-    const losers = effective.filter((entry) => entry !== winner);
+    // T11（P0-5）：losers 只含可见来源池（unbound 已进 gated，不重复进 shadowed）
+    const losers = [...pool2.filter((entry) => entry !== winner), ...excludedByExplicitOnly];
 
     if (!isReadinessPassing(winnerDiagnosis.readiness)) {
       gated.push(resolved);

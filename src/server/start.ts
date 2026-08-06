@@ -278,16 +278,31 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     }
     // 评审修复（A1）：启动时激活 enabled 插件（登记贡献 + 启动运行时）。
     // 异步执行不阻塞 Server 启动；单个插件激活失败仅记录，不影响其余。
+    // T11（P0-4）：激活完成后按最终状态全量重建插件 Skill（rebuildFromDisk 的
+    // initialize 早于激活完成执行，这里消除状态窗口；失败只 warn）
     pluginFacade.activateAllEnabled()
       .then(({ failed }) => {
         for (const failure of failed) {
           instrument.warn("plugin.activate.failed", "启动时激活插件失败", { pluginId: failure.pluginId });
+        }
+        try {
+          skillComposition.resyncPluginSkills();
+        } catch (error) {
+          instrument.warn("skill.plugin_resync.failed", "启动激活后插件 Skill 重建失败", {
+            reason: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+          });
         }
       })
       .catch((error: unknown) => {
         instrument.warn("plugin.activate_all.failed", "插件批量激活失败", {
           reason: error instanceof Error ? error.message : "unknown",
         });
+        // 激活整体失败也要恢复插件 Skill 阻断状态（fail-closed：不暴露未激活插件 Skill）
+        try {
+          skillComposition.resyncPluginSkills();
+        } catch {
+          // 已在 resyncPluginSkills 内部记录
+        }
       });
     const providerStore = new ProviderStore(paths.providerSettings);
     // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）

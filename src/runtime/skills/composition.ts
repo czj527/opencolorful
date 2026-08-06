@@ -90,6 +90,12 @@ export interface SkillComposition {
   rebuildFromDisk(): SkillRebuildSummary;
   /** PluginFacade 生命周期接线（pluginFacade 提供时；包装 enable/disable/update/rollback/uninstall） */
   attachPluginLifecycle(): void;
+  /**
+   * T11（P0-4）：按插件当前状态全量重建阻断/同步（enabled → sync，其余 → block）。
+   * 启动时序：rebuildFromDisk（initialize）先于异步 activateAllEnabled 完成，
+   * 激活后调用本方法确保插件 Skill 与最终运行状态一致（幂等，失败只 warn）。
+   */
+  resyncPluginSkills(): void;
 }
 
 /** 组合根环境快照：os + PATH 可解析 bin + 环境变量名 + 已启用插件（readiness 门控用）。 */
@@ -120,14 +126,16 @@ export function buildSkillReadinessEnvironment(options: {
 
 /**
  * PATH 可解析的二进制名（Skill requires.bins 门控依据）。
- * Windows 匹配 .exe/.cmd/.bat/.ps1；POSIX 直接列文件名。上限 2000 防超大目录。
+ * Windows 匹配 .exe/.cmd/.bat/.ps1；POSIX 直接列文件名。
+ * T11（P1-6）：单目录上限 500、全 PATH 上限 5000——超大目录占满全局配额
+ * 会把后续目录（如 git 所在目录）挤出检测结果；上限只保护性能，不改变语义。
  */
 export function detectPathBins(): string[] {
   const bins = new Set<string>();
   const entries = (process.env.PATH ?? "").split(path.delimiter);
   let scanned = 0;
   for (const entry of entries) {
-    if (entry === "" || scanned >= 2000) {
+    if (entry === "" || scanned >= 5000) {
       continue;
     }
     let names: readonly string[];
@@ -136,8 +144,9 @@ export function detectPathBins(): string[] {
     } catch {
       continue; // 目录不存在/不可读：跳过（不误判 ready）
     }
+    let perDir = 0;
     for (const name of names) {
-      if (scanned >= 2000) {
+      if (perDir >= 500 || scanned >= 5000) {
         break;
       }
       if (process.platform === "win32") {
@@ -149,6 +158,7 @@ export function detectPathBins(): string[] {
         bins.add(name);
       }
       scanned += 1;
+      perDir += 1;
     }
   }
   return [...bins];
@@ -241,7 +251,14 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
   const snapshots = new SkillSnapshotService();
   const loadHandles = new LoadHandleRegistry();
   const confirmations = new ConfirmationTokenRegistry();
-  const contentService = new SkillContentService({ catalog, snapshots });
+  const contentService = new SkillContentService({
+    catalog,
+    snapshots,
+    // T11（P0-3）：插件禁用/卸载后正文读取 fail-closed（PluginSkillBridge 检查）
+    ...(pluginBridge !== undefined
+      ? { sourceReadable: (skillRef) => pluginBridge.assertPluginSkillReadable(skillRef) }
+      : {}),
+  });
 
   // ── Core Service ──────────────────────────────────────────────
   const core = new SkillCoreService({
@@ -259,6 +276,15 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
     trust,
     ...(workspace !== undefined ? { workspace } : {}),
     adapters,
+    // T11（P0-3）：插件 Skill 实时状态接入解析链（未启用/禁用/卸载 → 可见集剔除）
+    ...(pluginBridge !== undefined
+      ? {
+          pluginOverlay: {
+            assertReadable: (skillRef) => pluginBridge.assertPluginSkillReadable(skillRef),
+            overlayStatus: (skill, agentId) => pluginBridge.overlayStatus(skill, agentId),
+          },
+        }
+      : {}),
   });
 
   // ── ScriptRunner（沙箱/执行缺省拒绝；插件来源阻断经 bridge）───
@@ -358,6 +384,29 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
     facade.uninstall = wrap(facade.uninstall.bind(facade), () => undefined, (pluginId) => pluginBridge.blockPluginSkills(pluginId, "plugin_uninstalled")) as typeof facade.uninstall;
   }
 
+  /**
+   * T11（P0-4）：启动激活完成后按插件当前状态全量重建（复用 initialize 语义：
+   * enabled → sync、其余 → block）。启动时序中 activateAllEnabled 是异步的，
+   * rebuildFromDisk 内的 initialize 可能早于激活完成执行；本方法在激活后调用，
+   * 消除状态窗口（幂等；无桥/失败只 warn 不抛）。
+   */
+  function resyncPluginSkills(): void {
+    if (pluginBridge === undefined) {
+      return;
+    }
+    try {
+      const { synced, blocked } = pluginBridge.initialize();
+      instrument.debug("skill.plugin_bridge.resync", "启动激活后插件 Skill 全量重建", {
+        synced: String(synced.length),
+        blocked: String(blocked.length),
+      });
+    } catch (error) {
+      instrument.warn("skill.plugin_bridge.resync_failed", "启动激活后插件 Skill 重建失败", {
+        reason: error instanceof Error ? error.message.slice(0, 200) : "unknown",
+      });
+    }
+  }
+
   return {
     core,
     catalog,
@@ -374,5 +423,6 @@ export function buildSkillComposition(options: SkillCompositionOptions): SkillCo
     adapters,
     rebuildFromDisk,
     attachPluginLifecycle,
+    resyncPluginSkills,
   };
 }

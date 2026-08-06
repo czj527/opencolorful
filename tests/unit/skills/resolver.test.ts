@@ -13,7 +13,9 @@ import { createSkillPackage, ingestPackage, makeEnv, makeSkillPackageAt, tmpDir 
 // - 优先级：workspace > managed > plugin > external > builtin；
 // - 同名候选全部保留 + shadowed；固定 SkillRef 优先；Workspace 不替换固定引用；
 // - 失效/缺失固定引用不静默回退（fail-closed）；
-// - readiness 门控与 selection 覆盖。
+// - readiness 门控与 selection 覆盖；
+// - T11（P0-5）：未固定 managed/plugin/external 候选不进入 Agent 可见集
+//   （安装默认只绑定当前 Agent，§11.5）→ gated + unbound 诊断；builtin/workspace 全局可见。
 // ═══════════════════════════════════════════════════════════════
 
 const env = makeEnv();
@@ -25,7 +27,7 @@ function registerSameName(catalog: SkillCatalog, name: string, sourceKind: "work
 }
 
 describe("解析优先级与 shadowed", () => {
-  it("默认优先级 workspace > managed > plugin > external > builtin", () => {
+  it("默认优先级 workspace > builtin；未固定 managed/plugin/external 不进入可见集（P0-5）", () => {
     const root = tmpDir();
     const catalog = new SkillCatalog();
     const workspace = registerSameName(catalog, "git-workflow", "workspace", root);
@@ -35,9 +37,13 @@ describe("解析优先级与 shadowed", () => {
     const builtin = registerSameName(catalog, "git-workflow", "builtin", root);
     const output = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], environment: env });
 
+    // 可见集只剩全局来源：workspace 胜出，builtin shadowed
     expect(output.visible).toHaveLength(1);
     expect(output.visible[0]?.skillRef.sourceKind).toBe("workspace");
-    expect(output.shadowed.map((skill) => skill.skillRef.sourceKind).sort()).toEqual(["builtin", "external", "managed", "plugin"]);
+    expect(output.shadowed.map((skill) => skill.skillRef.sourceKind)).toEqual(["builtin"]);
+    // 未固定 managed/plugin/external → gated（不 shadowed）+ unbound 诊断
+    expect(output.gated.map((skill) => skill.skillRef.sourceKind).sort()).toEqual(["external", "managed", "plugin"]);
+    expect(output.diagnostics.some((diagnostic) => diagnostic.message.includes("未绑定候选"))).toBe(true);
     // 同名候选在 Catalog 中全部保留
     expect(catalog.list({ validity: "valid" })).toHaveLength(5);
 
@@ -48,7 +54,22 @@ describe("解析优先级与 shadowed", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it("同来源多版本：新版本胜出，旧版本 shadowed", () => {
+  it("同来源多版本：新版本胜出，旧版本 shadowed（workspace 全局可见）", () => {
+    const root = tmpDir();
+    const catalog = new SkillCatalog();
+    const v1 = makeSkillPackageAt(root, "workspace/v1", { name: "git-workflow", version: "1.0.0" });
+    const v2 = makeSkillPackageAt(root, "workspace/v2", { name: "git-workflow", version: "2.0.0" });
+    ingestPackage(catalog, v1, "workspace", env);
+    ingestPackage(catalog, v2, "workspace", env);
+    const output = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], environment: env });
+    expect(output.visible).toHaveLength(1);
+    expect(output.visible[0]?.skillRef.version).toBe("2.0.0");
+    expect(output.shadowed).toHaveLength(1);
+    expect(output.shadowed[0]?.skillRef.version).toBe("1.0.0");
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("同来源多版本（managed）：未绑定 → 全部 gated，不 shadowed（P0-5）", () => {
     const root = tmpDir();
     const catalog = new SkillCatalog();
     const v1 = makeSkillPackageAt(root, "managed/v1", { name: "git-workflow", version: "1.0.0" });
@@ -56,10 +77,9 @@ describe("解析优先级与 shadowed", () => {
     ingestPackage(catalog, v1, "managed", env);
     ingestPackage(catalog, v2, "managed", env);
     const output = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], environment: env });
-    expect(output.visible).toHaveLength(1);
-    expect(output.visible[0]?.skillRef.version).toBe("2.0.0");
-    expect(output.shadowed).toHaveLength(1);
-    expect(output.shadowed[0]?.skillRef.version).toBe("1.0.0");
+    expect(output.visible).toHaveLength(0);
+    expect(output.gated).toHaveLength(2);
+    expect(output.shadowed).toHaveLength(0);
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
@@ -119,7 +139,8 @@ describe("固定 SkillRef 优先", () => {
       name: "os-bound",
       extraFrontmatter: "metadata:\n  opencolorful:\n    version: 1\n    requires:\n      os: [darwin]",
     });
-    ingestPackage(catalog, packageRoot, "managed", env);
+    // workspace 全局可见来源 → 走真实 readiness 门控路径（而非 unbound）
+    ingestPackage(catalog, packageRoot, "workspace", env);
     const output = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], environment: env });
     expect(output.visible).toHaveLength(0);
     expect(output.gated).toHaveLength(1);
@@ -134,7 +155,7 @@ describe("固定 SkillRef 优先", () => {
       name: "env-warn",
       extraFrontmatter: "metadata:\n  opencolorful:\n    version: 1\n    requires:\n      env: [MISSING_VAR]",
     });
-    ingestPackage(catalog, packageRoot, "managed", env);
+    ingestPackage(catalog, packageRoot, "workspace", env);
     const output = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], environment: env });
     expect(output.visible).toHaveLength(1);
     expect(output.visible[0]?.status.readiness).toBe("degraded");
@@ -146,25 +167,25 @@ describe("selection 覆盖与显式选择", () => {
   it("Agent 级 selectionOverrides：disabled 不入可见集，explicit-only 使低优先级胜出", () => {
     const root = tmpDir();
     const catalog = new SkillCatalog();
-    const managed = registerSameName(catalog, "git-workflow", "managed", root);
+    const workspace = registerSameName(catalog, "git-workflow", "workspace", root);
     const builtin = registerSameName(catalog, "git-workflow", "builtin", root);
 
-    // 覆盖 builtin 为 explicit-only → 低优先级显式选择胜出
+    // 覆盖 builtin 为 explicit-only → 全局来源池中显式选择胜出
     const overrides: Record<string, SkillSelectionMode> = {
       [skillRefKey(builtin.skillRef)]: "explicit-only",
     };
     const explicitOutput = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], selectionOverrides: overrides, environment: env });
     expect(explicitOutput.visible).toHaveLength(1);
     expect(explicitOutput.visible[0]?.skillRef.sourceKind).toBe("builtin");
-    expect(explicitOutput.shadowed.map((skill) => skill.skillRef.sourceKind)).toContain("managed");
+    expect(explicitOutput.shadowed.map((skill) => skill.skillRef.sourceKind)).toContain("workspace");
 
-    // 覆盖 managed 为 disabled → 不入可见集
+    // 覆盖 workspace 为 disabled → 不入可见集
     const disabledOverrides: Record<string, SkillSelectionMode> = {
-      [skillRefKey(managed.skillRef)]: "disabled",
+      [skillRefKey(workspace.skillRef)]: "disabled",
     };
     const disabledOutput = resolveSkillCandidates({ candidates: catalog.list(), pinnedRefs: [], selectionOverrides: disabledOverrides, environment: env });
-    expect(disabledOutput.disabled.map((skill) => skill.skillRef.sourceKind)).toContain("managed");
-    expect(disabledOutput.visible.map((skill) => skill.skillRef.sourceKind)).not.toContain("managed");
+    expect(disabledOutput.disabled.map((skill) => skill.skillRef.sourceKind)).toContain("workspace");
+    expect(disabledOutput.visible.map((skill) => skill.skillRef.sourceKind)).not.toContain("workspace");
     fs.rmSync(root, { recursive: true, force: true });
   });
 

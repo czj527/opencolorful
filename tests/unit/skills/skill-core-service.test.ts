@@ -546,6 +546,225 @@ describe("manage_skill_bundle：版本化与迁移确认", () => {
   });
 });
 
+
+// ── P1-7：无 Agent Session 与 Session 临时绑定 ──────────────────
+
+describe("P1-7：无 Agent Session 与 Session 临时绑定", () => {
+  it("无 Agent 会话：Session 临时绑定 + workspace 全局来源可见；未绑定 managed 不可见", () => {
+    const harness = setup();
+    // workspace 来源登记进 Catalog（全局可见来源）
+    const wsDir = harness.makePackage("ws-src", { name: "ws-skill", version: "1.0.0" });
+    harness.catalog.ingestCandidate({
+      candidate: makeCandidate(path.resolve(wsDir), "workspace", "ws-skill", "1.0.0"),
+      inspection: makeInspection(path.resolve(wsDir), "1.0.0"),
+      trusted: true,
+      environment: makeEnv(),
+    });
+    // 未绑定 managed → 不可见（P0-5）
+    const unboundDir = harness.makePackage("m-src", { name: "m-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(unboundDir), { name: "m-skill", version: "1.0.0" });
+    // Session 临时绑定 managed → 可见
+    const boundDir = harness.makePackage("b-src", { name: "b-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(boundDir), { name: "b-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, boundDir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+
+    const { skills } = harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    const names = skills.map((skill) => skill.name);
+    expect(names).toContain("b-skill");
+    expect(names).toContain("ws-skill");
+    expect(names).not.toContain("m-skill");
+  });
+
+  it("无 Agent 会话：临时绑定失效（Catalog 无此 Key）→ 诊断 fail-closed，不静默回退", () => {
+    const harness = setup();
+    const dir = harness.makePackage("x-src", { name: "x-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "x-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    // 卸载：从 Catalog 移除登记（临时绑定 Key 仍在存储中）
+    harness.catalog.removeByRefKey(skillRefKey(ref));
+
+    const { skills, diagnostics } = harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    expect(skills).toHaveLength(0);
+    expect(diagnostics.some((diag) => diag.type === "error" && diag.message.includes("临时绑定无法解析"))).toBe(true);
+  });
+
+  it("Agent 会话：Session 临时绑定与 Agent 持久绑定合并解析", () => {
+    const harness = setup();
+    // Agent-1 持久绑定
+    const agentDir = harness.makePackage("agent-src", { name: "agent-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(agentDir), { name: "agent-skill", version: "1.0.0" });
+    const agentRef = skillRefOf(harness, agentDir);
+    harness.agentService.bindSkill({ agentId: "agent-1", skillRef: agentRef, actor: { kind: "user", id: "test" } });
+    // Session 临时绑定另一个 Skill
+    const sessDir = harness.makePackage("sess-src", { name: "sess-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(sessDir), { name: "sess-skill", version: "1.0.0" });
+    const sessRef = skillRefOf(harness, sessDir);
+    harness.sessionService.bindTemporary({ sessionId: "session-1", skillRef: sessRef });
+
+    const { skills } = harness.core.buildPiSkillsForTurn({ agentId: "agent-1", sessionId: "session-1", turnId: "turn-1" });
+    const names = skills.map((skill) => skill.name);
+    expect(names).toContain("agent-skill");
+    expect(names).toContain("sess-skill");
+  });
+
+  it("快照身份：无 Agent 会话使用 @anonymous 占位（契约拒绝空 agentId）", () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "anon-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "anon-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    const { skills } = harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    expect(skills).toHaveLength(1);
+    expect(skills[0]?.sourceInfo.scope).toBe("user");
+  });
+});
+
+
+// ── P0-2：read 工具 Skill 受控读取路由 ─────────────────────────
+
+describe("P0-2：readSkillFileForSession 三态路由", () => {
+  it("命中可见 Skill 根 → ok（正文 + skillRefKey）；支持文件同样受控", async () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "ro-skill", version: "1.0.0" });
+    fs.mkdirSync(path.join(dir, "references"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "references", "guide.md"), "# Guide\n内容", "utf8");
+    ingestManagedSkill(harness, path.dirname(dir), { name: "ro-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    // 先冻结（beginTurn 语义）
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+
+    const main = await harness.core.readSkillFileForSession({ sessionId: "session-9", absPath: path.join(dir, "SKILL.md") });
+    expect(main.status).toBe("ok");
+    if (main.status === "ok") {
+      expect(main.body).toContain("这是 Skill 正文。");
+      expect(main.relativePath).toBe("SKILL.md");
+    }
+    const support = await harness.core.readSkillFileForSession({ sessionId: "session-9", absPath: path.join(dir, "references", "guide.md") });
+    expect(support.status).toBe("ok");
+    if (support.status === "ok") {
+      expect(support.body).toBe("# Guide\n内容");
+      expect(support.relativePath).toBe("references/guide.md");
+    }
+  });
+
+  it("非 Skill 路径 / 无冻结快照 → not-a-skill-file（回退普通沙箱读取）", async () => {
+    const harness = setup();
+    const outside = path.join(harness.home, "outside.txt");
+    fs.writeFileSync(outside, "plain", "utf8");
+    // 未冻结：无快照 → not-a-skill-file
+    const noFreeze = await harness.core.readSkillFileForSession({ sessionId: "session-9", absPath: outside });
+    expect(noFreeze.status).toBe("not-a-skill-file");
+
+    const dir = harness.makePackage("b-src", { name: "ro-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "ro-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    // 冻结后：Skill 根外路径仍 not-a-skill-file
+    const outsideAfter = await harness.core.readSkillFileForSession({ sessionId: "session-9", absPath: outside });
+    expect(outsideAfter.status).toBe("not-a-skill-file");
+  });
+
+  it("内容被篡改 → denied（fail-closed，绝不回退裸读）", async () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "tamper-ro", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "tamper-ro", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    // 冻结后篡改 → 哈希不匹配 → denied
+    fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: tamper-ro\ndescription: d\n---\nEVIL", "utf8");
+    const result = await harness.core.readSkillFileForSession({ sessionId: "session-9", absPath: path.join(dir, "SKILL.md") });
+    expect(result.status).toBe("denied");
+    if (result.status === "denied") {
+      expect(result.reasonCode).toBe("skill_content_hash_mismatch");
+    }
+  });
+});
+
+
+// ── P1-9：安装结果契约收紧（grant/loadHandle 失败不得静默 installed）──
+
+describe("P1-9：激活授权/loadHandle 签发失败 → failed（不静默 installed）", () => {
+  /** 临时把实例原型方法替换为抛错实现，回调后恢复（原型共享，必须还原）。 */
+  function withBrokenMethod<T extends object>(instance: T, methodName: keyof T, message: string, fn: () => void): void {
+    const proto = Object.getPrototypeOf(instance) as Record<string, unknown>;
+    const original = proto[methodName as string] as (...args: unknown[]) => unknown;
+    proto[methodName as string] = () => {
+      throw new Error(message);
+    };
+    try {
+      fn();
+    } finally {
+      proto[methodName as string] = original;
+    }
+  }
+
+  it("激活授权签发失败 → status=failed（skillRef/operationId 保留，reasonCode=skill_activation_denied）", () => {
+    const harness = setup();
+    const dir = harness.makePackage("grant-fail-src", { name: "grant-fail", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "grant-fail", version: "1.0.0" });
+
+    let result: ReturnType<T6Harness["core"]["install"]>;
+    withBrokenMethod(harness.sessionService, "issueActivationGrant", "activation store unavailable", () => {
+      result = harness.core.install({
+        sourceRef: dir,
+        kind: "local",
+        sessionId: "session-1",
+        turnId: "turn-1",
+      });
+    });
+    expect(result!.status).toBe("failed");
+    if (result!.status === "failed") {
+      expect(result!.reasonCode).toBe("skill_activation_denied");
+      expect(result!.skillRef).toBeDefined();
+      expect(result!.reason).toContain("安装与绑定已完成");
+    }
+  });
+
+  it("loadHandle 签发失败 → status=failed（reasonCode=skill_operation_failed）", () => {
+    const harness = setup();
+    const dir = harness.makePackage("handle-fail-src", { name: "handle-fail", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "handle-fail", version: "1.0.0" });
+
+    let result: ReturnType<T6Harness["core"]["install"]>;
+    withBrokenMethod(harness.loadHandles, "issueLoadHandle", "load handle store unavailable", () => {
+      result = harness.core.install({
+        sourceRef: dir,
+        kind: "local",
+        sessionId: "session-1",
+        turnId: "turn-1",
+      });
+    });
+    expect(result!.status).toBe("failed");
+    if (result!.status === "failed") {
+      expect(result!.reasonCode).toBe("skill_operation_failed");
+      expect(result!.loadHandle).toBeNull();
+    }
+  });
+
+  it("正常路径：grant + loadHandle 都签发成功 → installed（回归）", () => {
+    const harness = setup();
+    const dir = harness.makePackage("ok-src", { name: "ok-install", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "ok-install", version: "1.0.0" });
+
+    const result = harness.core.install({
+      sourceRef: dir,
+      kind: "local",
+      sessionId: "session-1",
+      turnId: "turn-1",
+    });
+    expect(result.status).toBe("installed");
+    if (result.status === "installed") {
+      expect(result.activationGrant).toBe("granted");
+      expect(result.loadHandle).not.toBeNull();
+    }
+  });
+});
+
 function skillRefKeyOf(harness: T6Harness, ref: SkillRef): string {
   const registered = harness.catalog.resolveBySkillRef(ref);
   return skillRefKey(registered.skillRef);

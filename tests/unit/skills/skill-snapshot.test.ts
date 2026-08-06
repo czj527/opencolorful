@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { SkillRef } from "../../../src/contracts/skill-protocol.js";
 import type { ResolveOutput } from "../../../src/runtime/skills/resolver.js";
 import { SkillCatalog } from "../../../src/runtime/skills/catalog/skill-catalog.js";
 import { SkillError } from "../../../src/runtime/skills/errors.js";
@@ -34,10 +35,10 @@ describe("SkillSnapshotService", () => {
     rmrf(root);
   });
 
-  function resolveVisible(skillRefs: string[] = []): ResolveOutput {
+  function resolveVisible(pinnedRefs: readonly SkillRef[] = []): ResolveOutput {
     return catalog.listByAgent({
       agentId: "agent-1",
-      pinnedRefs: [],
+      pinnedRefs,
       environment: makeEnv(),
     });
   }
@@ -57,9 +58,9 @@ describe("SkillSnapshotService", () => {
 
   it("创建快照：字段完整、deepFreeze 不可变、可见 SkillRef 顺序一致", () => {
     const dir = createSkillPackage(root, { name: "alpha", description: "Alpha Skill", version: "1.0.0" });
-    ingestPackage(catalog, dir, "managed", makeEnv());
-
-    const snapshot = makeSnapshot();
+    const registered = ingestPackage(catalog, dir, "managed", makeEnv());
+    // T11（P0-5）：managed 安装默认绑定当前 Agent → 固定引用进入可见集
+    const snapshot = makeSnapshot({ resolve: resolveVisible([registered.skillRef]) });
     expect(snapshot.snapshotId.startsWith(SKILL_SNAPSHOT_PREFIX)).toBe(true);
     expect(snapshot.agentId).toBe("agent-1");
     expect(snapshot.sessionId).toBe("session-1");
@@ -89,17 +90,21 @@ describe("SkillSnapshotService", () => {
   });
 
   it("四态结果与诊断进入快照（shadowed/disabled/gated/diagnostics）", () => {
-    // 同名两个候选 → 低优先级 shadowed
+    // 同名三个候选：workspace 胜出、builtin shadowed、未绑定 managed 进 gated（P0-5）
     const managed = createSkillPackage(root, { name: "dup", description: "managed", version: "1.0.0" });
     ingestPackage(catalog, managed, "managed", makeEnv());
     const workspace = createSkillPackage(root, { name: "dup", description: "workspace", version: "2.0.0" });
     ingestPackage(catalog, workspace, "workspace", makeEnv());
+    const builtin = createSkillPackage(root, { name: "dup", description: "builtin", version: "3.0.0" });
+    ingestPackage(catalog, builtin, "builtin", makeEnv());
 
     const snapshot = makeSnapshot();
     expect(snapshot.entries).toHaveLength(1);
+    expect(snapshot.entries[0]?.description).toBe("workspace");
     expect(snapshot.shadowed.length).toBeGreaterThanOrEqual(1);
-    expect(snapshot.shadowed[0]?.selection).toBe("shadowed");
-    expect(snapshot.diagnostics.length).toBe(0);
+    expect(snapshot.shadowed.some((skill) => skill.selection === "shadowed")).toBe(true);
+    expect(snapshot.gated.map((skill) => skill.skillRef.sourceKind)).toContain("managed");
+    expect(snapshot.diagnostics.some((diagnostic) => diagnostic.message.includes("未绑定候选"))).toBe(true);
   });
 
   it("激活授权摘要冻结：未消费未过期项进入快照", () => {
@@ -136,7 +141,7 @@ describe("SkillSnapshotService", () => {
     const implicit = ingestPackage(catalog, dir2, "managed", makeEnv());
     const output = catalog.listByAgent({
       agentId: "agent-1",
-      pinnedRefs: [pinned.skillRef],
+      pinnedRefs: [pinned.skillRef, implicit.skillRef],
       environment: makeEnv(),
     });
     // implicit 候选仍可见（同名不同 id）
@@ -156,16 +161,18 @@ describe("SkillSnapshotService", () => {
   });
 
   it("可见条目超过 maxSkillsPerSnapshot → 截断并标记 truncatedSkills", () => {
+    const refs = [];
     for (let index = 0; index < 3; index += 1) {
       const dir = createSkillPackage(root, { name: `skill-${index}`, version: "1.0.0" });
-      ingestPackage(catalog, dir, "managed", makeEnv());
+      const registered = ingestPackage(catalog, dir, "managed", makeEnv());
+      refs.push(registered.skillRef);
     }
     const small = new SkillSnapshotService({ now: () => nowValue, budgets: { maxSkillsPerSnapshot: 2 } });
     const snapshot = small.createSkillSnapshot({
       agentId: "agent-1",
       sessionId: "session-1",
       turnId: "turn-1",
-      resolveOutput: resolveVisible(),
+      resolveOutput: resolveVisible(refs),
     });
     expect(snapshot.entries).toHaveLength(2);
     expect(snapshot.truncatedSkills).toBe(true);
@@ -222,6 +229,7 @@ describe("SkillSnapshotService", () => {
   it("shouldRebuild：绑定/版本/信任/readiness/授权变化 → true；支持文件冻结 → false", () => {
     const dir = createSkillPackage(root, { name: "alpha", version: "1.0.0" });
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
+    // first：未绑定（P0-5 下 managed 不可见）→ 后续绑定变化触发重建
     const output = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
     const first = service.createSkillSnapshot({ agentId: "agent-1", sessionId: "session-1", turnId: "turn-1", resolveOutput: output });
 
@@ -236,8 +244,8 @@ describe("SkillSnapshotService", () => {
 
     // 版本变化 → 重建
     const dir2 = createSkillPackage(root, { name: "alpha", version: "2.0.0" });
-    ingestPackage(catalog, dir2, "managed", makeEnv());
-    const output2 = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [], environment: makeEnv() });
+    const v2Registered = ingestPackage(catalog, dir2, "managed", makeEnv());
+    const output2 = catalog.listByAgent({ agentId: "agent-1", pinnedRefs: [v2Registered.skillRef], environment: makeEnv() });
     const v2 = service.createSkillSnapshot({ agentId: "agent-1", sessionId: "session-1", turnId: "turn-1", resolveOutput: output2 });
     expect(service.shouldRebuild(first, v2)).toBe(true);
 

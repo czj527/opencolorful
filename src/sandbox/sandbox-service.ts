@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import * as path from "node:path";
 
 import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
 import type {
@@ -21,8 +22,13 @@ import { buildPathGuardPolicy } from "./policy.js";
  * 事件只进 observability 管线；路径/命令/参数一律不落盘（计划 §6.3：
  * 工作区和工具审计不得保存原始敏感路径、命令或参数），只保留
  * operation/level/required/pattern 等语义字段。
+ *
+ * T11（P0-2）：addReadOnlyRoots —— 运行时向 PathGuard 追加只读根
+ * （当前 turn 冻结的 Skill 根），幂等去重。
  */
 export class SandboxService {
+  private readonly readOnlyRoots = new Set<string>();
+
   constructor(
     private readonly pathGuard: PathGuard,
     private readonly agentId: string,
@@ -59,6 +65,35 @@ export class SandboxService {
   /** 获取 PathGuard 供外部调用 */
   getPathGuard(): PathGuard {
     return this.pathGuard;
+  }
+
+  /**
+   * T11（P0-2）：把目录注册为只读根（READ_ONLY 级别；write/edit/delete/exec
+   * 仍拒绝）。用于当前 turn 冻结的 Skill 根——read/grep/find/ls 可在 Skill
+   * 目录工作；正文读取优先走 SkillContentService 受控路径（哈希/预算），
+   * 本规则只兜底沙箱策略层。幂等：同一根重复注册不产生重复规则。
+   */
+  addReadOnlyRoots(roots: readonly string[], reason: string): void {
+    let added = 0;
+    for (const root of roots) {
+      const normalized = path.resolve(root);
+      if (this.readOnlyRoots.has(normalized)) {
+        continue;
+      }
+      this.readOnlyRoots.add(normalized);
+      this.pathGuard.addRule({
+        path: normalized.endsWith(path.sep) ? normalized : `${normalized}${path.sep}`,
+        level: "READ_ONLY",
+        reason,
+      });
+      added += 1;
+    }
+    if (added > 0) {
+      instrument.debug("sandbox.read_only_roots.added", "追加只读根", {
+        count: String(added),
+        reason,
+      });
+    }
   }
 
   /** 将 PathGuard 的拒绝结果记录为 sandbox.path.denied（+audit 镜像）。 */

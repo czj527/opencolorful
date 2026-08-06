@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { SkillRef } from "../../../src/contracts/skill-protocol.js";
 import type { ResolveOutput } from "../../../src/runtime/skills/resolver.js";
 import { SkillCatalog } from "../../../src/runtime/skills/catalog/skill-catalog.js";
 import { SkillContentService, type SkillActivationOverlayReader } from "../../../src/runtime/skills/content/skill-content-service.js";
@@ -47,8 +48,8 @@ describe("SkillContentService", () => {
     rmrf(root);
   });
 
-  function resolveFor(agentId = "agent-1"): ResolveOutput {
-    return catalog.listByAgent({ agentId, pinnedRefs: [], environment: makeEnv() });
+  function resolveFor(agentId = "agent-1", pinnedRefs: readonly SkillRef[] = []): ResolveOutput {
+    return catalog.listByAgent({ agentId, pinnedRefs, environment: makeEnv() });
   }
 
   function makeSnapshot(resolve: ResolveOutput = resolveFor()): SkillSnapshot {
@@ -69,7 +70,8 @@ describe("SkillContentService", () => {
       fs.writeFileSync(abs, `support:${rel}`, "utf8");
     }
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    return { dir, registered, resolve: resolveFor() };
+    // T11（P0-5）：managed 安装默认绑定当前 Agent → 固定引用进入解析（未绑定不进入可见集）
+    return { dir, registered, resolve: resolveFor("agent-1", [registered.skillRef]) };
   }
 
   it("正常读取 SKILL.md：正文与包哈希匹配", async () => {
@@ -164,7 +166,7 @@ describe("SkillContentService", () => {
     const lines = ["---", "name: big", "description: big skill", "---", "x".repeat(100)];
     fs.writeFileSync(path.join(dir, "SKILL.md"), lines.join("\n"), "utf8");
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    const snapshot = makeSnapshot(resolveFor());
+    const snapshot = makeSnapshot(resolveFor("agent-1", [registered.skillRef]));
     const result = await service.readSkillBody({ snapshot, skillRef: registered.skillRef });
     expect(result.truncated).toBe(true);
     expect(result.truncatedReason).toBe("single_file");
@@ -184,7 +186,7 @@ describe("SkillContentService", () => {
     fs.writeFileSync(path.join(dir, "a.md"), "a".repeat(50), "utf8");
     fs.writeFileSync(path.join(dir, "b.md"), "b".repeat(50), "utf8");
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    const snapshot = makeSnapshot(resolveFor());
+    const snapshot = makeSnapshot(resolveFor("agent-1", [registered.skillRef]));
 
     const first = await service.readSkillBody({ snapshot, skillRef: registered.skillRef, relativePath: "a.md" });
     expect(first.truncated).toBe(false);
@@ -208,7 +210,7 @@ describe("SkillContentService", () => {
     fs.writeFileSync(path.join(dir, "SKILL.md"), "---\nname: budget\ndescription: b\n---\nbody", "utf8");
     fs.writeFileSync(path.join(dir, "a.md"), "a".repeat(50), "utf8");
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    const snapshot = makeSnapshot(resolveFor());
+    const snapshot = makeSnapshot(resolveFor("agent-1", [registered.skillRef]));
 
     const first = await service.readSkillBody({ snapshot, skillRef: registered.skillRef, relativePath: "a.md" });
     expect(first.body).toHaveLength(50);

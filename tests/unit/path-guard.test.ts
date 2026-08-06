@@ -349,4 +349,33 @@ describe("PathGuard", () => {
       expect(result.level).toBe("BLOCKED");
     },
   );
+
+describe("PathGuard.addRule（T11 P0-2：运行时动态规则）", () => {
+  it("addRule 追加的规则优先于静态策略（READ_ONLY 放行 read，write 仍拒绝）", () => {
+    const guard = new PathGuard(makeTestPolicy());
+    const skillRoot = path.join(workspaceDir, "skills", "alpha");
+    fs.mkdirSync(skillRoot, { recursive: true });
+
+    // 静态策略：skillRoot 在 workspace FULL 内 → read/write 都允许
+    // 追加 READ_ONLY 规则后：read 允许、write 拒绝（只读放行）
+    guard.addRule({ path: skillRoot + path.sep, level: "READ_ONLY", reason: "skill-root-read" });
+    const readResult = guard.check("read", path.join(skillRoot, "SKILL.md"));
+    expect(readResult.allowed).toBe(true);
+    expect(readResult.level).toBe("READ_ONLY");
+    const writeResult = guard.check("write", path.join(skillRoot, "SKILL.md"));
+    expect(writeResult.allowed).toBe(false);
+  });
+
+  it("addRule 幂等：同 path+level 重复追加不产生重复规则", () => {
+    const guard = new PathGuard(makeTestPolicy());
+    const skillRoot = path.join(workspaceDir, "skills", "beta");
+    fs.mkdirSync(skillRoot, { recursive: true });
+    guard.addRule({ path: skillRoot + path.sep, level: "READ_ONLY", reason: "skill-root-read" });
+    guard.addRule({ path: skillRoot + path.sep, level: "READ_ONLY", reason: "skill-root-read" });
+    const readResult = guard.check("read", path.join(skillRoot, "SKILL.md"));
+    expect(readResult.allowed).toBe(true);
+    expect(readResult.reason).toContain("skill-root-read");
+  });
+});
+
 });

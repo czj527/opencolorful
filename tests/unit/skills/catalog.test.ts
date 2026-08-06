@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { skillRefKey } from "../../../src/contracts/skill-protocol.js";
 import { SkillCatalog } from "../../../src/runtime/skills/catalog/skill-catalog.js";
 import { SkillError } from "../../../src/runtime/skills/errors.js";
 import { createSkillPackage, ingestPackage, makeCandidate, makeEnv, makeInspection, makeSkillPackageAt, tmpDir } from "./helpers.js";
@@ -54,6 +55,23 @@ describe("SkillCatalog 登记与解析", () => {
     expect(registered.status.selection).toBe("disabled");
     expect(registered.status.readiness).toBe("incompatible");
     expect(registered.status.blockedReason).toBe("skill_manifest_invalid");
+  });
+
+
+  it("findByRefKey：按 skillRefKey 查找（P1-7 Session 临时绑定解析用）", () => {
+    const root = tmpDir();
+    const packageRoot = createSkillPackage(root, { name: "alpha", version: "1.0.0" });
+    const catalog = new SkillCatalog();
+    const registered = ingestPackage(catalog, packageRoot, "managed", env);
+    const key = skillRefKey(registered.skillRef);
+
+    const found = catalog.findByRefKey(key);
+    expect(found).not.toBeUndefined();
+    expect(found?.skillRef.contentHash).toBe(registered.skillRef.contentHash);
+    // 缺失 → undefined（不抛错，由调用方生成 fail-closed 诊断）
+    expect(catalog.findByRefKey("alpha@/nonexistent@1.0.0")).toBeUndefined();
+    expect(catalog.findByRefKey("")).toBeUndefined();
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   it("resolveBySkillRef 精确匹配；缺失/哈希不符抛错（fail-closed）", () => {

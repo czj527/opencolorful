@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import path from "node:path";
 
 import { type Static, Type } from "typebox";
 import Value from "typebox/value";
@@ -28,7 +29,7 @@ import { SkillError } from "../errors.js";
 import { diagnoseReadiness } from "../readiness.js";
 import type { SkillContentService } from "../content/skill-content-service.js";
 import type { LoadHandleRegistry } from "../content/load-handle.js";
-import type { SkillSnapshotService } from "../snapshot/skill-snapshot.js";
+import type { SkillSnapshotService, SkillSnapshot } from "../snapshot/skill-snapshot.js";
 import type { SkillInstaller } from "../installer/skill-installer.js";
 import { type SkillInstallSourceKind } from "../installer/stager.js";
 import { assessPackageRisks, type SkillRiskMarker } from "../installer/risk.js";
@@ -37,12 +38,20 @@ import type { SkillSourceAdapter, SkillSourceInspection } from "../sources/skill
 import type { SkillTrustPolicy } from "../sources/trust-config.js";
 import { WorkspaceSkillSource } from "../sources/workspace-source.js";
 import { buildPiSkillsFromSnapshot } from "../../../pi-sdk/skill-loader.js";
-import type { PiResourceSkills } from "../../../pi-sdk/types.js";
+import type { PiResourceSkills, SkillFileReadOutcome } from "../../../pi-sdk/types.js";
 import type { SkillLearningPolicy } from "../agent/agent-skill-config.js";
 import type { SessionSkillService } from "../session/session-skill-service.js";
 import type { ConfirmationTarget } from "../confirmation/confirmation-token.js";
 import { ConfirmationTokenRegistry, ConfirmationViewSchema, type ConfirmationView } from "../confirmation/confirmation-token.js";
 import type { ReadinessEnvironment } from "../readiness.js";
+import type { ResolutionDiagnostic } from "../resolver.js";
+
+/**
+ * T11（P1-7）：无 Agent Session 的快照 agentId 占位。
+ * SkillSnapshot 契约拒绝空 agentId（§10.2 身份字段必填），无 Agent 会话
+ * 以该哨兵值标识，语义为"会话未绑定 Agent"，不伪造任何真实 Agent 身份。
+ */
+export const ANONYMOUS_AGENT_ID = "@anonymous";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 13 T6 Skill Core Service（plans/phase-13.md §11 / §14.2 / §13.3）
@@ -591,6 +600,17 @@ export interface SkillCoreServiceDeps {
   readonly workspace?: { readonly cwd: string; readonly home: string };
   /** 来源适配器（当前仅用于能力诊断；搜索各层独立构建） */
   readonly adapters?: readonly SkillSourceAdapter[];
+  /**
+   * T11（P0-3）：插件 Skill 状态 overlay——插件启用/Agent 绑定/禁用/卸载的
+   * 实时状态接入解析链（PluginSkillBridge 适配）。未启用/已禁用/已卸载的插件
+   * Skill 从可见集剔除（fail-closed，不暴露给模型），正文读取同样 fail-closed。
+   */
+  readonly pluginOverlay?: {
+    /** 插件 Skill 可读性检查（禁用/卸载 → 抛错拒绝读取） */
+    assertReadable(skillRef: SkillRef): void;
+    /** 插件 Skill 状态覆盖（readiness/selection 按插件当前状态；插件来源用） */
+    overlayStatus(skill: RegisteredSkill, agentId?: string): SkillStatus;
+  };
   readonly actor?: ActorRef;
   readonly now?: () => Date;
   readonly activationGrantTtlMs?: number;
@@ -606,6 +626,12 @@ const EXECUTOR: ExecutorRef = { kind: "service", id: "skill-core" };
 
 export class SkillCoreService {
   private readonly now: () => Date;
+  /**
+   * T11（P0-2）：sessionId → 当前 turn 冻结的 Skill Snapshot。
+   * buildPiSkillsForTurn 每 turn 覆盖写入；read 工具经 readSkillFileForSession
+   * 用它做成员检查（哈希/预算由 SkillContentService 执行），保持 turn 冻结语义。
+   */
+  private readonly turnSnapshots = new Map<string, { readonly turnId: string; readonly snapshot: SkillSnapshot }>();
 
   constructor(private readonly deps: SkillCoreServiceDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -629,35 +655,152 @@ export class SkillCoreService {
 
   /**
    * T10：当前 Agent/Session 的 PI Skill pointer（元数据常驻注入 PI 系统提示）。
-   * 每 turn 调用：resolveOutput（Agent 绑定 + 解析）→ 不可变 Skill Snapshot 冻结
-   * （含未消费激活授权摘要）→ buildPiSkillsFromSnapshot（受控 filePath/baseDir）。
-   * 快照构造失败抛错（fail-closed，不返回 undefined）；无可见 Skill 返回空列表。
+   * 每 turn 调用：resolveOutput（Agent 绑定 + Session 临时绑定 + 解析）→ 不可变
+   * Skill Snapshot 冻结（含未消费激活授权摘要）→ buildPiSkillsFromSnapshot
+   * （受控 filePath/baseDir）。
+   * - 有 Agent：skills.json 持久绑定 + Session 临时绑定（P1-7 合并，extraPinnedRefs）；
+   * - 无 Agent Session（§9.4）：不继承 Agent Bundle，pinnedRefs 只含 Session 临时
+   *   绑定（active；skillRefKey → findByRefKey 解析为精确 SkillRef，失效进诊断
+   *   fail-closed），builtin/workspace 全局可见由 Resolver 保证；
+   * - 快照 agentId 用 ANONYMOUS_AGENT_ID 占位（Snapshot 契约拒绝空 agentId）；
+   * - 快照构造失败抛错（fail-closed，不返回 undefined）；无可见 Skill 返回空列表。
    */
-  buildPiSkillsForTurn(input: { readonly agentId: string; readonly sessionId?: string; readonly turnId?: string }): PiResourceSkills {
-    const { agentId, sessionId, turnId } = input;
-    const view = this.deps.agentService.listAgentSkills(agentId, this.deps.environment, this.deps.catalog);
+  buildPiSkillsForTurn(input: { readonly agentId?: string; readonly sessionId?: string; readonly turnId?: string }): PiResourceSkills {
+    const { sessionId, turnId } = input;
+    const agentId = input.agentId ?? "";
+    // P1-7：Session 临时绑定（agent/无 agent 会话都合并；只取 active，过期项不进入）
+    const bindings = sessionId !== undefined && sessionId !== "" ? this.resolveSessionBindings(sessionId) : { pinnedRefs: [] as SkillRef[], diagnostics: [] as ResolutionDiagnostic[] };
+    const diagnostics: ResolutionDiagnostic[] = [...bindings.diagnostics];
+    const view =
+      agentId === ""
+        ? this.deps.catalog.listByAgent({ agentId: ANONYMOUS_AGENT_ID, pinnedRefs: bindings.pinnedRefs, environment: this.deps.environment })
+        : this.deps.agentService.listAgentSkills(agentId, this.deps.environment, this.deps.catalog, bindings.pinnedRefs);
+    diagnostics.push(...view.diagnostics);
+    // T11（P0-3）：插件 Skill overlay——未启用/禁用/卸载的插件 Skill 从可见集剔除
+    // （fail-closed：不暴露给模型）；剔除项进 gated 并保留诊断
+    let visible = view.visible;
+    const gated: import("../resolver.js").ResolvedSkill[] = [...view.gated];
+    if (this.deps.pluginOverlay !== undefined) {
+      const kept: import("../resolver.js").ResolvedSkill[] = [];
+      for (const resolved of visible) {
+        if (resolved.skillRef.sourceKind !== "plugin") {
+          kept.push(resolved);
+          continue;
+        }
+        try {
+          this.deps.pluginOverlay.assertReadable(resolved.skillRef);
+          kept.push(resolved);
+        } catch (error) {
+          gated.push({
+            ...resolved,
+            status: {
+              ...resolved.status,
+              readiness: "blocked",
+              ...(error instanceof Error ? { blockedReason: error.message.slice(0, 200) } : {}),
+            },
+          });
+        }
+      }
+      visible = kept;
+    }
     const snapshot = this.deps.snapshots.createSkillSnapshot({
-      agentId,
+      agentId: agentId === "" ? ANONYMOUS_AGENT_ID : agentId,
       sessionId: sessionId ?? "",
       turnId: turnId ?? "",
       resolveOutput: {
-        visible: view.visible,
+        visible,
         shadowed: view.shadowed,
         disabled: view.disabled,
-        gated: view.gated,
-        diagnostics: view.diagnostics,
+        gated,
+        diagnostics,
       },
       ...(sessionId !== undefined
         ? { activationGrants: this.deps.sessionService.listActiveGrants(sessionId) }
         : {}),
     });
     const loaded = buildPiSkillsFromSnapshot(snapshot);
+    // T11（P0-2）：冻结快照入槽供 read 工具受控读取（新 turn 覆盖旧 turn）
+    if (sessionId !== undefined && sessionId !== "") {
+      this.turnSnapshots.set(sessionId, { turnId: turnId ?? "", snapshot });
+    }
     return { skills: loaded.skills, diagnostics: loaded.diagnostics };
   }
 
+  /**
+   * T11（P0-2）：read 工具路由——按绝对路径从当前 turn 冻结快照的可见 Skill
+   * 根匹配，命中则经 SkillContentService 受控读取（成员/哈希/预算/超时校验）。
+   * 三态结果：
+   * - ok：受控读取的正文（SKILL.md 或支持文件；relativePath 由 rootPath 换算）；
+   * - not-a-skill-file：无冻结快照或路径不在任何可见 Skill 根内——调用方回退
+   *   到普通沙箱读取（不改变普通文件行为）；
+   * - denied：命中 Skill 根但受控读取被拒（fail-closed，调用方不得回退裸读）。
+   */
+  async readSkillFileForSession(input: { readonly sessionId: string; readonly absPath: string }): Promise<SkillFileReadOutcome> {
+    const frozen = this.turnSnapshots.get(input.sessionId);
+    if (frozen === undefined) {
+      return { status: "not-a-skill-file", reason: "当前 Session 无冻结 Skill 快照（Skill 系统未接入或尚无 turn）" };
+    }
+    if (this.deps.contentService === undefined) {
+      return { status: "not-a-skill-file", reason: "SkillContentService 未就绪" };
+    }
+    const absPath = path.resolve(input.absPath);
+    for (const entry of frozen.snapshot.entries) {
+      const rel = path.relative(entry.rootPath, absPath);
+      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+        continue; // 目录本身/根外：不属于该 Skill 文件（目录不读正文）
+      }
+      const relativePath = rel.split(path.sep).join("/");
+      try {
+        const read = await this.deps.contentService.readSkillBody({
+          snapshot: frozen.snapshot,
+          skillRef: entry.skillRef,
+          relativePath,
+        });
+        return {
+          status: "ok",
+          body: read.body,
+          truncated: read.truncated,
+          skillRefKey: entry.skillRefKey,
+          relativePath,
+        };
+      } catch (error) {
+        return {
+          status: "denied",
+          reasonCode: extractReasonCode(error),
+          reason: error instanceof Error ? error.message.slice(0, 240) : "Skill 文件受控读取被拒绝",
+        };
+      }
+    }
+    return { status: "not-a-skill-file", reason: "路径不在当前 turn 可见 Skill 根内" };
+  }
+
+  /**
+   * T11（P1-7）：把 Session 临时绑定解析为精确 SkillRef（active 项）。
+   * 绑定只持久化 skillRefKey；经 Catalog.findByRefKey 找回完整 SkillRef
+   * （含 contentHash）才能进入 pinnedRefs。绑定失效（已卸载/不存在）→
+   * 诊断（skill_unknown_skillref，不静默回退）；过期项不进入。
+   */
+  private resolveSessionBindings(sessionId: string): { readonly pinnedRefs: readonly SkillRef[]; readonly diagnostics: readonly ResolutionDiagnostic[] } {
+    const pinnedRefs: SkillRef[] = [];
+    const diagnostics: ResolutionDiagnostic[] = [];
+    const view = this.deps.sessionService.listSessionSkills(sessionId);
+    for (const binding of view.active) {
+      const candidate = this.deps.catalog.findByRefKey(binding.skillRefKey);
+      if (candidate === undefined) {
+        diagnostics.push({
+          skillId: binding.skillRefKey.split("@")[0] ?? binding.skillRefKey,
+          code: "skill_unknown_skillref",
+          message: `Session 临时绑定无法解析到 Catalog（${binding.skillRefKey}），已排除且不静默回退`,
+        });
+        continue;
+      }
+      pinnedRefs.push(candidate.skillRef);
+    }
+    return { pinnedRefs, diagnostics };
+  }
+
   /** 无 Agent Session 临时绑定（TTL 到期自动失效；不自动升级为持久绑定）。 */
-  bindTemporarySessionSkill(
-    sessionId: string,
+  bindTemporarySessionSkill(    sessionId: string,
     input: { readonly skillRef: SkillRef; readonly selection?: SkillSelectionMode; readonly ttlMs?: number },
   ): ReturnType<SessionSkillService["bindTemporary"]> {
     return this.deps.sessionService.bindTemporary({
@@ -1067,6 +1210,9 @@ export class SkillCoreService {
     }
 
     // 7. 当前 turn 激活授权 overlay + loadHandle（仅会话内安装：sessionId + turnId）
+    // T11（P1-9）：grant/loadHandle 签发失败不得静默 installed——安装与绑定已
+    // 持久化，但当前 turn 的受控读取能力未建立；返回 failed（保留 skillRef/
+    // operationId 与已安装事实，可重试完成授权），绝不假装已具备读取权。
     let activationGrant: "granted" | "unavailable" = "unavailable";
     let grantId: string | undefined;
     let loadHandle: string | null = null;
@@ -1083,8 +1229,18 @@ export class SkillCoreService {
         });
         activationGrant = "granted";
         grantId = grant.grantId;
-      } catch {
-        activationGrant = "unavailable";
+      } catch (error) {
+        return {
+          status: "failed",
+          skillRef: installed.skillRef,
+          skillRefKey: installed.skillRefKey,
+          operationId: installed.operationId,
+          idempotent: installed.idempotent,
+          agentBinding,
+          loadHandle: null,
+          reasonCode: "skill_activation_denied",
+          reason: `安装与绑定已完成，但激活授权签发失败（${error instanceof Error ? error.message : "未知错误"}），当前 turn 无法受控读取，可重试`,
+        };
       }
       try {
         const handle = this.deps.loadHandles.issueLoadHandle({
@@ -1095,8 +1251,18 @@ export class SkillCoreService {
           ttlMs: this.deps.loadHandleTtlMs ?? DEFAULT_LOAD_HANDLE_TTL_MS,
         });
         loadHandle = handle.handleId;
-      } catch {
-        loadHandle = null;
+      } catch (error) {
+        return {
+          status: "failed",
+          skillRef: installed.skillRef,
+          skillRefKey: installed.skillRefKey,
+          operationId: installed.operationId,
+          idempotent: installed.idempotent,
+          agentBinding,
+          loadHandle: null,
+          reasonCode: "skill_operation_failed",
+          reason: `安装与绑定已完成，但 loadHandle 签发失败（${error instanceof Error ? error.message : "未知错误"}），当前 turn 无法受控读取，可重试`,
+        };
       }
     }
 

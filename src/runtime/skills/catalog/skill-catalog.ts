@@ -167,6 +167,16 @@ export class SkillCatalog {
     return toRegistered(record);
   }
 
+  /**
+   * T11（P1-7）：按 skillRefKey 查找登记（不校验 contentHash）。
+   * Session 临时绑定只持久化 skillRefKey，解析为精确 SkillRef（含 contentHash）
+   * 时使用；缺失返回 undefined，由调用方生成 fail-closed 诊断（不静默丢弃）。
+   */
+  findByRefKey(refKey: string): RegisteredSkill | undefined {
+    const record = this.registry.get(refKey);
+    return record === undefined ? undefined : toRegistered(record);
+  }
+
   list(options: SkillCatalogListOptions = {}): readonly RegisteredSkill[] {
     const needle = (options.query ?? "").trim().toLowerCase();
     const records = [...this.registry.values()].filter((record) => {

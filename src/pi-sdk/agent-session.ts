@@ -18,7 +18,7 @@ import {
 import type { ContextUsage, TokenUsage } from "../contracts/events.js";
 import type { FileOperation } from "../contracts/sandbox.js";
 import type { ToolPolicy } from "../runtime/tool-policy.js";
-import type { SandboxContext } from "./sandbox-extension.js";
+import type { SandboxContext, SandboxContextOverrides } from "./sandbox-extension.js";
 import {
   registerSandboxContext,
   runWithSandboxContext,
@@ -31,6 +31,7 @@ import type {
   PiResourceSkills,
   PiSessionUsageStats,
   PluginSessionTool,
+  SkillFileReadOutcome,
 } from "./types.js";
 import { getSessionManager } from "./session-manager-registry.js";
 
@@ -398,7 +399,7 @@ function toPiToolDefinition(tool: PluginSessionTool): ToolDefinition {
 export async function createPiFauxAgentSession(
   options: PiFauxAgentOptions & {
     toolPolicy?: ToolPolicy;
-    sandboxContext?: SandboxContext;
+        sandboxContext?: SandboxContextOverrides;
     /** 额外启用的工具名称（如记忆工具），不受 noTools 影响 */
     extraTools?: readonly string[];
   },
@@ -467,9 +468,16 @@ export async function createPiFauxAgentSession(
     await ensureSkillToolsExtensionLoaded();
   }
 
-  const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
+  // T11（P0-2）：外部注入只允许 skillRead 端口；sessionCwd 一律取 options.cwd
+  const sessionCwd = options.cwd;
   const sandboxCtx: SandboxContext | undefined = toolPolicy
-    ? { toolPolicy, sessionCwd, allowBash: false }
+    ? {
+      toolPolicy,
+      sessionCwd,
+      allowBash: false,
+      // T11（P0-2）：read 工具 Skill 受控读取端口（SessionRuntime 注入）
+      ...(options.sandboxContext?.skillRead !== undefined ? { skillRead: options.sandboxContext.skillRead } : {}),
+    }
     : undefined;
 
   const createSession = () => createAgentSession({
@@ -544,7 +552,7 @@ export async function createPiFauxAgentSession(
 export async function createPiAgentSession(
   options: PiAgentSessionOptions & {
     toolPolicy?: ToolPolicy;
-    sandboxContext?: SandboxContext;
+        sandboxContext?: SandboxContextOverrides;
     /** 额外启用的工具名称（如记忆工具），不受 noTools 影响 */
     extraTools?: readonly string[];
     /** 会话级插件工具（P0-1：按 Agent 绑定过滤后注入 PI 工具注册表） */
@@ -574,9 +582,16 @@ export async function createPiAgentSession(
     await ensureSkillToolsExtensionLoaded();
   }
 
-  const sessionCwd = options.sandboxContext?.sessionCwd ?? options.cwd;
+  // T11（P0-2）：外部注入只允许 skillRead 端口；sessionCwd 一律取 options.cwd
+  const sessionCwd = options.cwd;
   const sandboxCtx: SandboxContext | undefined = toolPolicy
-    ? { toolPolicy, sessionCwd, allowBash: false }
+    ? {
+      toolPolicy,
+      sessionCwd,
+      allowBash: false,
+      // T11（P0-2）：read 工具 Skill 受控读取端口（SessionRuntime 注入）
+      ...(options.sandboxContext?.skillRead !== undefined ? { skillRead: options.sandboxContext.skillRead } : {}),
+    }
     : undefined;
 
   const createOptions: Parameters<typeof createAgentSession>[0] = {

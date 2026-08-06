@@ -32,7 +32,8 @@ describe("buildPiSkills (PI ResourceLoader 接入)", () => {
   it("字段映射：name/description/filePath/baseDir/sourceInfo/disableModelInvocation", () => {
     const dir = createSkillPackage(root, { name: "alpha", description: "Alpha 技能描述", version: "1.0.0" });
     const registered = ingestPackage(catalog, dir, "managed", makeEnv());
-    const { skills } = buildPiSkills(resolveFor());
+    // T11（P0-5）：managed 安装默认绑定当前 Agent → 固定引用进入可见集
+    const { skills } = buildPiSkills(resolveFor("agent-1", [registered.skillRef]));
 
     expect(skills).toHaveLength(1);
     const skill = skills[0];
@@ -68,8 +69,8 @@ describe("buildPiSkills (PI ResourceLoader 接入)", () => {
       version: "1.0.0",
       extraFrontmatter: "disable-model-invocation: true",
     });
-    ingestPackage(catalog, dir, "managed", makeEnv());
-    const { skills } = buildPiSkills(resolveFor());
+    const dmiRegistered = ingestPackage(catalog, dir, "managed", makeEnv());
+    const { skills } = buildPiSkills(resolveFor("agent-1", [dmiRegistered.skillRef]));
     expect(skills[0]?.disableModelInvocation).toBe(true);
   });
 
@@ -89,11 +90,13 @@ describe("buildPiSkills (PI ResourceLoader 接入)", () => {
   });
 
   it("条目上限：maxSkills 截断", () => {
+    const refs = [];
     for (let index = 0; index < 3; index += 1) {
       const dir = createSkillPackage(root, { name: `skill-${index}`, version: "1.0.0" });
-      ingestPackage(catalog, dir, "managed", makeEnv());
+      const registered = ingestPackage(catalog, dir, "managed", makeEnv());
+      refs.push(registered.skillRef);
     }
-    const { skills, truncated } = buildPiSkills(resolveFor(), { maxSkills: 2 });
+    const { skills, truncated } = buildPiSkills(resolveFor("agent-1", refs), { maxSkills: 2 });
     expect(skills).toHaveLength(2);
     expect(truncated).toBe(true);
   });
@@ -120,7 +123,7 @@ describe("buildPiSkills (PI ResourceLoader 接入)", () => {
       agentId: "agent-1",
       sessionId: "session-1",
       turnId: "turn-1",
-      resolveOutput: resolveFor(),
+      resolveOutput: resolveFor("agent-1", [registered.skillRef]),
     });
     const { skills } = buildPiSkillsFromSnapshot(snapshot);
     expect(skills).toHaveLength(1);

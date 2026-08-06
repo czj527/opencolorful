@@ -24,7 +24,22 @@ import {
  * - policy.allowExternalReads 为 true 时，对 read 操作的兜底级别升级为 READ_ONLY
  */
 export class PathGuard {
+  /** T11（P0-2）：运行时动态追加的规则（如 Skill 根只读放行），始终优先于静态策略 */
+  private readonly extraRules: PathRule[] = [];
+
   constructor(private readonly policy: PathGuardPolicy) {}
+
+  /**
+   * T11（P0-2）：运行时追加规则（插入最前，优先级高于静态策略）。
+   * 用于动态来源（如每 turn 冻结的 Skill 根）的只读放行；
+   * 同 path 重复追加幂等（去重）。
+   */
+  addRule(rule: PathRule): void {
+    if (this.extraRules.some((existing) => existing.path === rule.path && existing.level === rule.level)) {
+      return;
+    }
+    this.extraRules.push(rule);
+  }
 
   /**
    * 检查单个路径是否允许指定操作。
@@ -41,15 +56,25 @@ export class PathGuard {
     const resolvedPath = path.resolve(targetPath);
     const canonicalPath = this.resolveCanonical(resolvedPath);
 
-    // 按优先级匹配规则
+    // 动态规则优先（T11 P0-2：Skill 根只读放行等运行时来源）
     let matchedLevel: AccessLevel | null = null;
     let matchedReason = "";
 
-    for (const rule of this.policy.rules) {
+    for (const rule of this.extraRules) {
       if (this.matchesRule(canonicalPath, rule)) {
         matchedLevel = rule.level;
         matchedReason = rule.reason;
         break;
+      }
+    }
+
+    if (matchedLevel === null) {
+      for (const rule of this.policy.rules) {
+        if (this.matchesRule(canonicalPath, rule)) {
+          matchedLevel = rule.level;
+          matchedReason = rule.reason;
+          break;
+        }
       }
     }
 
