@@ -20,10 +20,8 @@ import { assertSessionFileUnchanged, type SessionFileRegistry } from "./session-
 // - cleanup() 在成功/失败补偿时清除 staging。
 // ═══════════════════════════════════════════════════════════════
 
-/** 安装器可接受的来源 kind：本地/归档/Git/HTTP + 已登记 SessionFile。 */
+/** 安装器可接受的来源 kind：本地/归档/Git/HTTP/OpenClaw/Hermes + 已登记 SessionFile。 */
 export type SkillInstallSourceKind = SkillSourceAdapterKind | "session-file";
-
-const REMOTE_UNSUPPORTED: readonly SkillSourceAdapterKind[] = ["openclaw", "hermes"];
 
 export class SkillStager {
   constructor(
@@ -52,9 +50,6 @@ export class SkillStager {
     fs.mkdirSync(stagingRoot, { recursive: true });
     if (input.kind === "session-file") {
       return this.stageSessionFile(input.sourceRef, input.sessionId, stagingRoot);
-    }
-    if ((REMOTE_UNSUPPORTED as readonly string[]).includes(input.kind)) {
-      throw new SkillSourceError("skill_source_unsupported", `来源适配器暂未实现：${input.kind}`);
     }
     const adapter = this.adapterFor(input.kind);
     return adapter.stage(input.sourceRef, { stagingRoot });

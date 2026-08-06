@@ -44,6 +44,7 @@ import {
 import { ClientRegistry } from "./ws/client-registry.js";
 import { ObservabilityContext } from "../observability/observability-context.js";
 import { PluginFacade } from "../platform/plugin-facade.js";
+import { buildSkillComposition } from "../runtime/skills/composition.js";
 import { instrument } from "../observability/instrument.js";
 import { createBootId } from "../observability/trace-context.js";
 
@@ -242,6 +243,30 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       audit: observability.audit,
       hostVersion: version,
     });
+    // ── Phase 13 T10：Skill 组合根（Catalog/安装器/绑定/Bundle/Snapshot/Core + 插件桥）──
+    const skillComposition = buildSkillComposition({
+      paths,
+      database,
+      audit: observability.audit,
+      cwd: process.cwd(),
+      pluginFacade,
+    });
+    // 启动重建 Catalog（五类来源扫描 + 插件桥 initialize：enabled→sync、其余→block，
+    // 杜绝重启 fail-open）；失败只 warn 不阻塞 Server 启动
+    try {
+      skillComposition.rebuildFromDisk();
+    } catch (error) {
+      instrument.warn("skill.rebuild.failed", "Skill Catalog 启动重建失败", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+    }
+    try {
+      skillComposition.attachPluginLifecycle();
+    } catch (error) {
+      instrument.warn("skill.plugin_lifecycle.attach_failed", "Skill 插件生命周期接线失败", {
+        reason: error instanceof Error ? error.message : "unknown",
+      });
+    }
     // 评审修复（C1）：启动恢复扫描——崩溃遗留的 started 操作行终结为 failed，
     // 释放被永久锁住的插件（单插件失败不阻塞启动）。
     try {
@@ -426,6 +451,8 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     return {
       appOptions: {
         pluginFacade,
+        // Phase 13 T10：Skill Core Service（Agent 会话启用 Skill Core 工具 + /api/skills 路由）
+        skillCoreService: skillComposition.core,
         modelService,
         sessionService,
         preferencesStore,

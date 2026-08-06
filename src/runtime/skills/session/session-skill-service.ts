@@ -136,6 +136,19 @@ export class SessionSkillService {
   }
 
   /**
+   * T10：当前 Session 未消费且未过期的激活授权（turn 快照冻结摘要用）。
+   * 只暴露摘要字段（grantId/skillRefKey/contentHash/issuedTurnId/expiresAt/consumedAt），
+   * 不暴露任何 Secret 或正文。
+   */
+  listActiveGrants(sessionId: string): readonly SkillActivationGrantRecord[] {
+    this.validateSessionId(sessionId);
+    const nowIso = this.now().toISOString();
+    return this.deps.grants.listBySession(sessionId).filter(
+      (grant) => grant.consumedAt === null && grant.expiresAt > nowIso,
+    );
+  }
+
+  /**
    * 签发一次性激活授权（会话内安装后当前 turn 立即使用）。
    * grant 绑定 agentId + sessionId + skillRefKey + contentHash + issuedTurnId。
    */

@@ -7,6 +7,8 @@ import { HttpSkillSource, type HttpDownloader } from "./http-source.js";
 import { ManagedSkillSource } from "./managed-source.js";
 import { PluginSkillSource, type PluginSkillBundleProvider } from "./plugin-source.js";
 import { WorkspaceSkillSource } from "./workspace-source.js";
+import { OpenClawSkillSource } from "./openclaw-skill-source.js";
+import { HermesSkillSource } from "./hermes-skill-source.js";
 import type { SkillSourceAdapter } from "./skill-source-adapter.js";
 import type { SkillTrustPolicy } from "./trust-config.js";
 
@@ -25,6 +27,8 @@ export interface SkillAdapterFactoryOptions {
   readonly gitExec?: GitCommandRunner;
   readonly httpDownloader?: HttpDownloader;
   readonly httpMaxBytes?: number;
+  /** T9：OpenClaw/Hermes 本地镜像目录（固定版本夹具；缺省无市场可用但诊断明确） */
+  readonly ecosystemRegistryDir?: string;
 }
 
 export function createStandardAdapters(paths: RuntimePaths, options: SkillAdapterFactoryOptions = {}): readonly SkillSourceAdapter[] {
@@ -37,6 +41,9 @@ export function createStandardAdapters(paths: RuntimePaths, options: SkillAdapte
       ...(options.httpDownloader !== undefined ? { downloader: options.httpDownloader } : {}),
       ...(options.httpMaxBytes !== undefined ? { maxBytes: options.httpMaxBytes } : {}),
     }),
+    // T9：生态适配器（离线优先：本地镜像；无镜像时明确诊断，不伪装"没有 Skill"）
+    new OpenClawSkillSource({ ...(options.ecosystemRegistryDir !== undefined ? { registryDir: options.ecosystemRegistryDir } : {}) }),
+    new HermesSkillSource({ ...(options.ecosystemRegistryDir !== undefined ? { registryDir: options.ecosystemRegistryDir } : {}) }),
   ];
   if (options.workspace !== undefined) {
     adapters.push(new WorkspaceSkillSource(options.workspace));

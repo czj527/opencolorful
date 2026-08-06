@@ -207,7 +207,7 @@ export interface PiFauxAgentOptions {
   readonly thinkingLevel?: PiThinkingLevel;
   readonly systemPrompt?: string;
   /** T5：PI Skill pointer 注入（缺省空，行为不变） */
-  readonly skills?: PiResourceSkills;
+  readonly skills?: PiResourceSkills | (() => PiResourceSkills);
 }
 
 export interface PiResolvedModel {
@@ -231,5 +231,5 @@ export interface PiAgentSessionOptions {
   readonly thinkingLevel?: PiThinkingLevel;
   readonly systemPrompt?: string;
   /** T5：PI Skill pointer 注入（缺省空，行为不变） */
-  readonly skills?: PiResourceSkills;
+  readonly skills?: PiResourceSkills | (() => PiResourceSkills);
 }

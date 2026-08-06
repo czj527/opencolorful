@@ -36,6 +36,8 @@ import type { SessionFileRegistry } from "../installer/session-file-registry.js"
 import type { SkillSourceAdapter, SkillSourceInspection } from "../sources/skill-source-adapter.js";
 import type { SkillTrustPolicy } from "../sources/trust-config.js";
 import { WorkspaceSkillSource } from "../sources/workspace-source.js";
+import { buildPiSkillsFromSnapshot } from "../../../pi-sdk/skill-loader.js";
+import type { PiResourceSkills } from "../../../pi-sdk/types.js";
 import type { SkillLearningPolicy } from "../agent/agent-skill-config.js";
 import type { SessionSkillService } from "../session/session-skill-service.js";
 import type { ConfirmationTarget } from "../confirmation/confirmation-token.js";
@@ -625,6 +627,34 @@ export class SkillCoreService {
     return this.deps.sessionService.listSessionSkills(sessionId);
   }
 
+  /**
+   * T10：当前 Agent/Session 的 PI Skill pointer（元数据常驻注入 PI 系统提示）。
+   * 每 turn 调用：resolveOutput（Agent 绑定 + 解析）→ 不可变 Skill Snapshot 冻结
+   * （含未消费激活授权摘要）→ buildPiSkillsFromSnapshot（受控 filePath/baseDir）。
+   * 快照构造失败抛错（fail-closed，不返回 undefined）；无可见 Skill 返回空列表。
+   */
+  buildPiSkillsForTurn(input: { readonly agentId: string; readonly sessionId?: string; readonly turnId?: string }): PiResourceSkills {
+    const { agentId, sessionId, turnId } = input;
+    const view = this.deps.agentService.listAgentSkills(agentId, this.deps.environment, this.deps.catalog);
+    const snapshot = this.deps.snapshots.createSkillSnapshot({
+      agentId,
+      sessionId: sessionId ?? "",
+      turnId: turnId ?? "",
+      resolveOutput: {
+        visible: view.visible,
+        shadowed: view.shadowed,
+        disabled: view.disabled,
+        gated: view.gated,
+        diagnostics: view.diagnostics,
+      },
+      ...(sessionId !== undefined
+        ? { activationGrants: this.deps.sessionService.listActiveGrants(sessionId) }
+        : {}),
+    });
+    const loaded = buildPiSkillsFromSnapshot(snapshot);
+    return { skills: loaded.skills, diagnostics: loaded.diagnostics };
+  }
+
   /** 无 Agent Session 临时绑定（TTL 到期自动失效；不自动升级为持久绑定）。 */
   bindTemporarySessionSkill(
     sessionId: string,
@@ -919,6 +949,26 @@ export class SkillCoreService {
       return failedInstall(extractReasonCode(error), error instanceof Error ? error.message : "安装前检查失败");
     }
     this.emit("skill.inspect.completed", agentId, sessionId, { sourceRef: sourceRef.slice(0, 240), kind }, inspectOperationId);
+
+    // §8.4（T9 偏差②统一边界）：兼容失败不生成表面成功的空壳——
+    // unsupported（无转换路径）与 metadata-only（正文为空）直接拒绝并给迁移建议，
+    // 不因 local 路径绕过生态适配器的边界检查
+    const compatibilityLevel = inspection.manifest?.compatibilityLevel;
+    if (compatibilityLevel === "unsupported" || compatibilityLevel === "metadata-only") {
+      const migration = inspection.manifest?.compatibilityReport?.requiresManualMigration === true
+        ? "该 Skill 需要手工迁移后才能使用（见兼容报告）"
+        : "该 Skill 仅有元数据或格式不兼容，无法执行";
+      this.emit("skill.install.rejected", agentId, sessionId, {
+        sourceRef: sourceRef.slice(0, 240),
+        kind,
+        reasonCode: "skill_source_unsupported",
+        compatibilityLevel,
+      });
+      return rejectedInstall(
+        "skill_source_unsupported",
+        `Skill 兼容等级为 ${compatibilityLevel}，拒绝安装：${migration}`,
+      );
+    }
 
     // 4. 风险审查 + 学习策略决定是否确认
     const riskLevel = riskLevelOf(inspection.manifest, risks);

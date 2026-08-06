@@ -318,7 +318,7 @@ function mapRemainingEvent(event: AgentSessionEvent): PiAgentEvent | undefined {
 function minimalResourceLoader(
   systemPrompt?: string,
   useSandbox?: boolean,
-  skills?: PiResourceSkills,
+  skills?: PiResourceSkills | (() => PiResourceSkills),
 ): ResourceLoader {
   return {
     getExtensions: () => {
@@ -350,11 +350,15 @@ function minimalResourceLoader(
         runtime,
       };
     },
-    // T5：注入解析结果（默认仍为空数组，保证既有行为不变）；正文不在此返回
-    getSkills: () =>
-      skills !== undefined
-        ? { skills: [...skills.skills], diagnostics: [...skills.diagnostics] }
-        : { skills: [], diagnostics: [] },
+    // T5：注入解析结果（默认仍为空数组，保证既有行为不变）；正文不在此返回。
+    // T10：支持函数形式——每次 getSkills 调用（PI 每 turn 重建系统提示时）求值，
+    // 由 SessionRuntime 每 turn 更新的槽提供（Skill 快照每 turn 冻结）
+    getSkills: () => {
+      const resolved = typeof skills === "function" ? skills() : skills;
+      return resolved !== undefined
+        ? { skills: [...resolved.skills], diagnostics: [...resolved.diagnostics] }
+        : { skills: [], diagnostics: [] };
+    },
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),

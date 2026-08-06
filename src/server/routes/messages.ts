@@ -180,6 +180,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
   const runtimeSystemPrompt = new Map<string, string | undefined>();
   // P0-2：插件状态签名（绑定/授权修订/版本/运行实例），变化时重建 Runtime（下一 turn 生效）
   const pluginSignatures = new Map<string, string>();
+  // T10：Skill 元数据槽（sessionId → 每 turn 冻结的 PI Skill pointer；函数槽闭包引用）
+  const skillSlots = new Map<string, { current: import("../../pi-sdk/index.js").PiResourceSkills }>();
 
   /**
    * P0-2：Agent 的插件状态签名——enabled 绑定的 pluginId、active 版本、状态、
@@ -351,6 +353,26 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       // 构建 Skill Core 上下文（T6：五个 Core 工具按 Session 隔离注册；
       // 未注册的会话调用工具时 fail-closed 拒绝）
       let unregisterSkill: (() => void) | undefined;
+      // T10：PI Skill 元数据注入槽——每次 prompt 前由 core.buildPiSkillsForTurn
+      // 冻结写入，PI 每 turn 重建系统提示时经 getSkills() 读取（函数形式槽）
+      const skillsSlot: { current: import("../../pi-sdk/index.js").PiResourceSkills } = {
+        current: { skills: [], diagnostics: [] },
+      };
+      skillSlots.set(sessionId, skillsSlot);
+      const refreshSkillsSlot = (): void => {
+        if (view.agentId === undefined || view.agentId === null || options.skillCoreService === undefined) {
+          return;
+        }
+        try {
+          skillsSlot.current = options.skillCoreService.buildPiSkillsForTurn({
+            agentId: view.agentId,
+            sessionId,
+          });
+        } catch {
+          // 快照冻结失败：保留上一 turn 槽（不注入空集导致 fail-open 假象；
+          // 元数据注入失败只影响可见性，正文读取仍 fail-closed）
+        }
+      };
       const setupSkillContext = (runtime: SessionRuntime) => {
         if (view.agentId === undefined || view.agentId === null || options.skillCoreService === undefined) {
           return;
@@ -361,6 +383,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
             sessionId,
             agentId: view.agentId,
           });
+          // 初始冻结（会话创建即有一份元数据）
+          refreshSkillsSlot();
         } catch {
           // Skill 上下文初始化失败不阻塞会话创建（工具调用时 fail-closed）
         }
@@ -390,6 +414,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(extraTools ? { extraTools } : {}),
           ...(pluginTools.length > 0 ? { pluginTools } : {}),
           ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
+          // T10：PI Skill 元数据（函数槽：PI 每 turn 重建系统提示时读取当前冻结集）
+          ...(view.agentId != null && options.skillCoreService !== undefined ? { skills: () => skillsSlot.current } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -424,6 +450,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ...(extraTools ? { extraTools } : {}),
           ...(pluginTools.length > 0 ? { pluginTools } : {}),
           ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
+          // T10：PI Skill 元数据（函数槽：PI 每 turn 重建系统提示时读取当前冻结集）
+          ...(view.agentId != null && options.skillCoreService !== undefined ? { skills: () => skillsSlot.current } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -498,6 +526,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           return context.json(createApiError("CONFLICT", "已归档 Session 不能执行 Prompt"), 409);
         }
       }
+      const view = sessionService !== undefined ? sessionService.getView(sessionId) : undefined;
 
       try {
         await ensureRuntime(sessionId);
@@ -506,6 +535,22 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           return context.json(error.apiError, error.status);
         }
         throw error;
+      }
+
+      // T10：每次 prompt 前刷新 Skill 槽（turn 级冻结；绑定/版本/来源/激活授权
+      // 变化从本 turn 生效，正文读取仍受 Snapshot 校验）
+      if (view !== undefined && view.agentId !== undefined && view.agentId !== null && options.skillCoreService !== undefined) {
+        const slot = skillSlots.get(sessionId);
+        if (slot !== undefined) {
+          try {
+            slot.current = options.skillCoreService.buildPiSkillsForTurn({
+              agentId: view.agentId,
+              sessionId,
+            });
+          } catch {
+            // 冻结失败保留上一 turn 槽（fail-safe：不注入空集）
+          }
+        }
       }
 
       const run = promptService.prompt(sessionId, body.content);

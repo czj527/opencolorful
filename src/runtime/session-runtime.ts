@@ -9,6 +9,7 @@ import {
   type PiAgentEvent,
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
+  type PiResourceSkills,
   type PiSessionHandle,
   type PluginSessionTool,
   type PluginToolTurnContext,
@@ -66,6 +67,12 @@ export interface SessionRuntimeOptions {
    * 无运行实例/创建异常）必须显式返回失败，禁止 undefined 静默降级实时权限。
    */
   readonly snapshotFactory?: (pluginId: string, agentId: string) => PluginToolTurnContext;
+  /**
+   * T10（Phase 13）：PI Skill pointer 注入（静态或函数形式）。函数形式在 PI
+   * 每次 getSkills 调用（每 turn 重建系统提示）时求值——由宿主每 turn 更新槽，
+   * 实现 Skill 快照每 turn 冻结（元数据常驻、正文渐进披露）。
+   */
+  readonly skills?: PiResourceSkills | (() => PiResourceSkills);
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -199,6 +206,8 @@ export class SessionRuntime {
         ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         ...(sandboxService ? { toolPolicy } : {}),
+        // T10：PI Skill pointer（静态或每 turn 求值的函数槽）
+        ...(options.skills !== undefined ? { skills: options.skills } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");
