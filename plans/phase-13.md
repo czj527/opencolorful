@@ -1053,3 +1053,24 @@ Phase 14 的 Subagent 计划不得在本节之前提前实现或混入本阶段�
 - `contentIsFull` 语义由平台侧 SkillSnapshot 的"正文未读/已读"状态承载（PI 无此概念，快照层自己维护）。
 
 **针对性测试**（不依赖全量）：tests/contracts/skill-protocol.test.ts（SkillRef/BundleRef/Manifest 正反例/四态/兼容等级/错误码/预算/loadHandle 11 例）、tests/unit/observability-skill-catalog.test.ts（事件登记/命名约定/started-terminal 配对/auditMirror 6 例）、tests/integration/skill-migration.test.ts（全新库 v11/10→11 升级保留数据/拒绝高版本 3 例）；既有 observability-contract/plugin-catalog/config-paths/plugin-migration 32 例无回归。
+
+### T2-T10 实施记录（2026-08-06，主 Agent 规划/复核/验收 + 子 agent 开发）
+
+**任务进度**：T2（Catalog/校验器/来源解析，94 用例）→ T3+T4（安装器 + Bundle/Agent 绑定，75 用例）→ T5（PI ResourceLoader/ContentService/Snapshot/loadHandle，44 用例）→ T6+T7（会话内工具/确认令牌/API + 插件桥/ScriptRunner/observability 过滤，101 用例 + web 3）→ T8（CLI/Web 管理中心/官方示例/文档，51 用例 + web 19）→ T9（生态适配/固定版本 Fixture/live 隔离，44 用例）→ T10（组合根装配 + 浏览器验收，3 集成 + 1 E2E）。全部由主 Agent 独立复核 diff 与测试后提交，子 agent 未自行提交。
+
+**T10 组合根关键决策**：
+- `src/runtime/skills/composition.ts`：唯一装配点（Catalog/Stores/Installer/AgentSkillService/BundleService/SessionService/Snapshot/Content/loadHandle/Confirmation/Core + PluginSkillBridge + SkillScriptRunner）；`rebuildFromDisk()` 启动重建（五类来源扫描 + 插件桥 initialize：enabled→sync、其余→block，杜绝重启 fail-open）；`attachPluginLifecycle()` 包装 facade 的 enable/disable/update/rollback/uninstall → syncPluginSkills/blockPluginSkills（best-effort，失败 warn）。
+- **readiness 环境**：`buildSkillReadinessEnvironment` 真实探测 PATH bin（Windows .exe/.cmd/.bat/.ps1，上限 2000）与环境变量名——否则 requires.bins 的 Skill 全部 blocked（T10 集成测试发现并修复）。
+- **PI 元数据每 turn 冻结**：`core.buildPiSkillsForTurn`（Agent 绑定 → 不可变 SkillSnapshot（含未消费激活授权摘要）→ buildPiSkillsFromSnapshot）；messages 路由持函数槽（`skills: () => skillsSlot.current`），每次 prompt 前刷新——PI 每 turn 重建系统提示经 getSkills() 读到当前冻结集（§10.2 冻结语义落地）。
+- **T9 偏差闭环**：① openclaw/hermes 适配器注册进 createStandardAdapters + Stager REMOTE_UNSUPPORTED 移除（本地镜像缺省时明确诊断）；② `core.install` 统一拒绝 unsupported/metadata-only 兼容等级（§8.4 不生成表面成功的空壳，local 路径不再绕过生态边界）。
+- **正文读取的会话上下文**：详情页正文摘要经 ContentService 受控读取需 session 上下文（无 session 时正确降级为"不可用"提示，不泄露正文）——E2E 验证该降级。
+
+**浏览器验收（T10，Playwright）**：`web/tests/e2e/skill-lifecycle.spec.ts`——真实 Supervisor + Agent Server + Web：/skills 打开 → trusted local 安装（sdk-showcase-skill 直装）→ 发现搜索命中 → 已安装列表 → 详情（元数据表/状态四元组/兼容性 native/正文摘要降级/事件链接）→ /logs?skill= 预筛选 → 返回 /skills。1/1 通过。
+
+**质量门（T10 收口全量复跑）**：vitest 1752（113→152 文件）、web 394、web build、tsc（source+build）、imports（pi-sdk/plugin）、protocol/sdk 构建、verify-skill-package、Playwright 全量（56 + skill-lifecycle 1）——结果以最终验收结论为准。
+
+**已知偏差（T10 记录）**：
+1. 插件 Skill 阻断态为进程内存（migration 冻结未加表），靠启动 initialize() 重建——重启后若插件状态未变则阻断恢复一致；
+2. Confirm 令牌为内存 registry（未持久化；跨 server 重启失效，属可接受——确认流程在会话内即时完成）；
+3. 会话内 install 的 activation grant/loadHandle 只经工具路径发放（HTTP 路由无 turn 上下文，绑定经下一 turn 快照生效）；
+4. Skill 详情页正文读取需 session 上下文（`?session=<id>`），无 session 时显示受控降级提示——不泄露正文。
