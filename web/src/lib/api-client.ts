@@ -26,6 +26,12 @@ import type {
   SessionSettings,
   SessionUsageResponse,
   SessionView,
+  SubagentArtifactId,
+  SubagentMessagePage,
+  SubagentOwnership,
+  SubagentPreferences,
+  SubagentThreadId,
+  SubagentThreadTranscript,
   TraceResponse,
   UsageSummaryResponse,
   SupervisorStatusResponse,
@@ -116,6 +122,8 @@ export class ApiClient {
     defaults?: Partial<PreferencesDocument["defaults"]>;
     layout?: Partial<PreferencesDocument["layout"]>;
     appearance?: Partial<PreferencesDocument["appearance"]>;
+    /** Phase 14（§10.1/§20.4）：subagents 偏好段 patch（merge 不清空其他段） */
+    subagents?: Partial<SubagentPreferences>;
   }): Promise<PreferencesDocument> {
     return this.request("PUT", "/api/settings/preferences", patch);
   }
@@ -367,5 +375,72 @@ export class ApiClient {
 
   async saveObservabilityPreferences(prefs: ObservabilityPreferences): Promise<ObservabilityPreferences> {
     return this.request("PUT", "/api/preferences/observability", prefs);
+  }
+
+  // ─── Subagent 只读 API（Phase 14 §17 / §20.3；全部端点要求归属参数）───
+
+  private ownershipQuery(ownership: SubagentOwnership): string {
+    return `ownerAgentId=${encodeURIComponent(ownership.ownerAgentId)}&parentSessionId=${encodeURIComponent(ownership.parentSessionId)}`;
+  }
+
+  /** Thread transcript 投影（thread + runs + 消息首页 + artifacts + 简报快照） */
+  async getSubagentTranscript(
+    threadId: SubagentThreadId,
+    ownership: SubagentOwnership,
+    options?: { readonly afterSequence?: number; readonly limit?: number },
+  ): Promise<SubagentThreadTranscript> {
+    const params = new URLSearchParams(this.ownershipQuery(ownership));
+    if (options?.afterSequence !== undefined) params.set("afterSequence", String(options.afterSequence));
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    return this.request("GET", `/api/subagents/threads/${encodeURIComponent(threadId)}/transcript?${params.toString()}`);
+  }
+
+  /** 消息分页续拉（transcript 分页 cursor = nextSequence，与 SSE cursor 分离） */
+  async getSubagentMessages(
+    threadId: SubagentThreadId,
+    ownership: SubagentOwnership,
+    options?: { readonly afterSequence?: number; readonly limit?: number },
+  ): Promise<SubagentMessagePage> {
+    const params = new URLSearchParams(this.ownershipQuery(ownership));
+    if (options?.afterSequence !== undefined) params.set("afterSequence", String(options.afterSequence));
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    return this.request("GET", `/api/subagents/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
+  }
+
+  /** Artifact 元数据列表 */
+  async getSubagentArtifacts(
+    threadId: SubagentThreadId,
+    ownership: SubagentOwnership,
+  ): Promise<{ readonly items: readonly import("./types.js").SubagentArtifactRecord[] }> {
+    const params = new URLSearchParams(this.ownershipQuery(ownership));
+    return this.request("GET", `/api/subagents/threads/${encodeURIComponent(threadId)}/artifacts?${params.toString()}`);
+  }
+
+  /** Artifact 受控下载 URL（HTML/SVG 强制 octet-stream；nosniff + Content-Disposition） */
+  getSubagentArtifactContentUrl(artifactId: SubagentArtifactId, ownership: SubagentOwnership): string {
+    return `${this.baseUrl}/api/subagents/artifacts/${encodeURIComponent(artifactId)}/content?${this.ownershipQuery(ownership)}`;
+  }
+
+  /**
+   * 发现当前父 Session 的 Subagent Thread（§17.4：主对话只订阅卡片摘要）。
+   * 服务端无 session 级 Thread 列表端点，这里以 `subagent.thread.created` 活动
+   * 事件（scope.sessionId=父 Session、subagentThreadId 列）作为发现源，
+   * 返回按创建时间升序的 { threadId, createdAt } 列表。
+   */
+  async listSubagentThreads(
+    ownership: SubagentOwnership,
+    options?: { readonly cursor?: string | null; readonly limit?: number },
+  ): Promise<{ readonly items: readonly { readonly threadId: SubagentThreadId; readonly createdAt: string }[]; readonly nextCursor: string | null }> {
+    const filter: ActivityQuery = {
+      sessionId: ownership.parentSessionId,
+      eventName: "subagent.thread.created",
+    };
+    const page = await this.queryActivity(filter, options?.cursor ?? null, options?.limit ?? 200);
+    const items = page.items
+      .filter((row): row is typeof row & { subagentThreadId: SubagentThreadId } =>
+        row.subagentThreadId !== null && /^sat_[A-Za-z0-9_-]{8,128}$/.test(row.subagentThreadId))
+      .map((row) => ({ threadId: row.subagentThreadId, createdAt: row.recordedAt }))
+      .reverse(); // 活动查询按 recordedAt DESC → 反转为创建顺序
+    return { items, nextCursor: page.nextCursor };
   }
 }

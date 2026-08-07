@@ -1,0 +1,214 @@
+/* SubagentCard —— 主对话 Subagent 卡片（plans/phase-14.md §21.1）
+ * 稳定卡片：字段行统一排版，实时更新只改值不重排；低干扰动画 + reduced motion。
+ */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.listHint {
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-tertiary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--space-8);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-chat-card);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 运行中低干扰指示：图标缓慢呼吸，不抢主对话注意力 */
+.card[data-status="running"] .statusIcon,
+.card[data-status="starting"] .statusIcon,
+.card[data-status="queued"] .statusIcon {
+  color: var(--accent);
+}
+
+.spin {
+  animation: subagent-card-pulse var(--duration-slow) var(--ease-standard) infinite;
+}
+
+@keyframes subagent-card-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* reduced motion：用户偏好（CSS）或显式 prop（.cardNoAnim）都禁用动画 */
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.cardNoAnim .spin {
+  animation: none;
+  opacity: 0.7;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.statusIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.title {
+  font-weight: 600;
+  font-size: var(--fs-chat-message);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.statusText {
+  flex-shrink: 0;
+  font-size: var(--fs-hint);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.loadingRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--fs-hint);
+  color: var(--text-tertiary);
+}
+
+.errorRow {
+  font-size: var(--fs-hint);
+  color: var(--danger, var(--text-danger));
+  word-break: break-word;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-4) var(--space-8);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--fs-hint);
+  color: var(--text-tertiary);
+}
+
+.fieldValue {
+  font-size: var(--fs-hint);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.resultLine {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  font-size: var(--fs-hint);
+  min-width: 0;
+}
+
+.resultDisposition {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.resultSummary {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-height: 22px;
+}
+
+/* 只读请求按钮：向主对话发结构化消息，不直接控制 Subagent（§21.1） */
+.requestButton {
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 3px var(--space-8);
+  font-size: var(--fs-hint);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.requestButton:hover,
+.requestButton:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.readonlyHint {
+  font-size: var(--fs-hint);
+  color: var(--text-tertiary);
+}

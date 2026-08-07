@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { ApiClient, ApiClientError } from "../lib/api-client.js";
 import { SseClient } from "../lib/sse-client.js";
 import { WsClient } from "../lib/ws-client.js";
-import type { PlatformEventEnvelope, AgentView } from "../lib/types.js";
+import type { PlatformEventEnvelope, AgentView, SubagentThreadId } from "../lib/types.js";
 import { appReducer, initialAppState } from "./state.js";
 import { chatReducer, initialChatState, getStreamCursor, buildChatStateFromHistory } from "../features/chat/chat-state.js";
 import { executeCommand, type CommandName } from "../features/chat/commands.js";
@@ -12,6 +12,9 @@ import { SessionSidebar } from "../components/SessionSidebar.jsx";
 import { ChatPane } from "../components/ChatPane.jsx";
 import { InspectorSidebar } from "../components/InspectorSidebar.jsx";
 import { AppShell } from "../components/AppShell.jsx";
+import { SubagentPanel } from "../features/subagents/SubagentPanel.jsx";
+import type { SubagentParentRequestAction } from "../features/subagents/SubagentCard.jsx";
+import { useSubagentThreads } from "../features/subagents/use-subagent-threads.js";
 import { useLayoutState, NARROW_LEFT_QUERY, NARROW_RIGHT_QUERY } from "../features/layout/useLayoutState.js";
 import { StreamBuffer } from "../features/chat/stream-buffer.js";
 import { navigateToWorkspace } from "./page-router.js";
@@ -51,6 +54,8 @@ export function WorkspaceApp({
   const [showThinking, setShowThinking] = useState(true);
   const [showToolCalls, setShowToolCalls] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(true);
+  // Phase 14（§21.2）：右侧面板当前选中的 Subagent Thread（null=关闭）
+  const [selectedSubagentThreadId, setSelectedSubagentThreadId] = useState<SubagentThreadId | null>(null);
   const apiRef = useRef(new ApiClient(API_BASE));
   const sseRef = useRef<SseClient | null>(null);
   const wsRef = useRef<WsClient | null>(null);
@@ -441,6 +446,48 @@ export function WorkspaceApp({
 
   const activeSession = state.sessions.find((s) => s.id === state.activeSessionId) ?? null;
 
+  // ─── Phase 14 Subagent：卡片列表 + 右侧只读面板 ─────────────────
+
+  // §22.1 归属 = 父 Agent（无 Agent 时回退 Session）+ 父 Session
+  const subagentOwnership = activeSession !== null
+    ? { ownerAgentId: activeSession.agentId ?? activeSession.id, parentSessionId: activeSession.id }
+    : null;
+  const subagentsOnline = active && state.connectionStatus === "online";
+  const subagentThreads = useSubagentThreads({
+    api,
+    ownership: subagentOwnership,
+    enabled: subagentsOnline && activeSession !== null,
+    openPanelThreadId: selectedSubagentThreadId,
+  });
+
+  // 切换主对话后关闭面板（不显示旧 Session Thread，§21.2）
+  useEffect(() => {
+    setSelectedSubagentThreadId(null);
+  }, [state.activeSessionId]);
+
+  const handleOpenSubagent = useCallback((threadId: SubagentThreadId) => {
+    setSelectedSubagentThreadId(threadId);
+    // 右侧栏收起时展开（窄屏打开抽屉）
+    if (layout.rightCollapsed) layout.handleToggleRight();
+  }, [layout.rightCollapsed, layout.handleToggleRight]);
+
+  const handleCloseSubagent = useCallback(() => {
+    setSelectedSubagentThreadId(null);
+  }, []);
+
+  // §21.1 只读请求按钮：向主对话发结构化消息，不直接控制 Subagent
+  const handleRequestParentAction = useCallback((
+    threadId: SubagentThreadId,
+    action: SubagentParentRequestAction,
+    title: string,
+  ) => {
+    if (state.activeSessionId === null) return;
+    const text = action === "cancel"
+      ? `【Subagent 请求】请主 Agent 取消 Subagent「${title}」（${threadId}）。`
+      : `【Subagent 请求】请主 Agent 为 Subagent「${title}」（${threadId}）补充信息：`;
+    void handleSend(text);
+  }, [state.activeSessionId, handleSend]);
+
   return (
     <AppShell
       layout={layout}
@@ -492,12 +539,30 @@ export function WorkspaceApp({
           timelineVisible={timelineVisible}
           onToggleTimeline={handleToggleTimeline}
           narrowScreen={layout.breakpoints.rightNarrow}
+          subagentCards={subagentThreads.cards}
+          onOpenSubagent={(threadId) => handleOpenSubagent(threadId)}
+          onRequestParentAction={(threadId, action, title) => handleRequestParentAction(threadId, action, title)}
         />
       }
       right={
         <InspectorSidebar
           collapsed={layout.rightCollapsed}
           onToggle={layout.handleToggleRight}
+          panel={
+            selectedSubagentThreadId !== null && activeSession !== null && subagentOwnership !== null
+              ? (
+                  <SubagentPanel
+                    threadId={selectedSubagentThreadId}
+                    ownership={subagentOwnership}
+                    api={api}
+                    enabled={subagentsOnline}
+                    mobile={layout.breakpoints.rightNarrow}
+                    reducedMotion={layout.reducedMotion}
+                    onClose={handleCloseSubagent}
+                  />
+                )
+              : undefined
+          }
         />
       }
     />

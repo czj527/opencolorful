@@ -19,6 +19,7 @@ import {
 import { SettingsNav } from "./SettingsNav.js";
 import { ProvidersSection } from "./sections/ProvidersSection.js";
 import { DefaultsSection } from "./sections/DefaultsSection.js";
+import { SubagentDefaultsSection } from "./sections/SubagentDefaultsSection.js";
 import { LayoutSection } from "./sections/LayoutSection.js";
 import { LogsSection } from "./sections/LogsSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
@@ -133,6 +134,22 @@ export function SettingsPage(props: SettingsPageProps) {
     setSaveError(null);
     try {
       const updated = await props.api.updatePreferences({ layout });
+      setPreferences(updated);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "保存失败";
+      setSaveError(msg);
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Phase 14（§20.4）：subagents.defaultModel patch；保存后立即显示，只影响新 Thread
+  const handleSaveSubagentPreferences = async (subagents: import("../../lib/types.js").SubagentPreferences) => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await props.api.updatePreferences({ subagents });
       setPreferences(updated);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "保存失败";
@@ -268,6 +285,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onSavePreferences: handleSavePreferences,
             onSaveLayout: handleSaveLayout,
             onSaveTheme: handleSaveAppearance,
+            onSaveSubagentPreferences: handleSaveSubagentPreferences,
             onSaveProvider: handleSaveProvider,
             onGetSupervisorLogs: getSupervisorLogs,
             onGetUsageSummary: getUsageSummary,
@@ -294,6 +312,7 @@ interface SectionRenderProps {
   readonly onSavePreferences: (defaults: PreferencesDocument["defaults"]) => Promise<void>;
   readonly onSaveLayout: (layout: PreferencesDocument["layout"]) => Promise<void>;
   readonly onSaveTheme: (appearance: Partial<PreferencesDocument["appearance"]>) => Promise<void>;
+  readonly onSaveSubagentPreferences: (subagents: import("../../lib/types.js").SubagentPreferences) => Promise<void>;
   readonly onSaveProvider: (data: ProviderFormData) => Promise<void>;
   readonly onGetSupervisorLogs: (query?: {
     limit?: number;
@@ -399,6 +418,13 @@ function renderSection(active: SettingsSectionId, props: SectionRenderProps) {
             preferences={props.preferences}
             models={props.models}
             onSave={props.onSavePreferences}
+            saving={props.saving}
+            lastSaveError={props.saveError}
+          />
+          <SubagentDefaultsSection
+            preferences={props.preferences}
+            models={props.models}
+            onSave={props.onSaveSubagentPreferences}
             saving={props.saving}
             lastSaveError={props.saveError}
           />

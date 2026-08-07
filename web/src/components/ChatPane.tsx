@@ -4,6 +4,8 @@ import type { CommandName } from "../features/chat/commands.js";
 import { MessageList } from "../features/chat/MessageList.jsx";
 import { MessageComposer } from "../features/chat/MessageComposer.jsx";
 import { ChatTimelineNav } from "../features/chat/ChatTimelineNav.jsx";
+import { SubagentCardList, type SubagentParentRequestAction } from "../features/subagents/SubagentCard.jsx";
+import type { SubagentCardData } from "../features/subagents/use-subagent-threads.js";
 import { deriveRenderableUserMessages } from "../features/chat/timeline-turns.js";
 import { useChatScroll } from "../features/chat/use-chat-scroll.js";
 import { useMemo } from "react";
@@ -37,6 +39,15 @@ interface ChatPaneProps {
   readonly onToggleTimeline?: () => void;
   /** 是否窄屏（自动隐藏时间线） */
   readonly narrowScreen?: boolean;
+  /** Phase 14（§21.1）：主对话 Subagent 卡片（稳定展示，点击打开右侧面板） */
+  readonly subagentCards?: readonly SubagentCardData[];
+  readonly onOpenSubagent?: (threadId: SubagentCardData["threadId"]) => void;
+  /** 只读请求：向主对话发结构化消息，不直接控制 Subagent */
+  readonly onRequestParentAction?: (
+    threadId: SubagentCardData["threadId"],
+    action: SubagentParentRequestAction,
+    title: string,
+  ) => void;
 }
 
 const headerClass = styles.header ?? "";
@@ -70,6 +81,9 @@ export function ChatPane({
   timelineVisible = true,
   onToggleTimeline,
   narrowScreen = false,
+  subagentCards,
+  onOpenSubagent,
+  onRequestParentAction,
 }: ChatPaneProps) {
   const scroll = useChatScroll(reducedMotion ?? false);
   const historyEntries = session?.messageEntries ?? EMPTY_HISTORY;
@@ -151,6 +165,15 @@ export function ChatPane({
             compactionCards={chat.compactionCards}
             scroll={scroll}
           />
+
+          {subagentCards !== undefined && subagentCards.length > 0 && onOpenSubagent !== undefined && (
+            <SubagentCardList
+              cards={subagentCards}
+              reducedMotion={reducedMotion ?? false}
+              onOpen={onOpenSubagent}
+              onRequestParentAction={onRequestParentAction ?? (() => {})}
+            />
+          )}
 
           <MessageComposer
             disabled={false}

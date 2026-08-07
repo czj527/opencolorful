@@ -1,0 +1,20 @@
+/* SubagentDefaultsSection —— 设置页默认设置区的 Subagent 默认模型（§21.3） */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--border-color);
+}
+
+.note {
+  font-size: var(--fs-hint);
+  color: var(--text-tertiary);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}

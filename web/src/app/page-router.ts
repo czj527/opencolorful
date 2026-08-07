@@ -98,6 +98,13 @@ export function navigateToLogs(): void {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+/** Phase 14（§19.5）：跳转 /logs?subagent=<threadId>（Subagent 面板「查看相关日志」入口） */
+export function navigateToLogsSubagent(threadId: string): void {
+  if (typeof window === "undefined") return;
+  history.pushState({}, "", `/logs?subagent=${encodeURIComponent(threadId)}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export function navigateToPlugins(): void {
   if (typeof window === "undefined") return;
   history.pushState({}, "", "/plugins");
