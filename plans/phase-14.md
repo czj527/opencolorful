@@ -2497,3 +2497,35 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：T6 组合根（构造并注入 TranscriptView/ArtifactFileService/ReplayStore/Projector 及 app options.subagent；spawn/steer 工具调用 projector 投影；工具执行包装器接 ToolActivityTracker）。
 
 **质量门（定向）**：typecheck 全过；新测试 48/48 + 全量 171 文件 2026 测试通过；web:build+web:test 394/394；`check:pi-imports` 无违规。
+
+### T6：主 Agent Core Tools 与组合根（2026-08-07）
+
+**Commit**：`46291c9`
+
+**主要文件**：
+
+- `src/runtime/subagents/runtime/pi-session-adapter.ts`（新建）：`createPiSubagentSessionFactory`——PI AgentSession → SubagentSessionPort 生产适配器。懒创建代理（start 时才 createPiAgentSession，customTools=内部三工具+能力工具，避免修改 T4 冻结端口契约）；事件映射（任意首个事件→first-event、tool_start→tool-call、message_end(assistant)→model-iteration、turn_end.usage→token-usage、prompt resolve→terminal、prompt reject→error）；内部三工具 invoke 经 tool-invoke 事件桥接 RuntimeHost（resolve 回调）；能力工具走宿主 `abilityExecutor`（缺省 `subagent_ability_tool_unavailable` fail-closed）；`SUBAGENT_SYSTEM_PROMPT` 平台系统规则（§22.4）；start promise 会话终结语义（dispose/abort 时 resolve，含 start 完成前终结竞态）；noTools:"all" 只注入本 Run 工具（§13.5 无记忆无 spawn）；
+- `src/pi-sdk/subagent-tools-context.ts`（新建）：`SubagentToolContext`/`SubagentToolServices` 注册表（memory-tools 同模式：Symbol 状态表+AsyncLocalStorage；registerSubagentContext/requireSubagentContext fail-closed）；turnIdSlot/traceSlot 槽（§20.2 工具上下文盖章）；
+- `src/pi-sdk/subagent-tools.ts`（新建）：七个 Core 工具——spawn（契约 TypeBox 校验→resolveSubagentModel 三档（§10.2）→normalizeCapabilityRequest/limits→computeEffectiveSnapshot（§12.1）→durable 审计 started（§22.5 拒绝不创建）→createThreadWithFirstRun（task 消息含 `subagent.task_brief.v1`/`subagent.context_packet.v1` data parts）→renderTaskBrief/ContextPacket→scheduler.submit→审计 terminal）、get_subagent_status（单查/列表，不含正文）、inspect（messages/tools/steers/artifacts/result 脱敏组合）、steer（活动 Run 消息投递+dispatch；终态 Run+open Thread 创建下一 Run（快照/limits 复用）；stop→cancel）、wait（终态提前返回、timeout 快照、cursor 不重不漏）、cancel（幂等）、close（幂等；有活动 Run 先取消）；
+- `src/runtime/subagents/composition.ts`（新建）：`buildSubagentComposition` 组合根——stores→replay/projector→transcript/artifact/toolTracker→host（wireSubagentRuntimeObservability 叠加）→scheduler→dispatcher→coordinator→recovery；Host 回调接线（onTerminal/onMessage(input_required)→coordinator.signal；onRunFinished→coordinator closing 终态化+scheduler 容量释放）；`runRecovery()` 后 available 标志（§16.5 errors 为空才可用）；handleParentSessionArchived（§14.4）；
+- `src/pi-sdk/agent-session.ts`：`SUBAGENT_TOOL_NAMES` 列表 + ensureSubagentToolsExtensionLoaded（extraTools 注册路径）；
+- `src/runtime/session-runtime.ts`：`subagentLifecycle` hooks（beginTurn→onTurnBegin 更新 turnId 槽；prompt 前→onUserPrompt；runPrompt finally→onTurnEnd；abort→onAbort）；
+- `src/server/start.ts`：组合根构造 + runRecovery + app options.subagent（routes deps + composition）+ SessionService archive 联动合并闭包 + dispose；
+- `src/server/routes/messages.ts`：ensureRuntime——extraTools 加 SUBAGENT_TOOL_NAMES（composition available 才启用）；setupSubagentContext（registerSubagentContext + SessionRuntimeParentSessionPort 注册 + getSessionState 从 SessionView）；父侧快照闭包（parentSnapshot/toolCatalog/currentModel/workspaceCwd）；onDispose 清理；
+- `src/server/app.ts`：`ServerAppOptions.subagent` 扩展（routes deps + composition）；
+- `src/server/routes/settings.ts`：`PUT /api/settings/preferences` 支持 subagents.defaultModel patch（深合并不清空其他段；null 或 providerId+modelId；ModelService.resolveModel 校验失败 400 不落盘，§20.4）；
+- `src/runtime/subagents/runtime/runtime-host.ts`：cancelRun 修正——running/starting 先 `→cancelling` 再收敛 cancelled（状态机无直接边，T1 冻结）；onRunFinished 事件补 threadId。
+
+**新增测试与故障注入**（14 用例）：core-tools 11——spawn 全链（accepted→落库→task data parts→子会话注入工具→result→succeeded）、模型不可用不创建、参数非法、status 单查/列表、inspect include 组合、steer 活动投递（queue→followUp）/终态新建 Run/stop→cancel、wait 终态提前返回、cancel 幂等、close 幂等+关闭后可观察；pi-session-adapter 3——真实 ModelRuntime+Faux provider 懒创建/事件映射/内部工具桥接/terminal/followUp 再 terminal/start promise 终结语义、能力工具 abilityExecutor、abort→interrupted+resolve。
+
+**与计划的偏差和原因**：
+
+1. `okResult` 的 `status:"ok"` 与 cancel/close 返回语义冲突——payload 顶层改用 runStatus/threadStatus；wait 直接构造 `{status:"ok"|"timeout", threads}`（§20.1 要求 status 判断终态）；
+2. cancelRun 对 running/starting 的取消路径是 T5 遗漏（测试暴露）：状态机无 `running→cancelled` 直接边，先 `→cancelling` 再收敛；T5 已覆盖 waiting_for_input 路径不受影响；
+3. 测试 fixture 的工具名用 PI 文件工具名（read/write/bash）而非 read_file——`classifyToolSideEffect` 分类表（T3 冻结）认识的是 PI 名，unknown 在 read Run 被拒（§12.4 既有语义）；
+4. 父侧 Skill 委派（parentSkillEntries）当前为空——Skill 快照形状（PiResourceSkills）与 ParentSkillEntry 不同构，Phase 后续接线（不影响 §12.1 快照机制本身）；
+5. abilityExecutor 组合根未注入实现（能力工具执行器与 Sandbox 边界属后续阶段）——未注入时工具调用返回 `subagent_ability_tool_unavailable`（fail-closed，不允许静默无操作）。
+
+**当前未接线入口**：能力工具执行器（Sandbox）；Skill 委派；T8 Web 卡片/面板消费 transcript/SSE API；Browser E2E。
+
+**质量门（定向）**：typecheck 全过；新测试 14/14 + 回归（T4/T5 subagent 测试 59/59）；全量 2040 测试通过；web:build+web:test 394/394；`check:pi-imports` 无违规。
