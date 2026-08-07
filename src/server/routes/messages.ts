@@ -22,7 +22,10 @@ import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
 import { SessionIndex } from "../../storage/session-index.js";
 import { registerMemoryContext } from "../../pi-sdk/memory-tools.js";
 import { registerSkillContext } from "../../pi-sdk/skill-tools.js";
-import { MEMORY_TOOL_NAMES, SKILL_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
+import { MEMORY_TOOL_NAMES, SKILL_TOOL_NAMES, SUBAGENT_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
+import { registerSubagentContext, type SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
+import { SessionRuntimeParentSessionPort } from "../../runtime/subagents/runtime/parent-session-adapter.js";
+import { classifyToolSideEffect } from "../../runtime/subagents/delegation-policy.js";
 import type { PluginSessionTool } from "../../pi-sdk/index.js";
 import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type Database from "better-sqlite3";
@@ -164,6 +167,8 @@ export interface MessageRoutesOptions {
   readonly pluginFacade?: PluginFacade;
   /** Phase 13 T6：Skill Core Service（注入后 Agent 会话启用 search_skills 等五个 Core 工具） */
   readonly skillCoreService?: import("../../runtime/skills/core/skill-core-service.js").SkillCoreService;
+  /** Phase 14 T6：Subagent 运行时组合根（注入后主会话启用七个 Core 工具；缺省不注册，§20.2） */
+  readonly subagent?: { readonly composition?: import("../../runtime/subagents/composition.js").SubagentRuntimeComposition };
 }
 
 // ensureRuntime 的失败结果：路由层直接转成对应状态码
@@ -292,12 +297,19 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       // 无 Agent Session 也可用（search/inspect/install 走 Session 临时绑定；
       // manage_skills 等 Agent 级操作在工具层 fail-closed 拒绝）
       const hasSkillTools = options.skillCoreService !== undefined;
+      // Phase 14 T6：Subagent Core 工具（组合根注入且恢复完成才启用；§20.2 注册边界）
+      const subagentComposition = options.subagent?.composition;
+      const hasSubagentTools = subagentComposition !== undefined && subagentComposition.available();
       const extraTools =
-        hasMemoryTools || hasSkillTools
-          ? [...(hasMemoryTools ? MEMORY_TOOL_NAMES : []), ...(hasSkillTools ? SKILL_TOOL_NAMES : [])]
+        hasMemoryTools || hasSkillTools || hasSubagentTools
+          ? [
+              ...(hasMemoryTools ? MEMORY_TOOL_NAMES : []),
+              ...(hasSkillTools ? SKILL_TOOL_NAMES : []),
+              ...(hasSubagentTools ? SUBAGENT_TOOL_NAMES : []),
+            ]
           : undefined;
-      // 有记忆/技能工具时决不使用 noTools: "all"
-      const noTools = (toolPolicy.shouldDisableAllTools(toolMode) && !hasMemoryTools && !hasSkillTools)
+      // 有记忆/技能/Subagent 工具时决不使用 noTools: "all"
+      const noTools = (toolPolicy.shouldDisableAllTools(toolMode) && !hasMemoryTools && !hasSkillTools && !hasSubagentTools)
         ? ("all" as const)
         : undefined;
       const tools = fileTools.length > 0 ? [...fileTools] : undefined;
@@ -394,6 +406,87 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ? (input) => options.skillCoreService!.readSkillFileForSession({ sessionId, absPath: input.absPath })
           : undefined;
 
+      // ── Phase 14 T6：Subagent 工具上下文（§20.2：只普通主 Agent Session 注册）──
+      const turnIdSlot: { current: string | undefined } = { current: undefined };
+      const traceSlot: { current: import("../../contracts/observability.js").TraceContext | undefined } = { current: undefined };
+      let parentPort: SessionRuntimeParentSessionPort | undefined;
+      let unregisterSubagent: (() => void) | undefined;
+      // 父侧能力快照（§12.1 EffectiveSnapshot 输入）：fileTools + 插件工具 + 平台工具
+      const parentSnapshot = (): {
+        toolIds: readonly string[];
+        pluginContributions: readonly import("../../runtime/subagents/delegation-policy.js").ParentPluginContributionEntry[];
+        skillEntries: readonly import("../../runtime/subagents/delegation-policy.js").ParentSkillEntry[];
+      } => ({
+        toolIds: [...(tools ?? []), ...(extraTools ?? []), ...pluginTools.map((tool) => tool.qualifiedName)],
+        pluginContributions: pluginTools.map((tool) => ({
+          pluginId: tool.pluginId,
+          pluginVersion: "1.0.0",
+          runtimeInstanceId: tool.pluginId,
+          contributionId: tool.qualifiedName,
+          grantRevision: 1,
+          sideEffectClass: classifyToolSideEffect(tool.qualifiedName),
+        })),
+        skillEntries: [],
+      });
+      const toolCatalog = (name: string): import("../../runtime/subagents/runtime/types.js").SubagentSessionToolDef | null => {
+        const plugin = pluginTools.find((tool) => tool.qualifiedName === name);
+        if (plugin !== undefined) {
+          return {
+            name: plugin.qualifiedName,
+            description: plugin.description ?? "",
+            parameters: (plugin.inputSchema ?? { type: "object" }) as Record<string, unknown>,
+          };
+        }
+        return null;
+      };
+      const subagentLifecycle: import("../../runtime/session-runtime.js").SessionRuntimeOptions["subagentLifecycle"] =
+        subagentComposition === undefined
+          ? undefined
+          : {
+              onTurnBegin: (turnId) => {
+                turnIdSlot.current = turnId;
+              },
+              onUserPrompt: () => parentPort?.noteUserMessage(),
+              onTurnEnd: () => parentPort?.noteUserTurnEnd(),
+              onAbort: () => parentPort?.noteUserAbort(),
+            };
+      const setupSubagentContext = (runtime: SessionRuntime) => {
+        if (subagentComposition === undefined || !subagentComposition.available()) {
+          return;
+        }
+        try {
+          const services: SubagentToolServices = {
+            ...subagentComposition.toolServices,
+            parentSnapshot,
+            currentModel: () => (selectedModel !== null && selectedModel !== undefined ? { providerId: selectedModel.providerId, modelId: selectedModel.modelId } : null),
+            toolCatalog,
+            workspaceCwd: () => runtimeCwd,
+          };
+          unregisterSubagent = registerSubagentContext(sessionId, {
+            ownerAgentId: view.agentId ?? sessionId,
+            sessionId,
+            turnIdSlot,
+            traceSlot,
+            services,
+          });
+          parentPort = new SessionRuntimeParentSessionPort({
+            runtime,
+            ownerAgentId: view.agentId ?? sessionId,
+            getSessionState: () => {
+              try {
+                const current = sessionService.getView(sessionId);
+                return current.archived ? "archived" : "active";
+              } catch {
+                return "deleted";
+              }
+            },
+          });
+          subagentComposition.coordinator.registerParentSession(parentPort);
+        } catch {
+          // Subagent 上下文初始化失败不阻塞会话创建（工具调用时 fail-closed）
+        }
+      };
+
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;
       if (selectedModel && modelService && selectedModel.providerId !== "faux") {
@@ -415,6 +508,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
           ...(skillRead !== undefined ? { skillRead } : {}),
+          ...(subagentLifecycle !== undefined ? { subagentLifecycle } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -425,10 +519,13 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           onDispose: () => {
             unregisterMemory?.();
             unregisterSkill?.();
+            unregisterSubagent?.();
+            parentPort = undefined;
           },
         });
         setupMemoryContext(runtime);
         setupSkillContext(runtime);
+        setupSubagentContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
@@ -452,6 +549,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
           ...(skillRead !== undefined ? { skillRead } : {}),
+          ...(subagentLifecycle !== undefined ? { subagentLifecycle } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
           ...(replayStore ? { replayStore } : {}),
@@ -462,10 +560,13 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           onDispose: () => {
             unregisterMemory?.();
             unregisterSkill?.();
+            unregisterSubagent?.();
+            parentPort = undefined;
           },
         });
         setupMemoryContext(runtime);
         setupSkillContext(runtime);
+        setupSubagentContext(runtime);
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));

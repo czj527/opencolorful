@@ -59,6 +59,13 @@ const SKILL_TOOLS_EXTENSION_PATH = fs.existsSync(SKILL_TOOLS_EXTENSION_JS)
   ? SKILL_TOOLS_EXTENSION_JS
   : SKILL_TOOLS_EXTENSION_TS;
 
+// Subagent Core 工具扩展文件路径（Phase 14 T6：主 Agent 七个 Core 工具）
+const SUBAGENT_TOOLS_EXTENSION_JS = path.resolve(__dirname, "subagent-tools.js");
+const SUBAGENT_TOOLS_EXTENSION_TS = path.resolve(__dirname, "subagent-tools.ts");
+const SUBAGENT_TOOLS_EXTENSION_PATH = fs.existsSync(SUBAGENT_TOOLS_EXTENSION_JS)
+  ? SUBAGENT_TOOLS_EXTENSION_JS
+  : SUBAGENT_TOOLS_EXTENSION_TS;
+
 /** 记忆工具名称列表（始终可用，不受 tool_mode 影响） */
 export const MEMORY_TOOL_NAMES = [
   "search_memory",
@@ -80,6 +87,22 @@ export const SKILL_TOOL_NAMES = [
   "manage_skill_bundle",
 ] as const;
 
+/**
+ * Subagent Core 工具名称列表（Phase 14 T6：extraTools 注册路径）。
+ * 只在普通主 Agent Session 注册（§20.2：无 Agent Session、Subagent
+ * Session、Memory Agent、Plugin worker 不注册）；组合根缺少 Subagent
+ * 服务时不注入该列表（工具不注册，不静默 no-op）。
+ */
+export const SUBAGENT_TOOL_NAMES = [
+  "spawn_subagent",
+  "get_subagent_status",
+  "inspect_subagent",
+  "steer_subagent",
+  "wait_subagent",
+  "cancel_subagent",
+  "close_subagent",
+] as const;
+
 /** 预加载的沙箱扩展（进程级加载一次，工具执行时通过 AsyncLocalStorage 读取 per-Session 上下文） */
 let sandboxExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
@@ -88,6 +111,9 @@ let memoryToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtens
 
 /** 预加载的 Skill Core 工具扩展（进程级加载一次） */
 let skillToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
+
+/** 预加载的 Subagent Core 工具扩展（进程级加载一次） */
+let subagentToolsExtensionsLoaded: Awaited<ReturnType<typeof discoverAndLoadExtensions>> | null = null;
 
 export interface SandboxExtensionLoadResult {
   readonly errors: readonly {
@@ -165,6 +191,25 @@ async function ensureSkillToolsExtensionLoaded(): Promise<void> {
     throw new Error(`Skill tools extension failed to load: ${msg}`);
   }
   skillToolsExtensionsLoaded = result;
+}
+
+async function ensureSubagentToolsExtensionLoaded(): Promise<void> {
+  if (subagentToolsExtensionsLoaded) return;
+  if (!fs.existsSync(SUBAGENT_TOOLS_EXTENSION_PATH)) {
+    throw new Error(
+      `Subagent tools extension not found at ${SUBAGENT_TOOLS_EXTENSION_PATH}. ` +
+      "Run 'npm run build' to compile subagent-tools.",
+    );
+  }
+  const result = await discoverAndLoadExtensions(
+    [SUBAGENT_TOOLS_EXTENSION_PATH],
+    path.resolve(__dirname, "..", ".."),
+  );
+  if (result.errors.length > 0) {
+    const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
+    throw new Error(`Subagent tools extension failed to load: ${msg}`);
+  }
+  subagentToolsExtensionsLoaded = result;
 }
 
 function messageText(message: unknown): string {
@@ -466,6 +511,9 @@ export async function createPiFauxAgentSession(
   if (hasExtraTools) {
     await ensureMemoryToolsExtensionLoaded();
     await ensureSkillToolsExtensionLoaded();
+    if (options.extraTools!.some((name) => (SUBAGENT_TOOL_NAMES as readonly string[]).includes(name))) {
+      await ensureSubagentToolsExtensionLoaded();
+    }
   }
 
   // T11（P0-2）：外部注入只允许 skillRead 端口；sessionCwd 一律取 options.cwd
@@ -580,6 +628,9 @@ export async function createPiAgentSession(
   if (hasExtraTools) {
     await ensureMemoryToolsExtensionLoaded();
     await ensureSkillToolsExtensionLoaded();
+    if (options.extraTools!.some((name) => (SUBAGENT_TOOL_NAMES as readonly string[]).includes(name))) {
+      await ensureSubagentToolsExtensionLoaded();
+    }
   }
 
   // T11（P0-2）：外部注入只允许 skillRead 端口；sessionCwd 一律取 options.cwd

@@ -76,6 +76,17 @@ export interface SessionRuntimeOptions {
    */
   readonly skillSnapshotFactory?: (input: { readonly agentId: string; readonly sessionId: string; readonly turnId: string }) => PiResourceSkills;
   /**
+   * Phase 14 T6：Subagent 生命周期 hook（组合根/消息路由接线）——
+   * onTurnBegin 更新工具上下文 turnId 槽；onUserPrompt / onTurnEnd /
+   * onAbort 供 ParentSessionPort 的用户抢占/安全边界事件（§14.2）。缺省不调用。
+   */
+  readonly subagentLifecycle?: {
+    onTurnBegin(turnId: string): void;
+    onUserPrompt(): void;
+    onTurnEnd(): void;
+    onAbort(): void;
+  };
+  /**
    * T11（P0-2）：read 工具 Skill 文件受控读取端口（闭包引用
    * SkillCoreService.readSkillFileForSession）。注入后传给沙箱扩展上下文。
    */
@@ -111,6 +122,8 @@ export class SessionRuntime {
   /** T11：Skill 元数据槽（beginTurn 每 turn 冻结写入；PI loader 每 turn 读取） */
   private readonly skillsSlotRef: { current: PiResourceSkills };
   private readonly skillSnapshotFactory: SessionRuntimeOptions["skillSnapshotFactory"];
+  /** Phase 14 T6：Subagent 生命周期 hook（turnId 槽/用户抢占/安全边界） */
+  private readonly subagentLifecycle: SessionRuntimeOptions["subagentLifecycle"];
   /** T11（P0-2）：沙箱服务（turn 冻结后同步 Skill 只读根） */
   private readonly sandboxService: SandboxService | null;
 
@@ -135,6 +148,7 @@ export class SessionRuntime {
     this.pluginTools = options.pluginTools ?? [];
     this.snapshotFactory = options.snapshotFactory;
     this.skillSnapshotFactory = options.skillSnapshotFactory;
+    this.subagentLifecycle = options.subagentLifecycle;
     this.unsubscribe = agent.subscribe((event) => {
       this.observePiEvent(event);
       const mapper = this.mapper ?? this.resolveControlMapper(event);
@@ -266,6 +280,12 @@ export class SessionRuntime {
    * - 无 snapshotFactory（未接入插件系统）时不设置（此时也没有插件工具注入）。
    */
   private beginTurn(turnId: string): void {
+    // Phase 14 T6：Subagent 工具上下文 turnId 槽更新（§20.2 工具上下文盖章）
+    try {
+      this.subagentLifecycle?.onTurnBegin(turnId);
+    } catch {
+      // best-effort：hook 失败不阻断 turn
+    }
     // T11：Skill 元数据冻结（P0-1 真实 turnId；P1-8 fail-closed——冻结失败
     // 置空 + error 诊断，绝不保留上一 turn 的旧 Skill pointer）
     if (this.skillSnapshotFactory !== undefined) {
@@ -380,6 +400,11 @@ export class SessionRuntime {
     // 绑定/授权在 turn 中途的变更不影响 in-flight 执行；T11：同处冻结 Skill 元数据
     this.beginTurn(turnId);
 
+    try {
+      this.subagentLifecycle?.onUserPrompt();
+    } catch {
+      // best-effort
+    }
     return instrument.runWithTrace({ trace }, () => {
       void this.runPrompt(text, started.streamId, mapper, controller);
       return { streamId: started.streamId, completed: started.completed };
@@ -387,6 +412,11 @@ export class SessionRuntime {
   }
 
   abort(streamId: string): AbortResult {
+    try {
+      this.subagentLifecycle?.onAbort();
+    } catch {
+      // best-effort
+    }
     return this.executions.abort(this.sessionId, streamId);
   }
 
@@ -444,6 +474,11 @@ export class SessionRuntime {
       this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);
       if (this.mapper === mapper) this.mapper = undefined;
+      try {
+        this.subagentLifecycle?.onTurnEnd();
+      } catch {
+        // best-effort
+      }
     }
   }
 

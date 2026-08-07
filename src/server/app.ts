@@ -61,8 +61,15 @@ export interface ServerAppOptions {
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
   readonly memoryAdmin?: import("./routes/memory.js").MemoryAdminDeps;
-  /** Phase 14 T7：Subagent 只读 API（transcript/SSE/artifact 下载；T6 组合根注入） */
-  readonly subagent?: import("./routes/subagents.js").SubagentRouteDeps;
+  /**
+   * Phase 14 T6/T7：Subagent 只读 API 与运行时组合根。
+   * composition 注入后：注册 subagent 路由 + 主会话工具上下文/父端口
+   * 接线（messages 路由 ensureRuntime）；组合根缺服务时不注册工具
+   * （§20.2：不注册后静默 no-op）。
+   */
+  readonly subagent?: import("./routes/subagents.js").SubagentRouteDeps & {
+    readonly composition?: import("../runtime/subagents/composition.js").SubagentRuntimeComposition;
+  };
 }
 
 export interface ServerAppResult {
@@ -176,6 +183,8 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
           return global;
         },
       } : {}),
+      // Phase 14 T6：Subagent 运行时组合根（主会话启用七个 Core 工具 + 父端口）
+      ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
     });
   }
   if (options.replayStore !== undefined && options.promptService !== undefined) {

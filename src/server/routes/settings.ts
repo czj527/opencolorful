@@ -32,9 +32,12 @@ export function registerSettingsRoutes(
     const hasDefaults = body.defaults !== undefined;
     const hasLayout = body.layout !== undefined;
     const hasAppearance = body.appearance !== undefined;
+    // Phase 14 T6（§20.4）：subagents.defaultModel patch（merge 不清空其他段）
+    const hasSubagents = body.subagents !== undefined;
     const rawDefaults = hasDefaults ? (body.defaults as Record<string, unknown>) : undefined;
     const rawLayout = hasLayout ? (body.layout as Record<string, unknown>) : undefined;
     const rawAppearance = hasAppearance ? (body.appearance as Record<string, unknown>) : undefined;
+    const rawSubagents = hasSubagents ? (body.subagents as Record<string, unknown>) : undefined;
 
     const previous = preferencesStore.get();
     // 深合并 patch 与已有值：请求只提交变化的字段，缺失字段保留上一次值。
@@ -47,11 +50,15 @@ export function registerSettingsRoutes(
     const mergedAppearance = rawAppearance !== undefined
       ? { ...previous.appearance, ...rawAppearance }
       : previous.appearance;
+    const mergedSubagents = rawSubagents !== undefined
+      ? { ...(previous.subagents ?? { defaultModel: null }), ...rawSubagents }
+      : previous.subagents;
     const candidate = normalizePreferences({
       version: 1,
       defaults: mergedDefaults,
       layout: mergedLayout,
       appearance: mergedAppearance,
+      ...(mergedSubagents !== undefined ? { subagents: mergedSubagents } : {}),
     });
 
     // 显式校验原始请求字段：非法枚举返回 400 而不是静默回退。
@@ -90,6 +97,34 @@ export function registerSettingsRoutes(
         const theme = rawAppearance.theme;
         if (theme !== "dark" && theme !== "light") {
           return context.json(createApiError("INVALID_INPUT", "theme 必须是 dark 或 light"), 400);
+        }
+      }
+    }
+
+    // Phase 14 T6（§20.4）：subagents.defaultModel 校验——null 或
+    // { providerId, modelId }；provider/model 必须可 resolve（否则 400 不落盘）
+    if (rawSubagents !== undefined && Object.prototype.hasOwnProperty.call(rawSubagents, "defaultModel")) {
+      const defaultModel = candidate.subagents?.defaultModel ?? null;
+      if (defaultModel !== null) {
+        if (
+          typeof defaultModel !== "object" ||
+          typeof (defaultModel as { providerId?: unknown }).providerId !== "string" ||
+          typeof (defaultModel as { modelId?: unknown }).modelId !== "string"
+        ) {
+          return context.json(createApiError("INVALID_INPUT", "subagents.defaultModel 引用无效"), 400);
+        }
+        if (modelService !== undefined) {
+          try {
+            modelService.resolveModel(defaultModel.providerId, defaultModel.modelId);
+          } catch {
+            return context.json(
+              createApiError("INVALID_INPUT", "Subagent 默认模型不存在或凭据不可用", false, {
+                providerId: defaultModel.providerId,
+                modelId: defaultModel.modelId,
+              }),
+              400,
+            );
+          }
         }
       }
     }

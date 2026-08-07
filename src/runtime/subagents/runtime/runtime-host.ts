@@ -67,7 +67,7 @@ export interface SubagentRuntimeHostDeps {
   readonly onTerminal?: (event: { readonly runId: SubagentRunId; readonly threadId: SubagentThreadId; readonly status: string; readonly reasonCode: string | null; readonly result: SubagentResultV1 | null }) => void;
   readonly onLeaseLost?: (event: { readonly runId: SubagentRunId }) => void;
   /** Run 完全清理后回调（active 已移除，容量真实释放；Scheduler 据此启动排队 Run） */
-  readonly onRunFinished?: (event: { readonly runId: SubagentRunId }) => void;
+  readonly onRunFinished?: (event: { readonly runId: SubagentRunId; readonly threadId: SubagentThreadId }) => void;
 }
 
 export interface ExecuteSubagentRunInput {
@@ -178,12 +178,14 @@ export class SubagentRuntimeHost {
       return false; // 已终态：由 Dispatcher 按迟到结算
     }
     let fromOverride: SubagentRunStatus;
-    if (current.status === "waiting_for_input") {
+    if (current.status === "waiting_for_input" || current.status === "running" || current.status === "starting") {
+      // 状态机没有 running/starting/waiting_for_input → cancelled 直接边
+      // （T1 冻结），先转 cancelling 再收敛 cancelled（§16.4 #5）
       try {
-        this.deps.runs.transit({ runId, from: "waiting_for_input", to: "cancelling", reasonCode: null, now }, ownership);
+        this.deps.runs.transit({ runId, from: current.status, to: "cancelling", reasonCode: null, now }, ownership);
         fromOverride = "cancelling";
       } catch {
-        // 并发恢复路径已抢先转换；按当前状态收敛
+        // 并发路径已抢先转换；按当前状态收敛
         const after = this.deps.runs.get(runId, ownership);
         if (after === null || !isSubagentRunActive(after.status)) {
           return false;
@@ -815,7 +817,7 @@ export class SubagentRuntimeHost {
       // 终态后释放失败不阻断（启动恢复兜底）
     }
     this.active.delete(runId);
-    this.deps.onRunFinished?.({ runId });
+    this.deps.onRunFinished?.({ runId, threadId: active.threadId });
   }
 
   private newMessageId(): AgentMessageId {

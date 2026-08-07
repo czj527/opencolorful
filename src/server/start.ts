@@ -45,6 +45,8 @@ import { ClientRegistry } from "./ws/client-registry.js";
 import { ObservabilityContext } from "../observability/observability-context.js";
 import { PluginFacade } from "../platform/plugin-facade.js";
 import { buildSkillComposition } from "../runtime/skills/composition.js";
+import { buildSubagentComposition, type SubagentRuntimeComposition } from "../runtime/subagents/composition.js";
+import type { SubagentStartupRecoveryReport } from "../runtime/subagents/recovery/startup-recovery.js";
 import { instrument } from "../observability/instrument.js";
 import { createBootId } from "../observability/trace-context.js";
 
@@ -307,12 +309,17 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     const providerStore = new ProviderStore(paths.providerSettings);
     // 评审 P0-1：凭据变更走 fail-closed 审计（observability 上下文已就绪）
     const modelService = await ModelService.create(paths, providerStore, observability.audit);
-    // 记忆 ticker 在 sessionService 之后创建，archive 钩子用可变引用延迟接线
+    // 记忆 ticker 在 sessionService 之后创建，archive 钩子用可变引用延迟接线；
+    // Phase 14 T6：Subagent 父 Session archive 联动（组合根在其后构造，同样用可变引用）
     let memoryTicker: MemoryTicker | undefined;
+    let subagentCompositionRef: SubagentRuntimeComposition | undefined;
     const sessionService = new SessionService(
       paths,
       sessionIndex,
-      (sessionId) => memoryTicker?.onSessionArchived(sessionId),
+      (sessionId) => {
+        memoryTicker?.onSessionArchived(sessionId);
+        subagentCompositionRef?.handleParentSessionArchived(sessionId);
+      },
     );
     // preferencesStore 已在可观测性初始化前创建（评审 P1-7）
     const agentStore = new AgentStore(paths.agents);
@@ -461,6 +468,31 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       resolver: memoryAgentResolver,
     });
     memoryAgentScheduler.start();
+
+    // Phase 14 T6：Subagent 运行时组合根（T2-T7 服务接线 + 启动恢复 §16.5）
+    let subagentComposition: SubagentRuntimeComposition | undefined;
+    let subagentRecoveryReport: SubagentStartupRecoveryReport | undefined;
+    if (modelService !== undefined && preferencesStore !== undefined && observability !== undefined && database !== undefined) {
+      subagentComposition = buildSubagentComposition({
+        database,
+        paths,
+        modelService,
+        preferencesStore,
+        activity: observability.activity,
+        audit: observability.audit,
+        bootId: createBootId(version),
+      });
+      subagentRecoveryReport = subagentComposition.runRecovery();
+      subagentCompositionRef = subagentComposition;
+      if (subagentRecoveryReport.errors.length > 0) {
+        // §16.5：恢复失败 → Subagent 系统 unavailable（spawn fail-closed）；
+        // 主会话其余功能不受影响
+        instrument.warn("subagent.recovery.failed", "Subagent 启动恢复部分失败，运行时标记为不可用", {
+          reason: subagentRecoveryReport.errors.join("; ").slice(0, 400),
+        });
+      }
+    }
+
     let disposed = false;
 
     return {
@@ -482,6 +514,17 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         database,
         // 评审 P0-1：fail-closed 审计接入路由（沙箱策略/工作区/凭据）
         audit: observability.audit,
+        // Phase 14 T6/T7：Subagent 只读 API 与运行时组合根（未构造时不注册工具/路由）
+        ...(subagentComposition === undefined
+          ? {}
+          : {
+              subagent: {
+                transcriptView: subagentComposition.transcriptView,
+                artifactFiles: subagentComposition.artifactFiles,
+                replayStore: subagentComposition.replay,
+                composition: subagentComposition,
+              },
+            }),
         memoryFlushHook: (agentId) => memoryTicker?.requestFlush(agentId),
         memoryAdmin: {
           resolver: memoryAgentResolver,
@@ -497,6 +540,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         disposed = true;
         memoryTicker.stop();
         memoryAgentScheduler.stop();
+        subagentComposition?.dispose();
         usageRecorder.dispose();
         promptService.dispose();
         sessionService.closeAll();
