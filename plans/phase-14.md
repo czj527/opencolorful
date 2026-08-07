@@ -2383,7 +2383,7 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 
 ### T2+T3：Subagent Stores 与 DelegationPolicy（2026-08-07）
 
-**Commit**：`（T2+T3 提交 hash，提交后回填）`
+**Commit**：`582b6fe`
 
 **主要文件**：
 
