@@ -306,14 +306,14 @@ export class ActivityRecorder {
           (event_id, schema_version, event_version, recorded_at, occurred_at, event_name, category,
            level, status, significance, actor_kind, actor_id, executor_kind, executor_id,
            target_kind, target_id, owner_agent_id, session_id, run_id, turn_id, task_id,
-           subagent_run_id, tool_call_id, plugin_id, trace_id, span_id, parent_span_id,
+           subagent_thread_id, subagent_run_id, tool_call_id, plugin_id, trace_id, span_id, parent_span_id,
            operation_id, correlation_id, duration_ms, error_code, retryable,
            producer_component, producer_process_type, boot_id, search_text, payload_json)
          VALUES (
            @eventId, @schemaVersion, @eventVersion, @recordedAt, @occurredAt, @eventName, @category,
            @level, @status, @significance, @actorKind, @actorId, @executorKind, @executorId,
            @targetKind, @targetId, @ownerAgentId, @sessionId, @runId, @turnId, @taskId,
-           @subagentRunId, @toolCallId, @pluginId, @traceId, @spanId, @parentSpanId,
+           @subagentThreadId, @subagentRunId, @toolCallId, @pluginId, @traceId, @spanId, @parentSpanId,
            @operationId, @correlationId, @durationMs, @errorCode, @retryable,
            @producerComponent, @producerProcessType, @bootId, @searchText, @payloadJson
          )`,
@@ -340,6 +340,8 @@ export class ActivityRecorder {
         runId: scope.runId ?? null,
         turnId: scope.turnId ?? null,
         taskId: scope.taskId ?? null,
+        // Phase 14（§19.1）：Subagent Thread/Run 归属列（v12 迁移新增）
+        subagentThreadId: scope.subagentThreadId ?? null,
         subagentRunId: scope.subagentRunId ?? null,
         toolCallId: scope.toolCallId ?? null,
         pluginId: scope.pluginId ?? null,
@@ -372,8 +374,8 @@ export class ActivityRecorder {
   }
 
   /** audit 镜像：action=auditMirror 事件名（摘要化），不含 payload 正文；
-   *  event_name 同步落 mirror 事件名；decision 按事件名推导
-   *  （含 denied/revoked → 'denied'，否则 'allowed'） */
+   *   event_name 同步落 mirror 事件名；decision 按事件名推导
+   *   （含 denied/revoked → 'denied'，否则 'allowed'） */
   private insertAuditMirror(envelope: ActivityEnvelope, mirrorEventName: string, scope: EventScope): void {
     const decision = mirrorEventName.includes("denied") || mirrorEventName.includes("revoked") ? "denied" : "allowed";
     this.deps.database
@@ -381,9 +383,10 @@ export class ActivityRecorder {
         `INSERT OR IGNORE INTO audit_events
           (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
            action, decision, event_name, actor_kind, actor_id, executor_kind, executor_id,
-           target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
+           target_kind, target_id, owner_agent_id, session_id,
+           subagent_thread_id, subagent_run_id, trace_id, operation_id,
            policy_version, payload_json)
-         VALUES (?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         `mirror:${envelope.eventId}`,
@@ -401,6 +404,8 @@ export class ActivityRecorder {
         envelope.target?.id ?? null,
         scope.ownerAgentId ?? null,
         scope.sessionId ?? null,
+        scope.subagentThreadId ?? null,
+        scope.subagentRunId ?? null,
         envelope.trace.traceId,
         scope.runId ?? null,
         "1",

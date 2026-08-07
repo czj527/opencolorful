@@ -27,6 +27,8 @@ export interface SupportBundleManifest {
   readonly rawPayloadIncluded: false;
   readonly factSourcesIncluded: false;
   readonly rawLogsIncluded: false;
+  /** Phase 14（§19.5）：Support Bundle 只含脱敏事件和状态，不含完整 Subagent transcript */
+  readonly subagentTranscriptsIncluded: false;
 }
 
 export interface SupportBundleResult {
@@ -92,10 +94,11 @@ export function buildSupportBundle(options: {
     platform: process.platform,
     nodeVersion: process.version,
     redactionVersion: REDACTION_VERSION,
-    includedSections: ["manifest", "configShape", "health", "failedActivity", "audit", "metrics"],
+    includedSections: ["manifest", "configShape", "health", "failedActivity", "audit", "metrics", "subagentState"],
     rawPayloadIncluded: false,
     factSourcesIncluded: false,
     rawLogsIncluded: false,
+    subagentTranscriptsIncluded: false,
   };
 
   const bundle = {
@@ -110,6 +113,9 @@ export function buildSupportBundle(options: {
     failedActivity: activityAllowlist,
     audit: auditAllowlist,
     metrics: options.query.dailyMetrics({ days: 7 }),
+    // Phase 14（§19.5）：Subagent 只含状态摘要（threadId/status/计数），
+    // 不含消息正文/结果 JSON/Artifact 内容——完整 transcript 不进 bundle
+    subagentState: listSubagentState(options.database),
     ...(options.traceId !== undefined
       ? { trace: { tree: options.query.traceTree(options.traceId), linked: options.query.linkedGraph(options.traceId, { maxNodes: 20 }) } }
       : {}),
@@ -119,4 +125,38 @@ export function buildSupportBundle(options: {
   fs.writeFileSync(tmpPath, JSON.stringify(bundle, null, 2), "utf8");
   fs.renameSync(tmpPath, bundlePath);
   return { path: bundlePath, manifest };
+}
+
+/** §19.5：Subagent 状态摘要（脱敏——只含 ID/状态/计数，不含 title/正文/结果） */
+function listSubagentState(database: import("better-sqlite3").Database): Array<{
+  threadId: string;
+  ownerAgentId: string;
+  parentSessionId: string;
+  status: string;
+  closedAt: string | null;
+  runCount: number;
+  artifactCount: number;
+  failedRunCount: number;
+}> {
+  const rows = database
+    .prepare(
+      `SELECT t.thread_id AS threadId, t.owner_agent_id AS ownerAgentId,
+              t.parent_session_id AS parentSessionId, t.status, t.closed_at AS closedAt,
+              (SELECT COUNT(*) FROM subagent_runs r WHERE r.thread_id = t.thread_id) AS runCount,
+              (SELECT COUNT(*) FROM subagent_artifacts a WHERE a.thread_id = t.thread_id) AS artifactCount,
+              (SELECT COUNT(*) FROM subagent_runs r WHERE r.thread_id = t.thread_id AND r.status IN ('failed','cancelled','timed_out','interrupted','budget_exhausted')) AS failedRunCount
+       FROM subagent_threads t
+       ORDER BY t.updated_at DESC LIMIT 200`,
+    )
+    .all() as Array<{
+      threadId: string;
+      ownerAgentId: string;
+      parentSessionId: string;
+      status: string;
+      closedAt: string | null;
+      runCount: number;
+      artifactCount: number;
+      failedRunCount: number;
+    }>;
+  return rows;
 }

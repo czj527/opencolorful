@@ -14,6 +14,8 @@ export interface ActivityViewProps {
   readonly initialPluginId?: string;
   /** T7：Skill 预筛选（/logs?skill=<skillRefKey>）——按 skillRefKey 独立过滤，仿 plugin 模式 */
   readonly initialSkillRefKey?: string;
+  /** Phase 14（§19.5）：Subagent 预筛选（/logs?subagent=<threadId>）——按 subagent_thread_id 独立过滤 */
+  readonly initialSubagentThreadId?: string;
 }
 
 const CATEGORY_OPTIONS = [
@@ -39,6 +41,7 @@ interface DraftFilter {
   readonly ownerAgentId: string;
   readonly pluginId: string;
   readonly skillRefKey: string;
+  readonly subagentThreadId: string;
   readonly search: string;
   readonly from: string;
   readonly to: string;
@@ -53,6 +56,7 @@ const EMPTY_DRAFT: DraftFilter = {
   ownerAgentId: "",
   pluginId: "",
   skillRefKey: "",
+  subagentThreadId: "",
   search: "",
   from: "",
   to: "",
@@ -68,6 +72,7 @@ function buildQuery(draft: DraftFilter): ActivityQuery {
     ...(draft.ownerAgentId.trim() !== "" ? { ownerAgentId: draft.ownerAgentId.trim() } : {}),
     ...(draft.pluginId.trim() !== "" ? { pluginId: draft.pluginId.trim() } : {}),
     ...(draft.skillRefKey.trim() !== "" ? { skillRefKey: draft.skillRefKey.trim() } : {}),
+    ...(draft.subagentThreadId.trim() !== "" ? { subagentThreadId: draft.subagentThreadId.trim() } : {}),
     ...(draft.search.trim() !== "" ? { search: draft.search.trim() } : {}),
     ...(draft.from !== "" ? { from: draft.from } : {}),
     ...(draft.to !== "" ? { to: draft.to } : {}),
@@ -87,6 +92,11 @@ function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean 
   if (filter.sessionId !== undefined && row.sessionId !== filter.sessionId) return false;
   if (filter.ownerAgentId !== undefined && row.ownerAgentId !== filter.ownerAgentId) return false;
   if (filter.pluginId !== undefined && row.pluginId !== filter.pluginId) return false;
+  // Phase 14（§19.5）：subagent 过滤——subagent_thread_id 列精确匹配（服务端同语义）
+  if (filter.subagentThreadId !== undefined && filter.subagentThreadId.trim() !== ""
+    && row.subagentThreadId !== filter.subagentThreadId.trim()) {
+    return false;
+  }
   // T7：skill 过滤——payload attributes.skillRefKey 精确匹配（服务端同语义）
   if (filter.skillRefKey !== undefined && filter.skillRefKey.trim() !== "") {
     const parsed = parsePayload(row.payloadJson);
@@ -107,12 +117,12 @@ function matchesAppliedFilter(row: ActivityRow, filter: ActivityQuery): boolean 
   return true;
 }
 
-export function ActivityView({ api, initialSearch = "", initialPluginId = "", initialSkillRefKey = "" }: ActivityViewProps) {
-  // 预筛选（?plugin= / ?skill= 等）：初始 draft 与 applied 都带预筛选值，
+export function ActivityView({ api, initialSearch = "", initialPluginId = "", initialSkillRefKey = "", initialSubagentThreadId = "" }: ActivityViewProps) {
+  // 预筛选（?plugin= / ?skill= / ?subagent= 等）：初始 draft 与 applied 都带预筛选值，
   // 使首次加载即按该条件过滤；无预筛选时与之前行为一致
-  const [draft, setDraft] = useState<DraftFilter>(() => ({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId, skillRefKey: initialSkillRefKey }));
+  const [draft, setDraft] = useState<DraftFilter>(() => ({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId, skillRefKey: initialSkillRefKey, subagentThreadId: initialSubagentThreadId }));
   // 初始 applied 为空过滤（buildQuery 过滤空串），避免把空串参数发给后端导致零匹配
-  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId, skillRefKey: initialSkillRefKey }));
+  const [applied, setApplied] = useState<ActivityQuery>(() => buildQuery({ ...EMPTY_DRAFT, search: initialSearch, pluginId: initialPluginId, skillRefKey: initialSkillRefKey, subagentThreadId: initialSubagentThreadId }));
   const [items, setItems] = useState<readonly ActivityRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

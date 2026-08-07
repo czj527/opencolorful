@@ -142,6 +142,9 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
       ...(context.req.query("operationId") !== undefined ? { operationId: context.req.query("operationId")! } : {}),
       ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
+      // Phase 14（§19.5）：/logs?subagent=<threadId> 的专用过滤器
+      ...(context.req.query("subagentThreadId") !== undefined ? { subagentThreadId: context.req.query("subagentThreadId")! } : {}),
+      ...(context.req.query("subagentRunId") !== undefined ? { subagentRunId: context.req.query("subagentRunId")! } : {}),
       // T7：Skill 事件过滤（payload attributes：skillRefKey/sourceId/bundleRef）
       ...(context.req.query("skill") !== undefined ? { skillRefKey: context.req.query("skill")! } : {}),
       ...(context.req.query("source") !== undefined ? { sourceId: context.req.query("source")! } : {}),
@@ -262,6 +265,9 @@ export function registerObservabilityRoutes(app: Hono, deps: ObservabilityRouteD
       ...(context.req.query("sessionId") !== undefined ? { sessionId: context.req.query("sessionId")! } : {}),
       ...(context.req.query("traceId") !== undefined ? { traceId: context.req.query("traceId")! } : {}),
       ...(context.req.query("pluginId") !== undefined ? { pluginId: context.req.query("pluginId")! } : {}),
+      // Phase 14（§19.5）：audit 侧 Subagent 专用过滤器
+      ...(context.req.query("subagentThreadId") !== undefined ? { subagentThreadId: context.req.query("subagentThreadId")! } : {}),
+      ...(context.req.query("subagentRunId") !== undefined ? { subagentRunId: context.req.query("subagentRunId")! } : {}),
       // T7：Skill 审计过滤（strict audit 的 before/afterRevision 与 target 携带 refKey）
       ...(context.req.query("skill") !== undefined ? { skillRefKey: context.req.query("skill")! } : {}),
       ...(context.req.query("source") !== undefined ? { sourceId: context.req.query("source")! } : {}),

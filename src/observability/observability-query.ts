@@ -30,6 +30,10 @@ export interface ActivityFilter {
   readonly operationId?: string;
   /** P1-3：按插件过滤（activity_events.plugin_id 列） */
   readonly pluginId?: string;
+  /** Phase 14（§19.1/§19.5）：按 Subagent Thread 过滤（activity_events.subagent_thread_id） */
+  readonly subagentThreadId?: string;
+  /** Phase 14（§19.1）：按 Subagent Run 过滤（activity_events.subagent_run_id） */
+  readonly subagentRunId?: string;
   /** T7：按 Skill 事件 payload attributes 过滤（json_extract；无独立列） */
   readonly skillRefKey?: string;
   /** T7：按 Skill 来源过滤（payload attributes.sourceId，如插件 id / 包根路径） */
@@ -68,6 +72,9 @@ export interface ActivityRow {
   readonly targetId: string | null;
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
+  /** Phase 14（§19.1）：Subagent Thread/Run 归属 */
+  readonly subagentThreadId: string | null;
+  readonly subagentRunId: string | null;
   readonly traceId: string;
   readonly spanId: string;
   readonly parentSpanId: string | null;
@@ -93,6 +100,9 @@ export interface AuditRow {
   readonly actorId: string;
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
+  /** Phase 14（§19.1）：Subagent Thread/Run 归属 */
+  readonly subagentThreadId: string | null;
+  readonly subagentRunId: string | null;
   readonly traceId: string;
   readonly operationId: string | null;
   readonly payloadJson: string;
@@ -162,6 +172,7 @@ const ACTIVITY_COLUMNS = `
   executor_kind AS executorKind, executor_id AS executorId,
   target_kind AS targetKind, target_id AS targetId,
   owner_agent_id AS ownerAgentId, session_id AS sessionId, plugin_id AS pluginId,
+  subagent_thread_id AS subagentThreadId, subagent_run_id AS subagentRunId,
   trace_id AS traceId, span_id AS spanId, parent_span_id AS parentSpanId,
   operation_id AS operationId, duration_ms AS durationMs,
   error_code AS errorCode, retryable,
@@ -173,6 +184,7 @@ const AUDIT_COLUMNS = `
   event_name AS eventName, action, decision, reason_code AS reasonCode,
   actor_kind AS actorKind, actor_id AS actorId,
   owner_agent_id AS ownerAgentId, session_id AS sessionId,
+  subagent_thread_id AS subagentThreadId, subagent_run_id AS subagentRunId,
   trace_id AS traceId, operation_id AS operationId, payload_json AS payloadJson`;
 
 const MAX_PAGE_SIZE = 200;
@@ -197,6 +209,9 @@ export class ObservabilityQuery {
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
     if (filter.pluginId !== undefined) { where.push("plugin_id = ?"); params.push(filter.pluginId); }
+    // Phase 14（§19.1/§19.5）：/logs?subagent= 与面板按 Thread/Run 过滤
+    if (filter.subagentThreadId !== undefined) { where.push("subagent_thread_id = ?"); params.push(filter.subagentThreadId); }
+    if (filter.subagentRunId !== undefined) { where.push("subagent_run_id = ?"); params.push(filter.subagentRunId); }
     // T7：skill 相关事件按 payload attributes 过滤（activity_events 无 skill 列，
     // 不动 migration v11 表结构，用 SQLite JSON1 json_extract 查询 payload_json）
     if (filter.skillRefKey !== undefined) {
@@ -282,7 +297,7 @@ export class ObservabilityQuery {
   // ─── Audit cursor 分页 ────────────────────────────────────────
 
   queryAudit(
-    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; traceId?: string; operationId?: string; pluginId?: string; skillRefKey?: string; sourceId?: string },
+    filter: { epoch?: number; eventName?: string; action?: string; decision?: string; ownerAgentId?: string; sessionId?: string; subagentThreadId?: string; subagentRunId?: string; traceId?: string; operationId?: string; pluginId?: string; skillRefKey?: string; sourceId?: string },
     cursor: PageCursor | null,
     limit = 50,
   ): PagedResult<AuditRow> {
@@ -296,6 +311,9 @@ export class ObservabilityQuery {
     if (filter.operationId !== undefined) { where.push("operation_id = ?"); params.push(filter.operationId); }
     if (filter.ownerAgentId !== undefined) { where.push("owner_agent_id = ?"); params.push(filter.ownerAgentId); }
     if (filter.sessionId !== undefined) { where.push("session_id = ?"); params.push(filter.sessionId); }
+    // Phase 14（§19.1/§19.5）：audit_events 的 Subagent 归属列（v12 迁移新增）
+    if (filter.subagentThreadId !== undefined) { where.push("subagent_thread_id = ?"); params.push(filter.subagentThreadId); }
+    if (filter.subagentRunId !== undefined) { where.push("subagent_run_id = ?"); params.push(filter.subagentRunId); }
     if (filter.traceId !== undefined) { where.push("trace_id = ?"); params.push(filter.traceId); }
     // P1-3：audit_events 无 plugin_id 列，插件审计按 target（target_kind='plugin'）过滤
     if (filter.pluginId !== undefined) { where.push("target_kind = 'plugin' AND target_id = ?"); params.push(filter.pluginId); }

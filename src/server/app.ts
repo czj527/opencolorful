@@ -26,6 +26,7 @@ import { registerUsageRoutes } from "./routes/usage.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerAgentEventRoutes } from "./routes/agent-events.js";
 import { registerObservabilityRoutes } from "./routes/observability.js";
+import { registerSubagentRoutes } from "./routes/subagents.js";
 import { registerPluginDevRoutes, registerPluginRoutes } from "./routes/plugins.js";
 import { registerSkillRoutes } from "./routes/skills.js";
 import { registerSkillAdminRoutes } from "./routes/skill-admin.js";
@@ -60,6 +61,8 @@ export interface ServerAppOptions {
   readonly memoryFlushHook?: (agentId: string) => void;
   /** Phase 10.5 管理依赖（deep-dive/rollback/runs/settings/timeline） */
   readonly memoryAdmin?: import("./routes/memory.js").MemoryAdminDeps;
+  /** Phase 14 T7：Subagent 只读 API（transcript/SSE/artifact 下载；T6 组合根注入） */
+  readonly subagent?: import("./routes/subagents.js").SubagentRouteDeps;
 }
 
 export interface ServerAppResult {
@@ -200,6 +203,11 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       // 评审 P0（第三轮）：retention 删除与 Audit 同事务（fail-closed）
       ...(options.audit !== undefined ? { audit: options.audit } : {}),
     });
+  }
+
+  // Phase 14 T7：Subagent transcript/SSE/Artifact 只读 API（组合根注入后注册）
+  if (options.subagent !== undefined) {
+    registerSubagentRoutes(app, options.subagent);
   }
 
   // WebSocket 路由

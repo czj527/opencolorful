@@ -151,12 +151,14 @@ export class AuditRecorder {
         `INSERT OR IGNORE INTO audit_events
           (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
            event_name, action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
-           target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
+           target_kind, target_id, owner_agent_id, session_id,
+           subagent_thread_id, subagent_run_id, trace_id, operation_id,
            policy_version, before_revision, after_revision, changed_fields_json, payload_json)
          VALUES (
            @eventId, @ledgerEpoch, 1, @eventVersion, @recordedAt, @occurredAt,
            @eventName, @action, @decision, @reasonCode, @actorKind, @actorId, @executorKind, @executorId,
-           @targetKind, @targetId, @ownerAgentId, @sessionId, @traceId, @operationId,
+           @targetKind, @targetId, @ownerAgentId, @sessionId,
+           @subagentThreadId, @subagentRunId, @traceId, @operationId,
            @policyVersion, @beforeRevision, @afterRevision, @changedFieldsJson, @payloadJson
          )`,
       )
@@ -178,6 +180,9 @@ export class AuditRecorder {
         targetId: envelope.target?.id ?? null,
         ownerAgentId: envelope.scope.ownerAgentId ?? null,
         sessionId: envelope.scope.sessionId ?? null,
+        // Phase 14（§19.1）：Subagent Thread/Run 归属列（v12 迁移新增）
+        subagentThreadId: envelope.scope.subagentThreadId ?? null,
+        subagentRunId: envelope.scope.subagentRunId ?? null,
         traceId: envelope.trace.traceId,
         operationId: envelope.trace.operationId ?? null,
         policyVersion: envelope.payload.policyVersion ?? null,
@@ -229,9 +234,10 @@ export class AuditRecorder {
           `INSERT OR IGNORE INTO audit_events
             (event_id, ledger_epoch, schema_version, event_version, recorded_at, occurred_at,
              event_name, action, decision, reason_code, actor_kind, actor_id, executor_kind, executor_id,
-             target_kind, target_id, owner_agent_id, session_id, trace_id, operation_id,
+             target_kind, target_id, owner_agent_id, session_id,
+             subagent_thread_id, subagent_run_id, trace_id, operation_id,
              policy_version, before_revision, after_revision, changed_fields_json, payload_json)
-           VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           envelope.eventId,
@@ -251,6 +257,8 @@ export class AuditRecorder {
           envelope.target?.id ?? null,
           envelope.scope.ownerAgentId ?? null,
           envelope.scope.sessionId ?? null,
+          envelope.scope.subagentThreadId ?? null,
+          envelope.scope.subagentRunId ?? null,
           envelope.trace.traceId,
           envelope.trace.operationId ?? null,
           envelope.payload.policyVersion ?? null,

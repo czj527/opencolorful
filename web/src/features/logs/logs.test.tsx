@@ -87,6 +87,8 @@ function activityRow(overrides: Partial<ActivityRow> = {}): ActivityRow {
     targetId: "agent-server",
     ownerAgentId: null,
     sessionId: null,
+    subagentThreadId: null,
+    subagentRunId: null,
     traceId: "trace-1",
     spanId: "span-1",
     parentSpanId: null,

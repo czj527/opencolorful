@@ -285,6 +285,9 @@ export class ApiClient {
       if (filter.traceId !== undefined) params.set("traceId", filter.traceId);
       if (filter.operationId !== undefined) params.set("operationId", filter.operationId);
       if (filter.pluginId !== undefined) params.set("pluginId", filter.pluginId);
+      // Phase 14（§19.5）：Subagent 专用过滤
+      if (filter.subagentThreadId !== undefined) params.set("subagentThreadId", filter.subagentThreadId);
+      if (filter.subagentRunId !== undefined) params.set("subagentRunId", filter.subagentRunId);
       // T7：Skill 事件过滤（skillRefKey/sourceId/bundleRef）
       if (filter.skillRefKey !== undefined) params.set("skillRefKey", filter.skillRefKey);
       if (filter.sourceId !== undefined) params.set("sourceId", filter.sourceId);

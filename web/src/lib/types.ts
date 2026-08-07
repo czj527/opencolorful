@@ -351,6 +351,9 @@ export interface ActivityRow {
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
   readonly pluginId?: string | null;
+  /** Phase 14（§19.1）：Subagent Thread/Run 归属 */
+  readonly subagentThreadId: string | null;
+  readonly subagentRunId: string | null;
   readonly traceId: string;
   readonly spanId: string;
   readonly parentSpanId: string | null;
@@ -380,6 +383,9 @@ export interface ActivityQuery {
   readonly operationId?: string;
   /** P1-3：按插件过滤 */
   readonly pluginId?: string;
+  /** Phase 14（§19.5）：/logs?subagent=<threadId> 专用过滤 */
+  readonly subagentThreadId?: string;
+  readonly subagentRunId?: string;
   /** T7：按 Skill 事件过滤（skillRefKey） */
   readonly skillRefKey?: string;
   /** T7：按 Skill 来源过滤（sourceId） */
@@ -421,6 +427,9 @@ export interface AuditRow {
   readonly ownerAgentId: string | null;
   readonly sessionId: string | null;
   readonly pluginId?: string | null;
+  /** Phase 14（§19.1）：Subagent Thread/Run 归属 */
+  readonly subagentThreadId: string | null;
+  readonly subagentRunId: string | null;
   readonly traceId: string;
   readonly operationId: string | null;
   readonly payloadJson: string;
