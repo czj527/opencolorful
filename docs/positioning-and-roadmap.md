@@ -288,9 +288,9 @@ OpenColorful 是三层结构。**第一层是 agent 的"自我"，第二层是 a
 
 ## 十、立即行动建议
 
-1. **Phase 0-12 已完成并验收**：运行时、Agent 底色、沙箱、记忆、日志和插件基础设施已经建立。
-2. **进入 Phase 13 Skill 系统**：先完成标准兼容、Bundle、会话内安装、不可变快照和日志闭环，详细计划见 `plans/phase-13.md`。
-3. **Phase 14 只做临时 Subagent 1.0**：不提前混入 channel、ACP 图编排或常驻多 Agent 团队；技能自创和多 Agent 协作继续后移。
+1. **Phase 0-13 已完成并验收**：运行时、Agent 底色、沙箱、记忆、日志、插件和 Skill 基础设施已经建立。
+2. **进入 Phase 14 临时 Subagent 1.0**：实现无长期记忆的 Thread/Run Runtime、结构化父子协议、主 Agent 纠偏、用户只读观察、权限快照和可靠结果投递，详细草案见 `plans/phase-14.md`。
+3. **继续守住阶段边界**：Phase 14 不提前混入 Channel、外部 A2A/ACP、图编排、常驻团队、技能自创或多 Agent 协作。
 
 ---
 

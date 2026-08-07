@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 
 import { THINKING_LEVELS, TOOL_MODES, type ThinkingLevel, type ToolMode } from "./session-settings.js";
 import { MemoryAgentSettingsSchema, defaultMemoryAgentSettings, type MemoryAgentSettings } from "./memory.js";
+import { SubagentPreferencesSchema, defaultSubagentPreferences, type SubagentPreferences } from "./subagents.js";
 import { Value } from "typebox/value";
 
 /**
@@ -79,6 +80,8 @@ export const PreferencesDocumentSchema = Type.Object(
     memory: Type.Optional(MemoryAgentSettingsSchema),
     // Phase 11：可观测性全局默认（级别/保留/预算）
     observability: Type.Optional(ObservabilityPreferencesSchema),
+    // Phase 14：Subagent 全局默认（defaultModel；只影响新建 Thread）
+    subagents: Type.Optional(SubagentPreferencesSchema),
   },
   { additionalProperties: false },
 );
@@ -117,6 +120,7 @@ export interface PreferencesDocument {
   readonly appearance: AppearancePreferences;
   readonly memory?: MemoryAgentSettings;
   readonly observability?: ObservabilityPreferences;
+  readonly subagents?: SubagentPreferences;
 }
 
 const LEFT_MIN = 200;
@@ -150,6 +154,8 @@ export function defaultPreferences(): PreferencesDocument {
       timelineVisible: true,
     },
     observability: defaultObservabilityPreferences(),
+    // Phase 14：Subagent 默认模型（null = 未设置，创建时继承父模型或显式选择）
+    subagents: defaultSubagentPreferences(),
   };
 }
 
@@ -259,6 +265,8 @@ export function normalizePreferences(value: unknown): PreferencesDocument {
   const memory = normalizeMemorySettings(value.memory);
   // v1 → v2 迁移：observability 缺失时补默认段（Phase 11 保证新字段始终存在）
   const observability = normalizeObservabilitySettings(value.observability) ?? { ...defaultObservabilityPreferences() };
+  // Phase 14：subagents 缺失时补默认段（defaultModel=null）
+  const subagents = normalizeSubagentSettings(value.subagents) ?? { ...defaultSubagentPreferences() };
   return {
     version: 2,
     defaults: normalizeDefaults(value.defaults, fallback.defaults),
@@ -266,7 +274,16 @@ export function normalizePreferences(value: unknown): PreferencesDocument {
     appearance: normalizeAppearance(value.appearance, fallback.appearance),
     ...(memory !== undefined ? { memory } : {}),
     observability,
+    subagents,
   };
+}
+
+/** Subagent 设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */
+function normalizeSubagentSettings(value: unknown): SubagentPreferences | undefined {
+  if (value === undefined) return undefined;
+  return Value.Check(SubagentPreferencesSchema, value)
+    ? (value as SubagentPreferences)
+    : { ...defaultSubagentPreferences() };
 }
 
 /** 可观测性设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */

@@ -33,7 +33,8 @@
 | `plans/phase-10.5.md` | Phase 10.5 记忆 Agent 与后台整理计划 | 进入记忆 Agent 阶段时读 |
 | `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已实现并验收） | 接续可观测性工作时读 |
 | `plans/phase-12.md` | Phase 12 通用插件系统计划、实施记录与验收结论（已完成） | 接续插件、Skill 或 Subagent 工作时读 |
-| `plans/phase-13.md` | Phase 13 Skill 系统与 Agent Skills 生态兼容计划（规划中） | 开发或评审 Skill 系统时必读 |
+| `plans/phase-13.md` | Phase 13 Skill 系统与 Agent Skills 生态兼容计划（已完成） | 接续 Skill 或 Subagent 工作时读 |
+| `plans/phase-14.md` | Phase 14 临时 Subagent Runtime 与父子任务协议计划（草案） | 开发或评审 Subagent 时必读 |
 
 ## 参考仓库
 
@@ -48,8 +49,8 @@
 - **Phase 10.5 已完成（2026-08-03）**：记忆 Agent、sealed batch、retention/activation 强度、proposal + MemoryPolicy 审批、每日/每周整理和 deep-dive。
 - **Phase 11 已完成并验收（2026-08-03）**：Diagnostic/Activity/Audit 三通道、Trace、严格审计生命周期、查询/保留/恢复与 `/logs`。
 - **Phase 12 已完成并验收（2026-08-05）**：通用插件系统、四类 Runtime、10 类扩展点、生态适配、Agent 绑定、权限快照、开发循环和全链路日志。
-- **当前阶段（Phase 13）**：Skill 系统——Agent Skills 标准兼容、Catalog/Bundle/绑定、会话内安装、PI 渐进披露、每 turn 快照和日志闭环。详见 `plans/phase-13.md`。
-- **Phase 14 已定概念边界**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill 的 Subagent 1.0；不聚焦多 Agent 协作。
+- **Phase 13 已完成（2026-08-07）**：Agent Skills 标准兼容、Catalog/Bundle/绑定、会话内安装、PI 渐进披露、每 turn 快照、插件 Skill 和日志闭环。
+- **当前阶段（Phase 14 规划）**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill、用户只读观察、主 Agent 可纠偏的 Subagent Runtime 1.0；不聚焦多 Agent 协作。详见 `plans/phase-14.md`。
 - **当前定位已重新明确（2026-07-27）**：从"全能私人助理平台"修正为"承载 agent 完整一生的平台基础设施"。
 
 接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。

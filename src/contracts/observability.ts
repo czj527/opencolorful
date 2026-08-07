@@ -51,6 +51,8 @@ export type ExecutorKind = (typeof EXECUTOR_KINDS)[number];
 export const TARGET_KINDS = [
   "platform", "agent", "session", "turn", "tool", "file", "workspace",
   "memory_fact", "memory_event", "memory_batch", "plugin", "provider", "configuration", "external_resource",
+  // Phase 14（plans/phase-14.md §19.1）：Subagent 资源
+  "subagent_thread", "subagent_run", "subagent_artifact",
 ] as const;
 export type TargetKind = (typeof TARGET_KINDS)[number];
 
@@ -99,6 +101,10 @@ export const ResourceRefSchema = Type.Object({
       Type.Literal("provider"),
       Type.Literal("configuration"),
       Type.Literal("external_resource"),
+      // Phase 14（§19.1）：Subagent 资源
+      Type.Literal("subagent_thread"),
+      Type.Literal("subagent_run"),
+      Type.Literal("subagent_artifact"),
     ]),
   id: Type.String({ minLength: 1, maxLength: 256 }),
 });
@@ -115,6 +121,8 @@ export const EventScopeSchema = Type.Object(
     turnId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     taskId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     subagentRunId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    // Phase 14（§19.1）：Subagent Thread 归属（与 subagentRunId 成对出现）
+    subagentThreadId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     toolCallId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     pluginId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },

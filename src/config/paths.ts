@@ -35,6 +35,9 @@ export interface RuntimePaths {
   readonly skillsBuiltin: string;
   readonly skillDevSources: string;
   readonly skillSources: string;
+  // ── Phase 14 Subagent 目录（plans/phase-14.md §16.3）──
+  // 约定：<subagentsBase>/<ownerAgentId>/subagents/<threadId>/（session.jsonl + artifacts/）
+  readonly subagentsBase: string;
 }
 
 export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): RuntimePaths {
@@ -75,5 +78,9 @@ export function getRuntimePaths(environment: NodeJS.ProcessEnv = process.env): R
     skillsBuiltin: path.join(home, "skills", "builtin"),
     skillDevSources: path.join(home, "skill-dev-sources"),
     skillSources: path.join(config, "skill-sources.json"),
+    // Phase 14：agents 根目录——Subagent Thread 目录由
+    // <subagentsBase>/<ownerAgentId>/subagents/<threadId> 生成（threadId 为平台
+    // 生成的稳定 ID，调用方不得拼接用户提供的路径片段）
+    subagentsBase: path.join(home, "agents"),
   };
 }

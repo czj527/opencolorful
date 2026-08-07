@@ -2346,3 +2346,37 @@ npm run build --workspace=packages/agent-protocol
 - 最终验收结论和是否允许合并 `main`。
 
 Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agent 协作不得提前混入本节。
+
+### T1：契约、设置、事件目录与 Migration v12（2026-08-07）
+
+**Commit**：`（T1 提交 hash，提交后回填）`
+
+**主要文件**：
+
+- `src/contracts/subagents.ts`（新建）：全部 TypeBox 契约——稳定 ID 前缀与 pattern、Thread/Run 状态枚举、Run 状态机转换表、Result/Disposition、Envelope + Part + 消息权限、Parent Mailbox 通知、TaskBrief/ContextPacket/Steer/InputRequired、模型来源、Capability Request/Summary、固定禁用清单、RunLimits 默认/最大、稳定错误码；
+- `src/contracts/preferences.ts`：`subagents` 偏好段（defaultModel）+ default/normalize 接入；
+- `src/config/preferences-store.ts`：`PreferencesPatch` 支持 subagents；
+- `src/contracts/observability.ts`：`EventScope.subagentThreadId`、`TARGET_KINDS`/`ResourceRefSchema` 增加 `subagent_thread/subagent_run/subagent_artifact`；
+- `src/storage/migrations.ts`：`CURRENT_SCHEMA_VERSION` 11→12，六表（subagent_threads/runs/messages/artifacts/parent_mailbox/workspace_leases）+ activity/audit 查询列与索引；
+- `src/config/paths.ts`：`subagentsBase`（agents 根，§16.3 目录约定）；
+- `src/observability/catalog/subagent-events.ts`（新建）：33 个 Activity 事件 + 18 个 Audit 事件；
+- `src/observability/event-catalog.ts`：注册 subagent 事件组。
+
+**生产接线点**：事件目录经 `event-catalog.ts` 静态 Map 注册（recorder 按 eventName 查目录）；Preferences 经 `normalizePreferences`/`PreferencesStore.update` 生效；Migration v12 经 `applyMigrations` 全库执行；其余（Store/Policy/Runtime/Tools）为 T2-T9 入口。
+
+**新增测试**：
+
+- `tests/unit/subagents-contracts.test.ts`（24 用例）：枚举与计划逐字一致、状态机合法/非法转换、TypeBox fixtures（合法/缺必填/future version/超限/消息权限/错误码枚举）、Preferences subagents 段（默认/归一化/未知字段拒绝）；
+- `tests/integration/subagent-migration.test.ts`（4 用例）：全新库 v12 六表、v11→v12 保留 Skill 数据 + Subagent 表可用、observability 查询列与索引、拒绝高于当前版本。
+
+**与计划的偏差和原因**：
+
+1. `ActivityStatus` 枚举没有 `timed_out`/`budget_exhausted`——`subagent.run.timed_out`/`budget_exhausted` 事件的 `terminalStatuses` 使用 `["failed"]`（`interrupted` 用 `["interrupted"]`），沿 Phase 12 `plugin.execution.timed_out` 先例；Run 状态机（`SubagentRunStatus`）保持计划原枚举，`reasonCode` 区分终态原因。
+2. 补充 5 个稳定错误码：`subagent_run_state_conflict`（状态机非法转换/非终态唯一冲突，§7.2 要求"非法转换抛稳定错误"）、`subagent_thread_state_conflict`（closed/closing 上不允许的操作）、`subagent_ownership_denied`（§22.1 跨 Agent/Session 归属）、`subagent_not_found`（查找不存在）、`subagent_operation_failed`（通用兜底）。计划错误码清单是语义汇总，状态机/归属语义必需的最小补充。
+3. `TARGET_KINDS` 只增加计划要求的三个 subagent 目标；`skill` 目标未加（Phase 13 用 payload 过滤，计划未要求）。
+4. observability 列：`activity_events` 在 v8 已有 `subagent_run_id` 列（预留），v12 只补 `subagent_thread_id`；`audit_events` 补 `subagent_thread_id` + `subagent_run_id`；索引按 §19.1。
+5. `paths.subagentsBase` 指向 agents 根（`<agents>/<ownerAgentId>/subagents/<threadId>` 约定），由 T4 生成 Thread 目录。
+
+**当前未接线入口**：Subagent Stores、DelegationPolicy、Runtime Host、Core Tools、Server API、Web 面板均为 T2-T9 范围。
+
+**质量门（定向）**：typecheck 全过；契约 24/24 + migration 4/4 + preferences/observability/migration 相关 110/110 通过。全量质量门在 T10 统一执行。

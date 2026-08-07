@@ -2,6 +2,7 @@ import type { EventCatalogEntry } from "../contracts/observability.js";
 import { entry, notable, routine } from "./catalog/shared.js";
 import { pluginActivityEntries, pluginAuditEntries } from "./catalog/plugin-events.js";
 import { skillActivityEntries, skillAuditEntries } from "./catalog/skill-events.js";
+import { subagentActivityEntries, subagentAuditEntries } from "./catalog/subagent-events.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 事件目录（plans/phase-11.md §6）
@@ -174,8 +175,10 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       // Phase 11 已注册：plugin.permission.granted/denied/revoked（含 audit 镜像）、plugin.crashed
       // Phase 12（T1 冻结）：其余插件事件见 catalog/plugin-events.ts
       // Phase 13（T1 冻结）：Skill 事件见 catalog/skill-events.ts
+      // Phase 14（T1 冻结）：Subagent 事件见 catalog/subagent-events.ts
       ...pluginActivityEntries,
       ...skillActivityEntries,
+      ...subagentActivityEntries,
       entry({ eventName: "observability.preferences.changed", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "point", ...notable, auditMirror: "audit.observability.preferences_changed" }),
       entry({ eventName: "observability.retention.executed", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed"], ...notable, auditMirror: "audit.observability.retention_executed" }),
       entry({ eventName: "observability.export.created", eventVersion: 1, channel: "activity", category: "observability", defaultLevel: "info", lifecycleRole: "terminal", terminalStatuses: ["completed", "failed"], ...notable, auditMirror: "audit.observability.export_created" }),
@@ -210,6 +213,7 @@ export const ObservabilityEventCatalog: ReadonlyMap<string, EventCatalogEntry> =
       entry({ eventName: "audit.plugin.permission_revoked", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "point", significance: "notable" }),
       ...pluginAuditEntries,
       ...skillAuditEntries,
+      ...subagentAuditEntries,
       entry({ eventName: "audit.observability.preferences_change.started", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "started", significance: "notable" }),
       entry({ eventName: "audit.observability.preferences_change.failed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "warn", lifecycleRole: "terminal", significance: "notable" }),
       entry({ eventName: "audit.observability.preferences_changed", eventVersion: 1, channel: "audit", category: "audit", defaultLevel: "info", lifecycleRole: "terminal", significance: "notable" }),

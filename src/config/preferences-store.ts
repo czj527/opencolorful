@@ -12,7 +12,8 @@ export type PreferencesPatch = Partial<
     Pick<PreferencesDocument, "layout"> &
     Pick<PreferencesDocument, "appearance"> &
     Pick<PreferencesDocument, "memory"> &
-    Pick<PreferencesDocument, "observability">
+    Pick<PreferencesDocument, "observability"> &
+    Pick<PreferencesDocument, "subagents">
 >;
 
 /**

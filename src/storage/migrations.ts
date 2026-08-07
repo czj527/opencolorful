@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -719,6 +719,169 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
       CREATE INDEX IF NOT EXISTS idx_skill_operations_status ON skill_operations(kind, status);
     `);
     database.prepare("UPDATE schema_version SET version = 11").run();
+  }
+
+  // v12：Phase 14 Subagent Runtime 事实表（plans/phase-14.md §16.2）。
+  // 事实来源：subagent_threads 是 Thread 生命周期/模型/能力 ceiling 事实；
+  // subagent_runs 是 Run 状态机事实（SQLite 为权威，transcript 不替代）；
+  // subagent_messages 是父子协议 Envelope 与严格 sequence 事实（store-first）；
+  // subagent_artifacts 是 Artifact 元数据（正文在 agents/<agent>/subagents/ 目录）；
+  // subagent_parent_mailbox 是父 Mailbox 投递状态与幂等事实；
+  // subagent_workspace_leases 是当前有效写 Lease（过期行由恢复/housekeeping 清理）。
+  // observability 查询列：activity_events/audit_events 增加 subagent_thread_id、
+  // subagent_run_id（§19.1），供 /logs?subagent= 过滤与索引。
+  if (current < 12) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS subagent_threads (
+          thread_id TEXT PRIMARY KEY NOT NULL,
+          owner_agent_id TEXT NOT NULL,
+          parent_session_id TEXT NOT NULL,
+          created_from_turn_id TEXT,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('open','closing','closed')),
+          model_provider_id TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          model_source TEXT NOT NULL CHECK (model_source IN ('user_default','parent_request','parent_inherited')),
+          thinking_level TEXT NOT NULL,
+          workspace_cwd TEXT NOT NULL,
+          capability_ceiling_json TEXT NOT NULL DEFAULT '{}',
+          context_packet_hash TEXT NOT NULL,
+          next_message_sequence INTEGER NOT NULL DEFAULT 1,
+          next_run_ordinal INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_activity_at TEXT NOT NULL,
+          closed_at TEXT,
+          close_reason TEXT,
+          audit_pending_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_threads_owner ON subagent_threads(owner_agent_id, parent_session_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_subagent_threads_session ON subagent_threads(parent_session_id, status);
+
+        CREATE TABLE IF NOT EXISTS subagent_runs (
+          run_id TEXT PRIMARY KEY NOT NULL,
+          thread_id TEXT NOT NULL REFERENCES subagent_threads(thread_id),
+          ordinal INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('queued','starting','running','waiting_for_input','cancelling','succeeded','failed','cancelled','timed_out','interrupted','budget_exhausted')),
+          trigger_message_id TEXT NOT NULL,
+          snapshot_id TEXT,
+          snapshot_json TEXT,
+          limits_json TEXT NOT NULL DEFAULT '{}',
+          result_json TEXT,
+          reason_code TEXT,
+          audit_pending_json TEXT,
+          current_phase TEXT,
+          current_tool TEXT,
+          iteration_count INTEGER NOT NULL DEFAULT 0,
+          tool_call_count INTEGER NOT NULL DEFAULT 0,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens INTEGER NOT NULL DEFAULT 0,
+          last_activity_at TEXT,
+          started_at TEXT,
+          finished_at TEXT,
+          lease_boot_id TEXT,
+          lease_holder_id TEXT,
+          lease_expires_at TEXT,
+          revision INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (thread_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_runs_thread ON subagent_runs(thread_id, status);
+        CREATE INDEX IF NOT EXISTS idx_subagent_runs_status ON subagent_runs(status);
+
+        CREATE TABLE IF NOT EXISTS subagent_messages (
+          message_id TEXT PRIMARY KEY NOT NULL,
+          thread_id TEXT NOT NULL REFERENCES subagent_threads(thread_id),
+          run_id TEXT NOT NULL REFERENCES subagent_runs(run_id),
+          sequence INTEGER NOT NULL,
+          envelope_json TEXT NOT NULL,
+          message_type TEXT NOT NULL CHECK (message_type IN ('task','progress','steer','input_required','result','error','cancel','status')),
+          sender_kind TEXT NOT NULL CHECK (sender_kind IN ('parent_agent','subagent','system')),
+          recipient_kind TEXT NOT NULL CHECK (recipient_kind IN ('parent_agent','subagent')),
+          delivery_mode TEXT NOT NULL CHECK (delivery_mode IN ('immediate','queue','interrupt','mailbox')),
+          delivery_status TEXT NOT NULL CHECK (delivery_status IN ('queued','delivering','delivered','failed')),
+          consumed_at TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE (thread_id, sequence)
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_messages_thread_seq ON subagent_messages(thread_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_subagent_messages_run ON subagent_messages(run_id);
+
+        CREATE TABLE IF NOT EXISTS subagent_artifacts (
+          artifact_id TEXT PRIMARY KEY NOT NULL,
+          thread_id TEXT NOT NULL REFERENCES subagent_threads(thread_id),
+          run_id TEXT NOT NULL REFERENCES subagent_runs(run_id),
+          kind TEXT NOT NULL,
+          name TEXT NOT NULL,
+          mime_type TEXT,
+          content_hash TEXT NOT NULL,
+          size_bytes INTEGER,
+          resource_kind TEXT NOT NULL,
+          resource_id TEXT NOT NULL,
+          canonical_path TEXT,
+          visibility TEXT NOT NULL CHECK (visibility IN ('parent','user','private')),
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_artifacts_thread ON subagent_artifacts(thread_id, run_id);
+
+        CREATE TABLE IF NOT EXISTS subagent_parent_mailbox (
+          mailbox_id TEXT PRIMARY KEY NOT NULL,
+          owner_agent_id TEXT NOT NULL,
+          parent_session_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL REFERENCES subagent_threads(thread_id),
+          run_id TEXT NOT NULL REFERENCES subagent_runs(run_id),
+          message_id TEXT NOT NULL UNIQUE,
+          notification_kind TEXT NOT NULL CHECK (notification_kind IN ('started','input_required','completed','failed','cancelled','timed_out','interrupted','budget_exhausted')),
+          status TEXT NOT NULL CHECK (status IN ('queued','delivering','delivered','suppressed','failed')),
+          trigger_parent_turn INTEGER NOT NULL DEFAULT 0 CHECK (trigger_parent_turn IN (0, 1)),
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          next_retry_at TEXT,
+          last_error_code TEXT,
+          operation_id TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          delivered_at TEXT,
+          suppressed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_mailbox_session ON subagent_parent_mailbox(parent_session_id, status);
+        CREATE INDEX IF NOT EXISTS idx_subagent_mailbox_retry ON subagent_parent_mailbox(status, next_retry_at);
+
+        CREATE TABLE IF NOT EXISTS subagent_workspace_leases (
+          canonical_workspace TEXT PRIMARY KEY NOT NULL,
+          lease_kind TEXT NOT NULL CHECK (lease_kind IN ('subagent_write','parent_write')),
+          owner_kind TEXT NOT NULL CHECK (owner_kind IN ('subagent','parent_agent','system')),
+          owner_id TEXT NOT NULL,
+          boot_id TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_subagent_leases_expiry ON subagent_workspace_leases(expires_at);
+      `);
+
+      // observability 查询列（§19.1）：activity_events 已有 subagent_run_id（v8），
+      // 补齐 subagent_thread_id；audit_events 两者都缺。判重后 ALTER + 索引。
+      const activityColumns = database.prepare("PRAGMA table_info(activity_events)").all() as Array<{ name: string }>;
+      if (!activityColumns.some((column) => column.name === "subagent_thread_id")) {
+        database.exec("ALTER TABLE activity_events ADD COLUMN subagent_thread_id TEXT");
+      }
+      const auditColumns = database.prepare("PRAGMA table_info(audit_events)").all() as Array<{ name: string }>;
+      if (!auditColumns.some((column) => column.name === "subagent_thread_id")) {
+        database.exec("ALTER TABLE audit_events ADD COLUMN subagent_thread_id TEXT");
+      }
+      if (!auditColumns.some((column) => column.name === "subagent_run_id")) {
+        database.exec("ALTER TABLE audit_events ADD COLUMN subagent_run_id TEXT");
+      }
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_activity_subagent_thread ON activity_events(subagent_thread_id, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_subagent_thread ON audit_events(subagent_thread_id, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_subagent_run ON audit_events(subagent_run_id, recorded_at DESC);
+      `);
+
+      database.prepare("UPDATE schema_version SET version = 12").run();
+    })();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {
