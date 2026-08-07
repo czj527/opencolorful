@@ -69,11 +69,24 @@ export class WorkspaceMutationLeaseService {
 
   /**
    * 获取独占写 Lease（Store compare-and-set，单事务）。
-   * 无行 → acquired；已过期或同 bootId（同一进程重新获取）→ 接管；
-   * 未过期且 bootId 不同 → denied（返回 heldBy，供 fail-closed 拒绝或排队）。
+   * 无行 → acquired；已过期或同 bootId 且同 ownerId（同一进程同一持有者重新
+   * 获取）→ 接管；未过期且 bootId 不同 → denied（其他执行者持有，返回 heldBy）。
+   *
+   * T9b（§18.3 互斥补强）：同一 bootId 但不同 ownerId（同进程内父 Agent 与
+   * Subagent 是两个持有者）也 → denied——否则单进程内父写 permit 会被子 Run
+   * 同 bootId 接管，互斥失效。
    */
   acquire(canonicalWorkspace: string, request: WorkspaceLeaseRequest): WorkspaceLeaseAcquireResult {
     const nowMs = this.now();
+    // 同进程（同 bootId）不同持有者：直接拒绝，不让 Store 的"同 bootId 接管"生效
+    const held = this.get(canonicalWorkspace);
+    if (held !== null && held.bootId === request.bootId && held.ownerId !== request.ownerId) {
+      return {
+        status: "denied",
+        heldBy: held,
+        reason: `工作区 ${canonicalWorkspace} 已被 ${held.ownerKind}（${held.ownerId}）持有写 Lease（同进程不同持有者互斥）`,
+      };
+    }
     const acquired = this.store.acquire({
       canonicalWorkspace,
       leaseKind: request.leaseKind,

@@ -21,8 +21,9 @@ import {
   type SubagentSnapshotId,
   type SubagentThreadId,
 } from "../../../contracts/subagents.js";
-import { parseInputArgs, parseProgressArgs, parseResultArgs, subagentInternalToolDefs, REPORT_SUBAGENT_RESULT_TOOL } from "./internal-tools.js";
+import { parseInputArgs, parseProgressArgs, parseResultArgs, subagentInternalToolDefs, REPORT_SUBAGENT_RESULT_TOOL, isNestingForbiddenToolName } from "./internal-tools.js";
 import type { SubagentSessionEvent, SubagentSessionFactory, SubagentSessionPort, SubagentSessionToolDef } from "./types.js";
+import { WorkspaceMutationLeaseService, SUBAGENT_WRITE_LEASE_DEFAULT_TTL_MS } from "../workspace-lease-service.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 14 T4：SubagentRuntimeHost（plans/phase-14.md §13 / §15）
@@ -58,6 +59,13 @@ export interface SubagentRuntimeHostDeps {
   readonly sessionFactory: SubagentSessionFactory;
   /** 当前 Server 启动 bootId（Lease 持有者身份） */
   readonly bootId: string;
+  /**
+   * T9b（§18.3）：工作区写 Lease 服务。write Run 启动时获取 run-scoped 独占
+   * 长 Lease（subagent_write），heartbeat 续租，终态/清理释放；与父 Agent
+   * 写 Tool 的 operation-scoped parent_write permit 互斥（组合根注入）。
+   * 缺省（测试/无服务）不获取。
+   */
+  readonly workspaceLeases?: WorkspaceMutationLeaseService;
   readonly now?: () => number;
   readonly heartbeatIntervalMs?: number;
   readonly runtimeLeaseTtlMs?: number;
@@ -291,12 +299,37 @@ export class SubagentRuntimeHost {
       resultReminderSent: false,
       leaseLost: false,
       terminalHandled: false,
+      workspaceLease: null,
       timers: [],
       abort: () => undefined,
       session: null,
     };
     this.active.set(runId, active);
     try {
+      // T9b（§18.3）：write Run 获取工作区独占写 Lease（read Run 不获取；
+      // 父 Agent 写 permit 占用中 → fail-closed 拒绝启动写 Run）
+      if (this.deps.workspaceLeases !== undefined && workspaceAccessOf(input.snapshotJson) === "write") {
+        const outcome = this.deps.workspaceLeases.acquire(input.workspaceCwd, {
+          leaseKind: "subagent_write",
+          ownerKind: "subagent",
+          ownerId: runId,
+          bootId: this.deps.bootId,
+          ttlMs: SUBAGENT_WRITE_LEASE_DEFAULT_TTL_MS,
+        });
+        if (outcome.status === "denied") {
+          await this.terminal(
+            runId,
+            threadId,
+            ownership,
+            "failed",
+            "subagent_operation_failed",
+            null,
+            new Error(`工作区写 Lease 被占用（${outcome.reason}）`),
+          );
+          return;
+        }
+        active.workspaceLease = { canonicalWorkspace: input.workspaceCwd };
+      }
       await this.runWithSession(input, active, run);
     } catch (error) {
       // 未收敛异常 → failed（安全摘要；不暴露内部细节）
@@ -372,7 +405,13 @@ export class SubagentRuntimeHost {
         },
         ownership,
       );
-      if (!renewed) {
+      // T9b（§18.3）：write Run 同步续租工作区 Lease；续租失败视为 Lease 丢失
+      let workspaceRenewed = true;
+      if (renewed && active.workspaceLease !== null && this.deps.workspaceLeases !== undefined) {
+        const outcome = this.deps.workspaceLeases.renew(active.workspaceLease.canonicalWorkspace, runId, this.deps.bootId, SUBAGENT_WRITE_LEASE_DEFAULT_TTL_MS);
+        workspaceRenewed = outcome.status === "renewed";
+      }
+      if (!renewed || !workspaceRenewed) {
         // Lease 丢失：停止写状态并 abort（恢复由启动恢复处理）
         active.leaseLost = true;
         this.clearTimers(active);
@@ -523,6 +562,12 @@ export class SubagentRuntimeHost {
   ): Promise<void> {
     const { runId, threadId, ownership } = input;
     const resolve = event.resolve;
+
+    // T9b（§13.5）：模型伪造父控制工具（spawn_subagent 等）→ 确定性拒绝
+    if (isNestingForbiddenToolName(event.name)) {
+      resolve({ ok: false, text: "subagent_nesting_forbidden: Subagent 不能创建或控制其他 Agent/Subagent" });
+      return;
+    }
 
     if (event.name === "report_subagent_progress") {
       const args = parseProgressArgs(event.args);
@@ -816,6 +861,14 @@ export class SubagentRuntimeHost {
     } catch {
       // 终态后释放失败不阻断（启动恢复兜底）
     }
+    // T9b（§18.3）：释放工作区写 Lease（write Run 持有；崩溃后 TTL 兜底）
+    if (active.workspaceLease !== null && this.deps.workspaceLeases !== undefined) {
+      try {
+        this.deps.workspaceLeases.release(active.workspaceLease.canonicalWorkspace, runId, this.deps.bootId);
+      } catch {
+        // 释放失败不阻断（TTL 兜底）
+      }
+    }
     this.active.delete(runId);
     this.deps.onRunFinished?.({ runId, threadId: active.threadId });
   }
@@ -845,6 +898,8 @@ interface ActiveRun {
   resultReminderSent: boolean;
   leaseLost: boolean;
   terminalHandled: boolean;
+  /** T9b（§18.3）：write Run 持有的工作区写 Lease（read Run 为 null） */
+  workspaceLease: { readonly canonicalWorkspace: string } | null;
   timers: Array<NodeJS.Timeout | { readonly kind: "idle" | "firstEvent"; handle: NodeJS.Timeout }>;
   abort: () => void;
   /** 会话引用（resumeFromInput 经端口投递回答；清理时置空） */
@@ -855,4 +910,17 @@ function cryptoRandomSuffix(): string {
   const crypto = globalThis.crypto as { randomUUID?: () => string };
   const uuid = crypto.randomUUID?.() ?? `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
   return uuid.replaceAll("-", "").slice(0, 16);
+}
+
+/**
+ * T9b（§18.3）：从 EffectiveSnapshot 序列化中读取 workspaceAccess。
+ * 解析失败/非 "write" → "read"（fail-closed：不获取 Lease 也绝不让 read Run 写）。
+ */
+function workspaceAccessOf(snapshotJson: string): "read" | "write" {
+  try {
+    const snapshot = JSON.parse(snapshotJson) as { workspaceAccess?: unknown };
+    return snapshot.workspaceAccess === "write" ? "write" : "read";
+  } catch {
+    return "read";
+  }
 }

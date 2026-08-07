@@ -62,6 +62,17 @@ export interface SubagentObservabilityProjectorDeps {
   readonly messages?: import("../stores/message-store.js").MessageStore;
   /** 同 Run 限频（§19.2：≥30s 一条；测试可调小） */
   readonly progressMinIntervalMs?: number;
+  /**
+   * T9b：Activity 写入失败回调（§19.3 auditPending 补账）——投影失败不阻断
+   * Runtime，但把完整 ActivityRecordInput 交给调用方持久为 auditPending
+   * （composition 接线写入 run.audit_pending_json，启动恢复补账）。
+   */
+  readonly onProjectionFailure?: (input: {
+    readonly record: ActivityRecordInput;
+    readonly threadId: SubagentThreadId | null;
+    readonly runId: SubagentRunId | null;
+    readonly ownership: SubagentOwnership | null;
+  }) => void;
   readonly now?: () => Date;
 }
 
@@ -463,7 +474,7 @@ export class SubagentObservabilityProjector {
         ? { status: eventName.endsWith(".failed") ? "failed" : "completed", operationId: `subagent-delivery-${record.mailboxId}` }
         : {}),
     };
-    this.tryRecord(input);
+    this.tryRecord(input, record.threadId, record.runId, ownership);
   }
 
   projectArtifactCreated(record: SubagentArtifactRecord, ownership: SubagentOwnership): void {
@@ -567,14 +578,20 @@ export class SubagentObservabilityProjector {
           }
         : {}),
     };
-    this.tryRecord(record);
+    this.tryRecord(record, input.threadId, input.runId, input.ownership);
   }
 
-  private tryRecord(input: ActivityRecordInput): void {
+  private tryRecord(record: ActivityRecordInput, threadId: SubagentThreadId | null, runId: SubagentRunId | null, ownership: SubagentOwnership | null): void {
     try {
-      this.deps.activity.append(input);
+      this.deps.activity.append(record);
     } catch {
-      // best-effort：投影失败不阻断 Runtime（T4 回调契约）
+      // best-effort：投影失败不阻断 Runtime（T4 回调契约）；T9b：把证据交给
+      // 调用方持久为 auditPending（§19.3 补账），持久化自身失败不阻断
+      try {
+        this.deps.onProjectionFailure?.({ record, threadId, runId, ownership });
+      } catch {
+        // auditPending 持久失败：静默（恢复器无法补账，诊断由调用方负责）
+      }
     }
   }
 

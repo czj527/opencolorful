@@ -406,6 +406,18 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           ? (input) => options.skillCoreService!.readSkillFileForSession({ sessionId, absPath: input.absPath })
           : undefined;
 
+      // T9b（Phase 14 §18.3）：父 Agent 写 Tool 的 operation-scoped short permit
+      // 守卫——沙箱 write/edit/bash 执行入口检查/获取；Subagent write Run 独占
+      // 工作区写 Lease 时 fail-closed 拒绝（canonical workspace = 本会话 workspaceCwd）
+      const workspaceLeaseGuard: import("../../runtime/session-runtime.js").SessionRuntimeOptions["workspaceLeaseGuard"] =
+        subagentComposition !== undefined
+          ? (input) =>
+              subagentComposition.parentWriteLeaseGuard({
+                canonicalWorkspace: runtimeCwd,
+                ownerAgentId: view.agentId ?? sessionId,
+              })
+          : undefined;
+
       // ── Phase 14 T6：Subagent 工具上下文（§20.2：只普通主 Agent Session 注册）──
       const turnIdSlot: { current: string | undefined } = { current: undefined };
       const traceSlot: { current: import("../../contracts/observability.js").TraceContext | undefined } = { current: undefined };
@@ -508,6 +520,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
           ...(skillRead !== undefined ? { skillRead } : {}),
+          // T9b（§18.3）：父 Agent 写 Tool 工作区写 Lease 守卫
+          ...(workspaceLeaseGuard !== undefined ? { workspaceLeaseGuard } : {}),
           ...(subagentLifecycle !== undefined ? { subagentLifecycle } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),
@@ -549,6 +563,8 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
           ...(skillRead !== undefined ? { skillRead } : {}),
+          // T9b（§18.3）：父 Agent 写 Tool 工作区写 Lease 守卫
+          ...(workspaceLeaseGuard !== undefined ? { workspaceLeaseGuard } : {}),
           ...(subagentLifecycle !== undefined ? { subagentLifecycle } : {}),
           thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
           ...(systemPrompt ? { systemPrompt } : {}),

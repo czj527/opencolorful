@@ -91,6 +91,16 @@ export interface SessionRuntimeOptions {
    * SkillCoreService.readSkillFileForSession）。注入后传给沙箱扩展上下文。
    */
   readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
+  /**
+   * T9b（Phase 14 §18.3）：父 Agent 写 Tool 的工作区写 Lease 守卫（组合根
+   * 按 WorkspaceMutationLeaseService 构造）。注入后传给沙箱扩展上下文，
+   * write/edit/bash 执行入口检查/获取 operation-scoped short permit，
+   * Subagent write Run 独占占用中 fail-closed 拒绝。
+   */
+  readonly workspaceLeaseGuard?: (input: {
+    readonly toolName: "write" | "edit" | "bash";
+    readonly absPath?: string;
+  }) => { readonly allowed: boolean; readonly reason?: string; readonly release?: () => void };
   /** dispose 时的清理回调（如注销记忆工具上下文） */
   readonly onDispose?: () => void;
 }
@@ -196,6 +206,14 @@ export class SessionRuntime {
     let agent: PiAgentSessionHandle;
     // T11：Skill 元数据槽（beginTurn 冻结；loader 闭包读取同一引用）
     const skillsSlotRef: { current: PiResourceSkills } = { current: { skills: [], diagnostics: [] } };
+    // T9b（§18.3）：沙箱上下文外部端口（skillRead + workspaceLeaseGuard 合并注入）
+    const sandboxContextOverrides =
+      options.skillRead !== undefined || options.workspaceLeaseGuard !== undefined
+        ? {
+            ...(options.skillRead !== undefined ? { skillRead: options.skillRead } : {}),
+            ...(options.workspaceLeaseGuard !== undefined ? { workspaceLeaseGuard: options.workspaceLeaseGuard } : {}),
+          }
+        : undefined;
 
     if (options.faux !== undefined) {
       if (!options.sessionDir || !options.providerId || !options.modelId) {
@@ -217,12 +235,12 @@ export class SessionRuntime {
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         // T12（P1-1）：无 Agent Session（无 SandboxService）但注入 skillRead 时
         // 也传 toolPolicy——沙箱扩展上下文据此构造，read 工具才能命中受控路径
-        ...(sandboxService || options.skillRead !== undefined ? { toolPolicy } : {}),
+        ...(sandboxService || options.skillRead !== undefined || options.workspaceLeaseGuard !== undefined ? { toolPolicy } : {}),
         ...(options.extraTools ? { extraTools: options.extraTools } : {}),
         // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
         ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
-        // T11（P0-2）：read 工具 Skill 受控读取端口（沙箱扩展上下文）
-        ...(options.skillRead !== undefined ? { sandboxContext: { skillRead: options.skillRead } } : {}),
+        // T11（P0-2）+ T9b（§18.3）：沙箱扩展上下文外部端口
+        ...(sandboxContextOverrides !== undefined ? { sandboxContext: sandboxContextOverrides } : {}),
       });
     } else if (options.modelService && options.resolveProviderId && options.resolveModelId && options.sessionHandle) {
       // 真实模型路径
@@ -246,11 +264,11 @@ export class SessionRuntime {
         ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
         // T12（P1-1）：无 Agent Session（无 SandboxService）但注入 skillRead 时
         // 也传 toolPolicy——沙箱扩展上下文据此构造，read 工具才能命中受控路径
-        ...(sandboxService || options.skillRead !== undefined ? { toolPolicy } : {}),
+        ...(sandboxService || options.skillRead !== undefined || options.workspaceLeaseGuard !== undefined ? { toolPolicy } : {}),
         // T11：PI Skill pointer——内部槽（beginTurn 每 turn 冻结；loader 每 turn 读取）
         ...(options.skillSnapshotFactory !== undefined ? { skills: () => skillsSlotRef.current } : {}),
-        // T11（P0-2）：read 工具 Skill 受控读取端口（沙箱扩展上下文）
-        ...(options.skillRead !== undefined ? { sandboxContext: { skillRead: options.skillRead } } : {}),
+        // T11（P0-2）+ T9b（§18.3）：沙箱扩展上下文外部端口
+        ...(sandboxContextOverrides !== undefined ? { sandboxContext: sandboxContextOverrides } : {}),
       });
     } else {
       throw new Error("SessionRuntime 缺少 faux 参数或真实模型配置");

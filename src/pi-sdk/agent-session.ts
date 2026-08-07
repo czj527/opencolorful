@@ -525,6 +525,8 @@ export async function createPiFauxAgentSession(
       allowBash: false,
       // T11（P0-2）：read 工具 Skill 受控读取端口（SessionRuntime 注入）
       ...(options.sandboxContext?.skillRead !== undefined ? { skillRead: options.sandboxContext.skillRead } : {}),
+      // T9b（Phase 14 §18.3）：父 Agent 写 Tool 的工作区写 Lease 守卫
+      ...(options.sandboxContext?.workspaceLeaseGuard !== undefined ? { workspaceLeaseGuard: options.sandboxContext.workspaceLeaseGuard } : {}),
     }
     : undefined;
 
@@ -642,6 +644,8 @@ export async function createPiAgentSession(
       allowBash: false,
       // T11（P0-2）：read 工具 Skill 受控读取端口（SessionRuntime 注入）
       ...(options.sandboxContext?.skillRead !== undefined ? { skillRead: options.sandboxContext.skillRead } : {}),
+      // T9b（Phase 14 §18.3）：父 Agent 写 Tool 的工作区写 Lease 守卫
+      ...(options.sandboxContext?.workspaceLeaseGuard !== undefined ? { workspaceLeaseGuard: options.sandboxContext.workspaceLeaseGuard } : {}),
     }
     : undefined;
 

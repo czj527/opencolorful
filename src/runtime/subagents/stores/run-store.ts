@@ -647,7 +647,9 @@ export class RunStore {
       .immediate();
   }
 
-  /** T5 恢复器补写 auditPending 证据（§19.3）；原始 JSON 透传，不解析 */
+  /**
+   * T5 恢复器补写 auditPending 证据（§19.3）；原始 JSON 透传，不解析
+   */
   updateAuditPending(runId: SubagentRunId, ownership: SubagentOwnership, auditPendingJson: string | null): void {
     this.database
       .transaction(() => {
@@ -666,6 +668,73 @@ export class RunStore {
         }
       })
       .immediate();
+  }
+
+  /**
+   * T9b：auditPending 追加（§19.3：Recorder 故障时领域事务后把最小证据写入
+   * run.audit_pending_json，由启动恢复补账）。append 语义 + 上限保护：
+   * - 已有数组 corrupted → 视为空（旧证据丢失由恢复器诊断聚合，不阻断写入）；
+   * - 上限：MAX_AUDIT_PENDING_ENTRIES 条、MAX_AUDIT_PENDING_CHARS 字符
+   *   （超出丢最旧；单条过大则放弃本次追加，不抛错不阻断）。
+   */
+  appendAuditPending(runId: SubagentRunId, ownership: SubagentOwnership, record: unknown): void {
+    this.database
+      .transaction(() => {
+        const run = this.#getOwnedOrThrow(runId, ownership);
+        let entries = parseAuditPendingArray(run.auditPendingJson);
+        entries = [...entries, record].slice(-MAX_AUDIT_PENDING_ENTRIES);
+        let json = JSON.stringify(entries);
+        while (entries.length > 1 && json.length > MAX_AUDIT_PENDING_CHARS) {
+          entries = entries.slice(1);
+          json = JSON.stringify(entries);
+        }
+        if (json.length > MAX_AUDIT_PENDING_CHARS) {
+          return; // 单条记录过大：放弃（不阻断；恢复器诊断可见 pending 为空）
+        }
+        this.database
+          .prepare(
+            `UPDATE subagent_runs SET
+               audit_pending_json = @json,
+               updated_at = @now,
+               revision = revision + 1
+             WHERE run_id = @runId`,
+          )
+          .run({ json, now: new Date().toISOString(), runId });
+      })
+      .immediate();
+  }
+
+  /**
+   * T9b：启动恢复扫描 audit_pending_json 非空的 Run（§16.5 补账步骤）。
+   * 系统级操作，不携带调用方归属；corrupted 行由恢复器逐项聚合诊断。
+   */
+  listRunsWithAuditPending(): Array<{
+    readonly runId: SubagentRunId;
+    readonly threadId: SubagentThreadId;
+    readonly ownership: SubagentOwnership;
+    readonly auditPendingJson: string;
+  }> {
+    const rows = this.database
+      .prepare(
+        `SELECT r.run_id, r.thread_id, r.audit_pending_json, t.owner_agent_id, t.parent_session_id
+         FROM subagent_runs r
+         JOIN subagent_threads t ON t.thread_id = r.thread_id
+         WHERE r.audit_pending_json IS NOT NULL AND r.audit_pending_json != ''
+         ORDER BY r.created_at ASC`,
+      )
+      .all() as Array<{
+      run_id: SubagentRunId;
+      thread_id: SubagentThreadId;
+      audit_pending_json: string;
+      owner_agent_id: string;
+      parent_session_id: string;
+    }>;
+    return rows.map((row) => ({
+      runId: row.run_id,
+      threadId: row.thread_id,
+      ownership: { ownerAgentId: row.owner_agent_id, parentSessionId: row.parent_session_id },
+      auditPendingJson: row.audit_pending_json,
+    }));
   }
 
   // ── 内部 helpers ──────────────────────────────────────────────
@@ -696,5 +765,22 @@ export class RunStore {
       throw new SubagentStoreError("subagent_not_found", `subagent run ${runId} not found`);
     }
     return mapRunRow(row);
+  }
+}
+
+/** auditPending 追加上限（§19.3：领域事务后补账证据；防无界增长） */
+export const MAX_AUDIT_PENDING_ENTRIES = 32;
+export const MAX_AUDIT_PENDING_CHARS = 64_000;
+
+/** 解析 audit_pending_json 数组；corrupted → 空数组（旧证据丢失不阻断写入） */
+function parseAuditPendingArray(json: string | null): unknown[] {
+  if (json === null || json === "") {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }

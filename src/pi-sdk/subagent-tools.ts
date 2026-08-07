@@ -320,28 +320,13 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     ceiling,
   });
 
-  // 4. durable 审计 started（§22.5：拒绝则不创建）
+  // 4. durable 审计 started（§22.5 / §19.3：审计不可用/被拒 → fail-closed 不创建）
   const threadId = services.newId("sat_") as SubagentThreadId;
   const runId = services.newId("sar_") as SubagentRunId;
   const triggerMessageId = services.newId("sam_") as AgentMessageId;
-  try {
-    services.audit({
-      eventName: "subagent.thread.create",
-      payload: { action: "spawn_subagent", decision: "allowed", policyVersion: "subagents.v1" },
-      actor: { kind: "agent", id: ctx.ownerAgentId },
-      executor: { kind: "agent", id: ctx.ownerAgentId },
-      target: { kind: "subagent_thread", id: threadId },
-      scope: {
-        ...(ctx.ownerAgentId !== undefined ? { ownerAgentId: ctx.ownerAgentId } : {}),
-        ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
-        ...(ctx.turnIdSlot.current !== undefined ? { turnId: ctx.turnIdSlot.current } : {}),
-        subagentThreadId: threadId,
-        subagentRunId: runId,
-      },
-      ...(ctx.traceSlot.current !== undefined ? { trace: ctx.traceSlot.current } : {}),
-    });
-  } catch (error) {
-    return errorResult("subagent_operation_failed", `审计拒绝：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+  const auditStarted = tryDurableAudit(ctx, threadId, runId, "audit.subagent.spawn_started");
+  if (auditStarted !== null) {
+    return auditStarted;
   }
 
   // 5. 原子创建 Thread + first Run + task 消息（含 brief/context data parts）
@@ -384,6 +369,8 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
       now,
     });
   } catch (error) {
+    // domain write 失败（§22.5）：补写 failed terminal audit（best-effort）
+    bestEffortAudit(ctx, threadId, runId, "audit.subagent.spawn_failed");
     return errorResult("subagent_operation_failed", `Thread 创建失败：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
   }
 
@@ -421,26 +408,9 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     // best-effort：投影失败不阻断 spawn
   }
 
-  // 9. durable 审计 terminal
-  try {
-    services.audit({
-      eventName: "subagent.thread.spawned",
-      payload: { action: "spawn_subagent", decision: "allowed", policyVersion: "subagents.v1" },
-      actor: { kind: "agent", id: ctx.ownerAgentId },
-      executor: { kind: "agent", id: ctx.ownerAgentId },
-      target: { kind: "subagent_thread", id: threadId },
-      scope: {
-        ...(ctx.ownerAgentId !== undefined ? { ownerAgentId: ctx.ownerAgentId } : {}),
-        ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
-        ...(ctx.turnIdSlot.current !== undefined ? { turnId: ctx.turnIdSlot.current } : {}),
-        subagentThreadId: threadId,
-        subagentRunId: runId,
-      },
-      ...(ctx.traceSlot.current !== undefined ? { trace: ctx.traceSlot.current } : {}),
-    });
-  } catch {
-    // Thread 已合法创建；terminal 审计失败不阻断（调用方可通过 close 清理）
-  }
+  // 9. durable 审计 terminal（§19.3：事件名用目录 audit.subagent.spawn_completed；
+  //    Thread 已合法创建，terminal 审计失败不阻断（证据由活动 auditMirror/面板可见））
+  bestEffortAudit(ctx, threadId, runId, "audit.subagent.spawn_completed");
 
   return okResult({
     threadId,
@@ -450,6 +420,62 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     queued: outcome.status === "accepted" ? outcome.queued : false,
     queuedAt: now,
   });
+}
+
+// ── spawn 审计 helpers（§19.3：目录事件名 + assertDurableAudit 语义）──
+
+/**
+ * durable 审计（started 类）：rejected/spooled/抛错一律返回稳定错误（fail-closed），
+ * 调用方不得继续创建；accepted/accepted-idempotent 返回 null（继续）。
+ */
+function tryDurableAudit(
+  ctx: SubagentToolContext,
+  threadId: SubagentThreadId,
+  runId: SubagentRunId,
+  eventName: string,
+): ReturnType<typeof errorResult> | null {
+  const services = ctx.services;
+  try {
+    const result = services.audit(spawnAuditInput(ctx, threadId, runId, eventName));
+    if (result.kind !== "accepted" && result.kind !== "accepted-idempotent") {
+      return errorResult("subagent_operation_failed", `审计拒绝（${eventName}）：${result.reason.slice(0, 160)}`);
+    }
+    return null;
+  } catch (error) {
+    return errorResult("subagent_operation_failed", `审计拒绝（${eventName}）：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+  }
+}
+
+/** best-effort 审计（terminal 类）：失败不阻断（Thread 已创建/关闭） */
+function bestEffortAudit(ctx: SubagentToolContext, threadId: SubagentThreadId, runId: SubagentRunId, eventName: string): void {
+  try {
+    void ctx.services.audit(spawnAuditInput(ctx, threadId, runId, eventName));
+  } catch {
+    // 审计故障不阻断已完成的领域操作
+  }
+}
+
+function spawnAuditInput(
+  ctx: SubagentToolContext,
+  threadId: SubagentThreadId,
+  runId: SubagentRunId,
+  eventName: string,
+): import("../observability/audit-recorder.js").AuditRecordInput {
+  return {
+    eventName,
+    payload: { action: "spawn_subagent", decision: "allowed", policyVersion: "subagents.v1" },
+    actor: { kind: "agent", id: ctx.ownerAgentId },
+    executor: { kind: "agent", id: ctx.ownerAgentId },
+    target: { kind: "subagent_thread", id: threadId },
+    scope: {
+      ...(ctx.ownerAgentId !== undefined ? { ownerAgentId: ctx.ownerAgentId } : {}),
+      ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
+      ...(ctx.turnIdSlot.current !== undefined ? { turnId: ctx.turnIdSlot.current } : {}),
+      subagentThreadId: threadId,
+      subagentRunId: runId,
+    },
+    ...(ctx.traceSlot.current !== undefined ? { trace: ctx.traceSlot.current } : {}),
+  };
 }
 
 // ── 其他工具实现 ────────────────────────────────────────────────
@@ -770,6 +796,13 @@ function closeSubagent(ctx: SubagentToolContext, threadId: SubagentThreadId): Re
     closeReason: "close_subagent",
     suppressMailboxIds: [],
   });
+  // §19.3：close 正常路径投影 thread.closed（activity + auditMirror
+  // audit.subagent.close_completed；best-effort，Recorder 故障不阻断关闭）
+  try {
+    services.projector.projectThreadClosed(outcome.thread as never, ownership);
+  } catch {
+    // 投影失败不阻断 close（证据可由恢复器补账路径兜底）
+  }
   return okResult({ threadId, threadStatus: outcome.thread.status, closedNow: outcome.closedNow, suppressed: outcome.suppressed });
 }
 

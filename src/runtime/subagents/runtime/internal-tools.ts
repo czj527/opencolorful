@@ -25,6 +25,26 @@ export const SUBAGENT_INTERNAL_TOOL_NAMES = [
 ] as const;
 export type SubagentInternalToolName = (typeof SUBAGENT_INTERNAL_TOOL_NAMES)[number];
 
+/**
+ * 父控制工具名（§13.5：Subagent 工具注册表完全没有；即使模型伪造 Tool Call
+ * 名称到达 RuntimeHost 分发，也返回 subagent_nesting_forbidden）。
+ * 与 pi-sdk/agent-session.ts 的 SUBAGENT_TOOL_NAMES 一致（runtime 不 import
+ * pi-sdk，故此处独立维护；两端同为 T1 冻结工具名，不得改拼写）。
+ */
+export const SUBAGENT_NESTING_FORBIDDEN_TOOLS = [
+  "spawn_subagent",
+  "get_subagent_status",
+  "inspect_subagent",
+  "steer_subagent",
+  "wait_subagent",
+  "cancel_subagent",
+  "close_subagent",
+] as const;
+
+export function isNestingForbiddenToolName(name: string): boolean {
+  return (SUBAGENT_NESTING_FORBIDDEN_TOOLS as readonly string[]).includes(name);
+}
+
 export const ReportSubagentProgressArgsSchema = Type.Object(
   {
     text: Type.String({ minLength: 1, maxLength: 4000 }),

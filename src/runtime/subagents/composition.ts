@@ -31,6 +31,7 @@ import { SubagentArtifactFileService } from "./transcript/artifact-files.js";
 import { SubagentReplayStore } from "./transcript/replay-store.js";
 import { SubagentToolActivityTracker } from "./transcript/tool-summary.js";
 import { SubagentTranscriptView } from "./transcript/transcript-view.js";
+import { WorkspaceMutationLeaseService, PARENT_WRITE_LEASE_DEFAULT_TTL_MS } from "./workspace-lease-service.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 14 T6：Subagent 运行时组合根（plans/phase-14.md §16.4 / T6）
@@ -88,6 +89,16 @@ export interface SubagentRuntimeComposition {
   readonly newId: (prefix: "sat_" | "sar_" | "sam_" | "saa_" | "smb_" | "sas_") => string;
   /** Thread 目录解析：<subagentsBase>/<owner>/subagents/<threadId>（§16.3） */
   readonly threadDirResolver: (input: { readonly threadId: string; readonly ownerAgentId: string }) => string;
+  /**
+   * T9b（§18.3）：父 Agent 写 Tool 的 operation-scoped short permit 守卫。
+   * 由主会话沙箱扩展（write/edit/bash wrapper）在执行入口调用：工作区被
+   * write Subagent 独占 Lease 占用时 fail-closed 拒绝；获取成功返回 release
+   * （工具执行完成后释放）。canonicalWorkspace = 父会话 workspaceCwd。
+   */
+  readonly parentWriteLeaseGuard: (input: {
+    readonly canonicalWorkspace: string;
+    readonly ownerAgentId: string;
+  }) => { readonly allowed: boolean; readonly reason?: string; readonly release?: () => void };
   readonly modelRuntime: PiModelRuntimeHandle;
   readonly authPath: string;
   /** 启动恢复执行（幂等；errors 为空 → available=true，§16.5） */
@@ -124,7 +135,24 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
 
   // 2. 投影/只读组件（T7）
   const replay = new SubagentReplayStore(database);
-  const projector = new SubagentObservabilityProjector({ activity, replay, runs, messages });
+  const projector = new SubagentObservabilityProjector({
+    activity,
+    replay,
+    runs,
+    messages,
+    // T9b（§19.3 auditPending）：Activity 写入失败 → 证据追加到 run.audit_pending_json，
+    // 由启动恢复补账（只缓冲 Run 级事件；Thread 级事件无 run 归属，跳过）
+    onProjectionFailure: (input) => {
+      if (input.runId === null || input.ownership === null) {
+        return;
+      }
+      try {
+        runs.appendAuditPending(input.runId, input.ownership, input.record);
+      } catch {
+        // 补账证据持久失败：静默（Recorder/DB 双故障时诊断由上层负责）
+      }
+    },
+  });
   const transcriptView = new SubagentTranscriptView({ threads, runs, messages, artifacts });
   const toolTracker = new SubagentToolActivityTracker();
   const artifactFiles = new SubagentArtifactFileService({
@@ -135,6 +163,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
   });
 
   // 3. Host / Scheduler / Dispatcher / Coordinator（observability 经 wire 叠加）
+  const mutationLeases = new WorkspaceMutationLeaseService(leases, { now });
   let scheduler: SubagentScheduler;
   let coordinator: ParentMailboxDeliveryCoordinator;
   const sessionFactory = createPiSubagentSessionFactory({
@@ -152,6 +181,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
         sessionFactory,
         bootId,
         now,
+        workspaceLeases: mutationLeases, // T9b（§18.3）：write Run 独占工作区写 Lease
         onTerminal: (event) => {
           // mailbox 行已由 completeRunWithResult 写入；signal 触发父 Turn 唤醒
           coordinator.signal({ threadId: event.threadId });
@@ -204,6 +234,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
     transactions,
     workspaceLeases: leases,
     coordinator,
+    activity, // T9b（§19.3）：auditPending 补账的 Activity 落点
     now,
   });
   let availableFlag = false;
@@ -270,6 +301,25 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
     } as Omit<SubagentToolServices, "parentSnapshot" | "currentModel" | "toolCatalog" | "workspaceCwd">,
     newId,
     threadDirResolver,
+    // T9b（§18.3）：父 Agent 写 Tool 的 operation-scoped short permit 守卫
+    parentWriteLeaseGuard: (input) => {
+      const outcome = mutationLeases.acquire(input.canonicalWorkspace, {
+        leaseKind: "parent_write",
+        ownerKind: "parent_agent",
+        ownerId: input.ownerAgentId,
+        bootId,
+        ttlMs: PARENT_WRITE_LEASE_DEFAULT_TTL_MS,
+      });
+      if (outcome.status === "denied") {
+        return { allowed: false, reason: outcome.reason };
+      }
+      return {
+        allowed: true,
+        release: () => {
+          void mutationLeases.release(input.canonicalWorkspace, input.ownerAgentId, bootId);
+        },
+      };
+    },
     modelRuntime: modelService.getRuntime(),
     authPath: paths.authFile,
     runRecovery,

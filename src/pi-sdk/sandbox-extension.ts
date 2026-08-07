@@ -41,15 +41,28 @@ export interface SandboxContext {
    * - denied → 命中 Skill 根但读取被拒，抛错（fail-closed，绝不回退裸读）。
    */
   readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
+  /**
+   * T9b（Phase 14 §18.3）：工作区写 Lease 守卫（父 Agent 写 Tool 接入
+   * WorkspaceMutationLeaseService）。write/edit/bash 执行入口调用：
+   * - allowed=false → 拒绝执行（Subagent write Run 独占 Lease 占用中，fail-closed）；
+   * - allowed=true → 执行原工具，finally 调 release() 释放 operation-scoped permit。
+   * 缺省（未注入）→ 不检查（无 Subagent 运行时的会话不受影响）。
+   */
+  readonly workspaceLeaseGuard?: (input: {
+    readonly toolName: "write" | "edit" | "bash";
+    readonly absPath?: string;
+  }) => { readonly allowed: boolean; readonly reason?: string; readonly release?: () => void };
 }
 
 /**
- * T11（P0-2）：外部（SessionRuntime）注入的沙箱上下文扩展——只允许 skillRead
- * 端口；toolPolicy/sessionCwd/allowBash 一律由 agent-session 内部构造，
+ * T11（P0-2）：外部（SessionRuntime）注入的沙箱上下文扩展——目前允许
+ * skillRead（受控读取端口）与 workspaceLeaseGuard（§18.3 写互斥端口）；
+ * toolPolicy/sessionCwd/allowBash 一律由 agent-session 内部构造，
  * 防止外部伪造沙箱策略。
  */
 export interface SandboxContextOverrides {
   readonly skillRead?: (input: { readonly absPath: string }) => Promise<SkillFileReadOutcome>;
+  readonly workspaceLeaseGuard?: SandboxContext["workspaceLeaseGuard"];
 }
 
 interface SandboxContextState {
@@ -124,6 +137,26 @@ function resolvePath(raw: unknown, ctx: SandboxContext): string {
 }
 
 /**
+ * T9b（§18.3）：写工具执行入口的工作区写 Lease 检查。
+ * 返回 release 函数（工具执行完成后 finally 释放）；denied → 抛错（fail-closed）。
+ */
+function guardWorkspaceWrite(
+  ctx: SandboxContext,
+  toolName: "write" | "edit" | "bash",
+  absPath: string | undefined,
+): (() => void) | undefined {
+  const guard = ctx.workspaceLeaseGuard;
+  if (guard === undefined) {
+    return undefined;
+  }
+  const outcome = guard({ toolName, ...(absPath !== undefined ? { absPath } : {}) });
+  if (!outcome.allowed) {
+    throw new Error(`Sandbox: 工作区写 Lease 被占用，写操作被拒绝（${outcome.reason ?? "unknown"}）`);
+  }
+  return outcome.release;
+}
+
+/**
  * PI SDK 扩展入口。进程级加载一次，工具执行时按 ExtensionContext 中的
  * sessionId 读取 per-Session 上下文。所有路径均以 sessionCwd 解析。
  */
@@ -180,20 +213,26 @@ export default function (pi: ExtensionAPI): void {
     parameters: origBash.parameters,
     async execute(toolCallId, params, signal, onUpdate, executionContext) {
       const ctx = requireContext(executionContext);
-      if (!ctx.allowBash) {
-        const p = params as Record<string, unknown>;
-        const command = typeof p.command === "string" ? p.command : "";
-        ctx.toolPolicy.recordBashDenied(command, "bash-disabled");
-        throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
-      }
-      const p = params as Record<string, unknown>;
-      if (typeof p.command === "string") {
-        const result = ctx.toolPolicy.checkBashCommand(p.command);
-        if (!result.allowed) {
-          throw new Error(`Sandbox blocked bash command: ${result.reason}`);
+      // T9b（§18.3）：bash 是 workspace-write 工具，先过写 Lease 守卫
+      const releaseBash = guardWorkspaceWrite(ctx, "bash", undefined);
+      try {
+        if (!ctx.allowBash) {
+          const p = params as Record<string, unknown>;
+          const command = typeof p.command === "string" ? p.command : "";
+          ctx.toolPolicy.recordBashDenied(command, "bash-disabled");
+          throw new Error("Sandbox: bash is disabled (OS sandbox not yet available)");
         }
+        const p = params as Record<string, unknown>;
+        if (typeof p.command === "string") {
+          const result = ctx.toolPolicy.checkBashCommand(p.command);
+          if (!result.allowed) {
+            throw new Error(`Sandbox blocked bash command: ${result.reason}`);
+          }
+        }
+        return origBash.execute(toolCallId, params, signal, onUpdate);
+      } finally {
+        releaseBash?.();
       }
-      return origBash.execute(toolCallId, params, signal, onUpdate);
     },
   });
 
@@ -208,8 +247,14 @@ export default function (pi: ExtensionAPI): void {
       const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
-      ctx.toolPolicy.assertFilePath("write", absPath);
-      return origWrite.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
+      // T9b（§18.3）：写工具执行入口先过工作区写 Lease 守卫（占用中 fail-closed）
+      const releaseWrite = guardWorkspaceWrite(ctx, "write", absPath);
+      try {
+        ctx.toolPolicy.assertFilePath("write", absPath);
+        return origWrite.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
+      } finally {
+        releaseWrite?.();
+      }
     },
   });
 
@@ -224,8 +269,14 @@ export default function (pi: ExtensionAPI): void {
       const ctx = requireContext(executionContext);
       const p = params as Record<string, unknown>;
       const absPath = resolvePath(p.path, ctx);
-      ctx.toolPolicy.assertFilePath("write", absPath);
-      return origEdit.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
+      // T9b（§18.3）：写工具执行入口先过工作区写 Lease 守卫（占用中 fail-closed）
+      const releaseEdit = guardWorkspaceWrite(ctx, "edit", absPath);
+      try {
+        ctx.toolPolicy.assertFilePath("write", absPath);
+        return origEdit.execute(toolCallId, { ...p, path: absPath } as any, signal, onUpdate);
+      } finally {
+        releaseEdit?.();
+      }
     },
   });
 

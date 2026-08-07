@@ -7,6 +7,7 @@ import {
   type SubagentRunId,
   type SubagentThreadId,
 } from "../../../contracts/subagents.js";
+import type { ActivityRecorder } from "../../../observability/activity-recorder.js";
 import type { ParentMailboxDeliveryCoordinator } from "../mailbox/parent-mailbox-delivery-coordinator.js";
 import { MessageStore } from "../stores/message-store.js";
 import { RunStore } from "../stores/run-store.js";
@@ -28,7 +29,11 @@ import { WorkspaceLeaseStore } from "../stores/workspace-lease-store.js";
 //    卡死，§7.1 关闭规则）；
 // 3. 释放过期 workspace Lease（§16.5 / §16.2：只存当前有效写 Lease）；
 // 4. 扫描 pending/delivering mailbox 并重试（§14.3：delivering 视为可重试；
-//    由 ParentMailboxDeliveryCoordinator.retryPending 结算）。
+//    由 ParentMailboxDeliveryCoordinator.retryPending 结算）；
+// 5. T9b：auditPending 补账（§19.3 / §16.5"补写 cancel/close 的 auditPending
+//    证据"）——扫描 run.audit_pending_json 非空的 Run，逐条重放 Activity
+//    写入（Recorder 故障期间被 projector 缓冲的证据），全部成功 → 清空；
+//    corrupted 行/重放失败逐项聚合诊断，不阻断整体恢复。
 //
 // 恢复失败属于基础设施错误（§16.5）：逐项聚合 errors；调用方（组合根）
 // 依据 report.errors 决定 Subagent 系统可用性，不能 fail-open 创建无人执行
@@ -42,6 +47,8 @@ export interface SubagentStartupRecoveryDeps {
   readonly transactions: SubagentTransactions;
   readonly workspaceLeases: WorkspaceLeaseStore;
   readonly coordinator: ParentMailboxDeliveryCoordinator;
+  /** T9b：auditPending 补账的 Activity 落点（组合根必传；缺失时有 pending 即报错） */
+  readonly activity?: ActivityRecorder;
   readonly now?: () => number;
 }
 
@@ -50,6 +57,8 @@ export interface SubagentStartupRecoveryReport {
   readonly finalizedClosingThreads: number;
   readonly releasedWorkspaceLeases: number;
   readonly mailboxRetried: boolean;
+  /** T9b：auditPending 全部重放并清空的 Run 数 */
+  readonly auditPendingReplayed: number;
   readonly errors: readonly string[];
 }
 
@@ -133,7 +142,52 @@ export class SubagentStartupRecovery {
       errors.push(`mailbox retry: ${error instanceof Error ? error.message.slice(0, 200) : "unknown"}`);
     }
 
-    return { interruptedRuns, finalizedClosingThreads, releasedWorkspaceLeases, mailboxRetried, errors };
+    // 5. T9b：auditPending 补账（§19.3：Recorder 故障期间缓冲的证据重放）
+    //    （corrupted 行/重放失败逐项聚合，不阻断整体恢复）
+    let auditPendingReplayed = 0;
+    for (const { runId, ownership, auditPendingJson } of this.deps.runs.listRunsWithAuditPending()) {
+      if (this.deps.activity === undefined) {
+        errors.push(`auditPending replay ${runId}: activity recorder 未配置（证据保留，待下次恢复）`);
+        continue;
+      }
+      let entries: unknown;
+      try {
+        entries = JSON.parse(auditPendingJson);
+      } catch {
+        errors.push(`auditPending replay ${runId}: corrupted audit_pending_json（证据保留待人工诊断）`);
+        continue;
+      }
+      if (!Array.isArray(entries)) {
+        errors.push(`auditPending replay ${runId}: audit_pending_json 非数组（证据保留待人工诊断）`);
+        continue;
+      }
+      let allAccepted = true;
+      for (const entry of entries) {
+        try {
+          const result = this.deps.activity.append(entry as Parameters<ActivityRecorder["append"]>[0]);
+          if (result.kind === "rejected") {
+            allAccepted = false;
+            errors.push(`auditPending replay ${runId}: rejected（${result.reason.slice(0, 160)}）`);
+            break;
+          }
+        } catch (error) {
+          allAccepted = false;
+          errors.push(`auditPending replay ${runId}: ${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+          break;
+        }
+      }
+      if (allAccepted) {
+        try {
+          this.deps.runs.updateAuditPending(runId, ownership, null);
+          auditPendingReplayed += 1;
+        } catch (error) {
+          errors.push(`auditPending clear ${runId}: ${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
+        }
+      }
+      // 未全部成功：保留 audit_pending_json（下次启动重试补账）
+    }
+
+    return { interruptedRuns, finalizedClosingThreads, releasedWorkspaceLeases, mailboxRetried, auditPendingReplayed, errors };
   }
 
   private statusEnvelope(
