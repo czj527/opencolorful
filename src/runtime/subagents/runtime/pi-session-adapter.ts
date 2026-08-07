@@ -12,6 +12,7 @@ import {
 import type { SubagentOwnership } from "../stores/types.js";
 import type { ThreadStore } from "../stores/thread-store.js";
 import { isSubagentInternalToolName } from "./internal-tools.js";
+import { getSubagentAbilityExecutor } from "../../../pi-sdk/subagent-tools-context.js";
 import type {
   SubagentSessionEvent,
   SubagentSessionFactory,
@@ -249,11 +250,13 @@ class PiSubagentSession implements SubagentSessionPort {
             });
           });
         }
-        // 能力工具：宿主执行器（缺省 fail-closed）
-        if (this.deps.abilityExecutor === undefined) {
+        // 能力工具：宿主执行器（缺省查 runId 注册表（T9a spawn/steer 注册），
+        // 仍未注册 → fail-closed）
+        const executor = this.deps.abilityExecutor ?? getSubagentAbilityExecutor(this.input.runId);
+        if (executor === undefined) {
           return { ok: false, code: "subagent_ability_tool_unavailable", message: `工具 ${def.name} 的执行器未就绪` };
         }
-        const outcome = await this.deps.abilityExecutor({
+        const outcome = await executor({
           name: def.name,
           args: params,
           ...(signal !== undefined ? { signal } : {}),

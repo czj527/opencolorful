@@ -451,6 +451,41 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         }
         return null;
       };
+      // T9a（§25.4）：能力工具真实执行路由——插件工具 → PluginFacade worker
+      // 执行（现场冻结授权快照，携带父 Agent/Session 身份）；文件/Skill 工具
+      // 按 Phase 14 边界 unavailable（fail-closed）
+      const toolExecutor: import("../../pi-sdk/subagent-tools-context.js").SubagentToolServices["toolExecutor"] = async (input) => {
+        const plugin = pluginTools.find((tool) => tool.qualifiedName === input.name);
+        if (plugin === undefined || options.pluginFacade === undefined) {
+          return { ok: false, text: `subagent_ability_tool_unavailable: ${input.name}` };
+        }
+        // qualifiedName = "pluginId.toolId" 命名空间 → contributionId 取后缀
+        const contributionId = plugin.qualifiedName.startsWith(`${plugin.pluginId}.`)
+          ? plugin.qualifiedName.slice(plugin.pluginId.length + 1)
+          : plugin.name;
+        try {
+          const frozen = buildPluginTurnSnapshotFactory(options.pluginFacade)(plugin.pluginId, view.agentId ?? "");
+          if (!frozen.ok) {
+            return { ok: false, text: `插件 ${plugin.pluginId} 快照冻结失败：${frozen.error}` };
+          }
+          const result = await options.pluginFacade.hostApi.tools.invoke({
+            pluginId: plugin.pluginId,
+            contributionId,
+            params: input.args,
+            agentId: view.agentId ?? "",
+            sessionId,
+            ...(frozen.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
+            ...(frozen.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
+            ...(input.signal !== undefined ? { signal: input.signal } : {}),
+          });
+          return result.ok
+            ? { ok: true, text: JSON.stringify(result.result) }
+            : { ok: false, text: `${result.code}: ${result.message}` };
+        } catch (error) {
+          return { ok: false, text: `subagent_operation_failed: ${error instanceof Error ? error.message.slice(0, 200) : "unknown"}` };
+        }
+      };
+
       const subagentLifecycle: import("../../runtime/session-runtime.js").SessionRuntimeOptions["subagentLifecycle"] =
         subagentComposition === undefined
           ? undefined
@@ -469,6 +504,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         try {
           const services: SubagentToolServices = {
             ...subagentComposition.toolServices,
+            toolExecutor,
             parentSnapshot,
             currentModel: () => (selectedModel !== null && selectedModel !== undefined ? { providerId: selectedModel.providerId, modelId: selectedModel.modelId } : null),
             toolCatalog,

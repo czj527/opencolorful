@@ -12,6 +12,7 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { ThreadStore, type SubagentOwnership } from "../../src/runtime/subagents/stores/index.js";
 import { createPiSubagentSessionFactory } from "../../src/runtime/subagents/runtime/pi-session-adapter.js";
 import { REPORT_SUBAGENT_RESULT_TOOL, subagentInternalToolDefs } from "../../src/runtime/subagents/runtime/internal-tools.js";
+import { registerSubagentAbilityExecutor } from "../../src/pi-sdk/subagent-tools-context.js";
 import type { SubagentSessionEvent } from "../../src/runtime/subagents/runtime/types.js";
 
 // ═══════════════════════════════════════════════════════════════
@@ -221,6 +222,50 @@ describe("pi-session-adapter", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(abilityCalls).toContainEqual({ name: "read" });
+    session.dispose();
+  });
+
+  it("能力工具缺省执行器按 runId 查注册表（spawn 注册路由）", async () => {
+    const { dir, database } = createContext();
+    createThread(database);
+    const { faux, runtime } = await createModelRuntime(dir);
+
+    const events: SubagentSessionEvent[] = [];
+    const executed: string[] = [];
+    // 模拟 spawn 提交 Run 时注册本 Session 的执行器（T9a §25.4）
+    registerSubagentAbilityExecutor(RUN_ID, async (input) => {
+      executed.push(input.name);
+      return { ok: true, text: `executed: ${input.name}` };
+    });
+    const factory = createPiSubagentSessionFactory({
+      threadStore: new ThreadStore(database),
+      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      authPath: path.join(dir, "auth.json"),
+      threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
+      // 不传 abilityExecutor：缺省查 runId 注册表
+    });
+    const session = await factory.create({
+      threadId: THREAD_ID,
+      ownerAgentId: OWNERSHIP.ownerAgentId,
+      parentSessionId: OWNERSHIP.parentSessionId,
+      runId: RUN_ID,
+      sessionDir: path.join(dir, "session"),
+      workspaceCwd: "/tmp",
+    });
+    session.onEvent((event) => events.push(event));
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("read", { path: "/tmp/a.txt" })]),
+      fauxAssistantMessage("读完了"),
+    ]);
+    void session.start({
+      prompt: "读取文件",
+      tools: [...subagentInternalToolDefs(), { name: "read", description: "read", parameters: { type: "object" } }],
+    });
+    const deadline = Date.now() + 10000;
+    while (executed.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(executed).toContain("read");
     session.dispose();
   });
 

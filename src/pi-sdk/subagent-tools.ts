@@ -32,7 +32,7 @@ import { isSubagentRunTerminal } from "../contracts/subagents.js";
 import type { ExecuteSubagentRunInput } from "../runtime/subagents/runtime/runtime-host.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { requireSubagentContext, type SubagentToolContext } from "./subagent-tools-context.js";
+import { registerSubagentAbilityExecutor, requireSubagentContext, type SubagentToolContext } from "./subagent-tools-context.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 14 T6：主 Agent 七个 Core 工具（plans/phase-14.md §20.1）
@@ -398,6 +398,9 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     return errorResult(outcome.reasonCode, `${outcome.reason}（Thread ${threadId} 保持 queued，可 close_subagent 清理）`);
   }
 
+  // T9a（§25.4）：注册本 Session 的能力工具执行器（子会话按 runId 路由真实执行）
+  registerSubagentAbilityExecutor(runId, (input) => services.toolExecutor(input));
+
   // 8. 投影（thread.created / run.queued；best-effort）
   try {
     if (created !== null) {
@@ -670,6 +673,8 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
   if (outcome.status === "rejected") {
     return errorResult(outcome.reasonCode, outcome.reason);
   }
+  // T9a（§25.4）：新 Run 注册能力工具执行器（复用同一父侧执行路由）
+  registerSubagentAbilityExecutor(newRunId, (input) => services.toolExecutor(input));
   services.dispatcher.dispatch(messageId, ownership); // task/steer 记账（新 Run 已由 Host 渲染 trigger）
   return okResult({ messageId, delivery: "queued", targetRunId: runId, newRunId, queued: outcome.queued });
 }
