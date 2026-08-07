@@ -2529,3 +2529,32 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：能力工具执行器（Sandbox）；Skill 委派；T8 Web 卡片/面板消费 transcript/SSE API；Browser E2E。
 
 **质量门（定向）**：typecheck 全过；新测试 14/14 + 回归（T4/T5 subagent 测试 59/59）；全量 2040 测试通过；web:build+web:test 394/394；`check:pi-imports` 无违规。
+
+### T8：Web 卡片、只读面板与默认模型设置（2026-08-07）
+
+**Commit**：`9c4e8e3`
+
+**主要文件**（web/src/features/subagents/ 新建 + 7 个增量修改）：
+
+- `subagent-stream.ts`：`SubagentStreamClient`——`subagent:<threadId>` SSE 客户端；EventSource 无法带 Last-Event-ID 头 → 断线重建用 `sinceSeq` 查询参数（服务端 parseReplayCursor 优先头、其次 query）；seq 去重；reset（stale cursor）→ 通知调用方以随后 snapshot 整体重建；Tool transient 只走实时广播（§17.2）；
+- `use-subagent-threads.ts`：主对话卡片数据——activity `subagent.thread.created`（scope.sessionId）发现 Thread → 每 Thread 拉 transcript + 订阅面板流（§17.4 主对话只订阅卡片摘要，防抖 800ms）；createdAt 升序稳定输出；会话切换重置；
+- `use-subagent-panel.ts`：面板数据——初始 transcript + afterSequence 分页（cursor 与 SSE cursor 分离）+ 流事件合并（message 按 sequence 去重、run 按 runId upsert、tool transient、thread 更新状态）；snapshot 重建基线不重复追加；Run 选择；
+- `SubagentCard.tsx`（§21.1）：稳定卡片（标题/状态图标+文案/Run 序号/模型/阶段或 Tool/已运行/Token/最近活动/结果 disposition+一行摘要/Artifact 数）；点击或 Enter 打开面板（role=button+aria-label）；只读"请主 Agent 取消/补充信息"请求按钮（stopPropagation，向主对话发结构化消息）；无 steer/cancel/retry/grant；loading/error 态；reduced motion 动画；
+- `SubagentPanel.tsx` + `SubagentTimeline.tsx`（§21.2）：Header/Run strip（tab 切换过滤消息）/Transcript timeline（TaskBrief 区块、消息行、Steer 视图（data part `subagent.steer.v1`）、Result 视图（`subagent.result.v1`）、Tool 脱敏摘要、Artifacts 受控下载、大输出折叠）/follow-latest（上滚后"有新内容"提示不强制回底）/分页"加载更早消息"/Technical summary（snapshotId/工作区访问/limits/reasonCode + `/logs?subagent=` 链接）/footer 连接状态+只读徽标/`data-mobile` 全屏 sheet（§21.5）/aria region；
+- Settings（§21.3/§20.4）：`SubagentDefaultsSection.tsx`——"Subagent 默认模型"（null=继承主 Agent / 已配置 Provider models；说明"仅影响新建 Subagent"；保存/失败/回滚反馈复用 Settings 模式）；
+- 增量修改：`lib/types.ts`（Subagent 客户端类型段 + PreferencesDocument.subagents?）、`lib/api-client.ts`（getSubagentTranscript/Messages/Artifacts/ContentUrl/listSubagentThreads + updatePreferences subagents?）、`components/ChatPane.tsx`（卡片列表插槽，props 全可选）、`components/InspectorSidebar.tsx`（panel 插槽）、`app/WorkspaceApp.tsx`（归属派生 + hook 接线 + 选中面板状态）、`app/page-router.ts`（navigateToLogsSubagent）、`features/settings/SettingsPage.tsx`。
+
+**新增测试与故障注入**（32 用例）：stream 6（URL 归属/sinceSeq、seq 去重、reset 通知、snapshot 重建基线+高水位丢弃、断线按游标重建不重不漏、dispose 停止）；组件 26（卡片渲染/终态摘要/工具阶段/点击与 Enter/请求按钮/无直接控制控件/loading/error、多卡片排序、hook 发现+会话切换清空、面板全视图/Run 切换过滤/SSE 增量+去重+snapshot 重建/上滚提示/关闭/mobile sheet/Technical summary/大输出折叠/error、设置默认模型 null 保存/模型保存/失败反馈/回显）。
+
+**与计划的偏差和原因**（均为"不改 src/"约束下的实现选择）：
+
+1. Thread 发现：T7 未暴露 `GET /api/sessions/:sessionId/subagents`，卡片列表经 activity `subagent.thread.created` 事件发现（scope.sessionId），再按 Thread 拉 transcript；
+2. 卡片位置：无父 Turn 消息锚点（web 时间线不携带 turnId），卡片按 createdAt 升序稳定排列在消息区下方（满足"稳定展示不跳动"）；
+3. 请求按钮点击即发送结构化消息（无编辑确认弹窗）；逃生路径（归档父会话）未在 UI 呈现；
+4. 卡片实时性：每 Thread 一个面板流订阅，面板打开时跳过卡片侧订阅，关闭后由发现轮询兜底；
+5. 移动端 sheet 复用 InspectorSidebar 既有窄屏抽屉 + `data-mobile` 全屏样式（未新增路由页）；
+6. Tool 流事件无 runId（T7 形状），Run 过滤只作用于协议消息，tools 全局展示。
+
+**当前未接线入口**：能力工具执行器/Skill 委派（T9 范围）；Browser E2E（T10）。
+
+**质量门（定向）**：tsc 零错误；web:test 426/426（含既有 394）；web:build ✓。
