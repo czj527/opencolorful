@@ -2407,3 +2407,31 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：Runtime Host/Scheduler、Mailbox Delivery Coordinator、Core Tools、Server API、Web——均为 T4-T8 范围。
 
 **质量门（定向）**：typecheck 全过；subagent 全部测试 123/123 通过（contracts 24 + migration 4 + stores 49 + renderer/resolver 30 + policy/lease 16）。全量质量门在 T10 统一执行。
+
+### T4：PI Subagent Runtime Host 与 Scheduler（2026-08-07）
+
+**Commit**：`（待提交）`
+
+**主要文件**：
+
+- `src/runtime/subagents/runtime/types.ts`：`SubagentSessionPort`/`SubagentSessionToolDef`/`SubagentSessionEvent`/`SubagentSessionFactory`——Host 与 PI SDK 的适配边界（Host 不 import `@earendil-works/pi-*`，T6 宿主适配 PI AgentSession，测试注入 Faux 适配器）；
+- `src/runtime/subagents/runtime/internal-tools.ts`：三个平台内部控制工具（`report_subagent_progress`/`request_parent_input`/`report_subagent_result`）的 TypeBox args schema、恒注册定义、parse 校验（§13.3：不属于 CapabilityCeiling、不可覆盖）；
+- `src/runtime/subagents/runtime/runtime-host.ts`：`SubagentRuntimeHost`——Run 生命周期状态机（queued→starting→running/waiting_for_input→终态）、`startWithSnapshot` 快照+Runtime Lease 单事务、心跳 15s 续租/Lease TTL 45s（heartbeat 不更新业务 lastActivityAt）、四类超时与三类预算确定性保护、三内部工具分发（progress/input_required 消息落库、result 唯一、缺失 result 两次结束→failed）、`completeRunWithResult` 终态原子事务、`resumeFromInput`（waiting_for_input 恢复）、`dispose`/`onRunFinished`（容量真实释放信号）；
+- `src/runtime/subagents/runtime/scheduler.ts`：`SubagentScheduler`——容量缺省 2、FIFO 排队（上限 8）、超限拒绝 `subagent_runtime_unavailable`（§22.2 fail-closed）、`onRunTerminal` 在 host `onRunFinished`（cleanup 后）接线。
+
+**生产接线点**：Host 经 `sessionFactory` 注入 T6 宿主适配器（PI AgentSession）；`scheduler.onRunTerminal` 由组合根接 `host.onRunFinished`；`onRunProgress/onMessage/onTerminal/onLeaseLost` 供 T5/T7 投影（mailbox/observability/transcript）；`resumeFromInput` 由 T6 `answer_input` 工具调用。
+
+**新增测试与故障注入**（`tests/unit/subagents-runtime-host.test.ts`，17 用例）：Faux Session 适配器全链（start gate 显式释放、事件流注入、tool-invoke resolve 回调）；成功终态全链（Run succeeded + result message + mailbox(completed) + 清 Lease）；progress/input/result 三工具 schema 校验失败不终态、result 唯一；request_parent_input→waiting_for_input（idle 暂停）→`resumeFromInput` 恢复→succeeded；total/first-event/idle/startup 四类超时原因；tool-call/迭代两类预算；缺失 result 两次结束→failed/subagent_result_not_reported；Lease 丢失→onLeaseLost+停止写（无终态写库）；正常心跳续租；startWithSnapshot 冲突 fail-closed（保持原状态、不建 Session）；Session 创建失败→failed（安全摘要）；Scheduler 容量排队（终态后 FIFO 启动下一个）与重复提交/队列超限拒绝。
+
+**与计划的偏差和原因**：
+
+1. `onTerminal` 回调时刻 host 尚未 cleanup（active 未移除），容量释放信号改由新增 `onRunFinished`（cleanup 后同步触发）驱动 Scheduler，避免排队 Run 因"容量仍满"误判而永不启动（测试暴露，主 Agent 修复）；
+2. 模型结束检查由事件驱动：`terminal` 事件进入 `onModelTerminal`（第一次结束 followUp 提醒、第二次 failed/result_not_reported），`start` resolve 仅作"结束但未收到 terminal 事件"的兜底——PI 语义中 followUp 后会话继续，start promise 不能代表单轮结束；
+3. `succeeded` 从 `waiting_for_input` 收敛时先 `waiting_for_input→running` 再终态（状态机表无 `waiting_for_input→succeeded`，T1 冻结契约不变更）；
+4. Session 创建失败（非 startup 超时）映射 `failed/subagent_operation_failed`，错误详情不写入 reasonCode（§22.3 安全摘要）；
+5. `startWithSnapshot` 事务失败（CAS 冲突/数据校验）不终态化、保持原状态，由启动恢复/调用方兜底（queued 状态无合法 failed 转换）；
+6. 测试超时值受 `SubagentRunLimitsV1Schema` minimum 1000ms 约束，timeout 用例使用最小合法值（真实计时器，单用例约 1s）。
+
+**当前未接线入口**：Mailbox Delivery Coordinator（T5）、启动恢复（T5）、Transcript/Observability 投影（T7）、主 Agent Core Tools 与组合根（T6）、Web 面板（T8）。
+
+**质量门（定向）**：typecheck 全过；T4 17/17 通过；全量 162 文件 1927 测试通过；`check:pi-imports` 无违规（runtime 目录不 import PI SDK）。
