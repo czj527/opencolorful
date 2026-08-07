@@ -2349,7 +2349,7 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 
 ### T1：契约、设置、事件目录与 Migration v12（2026-08-07）
 
-**Commit**：`（T1 提交 hash，提交后回填）`
+**Commit**：`864b338`
 
 **主要文件**：
 
@@ -2380,3 +2380,30 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：Subagent Stores、DelegationPolicy、Runtime Host、Core Tools、Server API、Web 面板均为 T2-T9 范围。
 
 **质量门（定向）**：typecheck 全过；契约 24/24 + migration 4/4 + preferences/observability/migration 相关 110/110 通过。全量质量门在 T10 统一执行。
+
+### T2+T3：Subagent Stores 与 DelegationPolicy（2026-08-07）
+
+**Commit**：`（T2+T3 提交 hash，提交后回填）`
+
+**主要文件**：
+
+- `src/runtime/subagents/stores/`（T2，9 文件）：errors/thread-store/run-store/message-store/artifact-store/parent-mailbox-store/workspace-lease-store/subagent-transactions/index；
+- `src/runtime/subagents/task-renderer.ts`、`context-resolver.ts`、`delegation-policy.ts`、`workspace-lease-service.ts`（T3）；
+- 测试：`tests/unit/subagents-stores.test.ts`（49）、`subagents-task-renderer.test.ts`、`subagents-context-resolver.test.ts`、`subagents-policy-lease.test.ts`（16，主 Agent 补充）。
+
+**生产接线点**：Stores 组合进 `SubagentTransactions`（创建 Thread+首条 task message+first Run；terminal+result+message+mailbox 原子事务；close+mailbox suppression）；T4/T5 将消费 Stores 与 DelegationPolicy。
+
+**新增测试与故障注入**：六表 CRUD+归属过滤、sequence 30 路并发严格递增+重启不重复、8 路并发建 Run 仅 1 成功、状态机非法转换/terminal 幂等、operationId 冲突与非法 Envelope 两种中途回滚、Run/Workspace Lease 全流程、模型解析三档+override/required/unavailable、Capability 交集/固定禁用/空 allowlist fail-closed、ceilingHash 稳定、limits 超限拒绝、写 Lease 互斥/接管/过期清理/跨工作区并行。
+
+**与计划的偏差和原因**：
+
+1. sequence/ordinal 分配用「IMMEDIATE 事务内 SELECT+UPDATE」（列 DEFAULT 1 语义为"下一条将分配"，UPDATE+RETURNING 会从 2 开始跳过 1）；
+2. 未加部分唯一索引（不能改 migrations.ts），单非终态 Run 约束由 `RunStore.create` 的 IMMEDIATE 事务内检查实现（跨连接安全）；
+3. `messageStore.append` 输入为 `Omit<Envelope,"sequence">`，Store 分配后补全再全量 TypeBox 校验（future version 拒绝）；
+4. `WorkspaceMutationLeaseService` 重构为依赖 T2 `WorkspaceLeaseStore`（消除同表双 SQL 路径；Store 支持同 bootId 接管语义）；
+5. `selectPluginContributions` 空 allowlist 改为 fail-closed（与 tools/skills 一致；初版实现把空列表当"不过滤"，与注释矛盾，主 Agent 复核修正）；
+6. `succeeded` 缺 result 使用 `subagent_result_not_reported`（冻结错误码中最贴近语义）。
+
+**当前未接线入口**：Runtime Host/Scheduler、Mailbox Delivery Coordinator、Core Tools、Server API、Web——均为 T4-T8 范围。
+
+**质量门（定向）**：typecheck 全过；subagent 全部测试 123/123 通过（contracts 24 + migration 4 + stores 49 + renderer/resolver 30 + policy/lease 16）。全量质量门在 T10 统一执行。
