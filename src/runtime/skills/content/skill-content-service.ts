@@ -51,6 +51,8 @@ const DEFAULT_CONTENT_BUDGETS: SkillContentBudgets = {
 /** 当前 turn 的激活授权 overlay 读取器（生产实现为 SkillActivationGrantStore）。 */
 export interface SkillActivationOverlayReader {
   listBySession(sessionId: string): readonly SkillActivationGrantRecord[];
+  /** 已原子消费、仍附着当前 Turn 的 overlay。 */
+  listTurnOverlays?(sessionId: string, turnId: string): readonly SkillActivationGrantRecord[];
 }
 
 export interface SkillContentServiceDeps {
@@ -292,18 +294,26 @@ export class SkillContentService {
   /** 激活授权 overlay：快照冻结摘要（未过期）+ 当前 turn 实时 overlay。 */
   private findOverlayGrant(snapshot: SkillSnapshot, ref: SkillRef, nowIso: string): SkillSnapshotGrant | undefined {
     const refKey = skillRefKey(ref);
+    const turnOverlays =
+      this.deps.grants?.listTurnOverlays?.(snapshot.sessionId, snapshot.turnId).map((grant) => ({
+        ...toSnapshotGrantLike(grant),
+        // SQLite consumedAt 是永久消费证据；当前 Turn overlay 的有效性由
+        // SessionSkillService 的 turn-scoped 内存表表达。
+        consumedAt: null,
+      })) ?? [];
+    const turnOverlayIds = new Set(turnOverlays.map((grant) => grant.grantId));
     const grants: readonly SkillSnapshotGrant[] = [
+      ...turnOverlays,
       ...snapshot.activationGrants,
       ...(this.deps.grants !== undefined
         ? this.deps.grants.listBySession(snapshot.sessionId).filter((grant) => grant.issuedTurnId === snapshot.turnId).map(toSnapshotGrantLike)
         : []),
     ];
     for (const grant of grants) {
-      // T13（P0-4）：grant 一次性——consumedAt 非空（读取后被消费/撤销）不再授权，
-      // 禁止同 grant 重复读取。快照摘要是冻结对象，消费状态以实时 store 为准
-      // （读取成功后 consumeActivationGrant 写入 consumedAt，后续读取不再授权）。
+      // T13（P0-4）：持久 grant 被消费后只有当前 Turn overlay 能继续授权；
+      // 其他路径的 consumedAt 非空记录一律拒绝，禁止跨 Turn 或撤销后重放。
       let consumedAt = grant.consumedAt;
-      if (this.deps.grants !== undefined) {
+      if (this.deps.grants !== undefined && !turnOverlayIds.has(grant.grantId)) {
         const live = this.deps.grants.listBySession(snapshot.sessionId).find((record) => record.grantId === grant.grantId);
         if (live !== undefined) {
           consumedAt = live.consumedAt;

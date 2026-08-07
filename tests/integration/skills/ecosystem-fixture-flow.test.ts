@@ -129,7 +129,15 @@ function makeHarness(): EcoHarness {
   const sessionService = new SessionSkillService({ catalog, sessionBindings, grants, now });
   void sessionService;
   const snapshots = new SkillSnapshotService({ now });
-  const content = new SkillContentService({ catalog, snapshots, grants, now });
+  const content = new SkillContentService({
+    catalog,
+    snapshots,
+    grants: {
+      listBySession: (sessionId) => grants.listBySession(sessionId),
+      listTurnOverlays: (sessionId, turnId) => sessionService.listTurnOverlays(sessionId, turnId),
+    },
+    now,
+  });
 
   cleanups.push(() => {
     instrument.reset();

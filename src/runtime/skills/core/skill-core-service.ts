@@ -682,6 +682,9 @@ export class SkillCoreService {
   buildPiSkillsForTurn(input: { readonly agentId?: string; readonly sessionId?: string; readonly turnId?: string }): PiResourceSkills {
     const { sessionId, turnId } = input;
     const agentId = input.agentId ?? "";
+    if (sessionId !== undefined && sessionId !== "" && turnId !== undefined && turnId !== "") {
+      this.deps.sessionService.beginTurn(sessionId, turnId);
+    }
     // T13（P0-1）：冻结开始即移除旧快照——任何后续失败（view 解析/快照构造）
     // 都 fail-closed，不保留上一 Turn 的旧快照（否则 read 链路仍按旧可见集授权）
     if (sessionId !== undefined && sessionId !== "") {
@@ -844,24 +847,41 @@ export class SkillCoreService {
           candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef, grantId: grant.grantId });
         }
       }
+      for (const grant of this.deps.sessionService.listTurnOverlays(input.sessionId, frozen.turnId)) {
+        const registered = this.deps.catalog.findByRefKey(grant.skillRefKey);
+        if (registered !== undefined) {
+          candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef });
+        }
+      }
     }
     for (const candidate of candidates) {
+      if (candidate.grantId !== undefined && frozen !== undefined && this.deps.sessionService !== undefined) {
+        const rel = path.relative(canonicalResolve(candidate.rootPath), absCanonical);
+        if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+          continue;
+        }
+        let activated: ReturnType<SessionSkillService["activateActivationGrant"]>;
+        try {
+          activated = this.deps.sessionService.activateActivationGrant({
+            grantId: candidate.grantId,
+            sessionId: input.sessionId,
+            turnId: frozen.turnId,
+            skillRef: candidate.skillRef,
+            contentHash: candidate.skillRef.contentHash,
+          });
+        } catch (error) {
+          return {
+            status: "denied",
+            reasonCode: "skill_activation_denied",
+            reason: error instanceof Error ? error.message.slice(0, 240) : "激活授权拒绝",
+          };
+        }
+        if (activated.status !== "consumed") {
+          return { status: "denied", reasonCode: activated.reasonCode, reason: activated.reason };
+        }
+      }
       const outcome = await read(candidate.rootPath, candidate.skillRef, "当前 Turn 可见 Skill");
       if (outcome.status !== "not-a-skill-file") {
-        // T13（P0-4）：经 grant 路径读取成功后消费该 grant（一次性）——同一 grant
-        // 不得重复读取；消费失败（并发已消费）不阻塞已完成的读取
-        if (outcome.status === "ok" && candidate.grantId !== undefined && this.deps.sessionService !== undefined) {
-          try {
-            this.deps.sessionService.consumeActivationGrant({
-              grantId: candidate.grantId,
-              sessionId: input.sessionId,
-              skillRef: candidate.skillRef,
-              contentHash: candidate.skillRef.contentHash,
-            });
-          } catch {
-            // 消费竞争失败（已被并发消费/撤销）：读取已完成，不改变结果
-          }
-        }
         return outcome;
       }
     }
@@ -869,7 +889,7 @@ export class SkillCoreService {
     // 2. 未命中可见集，但 canonical 路径落在任意已登记 Skill 根内 → denied
     //    （T12 P0-1：上一轮可见、本轮解绑/停用/插件禁用；Junction 别名经
     //    canonical 化后同样命中——fail-closed，绝不回退裸读）
-    if (frozen !== undefined && this.deps.contentService !== undefined) {
+    if (this.deps.contentService !== undefined) {
       for (const skill of this.deps.catalog.list({})) {
         const rel = path.relative(canonicalResolve(skill.rootPath), absCanonical);
         if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {

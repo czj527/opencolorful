@@ -76,6 +76,11 @@ export interface ConsumeActivationGrantInput {
   readonly contentHash: string;
 }
 
+export interface ActivateActivationGrantInput extends ConsumeActivationGrantInput {
+  /** 当前受控读取所属 Turn；grant 必须由同一 Turn 签发。 */
+  readonly turnId: string;
+}
+
 export type ConsumeActivationGrantResult =
   | { readonly status: "consumed"; readonly grant: SkillActivationGrantRecord }
   | { readonly status: "rejected"; readonly grant: SkillActivationGrantRecord | null; readonly reasonCode: "skill_activation_expired" | "skill_activation_reused" | "skill_activation_denied"; readonly reason: string };
@@ -85,6 +90,8 @@ const PERSISTED_SELECTIONS = new Set<SkillSelectionMode>(["implicit", "explicit-
 
 export class SessionSkillService {
   private readonly now: () => Date;
+  /** 已原子消费、但仍附着在当前 Turn 的精确 overlay。 */
+  private readonly turnOverlays = new Map<string, { readonly turnId: string; readonly grants: Map<string, SkillActivationGrantRecord> }>();
 
   constructor(private readonly deps: SessionSkillServiceDeps) {
     this.now = deps.now ?? (() => new Date());
@@ -145,6 +152,28 @@ export class SessionSkillService {
   listGrantsBySession(sessionId: string): readonly SkillActivationGrantRecord[] {
     this.validateSessionId(sessionId);
     return this.deps.grants.listBySession(sessionId);
+  }
+
+  /**
+   * 开始一个新的 Session Turn：清理上一 Turn 的内存 overlay。
+   * SQLite grant 仍保留消费证据，但不能跨 Turn 继续作为读取授权。
+   */
+  beginTurn(sessionId: string, turnId: string): void {
+    this.validateSessionId(sessionId);
+    if (typeof turnId !== "string" || turnId.length < 1 || turnId.length > 256) {
+      throw new SkillError("skill_operation_failed", "Turn ID 不合法");
+    }
+    const current = this.turnOverlays.get(sessionId);
+    if (current?.turnId !== turnId) {
+      this.turnOverlays.set(sessionId, { turnId, grants: new Map() });
+    }
+  }
+
+  /** 当前 Turn 已建立的激活 overlay（grant 已消费但仍可受控读取）。 */
+  listTurnOverlays(sessionId: string, turnId: string): readonly SkillActivationGrantRecord[] {
+    this.validateSessionId(sessionId);
+    const current = this.turnOverlays.get(sessionId);
+    return current?.turnId === turnId ? [...current.grants.values()] : [];
   }
 
   /**
@@ -209,6 +238,22 @@ export class SessionSkillService {
    * - Session / skillRefKey / contentHash 不匹配 → skill_activation_denied。
    */
   consumeActivationGrant(input: ConsumeActivationGrantInput): ConsumeActivationGrantResult {
+    return this.consumeActivationGrantInternal(input);
+  }
+
+  /**
+   * 原子建立当前 Turn overlay：数据库先抢占 grant，成功后才把已消费记录
+   * 放入当前 Turn 的内存 overlay。并发调用只有一个调用方能成功。
+   */
+  activateActivationGrant(input: ActivateActivationGrantInput): ConsumeActivationGrantResult {
+    this.validateSessionId(input.sessionId);
+    if (typeof input.turnId !== "string" || input.turnId.length < 1 || input.turnId.length > 256) {
+      throw new SkillError("skill_operation_failed", "Turn ID 不合法");
+    }
+    return this.consumeActivationGrantInternal(input, input.turnId);
+  }
+
+  private consumeActivationGrantInternal(input: ConsumeActivationGrantInput, turnId?: string): ConsumeActivationGrantResult {
     this.validateSessionId(input.sessionId);
     const grant = this.deps.grants.get(input.grantId);
     if (grant === null) {
@@ -226,6 +271,10 @@ export class SessionSkillService {
     if (grant.sessionId !== input.sessionId) {
       this.emitRejected("skill_activation_denied", grant, input.sessionId);
       return { status: "rejected", grant, reasonCode: "skill_activation_denied", reason: "激活授权与当前 Session 不一致" };
+    }
+    if (turnId !== undefined && grant.issuedTurnId !== turnId) {
+      this.emitRejected("skill_activation_denied", grant, input.sessionId);
+      return { status: "rejected", grant, reasonCode: "skill_activation_denied", reason: "激活授权与当前 Turn 不一致" };
     }
     const requestKey = skillRefKey(input.skillRef);
     if (grant.skillRefKey !== requestKey || grant.contentHash !== input.contentHash) {
@@ -250,6 +299,14 @@ export class SessionSkillService {
         attributes: { grantId: input.grantId, skillRefKey: grant.skillRefKey, issuedTurnId: grant.issuedTurnId },
       },
     });
+    if (turnId !== undefined) {
+      const current = this.turnOverlays.get(input.sessionId);
+      if (current?.turnId !== turnId) {
+        this.turnOverlays.set(input.sessionId, { turnId, grants: new Map([[consumed.grantId, consumed]]) });
+      } else {
+        current.grants.set(consumed.grantId, consumed);
+      }
+    }
     return { status: "consumed", grant: consumed };
   }
 

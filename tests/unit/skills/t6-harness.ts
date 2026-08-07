@@ -144,7 +144,15 @@ export function createT6Harness(options: { readonly trustedRoots?: readonly stri
   });
   const sessionService = new SessionSkillService({ catalog, sessionBindings, grants, now });
   const snapshots = new SkillSnapshotService({ now });
-  const content = new SkillContentService({ catalog, snapshots, grants, now });
+  const content = new SkillContentService({
+    catalog,
+    snapshots,
+    grants: {
+      listBySession: (sessionId) => grants.listBySession(sessionId),
+      listTurnOverlays: (sessionId, turnId) => sessionService.listTurnOverlays(sessionId, turnId),
+    },
+    now,
+  });
   const loadHandles = new LoadHandleRegistry({ now });
   const confirmations = new ConfirmationTokenRegistry({ now, ttlMs: 15 * 60 * 1000 });
 
