@@ -58,6 +58,12 @@ export interface CreateParentMailboxInput {
   readonly createdAt: string;
 }
 
+/** T5 cursor 分页游标（createdAt + mailboxId 字典序，ISO 时间戳可 lexicographic 比较） */
+export interface ParentMailboxCursor {
+  readonly createdAt: string;
+  readonly mailboxId: ParentMailboxId;
+}
+
 interface MailboxRow {
   mailbox_id: ParentMailboxId;
   owner_agent_id: string;
@@ -209,6 +215,57 @@ export class ParentMailboxStore {
          LIMIT ?`,
       )
       .all(parentSessionId, ownership.ownerAgentId, Math.min(Math.max(limit, 1), 1000)) as MailboxRow[];
+    return rows.map(mapMailboxRow);
+  }
+
+  /**
+   * T5 重试扫描（§14.3）：queued/delivering 全部可重试；failed 且
+   * next_retry_at 已到期（指数退避）也可重试（调用方 requeue 后结算）。
+   */
+  listRetryableDue(now: string, limit = 500): ParentMailboxRecord[] {
+    const rows = this.database
+      .prepare(
+        `SELECT * FROM subagent_parent_mailbox
+         WHERE status IN ('queued', 'delivering')
+            OR (status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= @now)
+         ORDER BY created_at ASC
+         LIMIT @limit`,
+      )
+      .all({ now, limit: Math.min(Math.max(limit, 1), 2000) }) as MailboxRow[];
+    return rows.map(mapMailboxRow);
+  }
+
+  /**
+   * T5 父侧 cursor 分页（§8.4 / §14.1：父侧轮询/等待新通知）。
+   * 所有状态（queued/delivering/delivered/suppressed/failed）均可查询；
+   * 严格归属过滤；after 为空返回最新一批（created_at ASC, mailbox_id ASC）。
+   */
+  listForSessionCursor(ownership: SubagentOwnership, after: ParentMailboxCursor | null, limit = 50): ParentMailboxRecord[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+    const rows = after === null
+      ? (this.database
+          .prepare(
+            `SELECT * FROM subagent_parent_mailbox
+             WHERE owner_agent_id = ? AND parent_session_id = ?
+             ORDER BY created_at ASC, mailbox_id ASC
+             LIMIT ?`,
+          )
+          .all(ownership.ownerAgentId, ownership.parentSessionId, safeLimit) as MailboxRow[])
+      : (this.database
+          .prepare(
+            `SELECT * FROM subagent_parent_mailbox
+             WHERE owner_agent_id = @owner AND parent_session_id = @session
+               AND (created_at > @afterCreated OR (created_at = @afterCreated AND mailbox_id > @afterId))
+             ORDER BY created_at ASC, mailbox_id ASC
+             LIMIT @limit`,
+          )
+          .all({
+            owner: ownership.ownerAgentId,
+            session: ownership.parentSessionId,
+            afterCreated: after.createdAt,
+            afterId: after.mailboxId,
+            limit: safeLimit,
+          }) as MailboxRow[]);
     return rows.map(mapMailboxRow);
   }
 

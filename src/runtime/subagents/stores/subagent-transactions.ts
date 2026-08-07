@@ -115,6 +115,43 @@ export interface CloseThreadResult {
   readonly suppressed: number;
 }
 
+export interface WaitingForInputWithMailboxInput {
+  readonly runId: SubagentRunId;
+  readonly threadId: SubagentThreadId;
+  readonly ownership: SubagentOwnership;
+  /** input_required 协议消息 Envelope（sequence 由 Store 分配） */
+  readonly envelope: Omit<AgentMessageEnvelopeV1, "sequence">;
+  readonly mailbox: {
+    readonly mailboxId: ParentMailboxId;
+    readonly messageId: AgentMessageId;
+    readonly operationId: string;
+  };
+  readonly now: string;
+}
+
+export interface WaitingForInputWithMailboxResult {
+  readonly run: SubagentRunRecord;
+  readonly message: SubagentMessageRecord;
+  readonly mailbox: ParentMailboxRecord;
+}
+
+export interface MarkRunStartedWithMailboxInput {
+  readonly runId: SubagentRunId;
+  readonly threadId: SubagentThreadId;
+  readonly ownership: SubagentOwnership;
+  readonly mailbox: {
+    readonly mailboxId: ParentMailboxId;
+    readonly messageId: AgentMessageId;
+    readonly operationId: string;
+  };
+  readonly now: string;
+}
+
+export interface MarkRunStartedWithMailboxResult {
+  readonly run: SubagentRunRecord;
+  readonly mailbox: ParentMailboxRecord;
+}
+
 export class SubagentTransactions {
   constructor(
     private readonly database: Database.Database,
@@ -256,6 +293,69 @@ export class SubagentTransactions {
           }
         }
         return { thread, closedNow, suppressed };
+      })
+      .immediate();
+  }
+
+  /**
+   * §13.3：request_parent_input 原子写消息 + waiting_for_input + Parent Mailbox
+   * （§8.4：input_required 可唤醒父 Turn）。中途任何一步失败整体回滚，
+   * Run 保持 running，不产生半写状态（§22.3）。
+   */
+  waitingForInputWithMailbox(input: WaitingForInputWithMailboxInput): WaitingForInputWithMailboxResult {
+    return this.database
+      .transaction(() => {
+        const { run } = this.deps.runStore.transit(
+          { runId: input.runId, from: "running", to: "waiting_for_input", reasonCode: null, now: input.now },
+          input.ownership,
+        );
+        const { message } = this.deps.messageStore.append({
+          envelope: input.envelope,
+          ownership: input.ownership,
+          createdAt: input.now,
+        });
+        const mailbox = this.deps.mailboxStore.insert({
+          mailboxId: input.mailbox.mailboxId,
+          ownerAgentId: input.ownership.ownerAgentId,
+          parentSessionId: input.ownership.parentSessionId,
+          threadId: input.threadId,
+          runId: input.runId,
+          messageId: input.mailbox.messageId,
+          notificationKind: "input_required",
+          triggerParentTurn: true,
+          operationId: input.mailbox.operationId,
+          createdAt: input.now,
+        });
+        return { run, message, mailbox };
+      })
+      .immediate();
+  }
+
+  /**
+   * §14.1：Run started 写入不唤醒父 Turn 的状态 Mailbox（§8.4：started 只供
+   * 状态查询）。与 starting → running 转换同事务；enqueue 幂等
+   * （operationId=subagent-started-<runId>，重放不重复副作用）。
+   */
+  markRunStartedWithMailbox(input: MarkRunStartedWithMailboxInput): MarkRunStartedWithMailboxResult {
+    return this.database
+      .transaction(() => {
+        const { run } = this.deps.runStore.transit(
+          { runId: input.runId, from: "starting", to: "running", reasonCode: null, now: input.now },
+          input.ownership,
+        );
+        const mailbox = this.deps.mailboxStore.enqueue({
+          mailboxId: input.mailbox.mailboxId,
+          ownerAgentId: input.ownership.ownerAgentId,
+          parentSessionId: input.ownership.parentSessionId,
+          threadId: input.threadId,
+          runId: input.runId,
+          messageId: input.mailbox.messageId,
+          notificationKind: "started",
+          triggerParentTurn: false,
+          operationId: input.mailbox.operationId,
+          createdAt: input.now,
+        });
+        return { run, mailbox };
       })
       .immediate();
   }

@@ -324,6 +324,46 @@ export class RunStore {
     return row !== undefined;
   }
 
+  /** Thread 当前活动（非终态）Run；无 → null（T5 生命周期联动/取消用） */
+  getActiveRunByThread(threadId: SubagentThreadId, ownership: SubagentOwnership): SubagentRunRecord | null {
+    const row = this.database
+      .prepare(
+        `SELECT r.* FROM subagent_runs r
+         JOIN subagent_threads t ON t.thread_id = r.thread_id
+         WHERE r.thread_id = ? AND t.owner_agent_id = ? AND t.parent_session_id = ?
+           AND r.status IN ${ACTIVE_STATUS_IN_LIST}
+         ORDER BY r.created_at ASC
+         LIMIT 1`,
+      )
+      .get(threadId, ownership.ownerAgentId, ownership.parentSessionId) as RunRow | undefined;
+    return row === undefined ? null : mapRunRow(row);
+  }
+
+  /**
+   * T5 启动恢复：系统级扫描全部非终态 Run（queued/starting/running/
+   * waiting_for_input/cancelling，§16.5 / §25.6：Server crash 后全部
+   * interrupted）。系统操作，不携带调用方归属；返回各 Run 的最小引用 +
+   * 归属上下文。不做 JSON 解析（corrupted 行由恢复器逐项聚合诊断，
+   * 不阻断整体扫描，§16.5 恢复失败属于基础设施错误）。
+   */
+  listActiveRunRefsWithOwnership(): Array<{ readonly runId: SubagentRunId; readonly threadId: SubagentThreadId; readonly status: SubagentRunStatus; readonly ownership: SubagentOwnership }> {
+    const rows = this.database
+      .prepare(
+        `SELECT r.run_id, r.thread_id, r.status, t.owner_agent_id, t.parent_session_id
+         FROM subagent_runs r
+         JOIN subagent_threads t ON t.thread_id = r.thread_id
+         WHERE r.status IN ${ACTIVE_STATUS_IN_LIST}
+         ORDER BY r.created_at ASC`,
+      )
+      .all() as Array<{ run_id: SubagentRunId; thread_id: SubagentThreadId; status: SubagentRunStatus; owner_agent_id: string; parent_session_id: string }>;
+    return rows.map((row) => ({
+      runId: row.run_id,
+      threadId: row.thread_id,
+      status: row.status,
+      ownership: { ownerAgentId: row.owner_agent_id, parentSessionId: row.parent_session_id },
+    }));
+  }
+
   /**
    * 状态机 compare-and-set（§7.2）：
    * - 当前状态 === from：canTransitSubagentRun 合法 → 更新；非法抛 subagent_run_state_conflict；

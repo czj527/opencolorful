@@ -9,9 +9,11 @@ import {
   SUBAGENT_RUNTIME_LEASE_TTL_MS,
   SUBAGENT_MESSAGE_ID_PREFIX,
   SUBAGENT_MAILBOX_ID_PREFIX,
+  isSubagentRunActive,
   type AgentMessageEnvelopeV1,
   type AgentMessageId,
   type ParentMailboxId,
+  type SubagentDeliveryMode,
   type SubagentResultV1,
   type SubagentRunId,
   type SubagentRunLimitsV1,
@@ -37,6 +39,13 @@ import type { SubagentSessionEvent, SubagentSessionFactory, SubagentSessionPort,
 // - 终态经 SubagentTransactions.completeRunWithResult（terminal+result+message+
 //   mailbox 原子；T5 消费 mailbox）；
 // - 事件回调（onRunProgress/onMessage/onTerminal/onLeaseLost）供 T5/T7 投影。
+//
+// T5 扩展（协议 Dispatcher 的 Runtime 侧，§13.4 / §14.1）：
+// - cancelRun：父取消（stop → abort + cancelled 终态；waiting_for_input 先
+//   cancelling 再收敛，转换表无直接边）；
+// - deliverParentMessage：queue → followUp / interrupt → steer 投递；
+// - started 状态 Mailbox 在 starting → running 事务内写入（不唤醒父 Turn）；
+// - request_parent_input 改为原子事务（消息 + waiting_for_input + Mailbox）。
 //
 // RuntimeHost 不依赖 PI SDK：Session 行为经 SubagentSessionPort 抽象（宿主
 // 适配 PI AgentSession，测试注入 Faux 适配器）。
@@ -153,6 +162,78 @@ export class SubagentRuntimeHost {
   }
 
   /**
+   * T5 父侧取消（§13.4 stop → Runtime abort；§16.4 #5 取消终态 + terminal
+   * message + mailbox）。只处理本 Host 活动 Run；已终态/Lease 丢失/非活跃
+   * 返回 false（调用方按迟到消息结算）。转换表无 waiting_for_input →
+   * cancelled 直接边（T1 冻结），先 waiting → cancelling 再收敛 cancelled。
+   */
+  cancelRun(runId: SubagentRunId, ownership: SubagentOwnership, reasonCode: string | null): boolean {
+    const active = this.active.get(runId);
+    if (active === undefined || active.terminalHandled || active.leaseLost) {
+      return false;
+    }
+    const now = new Date(this.now()).toISOString();
+    const current = this.deps.runs.get(runId, ownership);
+    if (current === null || !isSubagentRunActive(current.status)) {
+      return false; // 已终态：由 Dispatcher 按迟到结算
+    }
+    let fromOverride: SubagentRunStatus;
+    if (current.status === "waiting_for_input") {
+      try {
+        this.deps.runs.transit({ runId, from: "waiting_for_input", to: "cancelling", reasonCode: null, now }, ownership);
+        fromOverride = "cancelling";
+      } catch {
+        // 并发恢复路径已抢先转换；按当前状态收敛
+        const after = this.deps.runs.get(runId, ownership);
+        if (after === null || !isSubagentRunActive(after.status)) {
+          return false;
+        }
+        fromOverride = after.status === "cancelling" ? "cancelling" : after.status === "running" ? "running" : "starting";
+      }
+    } else if (current.status === "queued") {
+      return false; // queued Run 由 Dispatcher 直接终态化（本 Host 无 Session）
+    } else {
+      fromOverride = current.status;
+    }
+    void this.terminal(runId, active.threadId, ownership, "cancelled", reasonCode, null, null, fromOverride);
+    active.abort();
+    return true;
+  }
+
+  /**
+   * T5 父 → 子协议消息投递（§13.4 queue → PI followUp；interrupt → PI steer；
+   * stop → cancelRun）。instruction 由 Dispatcher 从 Envelope parts 渲染
+   * （data part 过 TypeBox 校验，非法不入 Runtime，§8.3）。
+   * 返回 "applied"（已应用到活动 Session）/ "not-active"（Run 不在本 Host 活动）。
+   */
+  deliverParentMessage(
+    input: {
+      readonly runId: SubagentRunId;
+      readonly messageType: "steer" | "cancel";
+      readonly deliveryMode: SubagentDeliveryMode;
+      readonly instruction: string | null;
+    },
+    ownership: SubagentOwnership,
+  ): "applied" | "not-active" {
+    const active = this.active.get(input.runId);
+    if (active === undefined || active.terminalHandled || active.leaseLost) {
+      return "not-active";
+    }
+    if (input.messageType === "cancel") {
+      this.cancelRun(input.runId, ownership, "subagent_cancelled_by_parent");
+      return "applied";
+    }
+    if (input.instruction !== null && input.instruction.length > 0) {
+      if (input.deliveryMode === "interrupt") {
+        active.session?.steer(input.instruction);
+      } else {
+        active.session?.followUp(input.instruction);
+      }
+    }
+    return "applied";
+  }
+
+  /**
    * 启动并执行一个 Run（异步；不阻塞调用方）。
    * 所有失败路径都收敛到终态事务（failed/timed_out/budget_exhausted/interrupted），
    * 不留下活动态 Run（Lease 丢失除外——停止写状态，恢复由启动恢复处理）。
@@ -247,9 +328,22 @@ export class SubagentRuntimeHost {
     active.session = session;
     const unsubscribe = session.onEvent((event) => this.handleSessionEvent(input, active, session, event));
 
-    // 2. starting → running（快照已冻结；进入执行）
+    // 2. starting → running（快照已冻结；进入执行）+ started 状态 Mailbox
+    //    （§14.1：started 不唤醒父 Turn，只供状态查询；§8.4）
     try {
-      this.deps.runs.transit({ runId, from: "starting", to: "running", reasonCode: null, now: new Date(this.now()).toISOString() }, ownership);
+      this.deps.transactions.markRunStartedWithMailbox(
+        {
+          runId,
+          threadId,
+          ownership,
+          mailbox: {
+            mailboxId: this.newMailboxId(),
+            messageId: this.newMessageId(),
+            operationId: `subagent-started-${runId}`,
+          },
+          now: new Date(this.now()).toISOString(),
+        },
+      );
     } catch (error) {
       unsubscribe();
       session.dispose();
@@ -457,11 +551,26 @@ export class SubagentRuntimeHost {
         return;
       }
       try {
-        const message = this.appendProtocolMessage(input, active, "input_required", args.question);
-        this.deps.runs.transit({ runId, from: "running", to: "waiting_for_input", reasonCode: null, now: new Date(this.now()).toISOString() }, ownership);
+        // §13.3：原子写消息 + waiting_for_input + Parent Mailbox（§16.4）
+        const now = new Date(this.now()).toISOString();
+        const envelope = this.protocolEnvelope(input, active, "input_required", args.question, now);
+        const outcome = this.deps.transactions.waitingForInputWithMailbox(
+          {
+            runId,
+            threadId,
+            ownership,
+            envelope,
+            mailbox: {
+              mailboxId: this.newMailboxId(),
+              messageId: envelope.messageId,
+              operationId: `subagent-input-required-${runId}`,
+            },
+            now,
+          },
+        );
         active.waitingForInput = true;
         this.pauseIdleTimer(active);
-        this.deps.onMessage?.({ runId, message });
+        this.deps.onMessage?.({ runId, message: outcome.message });
         resolve({ ok: true, text: "已向父 Agent 请求输入；等待父 Agent 回答后自动恢复" });
       } catch (error) {
         resolve({ ok: false, text: `请求输入失败：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}` });
@@ -506,6 +615,8 @@ export class SubagentRuntimeHost {
     reasonCode: string | null,
     result: SubagentResultV1 | null,
     error: unknown,
+    /** T5：调用方已知确切当前状态时覆盖（如取消路径 waiting → cancelling 后） */
+    fromOverride?: SubagentRunStatus,
   ): Promise<void> {
     const active = this.active.get(runId);
     if (active === undefined || active.terminalHandled || active.leaseLost) {
@@ -522,7 +633,7 @@ export class SubagentRuntimeHost {
     // from 取当前实际状态（starting 阶段失败 / waiting_for_input 终态都合法）；
     // 转换表没有 waiting_for_input → succeeded（T1 冻结），succeeded 先恢复
     // running 再收敛（并发被恢复路径抢先 → CAS 失败后从 running 重试）
-    let from: SubagentRunStatus = active.phase === "starting" ? "starting" : active.waitingForInput ? "waiting_for_input" : "running";
+    let from: SubagentRunStatus = fromOverride ?? (active.phase === "starting" ? "starting" : active.waitingForInput ? "waiting_for_input" : "running");
     if (to === "succeeded" && from === "waiting_for_input") {
       try {
         this.deps.runs.transit({ runId, from: "waiting_for_input", to: "running", reasonCode: null, now }, ownership);
@@ -573,7 +684,19 @@ export class SubagentRuntimeHost {
     text: string,
   ): SubagentMessageRecord {
     const now = new Date(this.now()).toISOString();
-    const envelope: Omit<AgentMessageEnvelopeV1, "sequence"> = {
+    const envelope = this.protocolEnvelope(input, active, messageType, text, now);
+    return this.deps.messages.append({ envelope, ownership: input.ownership, createdAt: now }).message;
+  }
+
+  /** Subagent → 父协议 Envelope（store-first：sequence 由 Store 分配后补全） */
+  private protocolEnvelope(
+    input: ExecuteSubagentRunInput,
+    active: ActiveRun,
+    messageType: "progress" | "input_required",
+    text: string,
+    now: string,
+  ): Omit<AgentMessageEnvelopeV1, "sequence"> {
+    return {
       protocol: "opencolorful.agent-message",
       version: 1,
       messageId: this.newMessageId(),
@@ -586,7 +709,6 @@ export class SubagentRuntimeHost {
       parts: [{ kind: "text", text }],
       metadata: { createdAt: now, traceId: `trace-${input.runId}`, schemaName: `subagent.${messageType}` },
     };
-    return this.deps.messages.append({ envelope, ownership: input.ownership, createdAt: now }).message;
   }
 
   private resultEnvelope(

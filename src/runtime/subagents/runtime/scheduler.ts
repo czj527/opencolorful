@@ -95,6 +95,18 @@ export class SubagentScheduler {
     }
   }
 
+  /**
+   * T5：从排队队列移除 Run（父 cancel 已把 queued Run 终态化为 cancelled 后，
+   * 避免被调度器拾起执行；Host 的 startWithSnapshot CAS 会兜底拒绝，这里提前释放槽位）。
+   * 返回是否真的在排队中。
+   */
+  remove(runId: SubagentRunId): boolean {
+    const index = this.queue.findIndex((queued) => queued.runId === runId);
+    if (index < 0) return false;
+    this.queue.splice(index, 1);
+    return true;
+  }
+
   /** 清空内存队列（关闭/重启；DB queued Run 由启动恢复接管） */
   drain(): void {
     this.queue.length = 0;

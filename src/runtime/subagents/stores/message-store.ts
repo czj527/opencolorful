@@ -316,6 +316,29 @@ export class MessageStore {
     return current.deliveryStatus === "failed";
   }
 
+  /**
+   * T5 Dispatcher 重试/启动恢复：未结算的父 → 子方向消息
+   * （recipient=subagent 的 task/steer/cancel，§8.2：投递失败不删除记录，
+   * Delivery Coordinator 可重试）。系统级扫描，返回各消息的归属上下文。
+   */
+  listUndeliveredToSubagentWithOwnership(limit = 200): Array<{ readonly message: SubagentMessageRecord; readonly ownership: SubagentOwnership }> {
+    const rows = this.database
+      .prepare(
+        `SELECT m.*, t.owner_agent_id AS owner_agent_id, t.parent_session_id AS parent_session_id
+         FROM subagent_messages m
+         JOIN subagent_threads t ON t.thread_id = m.thread_id
+         WHERE m.recipient_kind = 'subagent'
+           AND m.delivery_status IN ('queued', 'delivering')
+         ORDER BY m.sequence ASC
+         LIMIT ?`,
+      )
+      .all(Math.min(Math.max(limit, 1), 1000)) as Array<MessageRow & { owner_agent_id: string; parent_session_id: string }>;
+    return rows.map((row) => ({
+      message: mapMessageRow(row),
+      ownership: { ownerAgentId: row.owner_agent_id, parentSessionId: row.parent_session_id },
+    }));
+  }
+
   // ── 内部 helpers ──────────────────────────────────────────────
 
   #findOwned(messageId: AgentMessageId, ownership: SubagentOwnership): MessageRow | undefined {

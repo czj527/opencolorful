@@ -335,6 +335,29 @@ export class ThreadStore {
       .immediate();
   }
 
+  /**
+   * T5 系统级读取（启动恢复/生命周期联动）：不携带调用方归属，
+   * 从行自身返回 owner/session。仅限平台内部系统流程使用；不存在返回 null。
+   */
+  getSystem(threadId: SubagentThreadId): SubagentThreadRecord | null {
+    const row = this.database.prepare("SELECT * FROM subagent_threads WHERE thread_id = ?").get(threadId) as ThreadRow | undefined;
+    return row === undefined ? null : mapThreadRow(row);
+  }
+
+  /**
+   * T5 启动恢复：扫描全部 closing 状态 Thread（§7.1：closing 表示取消中；
+   * 崩溃后恢复器把无活动 Run 的 closing 终态化为 closed，避免卡在 closing）。
+   */
+  listClosingWithOwnership(): Array<{ readonly thread: SubagentThreadRecord; readonly ownership: SubagentOwnership }> {
+    const rows = this.database
+      .prepare("SELECT * FROM subagent_threads WHERE status = 'closing' ORDER BY updated_at ASC")
+      .all() as ThreadRow[];
+    return rows.map((row) => ({
+      thread: mapThreadRow(row),
+      ownership: { ownerAgentId: row.owner_agent_id, parentSessionId: row.parent_session_id },
+    }));
+  }
+
   // ── 内部 helpers ──────────────────────────────────────────────
 
   /** 归属过滤读取；存在但归属不匹配 → 返回 undefined（由调用方判定） */

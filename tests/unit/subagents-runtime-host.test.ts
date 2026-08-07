@@ -377,9 +377,12 @@ describe("SubagentRuntimeHost：成功终态全链", () => {
     expect((dataPart as { value: SubagentResultV1 }).value.disposition).toBe("satisfied");
 
     const mailboxRows = h.db.prepare("SELECT * FROM subagent_parent_mailbox WHERE run_id = ?").all(RUN_ID) as Array<{ notification_kind: string; trigger_parent_turn: number }>;
-    expect(mailboxRows).toHaveLength(1);
-    expect(mailboxRows[0]?.notification_kind).toBe("completed");
-    expect(mailboxRows[0]?.trigger_parent_turn).toBe(1);
+    // §14.1：Run started 写入不唤醒父 Turn 的状态 Mailbox（started 行，
+    // trigger_parent_turn=0），终态另写 completed 行（trigger_parent_turn=1）
+    expect(mailboxRows).toHaveLength(2);
+    expect(mailboxRows.some((row) => row.notification_kind === "started" && row.trigger_parent_turn === 0)).toBe(true);
+    const completed = mailboxRows.find((row) => row.notification_kind === "completed");
+    expect(completed?.trigger_parent_turn).toBe(1);
 
     session.finish();
   });
@@ -428,6 +431,9 @@ describe("SubagentRuntimeHost：内部控制工具", () => {
     await waitUntil(() => h.runs.get(RUN_ID, ownership())?.status === "waiting_for_input");
     expect(h.messageEvents.some((event) => event.messageType === "input_required")).toBe(true);
     expect(h.runs.get(RUN_ID, ownership())?.status).toBe("waiting_for_input");
+    // §8.4：input_required 原子写入可唤醒父 Turn 的 Mailbox（trigger_parent_turn=1）
+    const inputMailbox = h.db.prepare("SELECT notification_kind, trigger_parent_turn FROM subagent_parent_mailbox WHERE run_id = ?").all(RUN_ID) as Array<{ notification_kind: string; trigger_parent_turn: number }>;
+    expect(inputMailbox.some((row) => row.notification_kind === "input_required" && row.trigger_parent_turn === 1)).toBe(true);
 
     // waiting 期间 idle 暂停：超过 idleTimeoutMs 不终态
     await new Promise((resolve) => setTimeout(resolve, 1150));
@@ -552,7 +558,8 @@ describe("SubagentRuntimeHost：缺失 result 终态（§13.3）", () => {
     expect(h.terminals[0]).toMatchObject({ status: "failed", reasonCode: "subagent_result_not_reported" });
     expect(h.runs.get(RUN_ID, ownership())?.status).toBe("failed");
     const mailboxRows = h.db.prepare("SELECT notification_kind FROM subagent_parent_mailbox WHERE run_id = ?").all(RUN_ID) as Array<{ notification_kind: string }>;
-    expect(mailboxRows[0]?.notification_kind).toBe("failed");
+    // started 行 + failed 终态行（§14.1：started 不唤醒父 Turn）
+    expect(mailboxRows.some((row) => row.notification_kind === "failed")).toBe(true);
     session.finish();
   });
 });
