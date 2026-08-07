@@ -492,6 +492,7 @@ function createToolHarness(options: {
     parentSnapshot: () => ({ toolIds: ["read", "write", "bash"], pluginContributions: [], skillEntries: [] }),
     modelResolver: () => true,
     toolCatalog: (name) => (name === "read" ? { name: "read", description: "read", parameters: { type: "object" } } : null),
+    toolExecutor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }),
     workspaceCwd: () => WS,
     threadDirResolver: (input) => path.join(WS, "subagents", input.ownerAgentId, input.threadId),
     threads: stores.threads,

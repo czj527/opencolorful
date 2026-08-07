@@ -250,6 +250,7 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
     parentSnapshot: () => ({ toolIds: ["read", "write", "bash"], pluginContributions: [], skillEntries: [] }),
     modelResolver: () => modelAvailable,
     toolCatalog: (name) => (name === "read" ? { name: "read", description: "read", parameters: { type: "object" } } : null),
+    toolExecutor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }),
     workspaceCwd: () => paths.home,
     threadDirResolver: (input) => path.join(paths.subagentsBase, input.ownerAgentId, "subagents", input.threadId),
     threads: stores.threads,
