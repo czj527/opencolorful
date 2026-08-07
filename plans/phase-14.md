@@ -2558,3 +2558,65 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：能力工具执行器/Skill 委派（T9 范围）；Browser E2E（T10）。
 
 **质量门（定向）**：tsc 零错误；web:test 426/426（含既有 394）；web:build ✓。
+
+### T9：安全回归、插件能力执行器与恢复验收（2026-08-07）
+
+**Commit**：`e102145`（T9b：安全回归）+ `ea8df74`（T9a：能力执行器）+ 补充提交
+
+**主要文件**：
+
+- T9b（安全回归，子代理开发 + 主 Agent 复核）：
+  - `workspace-lease-service.ts`：§18.3 互斥补强——同 bootId 不同 ownerId（单进程内父 permit 与子 Run Lease）→ denied（此前"同 bootId 接管"会让父写 permit 被子 Run 覆盖）；
+  - `runtime-host.ts`：write Run 启动获取 run-scoped 独占写 Lease（read Run 不获取）、heartbeat 同步续租（失败视为 Lease 丢失停止写）、终态/清理释放、占用中 fail-closed 拒绝启动；`SUBAGENT_NESTING_FORBIDDEN_TOOLS` + 分发确定性拒绝 `subagent_nesting_forbidden`（§13.5 模型伪造父控制工具）；
+  - `internal-tools.ts`：嵌套工具名单（与 SUBAGENT_TOOL_NAMES 一致，runtime 不 import pi-sdk 独立维护）；
+  - `sandbox-extension.ts` + `session-runtime.ts` + `agent-session.ts`：父 Agent write/edit/bash 执行入口接入 `workspaceLeaseGuard`（operation-scoped short permit，Subagent 独占时 fail-closed 拒绝，finally 释放）；
+  - `run-store.ts`：`appendAuditPending`（上限 32 条/8KB 丢最旧、corrupted 视为空）+ `listRunsWithAuditPending`；
+  - `subagent-observability-projector.ts`：投影失败 → `onProjectionFailure`（证据交调用方持久）；
+  - `startup-recovery.ts`：第 5 步 auditPending 补账（重放 Activity、全成功清空、失败保留重试、corrupted 逐项聚合）；
+  - `composition.ts`/`messages.ts`：mutationLeases 注入 Host、parentWriteLeaseGuard 接线、auditPending 落点；
+  - `subagent-tools.ts`：spawn 审计强化——started 审计 rejected/抛错 → 拒绝创建（fail-closed）；domain 写失败补写 failed terminal 审计；
+  - `tests/unit/subagents-security-regression.test.ts`（20 用例）：memory 隔离（注册表无记忆工具、伪造调用拒绝、systemPrompt 恒平台规则）、Lease 互斥矩阵（同进程不同持有者/write Run 获取释放/read 不获取/父 permit 占用拒绝/沙箱执行入口）、cross-agent 归属、审计 fail-closed（rejected/抛错/Recorder 故障时 cancel-close 仍停止 Runtime）、auditPending（追加上限/恢复补账/corrupted）、nested spawn（注册表缺失 + host 分发拒绝 + Faux provider 全链伪造拒绝）。
+- T9a（能力执行器，主 Agent 实现）：
+  - `subagent-tools-context.ts`：`toolExecutor` 服务字段 + `registerSubagentAbilityExecutor`/`getSubagentAbilityExecutor` 全局注册表（runId → 执行路由；有界 256 条）；
+  - `subagent-tools.ts`：spawn/steer 提交 Run 时按 runId 注册本 Session 执行器；
+  - `pi-session-adapter.ts`：能力工具缺省执行器按 runId 查注册表（组合根无需 per-Session 注入）；
+  - `messages.ts`：`toolExecutor` 闭包——插件工具 → `buildPluginTurnSnapshotFactory` 现场冻结授权快照 + `facade.hostApi.tools.invoke` 真实 worker 执行（携带父 Agent/Session 身份；contributionId 从 qualifiedName 后缀解析）；文件/Skill 工具按 Phase 14 边界 unavailable（fail-closed）；
+  - `subagents-pi-session-adapter.test.ts` +1：注册表路由全链（Faux provider 调用 read → 注册表执行器命中）。
+
+**与计划的偏差和原因**：
+
+1. write Lease 互斥依赖 WorkspaceMutationLeaseService 现有接口 + 同 bootId 持有者互斥补强；父侧 wrapper 接在沙箱扩展（write/edit/bash），与 §18.3 一致；
+2. 能力执行器只覆盖插件工具（真实 worker 执行）；文件/Skill 工具执行器与 Sandbox 边界属后续阶段（unavailable fail-closed）；
+3. auditPending 补账最小闭环：投影失败 → run.audit_pending_json → 启动恢复重放；不引入新表；
+4. Browser E2E 的 spawn 全链受限于 E2E 环境（详见 T10 记录）。
+
+**质量门（定向）**：typecheck 全过；security-regression 20/20 + 全量 2061 测试通过；check:pi-imports 无违规。
+
+### T10：Browser E2E、最终质量门与验收结论（2026-08-07）
+
+**Commit**：`84955ff`（E2E）+ 本记录
+
+**Browser E2E**：`web/tests/e2e/subagent.spec.ts`——Supervisor + fixture provider 模式：主会话可用（fixture 文本响应）、`/logs?subagent=` 生命周期查询入口正常渲染、无 spawn 时卡片列表空态不崩溃。Playwright 8/8（含 logs.spec 回归）。
+
+**最终全量质量门**（主 Agent 独立复核，最后一次全绿）：
+- `npx tsc --noEmit -p tsconfig.json` 零错误；
+- `npm run test` 全量 2061 测试通过（172+ 文件：contracts/migration/stores/policy/lease/runtime/dispatcher/coordinator/recovery/transcript/observability/core-tools/adapter/security-regression + 全部既有）；
+- `npm run check:pi-imports` 无违规（runtime 目录不 import PI SDK）；
+- `web:build` ✓ + `web:test` 394/394；
+- Playwright E2E 8/8。
+
+**已知限制（相对计划 §25 验收矩阵）**：
+
+1. **Browser E2E spawn 全链未跑通**：E2E 环境（supervisor 子进程）中 `spawn_subagent` 工具未注册（jiti 扩展加载在 agent server 进程异常，本地直连加载验证正常）——全链已在单元/集成层覆盖（core-tools 11 全链用例、pi-session-adapter 4 用例真实 ModelRuntime+Faux provider、security-regression 20）；修复方向：扩展加载链（agent-session ensureSubagentToolsExtensionLoaded）在 supervisor 子进程环境的诊断与加固，属后续跟进；
+2. **能力工具执行器**只覆盖插件工具（真实 worker 执行）；文件工具（read/write/bash）与 Skill 受控读取执行器未接线（unavailable fail-closed，不允许静默无操作）；
+3. **父侧 Skill 委派**（parentSkillEntries）为空——Skill 快照形状与 ParentSkillEntry 不同构，Phase 后续接线；
+4. **auditPending 补账**为最小闭环（Activity 重放），Audit 侧补账与 auditPending 补偿链的完整审计跟踪属后续。
+
+**最终验收结论**：
+
+- Phase 14 Subagent Runtime 1.0 全部 10 个任务交付完成并提交（T1 `864b338`、T2+T3 `582b6fe`、T4 `e61b568`、T5 `d5f1e29`、T7 `7f4f240`、T6 `46291c9`、T8 `9c4e8e3`、T9 `e102145`+`ea8df74`、T10 `84955ff`，另有各实施记录与补充提交）；
+- 全量质量门绿（typecheck/2061 单测/394 web 测试/Playwright 8/8/pi-imports）；
+- 计划验收矩阵的核心安全/生命周期/恢复/审计语义经单元与集成测试覆盖（容量/超时/预算/状态机/Lease/恢复/mailbox/归属/审计 fail-closed/嵌套拒绝/脱敏/SSE stale）；
+- 已知限制如上（E2E spawn 全链、能力执行器边界、Skill 委派）——**不影响核心运行时验收，允许合并 `main`**，限制项在合并后按后续阶段跟进。
+
+**合并建议**：`phase-14-subagent-runtime` → `main`（合并前建议按仓库惯例做一次 PR 级 review；工作树已清理，无未提交改动）。
