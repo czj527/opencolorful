@@ -111,4 +111,3 @@ export function buildBindingRows(input: {
   rows.sort((a, b) => (a.skillRefKey < b.skillRefKey ? -1 : a.skillRefKey > b.skillRefKey ? 1 : 0));
   return rows;
 }
-

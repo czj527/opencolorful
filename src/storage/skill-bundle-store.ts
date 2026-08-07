@@ -214,4 +214,3 @@ export class SkillBundleStore {
     return rows.map(mapItem);
   }
 }
-

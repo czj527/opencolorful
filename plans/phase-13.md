@@ -1,6 +1,6 @@
 # Phase 13：Skill 系统与 Agent Skills 生态兼容层
 
-**状态：已评审修订（2026-08-05），待开发** | **规划基线：** `main`（Phase 12 最终验收点，`df24f05`）
+**状态：已完成（2026-08-07，自审通过，允许合并 `main`）** | **规划基线：** `main`（Phase 12 最终验收点，`df24f05`）
 **阶段定位：** Skill 1.0 基础设施，不实现 Subagent、多 Agent 协作或浏览器内核
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 13
 **架构参考：** OpenHanako `core/skill-manager.ts`、`lib/tools/install-skill.ts`、`lib/skills/session-skill-snapshot.ts`、`lib/skill-bundles/store.ts`；OpenClaw `docs/tools/skills.md`；Hermes `tools/skills_tool.py`；PI `@earendil-works/pi-coding-agent/docs/skills.md`；Agent Skills Specification
@@ -1074,3 +1074,10 @@ Phase 14 的 Subagent 计划不得在本节之前提前实现或混入本阶段�
 2. Confirm 令牌为内存 registry（未持久化；跨 server 重启失效，属可接受——确认流程在会话内即时完成）；
 3. 会话内 install 的 activation grant/loadHandle 只经工具路径发放（HTTP 路由无 turn 上下文，绑定经下一 turn 快照生效）；
 4. Skill 详情页正文读取需 session 上下文（`?session=<id>`），无 session 时显示受控降级提示——不泄露正文。
+
+### T11-T13 验收修复与最终自审（2026-08-07）
+
+- **T11（`70e66c3`）**：闭环首次正式验收的安装、绑定、正文读取、审计和运行时安全问题；
+- **T12（`1864cdf`）**：Skill 根动态规则改为按 Turn 整体替换，canonical 路径命中后 fail-closed；补齐同 Turn 安装的 activation grant/loadHandle 消费链和 Agent 绑定插件 Skill 可见性；
+- **T13（`5cf5795`、`38dc71d`、`7964459`）**：冻结失败先清除旧 Snapshot；已登记 Skill 根在 Snapshot 缺失时返回 `denied`，禁止 PI read 回退；activation grant 使用 SQLite 原子消费并建立仅当前 Turn 有效的内存 overlay，支持同 Turn 受控重复读取且禁止跨 Turn 重放；
+- **最终自审结论**：未发现阻塞合并的问题。安全边界保持 fail-closed，普通非 Skill 文件仍保留 `not-a-skill-file` 回退；定向 Skill 回归、类型检查和 diff 检查通过，允许合并 `main`。
