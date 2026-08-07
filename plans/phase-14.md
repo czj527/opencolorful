@@ -2435,3 +2435,65 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **当前未接线入口**：Mailbox Delivery Coordinator（T5）、启动恢复（T5）、Transcript/Observability 投影（T7）、主 Agent Core Tools 与组合根（T6）、Web 面板（T8）。
 
 **质量门（定向）**：typecheck 全过；T4 17/17 通过；全量 162 文件 1927 测试通过；`check:pi-imports` 无违规（runtime 目录不 import PI SDK）。
+
+### T5：协议 Dispatcher、Parent Mailbox 与启动恢复（2026-08-07）
+
+**Commit**：`d5f1e29`
+
+**主要文件**：
+
+- `src/runtime/subagents/protocol/protocol-dispatcher.ts`：`ProtocolDispatcher`——store-first dispatch（queued→delivering→delivered/failed 幂等）；steer queue→followUp / interrupt→steer / answer_input→resumeFromInput（§13.4）；queued Run 的 cancel 直接终态化（§16.4 #5，terminal message+mailbox+scheduler.remove）；steer 到 queued/starting 延迟重试（退避上限 30s）；终态 Run 迟到消息结算；`extractSteerInstruction`（data part 过 TypeBox 校验，§8.3 非法不入 Runtime）；
+- `src/runtime/subagents/mailbox/parent-session-port.ts`：`ParentSessionPort`——getStatus（idle/busy/archived/deleted/unknown）、startContinuation（triggered/interrupted/rejected 终态语义）、noteUserMessage/noteUserTurnEnd/noteUserAbort、subscribe（用户打断/安全边界）；
+- `src/runtime/subagents/runtime/parent-session-adapter.ts`：`SessionRuntimeParentSessionPort`——复用现有 SessionRuntime 注入路径（prompt/activeStream/abort 窄面），空闲判定（无 in-flight prompt/steer、无未消费 abort、未归档/删除）、用户消息优先不插队、同一 Session 至多一个并发 continuation（内部 guard）、prompt 槽被抢占→rejected/parent_session_busy；
+- `src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.ts`：`ParentMailboxDeliveryCoordinator`——按 ownerAgentId+parentSessionId 聚合 pending 通知；started 不唤醒、input_required/终态可唤醒（§8.4）；父 idle→一次 continuation（多通知聚合）、busy→排队到安全边界（onTurnEnd/退避定时器）、archived/deleted→suppress+联动；rejected→failed+指数退避（上限 5 分钟，§14.3）、interrupted→delivered（不重复触发）；in-flight 记账保证至多一个并发 continuation；cursor 分页 `listForSession` + `waitForNotifications`（signal 唤醒/超时/abort）；archive/delete 联动（cancelRun+closeThread 同事务 suppress mailbox+删除 Thread 目录）+ `onRunFinished` 终态化 closing；
+- `src/runtime/subagents/recovery/startup-recovery.ts`：`SubagentStartupRecovery`（§16.5）——全部非终态 Run（含 queued）→ interrupted + terminal message + mailbox；closing Thread 无活动 Run→closed；过期 workspace Lease 释放；mailbox pending/delivering 重试；errors 逐项聚合（corrupted 行不阻断整体）；
+- Stores 增量：`waitingForInputWithMailbox`/`markRunStartedWithMailbox` 原子事务、`ParentMailboxCursor`/`listForSessionCursor`/`listRetryableDue`、`getActiveRunByThread`/`listActiveRunRefsWithOwnership`/`getSystem`/`listClosingWithOwnership`/`listUndeliveredToSubagentWithOwnership`；
+- Host/Scheduler 增量：`cancelRun`（waiting→cancelling→cancelled 合法路径）、`deliverParentMessage`（§13.4）、request_parent_input 改走原子事务、started Mailbox、`terminal()` 可选 fromOverride、`scheduler.remove(runId)`。
+
+**生产接线点（T6 组合根）**：`coordinator.registerParentSession(adapter)`（须在 recovery.run() 之前）；Host 回调→coordinator（onTerminal/onMessage(input_required)→signal、onRunFinished）；父工具写消息后→`dispatcher.dispatch`；启动时 `dispatcher.retryPending()`；用户 prompt 注入前→`adapter.noteUserMessage()`、prompt completed→`noteUserTurnEnd()`、stop 路由→`noteUserAbort()`；SessionService archive/delete→`handleParentSessionArchived/Deleted`；`recovery.run()` 在 migration v12 之后调用，`report.errors.length > 0`→`subagent_runtime_unavailable`（§16.5）。
+
+**新增测试与故障注入**（51 用例）：dispatcher 17（task 记账/queue/interrupt/answer_input 投递/queued 延迟重试/非法 data part 拒绝/cancel 三路径/迟到结算/幂等重放/retryPending）、coordinator 19（唤醒规则/聚合一次/busy 排队到安全边界/in-flight 不并发/rejected 退避/interrupted 不重试/cursor 分页/wait 三种结局/archive-delete 联动/delivering 崩溃遗留补投递）、parent-session 9（空闲判定/三种终态语义/用户抢占/并发 guard）、recovery 6（crash window 五种活动态全部 interrupted+mailbox+不自动 resume/closing 终态化/过期 Lease/mailbox 恢复/corrupted 逐项聚合）。
+
+**与计划的偏差和原因**：
+
+1. queued Run 恢复时同样终态化 interrupted 而非"接管启动"——§16.5 + §25.6 测试矩阵（Server crash 后 queued/starting/running/waiting/cancelling 全部 interrupted，平台不自动 resume；主 Agent 检查后可在原 Thread 新建 Run，§7.2）；
+2. `cancelled` 通知不触发父 Turn（`triggerParentTurn: false`）——父侧自己发起的取消，其 Turn 内即已知结果，continuation 属噪音；与 T1 的 TRIGGER_KINDS 允许集不冲突（集合=可触发上限）；
+3. delete 联动保留 DB 元数据——§16.3 删除的是 transcript/Artifact 文件，T2 无删除元数据事务；实现为 cancel+closeThread(closed)+删目录，DB 保留只读历史，Audit 保留；
+4. auditPending 补账留待 T7（observability 事件目录归属 T7，T5 交付清单不含 audit）；
+5. `waitForNotifications` 用进程内 signal 事件+超时+AbortSignal（单 Server SQLite 场景无需跨进程轮询）。
+
+**当前未接线入口**：全部 T6 组合根接线（上述"生产接线点"）。
+
+**质量门（定向）**：typecheck 全过；新测试 51/51 + 回归（stores+runtime-host）66/66；全量 171 文件 2026 测试通过；`check:pi-imports` 无违规。
+
+### T7：Transcript、Artifact、SSE 与 Observability 投影（2026-08-07）
+
+**Commit**：`7f4f240`
+
+**主要文件**：
+
+- `src/runtime/subagents/transcript/transcript-view.ts`：Thread 只读投影（thread+runs+消息+artifacts 快照、TaskBrief/ContextPacket 快照提取（TypeBox 校验）、afterSequence/limit 分页、大输出分页读取）；
+- `src/runtime/subagents/transcript/tool-summary.ts`：工具可见摘要与脱敏（敏感 key 不落盘、redactText、绝对路径转工作区相对、浅层摘要+截断）、`SubagentToolActivityTracker` 进程内有界环形缓冲（Tool delta 只走 SSE 不落 durable）；
+- `src/runtime/subagents/transcript/artifact-files.ts`：Artifact 文件路由（`<subagentsBase>/<owner>/subagents/<threadId>/artifacts/`）、原子写+sha256 contentHash、读取完整性校验（不匹配抛 `subagent_artifact_integrity_failed`+回调）、workspace_file 只登记引用不复制、删除时平台文件连删/外部文件不动、稳定 ID pattern 复检防穿越；
+- `src/runtime/subagents/transcript/replay-store.ts`：`subagent:<threadId>` Replay Store——sequence 用 SQLite `observability_state` 键值持久分配（重启严格递增，不新增表）、先写后广播、环形缓冲截断→reset:true（stale cursor）；
+- `src/runtime/subagents/observability/subagent-observability-projector.ts`：Activity/Audit/Trace 自动埋点——host 四回调接线 + `wireSubagentRuntimeObservability`；事件名全部用 T1 冻结目录（未新增）；run.progress 限频 ≥30s；终态映射（timed_out/budget→failed+reasonCode）；scope 四字段+确定性 run spanId；auditMirror 自动；全部 best-effort；
+- `src/server/routes/subagents.ts`：只读 API——transcript/messages/artifacts/stream（SSE：Last-Event-ID 重连、stale→reset+snapshot）、artifact 受控下载（nosniff+Content-Disposition、HTML/SVG 强制 octet-stream、完整性失败 409）、归属 `?ownerAgentId=&parentSessionId=`（§22.1）；
+- Observability 修复：activity/audit recorder 补写 v12 的 `subagent_thread_id`/`subagent_run_id` 列（此前从未写入）；observability-query 加 subagentThreadId/subagentRunId 过滤；`/logs?subagent=` 支持（web 三个文件 + 类型/api-client）；
+- Support Bundle：manifest 加 `subagentTranscriptsIncluded:false`，bundle 加 `subagentState`（仅 threadId/status/计数，无正文/结果/Artifact 内容）。
+
+**生产接线点**：`registerSubagentRoutes`（app.ts 已备 `options.subagent` 接线位，T6 注入）；`wireSubagentRuntimeObservability` 由 T6 组合根调用；projector 的 run.queued/started/steer 等投影需 T6 工具/Dispatcher 调用。
+
+**新增测试与故障注入**（48 用例）：transcript 9（完整快照/简报提取损坏拒绝/分页/60KB 大输出/归属/NotFound/关闭后只读）、tool-summary 13（脱敏矩阵/路径相对化/截断/tracker 生命周期幂等有界订阅）、replay-store 8（断线重连不重不漏/重启 sequence 严格递增/stale cursor→reset/截断→reset/线程隔离/退订）、artifact-files 8（目录约定/contentHash/篡改→integrity_failed+回调/workspace 引用不复制/删除/防穿越）、observability-projection 10（scope 列持久/终态映射/progress 限频/Tool delta 不落 durable/lease_lost/auditMirror/host 端到端全链（FauxSession）/spawn trace 优先传播）。
+
+**与计划的偏差和原因**：
+
+1. 不新增 DB 表——§17.4 "stream sequence 由 SQLite 持久分配"复用 `observability_state`（Phase 11 高水位同一模式，migration 归 T1 冻结）；
+2. SubagentArtifactRef 用 T1 契约形状（artifactId/name/contentHash 三字段）——计划 §17.3 的展示字段由 transcript 的 artifacts 全量元数据提供（契约 additionalProperties:false 不可改）；
+3. Tool delta 无持久存储——§17.2 设计为 transient（进程内 tracker+SSE 广播，断线不重放）；
+4. TaskBrief/ContextPacket 快照约定依赖 T6 把简报写入 task 消息 data parts（schema `subagent.task_brief.v1`/`subagent.context_packet.v1`），缺失时快照为 null；
+5. host 回调无 ownership——projector 用 thread→ownership 注册表（T6 spawn 路径登记），未登记时事件仍写（scope 缺 owner/session）；
+6. 路由归属：API 无会话鉴权机制，SSE/下载端点要求显式归属参数（T8 卡片上下文携带）。
+
+**当前未接线入口**：T6 组合根（构造并注入 TranscriptView/ArtifactFileService/ReplayStore/Projector 及 app options.subagent；spawn/steer 工具调用 projector 投影；工具执行包装器接 ToolActivityTracker）。
+
+**质量门（定向）**：typecheck 全过；新测试 48/48 + 全量 171 文件 2026 测试通过；web:build+web:test 394/394；`check:pi-imports` 无违规。
