@@ -1,6 +1,6 @@
 # Phase 14：临时 Subagent Runtime 与父子任务协议
 
-**状态：已评审修订（2026-08-07），待开发** | **规划基线：** `main`（Phase 13 最终自审合并点，`90cae72`）
+**状态：已开发完成（T1-T10），复审修复完成（T11，2026-08-08），验收通过** | **规划基线：** `main`（Phase 13 最终自审合并点，`90cae72`）
 **阶段定位：** 临时、无长期记忆、可观察、可由主 Agent 多轮纠偏的 Subagent Runtime 1.0；不实现多 Agent 协作
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 14、[docs/infrastructure-decisions.md](../docs/infrastructure-decisions.md) 第四章
 **架构参考：** OpenHanako `lib/subagent-thread-store.ts`、`lib/subagent-run-store.ts`、`lib/tools/subagent-tool.ts`、`lib/deferred-result-coordinator.ts` 与 Session Preview；Codex `AgentControl`、`InterAgentCommunication`、Agent Status Subscribe 与 Mailbox；OpenClaw child session completion/yield 与幂等结果投递；Hermes background delegation heartbeat；PI AgentSession `steer` / `followUp`；A2A 1.0 Task / Context / Message / Artifact 语义
@@ -2618,5 +2618,45 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 - 全量质量门绿（typecheck/2061 单测/394 web 测试/Playwright 8/8/pi-imports）；
 - 计划验收矩阵的核心安全/生命周期/恢复/审计语义经单元与集成测试覆盖（容量/超时/预算/状态机/Lease/恢复/mailbox/归属/审计 fail-closed/嵌套拒绝/脱敏/SSE stale）；
 - 已知限制如上（E2E spawn 全链、能力执行器边界、Skill 委派）——**不影响核心运行时验收，允许合并 `main`**，限制项在合并后按后续阶段跟进。
+
+### T11：独立复审修复轮（2026-08-08）——3×P0 + 3×P1 全部闭环
+
+**复审结论（暂不通过，不能合并）**：核心质量可信（Subagent 定向测试 75/75、tsc、`git diff --check`），但 6 项指控全部对应计划必须项，属真实缺陷：
+
+| 级别 | 指控 | 对应必须项 | 根因 |
+|---|---|---|---|
+| P0-1 | queue/interrupt 未真实区分：followUp/steer 都退化为 `handle.prompt`（流式时缺 streamingBehavior 抛错）；首事件前静默丢消息且误标 delivered | #6 | 适配器未接入 PI 真实 steer/followUp；端口无投递结果 |
+| P0-2 | 插件快照写占位值（version="1.0.0"/runtimeInstanceId=pluginId/grantRevision=1）；执行时重新冻结当前状态，活动 Run 权限漂移 | #12 | parentSnapshot 未冻结真实 ExecutionSnapshot；toolExecutor 现场冻结 |
+| P0-3 | 快照 toolIds 无法解析时静默 filter 缩减（快照声称 read/write/bash，Session 实际没有）；文件/Skill 工具无真实执行链 | #13 | toolCatalog 只识别插件工具；无文件/Skill 执行器 |
+| P1-1 | spawn_completed 用 best-effort 审计，rejected/抛错被吞，无补偿/auditPending | #19 | terminal 审计失败无补偿路径 |
+| P1-2 | Thread/Run 先持久化再 scheduler.submit，排队拒绝留下无人调度的 queued Run | #4/#9 | 无容量预检与拒绝补偿 |
+| P1-3 | Browser E2E 只测空态，未跑 spawn 全链；文档声明与实际不符 | #20 | 两个 E2E 环境根因（见下） |
+
+**修复（三个提交）**：
+
+- `11920a5`（P0-1）：`PiAgentSessionHandle` 透出真实 `steer()/followUp()/isStreaming` 与 `prompt(text,{streamingBehavior})`；端口投递返回 `applied/deferred/failed` 三态——未就绪 → deferred（Dispatcher 退避重试，消息保持 delivering，不再误标 delivered/丢消息），已终结 → failed；适配器投递 = prompt+streamingBehavior（PI `sendUserMessage` 同款）：流式期间走真实 steer（中断插队）/followUp（结束后投递）队列，idle 触发新轮并发 terminal；
+- `6e39bef`（P0-2/P0-3/P1-1/P1-2）：spawn 现场冻结真实 `PluginExecutionSnapshot`（version/runtimeInstanceId/grantRevision 取自快照）并缓存，run-scoped 执行器只消费冻结快照（执行不再重新冻结）；steer 新建 Run 重新冻结（§12.6，变化产生新 snapshotId），ceiling 从 Thread 摘要保守重建（权限只会缩小）；快照 toolIds 必须全部可解析 + 插件冻结必须全部成功，缺失 → spawn fail-closed（不再静默缩减）；文件工具（read/grep/find/ls/write/edit）经 Phase 9 ToolPolicy/PathGuard 真实执行（write/edit 校验 run 独占写 Lease §18.3）；Skill 元数据/正文经 SkillCoreService 受控读取（run 冻结 turn 门：父 Session 换 turn 后 denied，当前 Run 变化不生效；新增 `readSkillFileForSubagentRun`/`readSkillBodyForSubagentRun`/`listFrozenSkillEntriesForDelegation`）；`install_skill/manage_skills/manage_skill_bundle` 加入固定禁用（§12.3）、`search_skills/inspect_skill` 分类 workspace-read；spawn_completed 审计失败 → 证据转入 `run.audit_pending_json`（启动恢复补账）；`scheduler.canAccept()` 容量预检（领域写入前拒绝）+ submit 拒绝防御补偿（queued→cancelled + closeThread，不留 orphan）；
+- `f2ee9d1`（P1-3）：两个 E2E 环境根因——① `minimalResourceLoader.getExtensions()` 漏加 subagent 扩展（工具名在 extraTools 但被 `setActiveToolsByName` 静默丢弃，即 T10 已知限制 #1 的真根因）；② 组合根启动时捕获 `modelService.getRuntime()` 实例，Provider upsert 重建 runtime 后子会话拿旧实例（无 Provider/凭据 → UNAUTHORIZED），改为惰性解析（`resolveModelRuntime`/适配器 deps 为 getter）。fixture SSE 协议补 `finish_reason:"tool_calls"`、按请求计数只对首个委托轮返回 spawn；E2E 断言改 `data-testid`（原 className 是 CSS module 哈希，选择器从不匹配）。
+
+**复审修复后的 Browser E2E（真实生产组合根全链）**：spawn_subagent（真实扩展）→ Thread/Run 落库 → 子会话（fixture provider 真实模型循环）调用 `report_subagent_result` → Run `succeeded` → 父会话收到 Mailbox 通知（satisfied）→ 主对话 Subagent 卡片 → `/logs?subagent=` 生命周期页。Playwright `web/tests/e2e/subagent.spec.ts` 2/2 通过。
+
+**新增测试**：fail-closed 执行器构建（P0-2/3）、容量预检拒绝、submit 拒绝补偿（P1-2）、auditPending 补账（P1-1）、投递三态 deferred/failed（P0-1）；Subagent 单测 270 全绿。
+
+**T11 后全量质量门**（主 Agent 独立复跑）：
+- `npx tsc -p tsconfig.build.json` 零错误；`npm run check:pi-imports` 无违规；
+- `npm run test` 全量 2068 测试通过（Subagent 单测 270 含新增 8 项）；
+- `web:test` 394/394 + `web:build` ✓；Playwright E2E 全量（含 subagent 全链 2/2）通过；
+- 全量跑中两个既有用例（supervisor 集成 + detect-path-bins PATH 扫描）偶发超时，隔离复跑通过（负载抖动，与本次改动无关）。
+
+**T10 已知限制处置**：
+
+| T10 已知限制 | T11 处置 |
+|---|---|
+| ① E2E spawn 全链未跑通（jiti 扩展加载异常） | **已修复**（f2ee9d1）：根因是 ResourceLoader 漏加 subagent 扩展 + 组合根捕获旧 runtime；全链 E2E 通过 |
+| ② 能力执行器只覆盖插件工具 | **已修复**（6e39bef）：文件工具经 Sandbox 真实执行、Skill 经 SkillContentService 受控读取、bash 与父会话一致不在有效能力 |
+| ③ parentSkillEntries 为空 | **已修复**（6e39bef）：Skill 委派 = 父 Session 冻结 turn 的可见集（contentHash 冻结），搜索/检查/正文读取全链 |
+| ④ auditPending 最小闭环 | **已补强**（6e39bef）：spawn_completed 审计失败 → run.audit_pending_json（启动恢复第 5 步补账）；双故障才放弃 |
+
+**T11 后最终验收结论**：复审 6 项指控全部闭环；已知限制清单清零；全量质量门绿；**允许合并 `main`**。合并前建议按仓库惯例做一次 PR 级 review（工作树已清理，无未提交改动）。
 
 **合并建议**：`phase-14-subagent-runtime` → `main`（合并前建议按仓库惯例做一次 PR 级 review；工作树已清理，无未提交改动）。

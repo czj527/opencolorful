@@ -728,9 +728,10 @@ describe("T9b-1 memory/personality 隔离", () => {
     const { faux, runtime } = await createModelRuntime(dir);
     const factory = createPiSubagentSessionFactory({
       threadStore: threads,
-      modelRuntime: {
+      // 惰性解析（P1-3 根因修复）：deps.modelRuntime 为 getter
+      modelRuntime: () => ({
         resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }),
-      } as never,
+      } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
     });
@@ -744,7 +745,8 @@ describe("T9b-1 memory/personality 隔离", () => {
     });
     faux.setResponses([fauxAssistantMessage("收到")]);
     void session.start({ prompt: "[任务目标] 测试\n", tools: subagentInternalToolDefs() });
-    await waitUntil(() => vi.mocked(createPiAgentSession).mock.calls.length > 0);
+    // 满载（全量单测并发）下真实 PI 会话创建可能超过默认 5s：放宽到 20s
+    await waitUntil(() => vi.mocked(createPiAgentSession).mock.calls.length > 0, 20_000);
     const args = vi.mocked(createPiAgentSession).mock.calls[0]?.[0];
     // systemPrompt 恒为平台规则（§11.1：不注入父 identity/base-color/四段记忆）
     expect(args?.systemPrompt).toBe(SUBAGENT_SYSTEM_PROMPT);
@@ -1288,9 +1290,10 @@ describe("T9b-6 nested spawn 拒绝", () => {
     const events: SubagentSessionEvent[] = [];
     const factory = createPiSubagentSessionFactory({
       threadStore: threads,
-      modelRuntime: {
+      // 惰性解析（P1-3 根因修复）：deps.modelRuntime 为 getter
+      modelRuntime: () => ({
         resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }),
-      } as never,
+      } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
     });
@@ -1310,7 +1313,8 @@ describe("T9b-6 nested spawn 拒绝", () => {
     ]);
     void session.start({ prompt: "[任务目标] 测试\n", tools: subagentInternalToolDefs() });
     // 等待会话收敛（terminal 或 error；模型伪造调用被拒后继续/结束）
-    const deadline = Date.now() + 10000;
+    // 满载下放宽到 30s
+    const deadline = Date.now() + 30000;
     while (!events.some((event) => event.type === "terminal" || event.type === "error") && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
