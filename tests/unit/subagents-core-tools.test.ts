@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   SUBAGENT_MESSAGE_PROTOCOL,
@@ -43,6 +43,7 @@ import { SubagentArtifactFileService } from "../../src/runtime/subagents/transcr
 import { SubagentReplayStore } from "../../src/runtime/subagents/transcript/replay-store.js";
 import { SubagentToolActivityTracker } from "../../src/runtime/subagents/transcript/tool-summary.js";
 import { registerSubagentContext, type SubagentToolServices } from "../../src/pi-sdk/subagent-tools-context.js";
+import { SUBAGENT_FILE_TOOL_DEFS } from "../../src/server/routes/subagent-ability-tools.js";
 import subagentToolsExtension from "../../src/pi-sdk/subagent-tools.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -105,12 +106,14 @@ class FauxSessionPort implements SubagentSessionPort {
     });
   }
 
-  followUp(message: string): void {
+  followUp(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.followUpMessages.push(message);
+    return "applied";
   }
 
-  steer(message: string): void {
+  steer(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.steerMessages.push(message);
+    return "applied";
   }
 
   abort(): void {
@@ -247,10 +250,18 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
   const services: SubagentToolServices = {
     preferences: () => ({ subagents: { defaultModel: null } }),
     currentModel: () => ({ providerId: "faux", modelId: "faux-1" }),
-    parentSnapshot: () => ({ toolIds: ["read", "write", "bash"], pluginContributions: [], skillEntries: [] }),
+    parentSnapshot: () => ({ toolIds: ["read", "write"], pluginContributions: [], skillEntries: [] }),
     modelResolver: () => modelAvailable,
-    toolCatalog: (name) => (name === "read" ? { name: "read", description: "read", parameters: { type: "object" } } : null),
-    toolExecutor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }),
+    // 复审 P0-3：目录覆盖全部快照文件工具（bash 与父会话一致不在有效能力）
+    toolCatalog: (name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) ?? null,
+    // 复审 P0-2/P0-3：run-scoped 执行器——快照 toolIds 必须全部可解析（fail-closed）
+    createRunToolExecutor: ({ snapshot }) => {
+      const missing = snapshot.toolIds.filter((name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) === null);
+      if (missing.length > 0) {
+        return { ok: false, reason: `快照工具无法解析（fail-closed）：${missing.join(", ")}` };
+      }
+      return { ok: true, executor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }) };
+    },
     workspaceCwd: () => paths.home,
     threadDirResolver: (input) => path.join(paths.subagentsBase, input.ownerAgentId, "subagents", input.threadId),
     threads: stores.threads,
@@ -407,6 +418,60 @@ describe("spawn_subagent", () => {
     const out = await callTool(h, "spawn_subagent", { brief: { title: "x" }, context: packet() });
     expect(out.status).toBe("error");
     expect(out.code).toBe("subagent_invalid_args");
+  });
+
+  it("复审 P0-2/P0-3：执行器构建失败（快照工具无法解析）→ fail-closed，不创建 Thread/Run", async () => {
+    const h = createHarness();
+    const original = h.services.createRunToolExecutor;
+    h.services.createRunToolExecutor = () => ({ ok: false, reason: "快照工具无法解析（fail-closed）：ghost_tool" });
+    try {
+      const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+      expect(out.status).toBe("error");
+      expect(out.code).toBe("subagent_operation_failed");
+      expect(out.message).toContain("fail-closed");
+      // 领域写入前拒绝：不创建任何 Thread/Run
+      expect(h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10)).toHaveLength(0);
+    } finally {
+      h.services.createRunToolExecutor = original;
+    }
+  });
+
+  it("复审 P1-2：容量预检拒绝 → subagent_runtime_unavailable，不创建 Thread", async () => {
+    const h = createHarness();
+    const spy = vi.spyOn(h.scheduler, "canAccept").mockReturnValue(false);
+    try {
+      const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+      expect(out.status).toBe("error");
+      expect(out.code).toBe("subagent_runtime_unavailable");
+      expect(h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10)).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("复审 P1-2：submit 拒绝 → 可靠补偿（Run 终态化 cancelled + Thread 关闭），不留无人调度 Run", async () => {
+    const h = createHarness();
+    const spy = vi.spyOn(h.scheduler, "submit").mockReturnValueOnce({
+      status: "rejected",
+      reasonCode: "subagent_runtime_unavailable",
+      reason: "测试注入：排队积压",
+    });
+    try {
+      const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+      expect(out.status).toBe("error");
+      expect(out.code).toBe("subagent_runtime_unavailable");
+      expect(out.message).toContain("已补偿");
+      const threads = h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10);
+      expect(threads).toHaveLength(1);
+      expect(threads[0]?.status).toBe("closed");
+      const runId = threads[0] === undefined ? null : h.runIdOf(threads[0].threadId);
+      expect(runId).not.toBeNull();
+      const run = h.stores.runs.get(runId as SubagentRunId, { ownerAgentId: OWNER, parentSessionId: SESSION_ID });
+      expect(run?.status).toBe("cancelled");
+      expect(run?.reasonCode).toBe("subagent_scheduler_rejected");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

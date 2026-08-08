@@ -26,6 +26,13 @@ import { MEMORY_TOOL_NAMES, SKILL_TOOL_NAMES, SUBAGENT_TOOL_NAMES } from "../../
 import { registerSubagentContext, type SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
 import { SessionRuntimeParentSessionPort } from "../../runtime/subagents/runtime/parent-session-adapter.js";
 import { classifyToolSideEffect } from "../../runtime/subagents/delegation-policy.js";
+import { PathGuard } from "../../sandbox/path-guard.js";
+import { SkillSearchArgsSchema, SkillInspectArgsSchema } from "../../runtime/skills/core/skill-core-service.js";
+import {
+  SUBAGENT_FILE_TOOL_DEFS,
+  buildSubagentRunToolExecutor,
+  isSubagentFileToolName,
+} from "./subagent-ability-tools.js";
 import type { PluginSessionTool } from "../../pi-sdk/index.js";
 import type { PluginFacade } from "../../platform/plugin-facade.js";
 import type Database from "better-sqlite3";
@@ -423,23 +430,70 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       const traceSlot: { current: import("../../contracts/observability.js").TraceContext | undefined } = { current: undefined };
       let parentPort: SessionRuntimeParentSessionPort | undefined;
       let unregisterSubagent: (() => void) | undefined;
-      // 父侧能力快照（§12.1 EffectiveSnapshot 输入）：fileTools + 插件工具 + 平台工具
+      // 父侧能力快照（§12.1 EffectiveSnapshot 输入；复审 P0-2：真实冻结）。
+      // 每次 parentSnapshot()（spawn 时刻）现场冻结插件执行快照——pluginVersion/
+      // runtimeInstanceId/grantRevision 取自 PluginExecutionSnapshot 真实值
+      // （不再写占位），并缓存完整快照供 run-scoped 执行器消费（当前 Run 不漂移）；
+      // 冻结失败记录到 lastPluginFreezeFailures——spawn 经 createRunToolExecutor
+      // 校验后整体 fail-closed，不允许静默缩减委派。
+      // bash 与父会话一致（Sandbox allowBash=false）不属于有效能力，从快照排除。
+      const lastFrozenPluginSnapshots = new Map<string, { readonly snapshot: unknown; readonly state: unknown }>();
+      const lastPluginFreezeFailures = new Map<string, string>();
       const parentSnapshot = (): {
         toolIds: readonly string[];
         pluginContributions: readonly import("../../runtime/subagents/delegation-policy.js").ParentPluginContributionEntry[];
         skillEntries: readonly import("../../runtime/subagents/delegation-policy.js").ParentSkillEntry[];
-      } => ({
-        toolIds: [...(tools ?? []), ...(extraTools ?? []), ...pluginTools.map((tool) => tool.qualifiedName)],
-        pluginContributions: pluginTools.map((tool) => ({
-          pluginId: tool.pluginId,
-          pluginVersion: "1.0.0",
-          runtimeInstanceId: tool.pluginId,
-          contributionId: tool.qualifiedName,
-          grantRevision: 1,
-          sideEffectClass: classifyToolSideEffect(tool.qualifiedName),
-        })),
-        skillEntries: [],
-      });
+      } => {
+        lastFrozenPluginSnapshots.clear();
+        lastPluginFreezeFailures.clear();
+        const pluginContributions: import("../../runtime/subagents/delegation-policy.js").ParentPluginContributionEntry[] = [];
+        const snapshotFactory = pluginSnapshotFactory();
+        if (snapshotFactory !== undefined) {
+          for (const tool of pluginTools) {
+            const frozen = snapshotFactory(tool.pluginId, view.agentId ?? "");
+            if (!frozen.ok) {
+              lastPluginFreezeFailures.set(tool.qualifiedName, frozen.error);
+              continue; // 条目不进入委派（spawn 因 freeze 失败整体拒绝）
+            }
+            const pluginSnapshot = frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot;
+            lastFrozenPluginSnapshots.set(tool.qualifiedName, { snapshot: frozen.snapshot, state: frozen.state });
+            pluginContributions.push({
+              pluginId: tool.pluginId,
+              pluginVersion: pluginSnapshot.pluginVersion,
+              runtimeInstanceId: pluginSnapshot.runtimeInstanceId,
+              contributionId: tool.qualifiedName,
+              grantRevision: pluginSnapshot.grantRevision,
+              sideEffectClass: classifyToolSideEffect(tool.qualifiedName),
+            });
+          }
+        }
+        return {
+          toolIds: [...(tools ?? []), ...(extraTools ?? []), ...pluginTools.map((tool) => tool.qualifiedName)]
+            .filter((name) => name !== "bash"),
+          pluginContributions,
+          // §12.6：Skill 委派 = 父 Session 当前冻结 turn 的可见集（contentHash
+          // 冻结；当前 Run 中变化不生效由受控读取的 turn 门保证）
+          skillEntries: (() => {
+            if (options.skillCoreService === undefined) {
+              return [];
+            }
+            try {
+              return options.skillCoreService.listFrozenSkillEntriesForDelegation({
+                sessionId,
+                turnId: turnIdSlot.current ?? null,
+              }).map((entry) => ({
+                ref: entry.ref,
+                contentHash: entry.contentHash,
+                selectionMode: entry.selectionMode,
+                readiness: entry.readiness,
+                sourceKind: entry.sourceKind,
+              }));
+            } catch {
+              return []; // 冻结快照不可得 → 不委派 Skill（偏空 fail-closed）
+            }
+          })(),
+        };
+      };
       const toolCatalog = (name: string): import("../../runtime/subagents/runtime/types.js").SubagentSessionToolDef | null => {
         const plugin = pluginTools.find((tool) => tool.qualifiedName === name);
         if (plugin !== undefined) {
@@ -449,41 +503,77 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
             parameters: (plugin.inputSchema ?? { type: "object" }) as Record<string, unknown>,
           };
         }
+        if (isSubagentFileToolName(name)) {
+          return SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) ?? null;
+        }
+        if (name === "search_skills") {
+          return { name, description: "搜索本 Run 冻结快照内的可用 Skill（只返回结构化候选，绝不触发安装）。", parameters: SkillSearchArgsSchema as unknown as Record<string, unknown> };
+        }
+        if (name === "inspect_skill") {
+          return { name, description: "检查本 Run 冻结快照内的 Skill（元数据 + 可选受控正文读取）。", parameters: SkillInspectArgsSchema as unknown as Record<string, unknown> };
+        }
         return null;
       };
-      // T9a（§25.4）：能力工具真实执行路由——插件工具 → PluginFacade worker
-      // 执行（现场冻结授权快照，携带父 Agent/Session 身份）；文件/Skill 工具
-      // 按 Phase 14 边界 unavailable（fail-closed）
-      const toolExecutor: import("../../pi-sdk/subagent-tools-context.js").SubagentToolServices["toolExecutor"] = async (input) => {
-        const plugin = pluginTools.find((tool) => tool.qualifiedName === input.name);
-        if (plugin === undefined || options.pluginFacade === undefined) {
-          return { ok: false, text: `subagent_ability_tool_unavailable: ${input.name}` };
+      // Subagent 沙箱策略（§12.7）：PathGuard 按 Thread 冻结的 workspaceCwd
+      // 构造——工作区子树 READ_WRITE，其余 BLOCKED，禁止外部读取
+      const subagentToolPolicy = new ToolPolicy();
+      subagentToolPolicy.setPathGuard(
+        new PathGuard({
+          rules: [
+            {
+              path: `${path.resolve(runtimeCwd)}${path.sep}`,
+              level: "READ_WRITE",
+              reason: "Subagent 工作区（Thread 冻结的 workspaceCwd）",
+            },
+          ],
+          defaultLevel: "BLOCKED",
+          allowExternalReads: false,
+        }),
+      );
+      // run-scoped 能力工具执行器（复审 P0-2/P0-3）：spawn/steer 提交 Run 时
+      // 调用——校验快照 toolIds 全部可解析 + 插件冻结全部成功（fail-closed，
+      // 不静默 filter 缩减），返回绑定冻结快照的执行闭包；文件工具经 Phase 9
+      // Sandbox + 独占写 Lease，Skill 经 Phase 13 受控读取，插件工具消费
+      // spawn 冻结快照（执行不再现场重新冻结，Run 不漂移）
+      const createRunToolExecutor: SubagentToolServices["createRunToolExecutor"] = ({ runId, snapshot, spawnTurnId }) => {
+        const failures = [...lastPluginFreezeFailures.entries()];
+        if (failures.length > 0) {
+          return { ok: false, reason: `插件执行快照冻结失败（${failures[0]?.[0] ?? "?"}）：${failures[0]?.[1] ?? "unknown"}（fail-closed）` };
         }
-        // qualifiedName = "pluginId.toolId" 命名空间 → contributionId 取后缀
-        const contributionId = plugin.qualifiedName.startsWith(`${plugin.pluginId}.`)
-          ? plugin.qualifiedName.slice(plugin.pluginId.length + 1)
-          : plugin.name;
-        try {
-          const frozen = buildPluginTurnSnapshotFactory(options.pluginFacade)(plugin.pluginId, view.agentId ?? "");
-          if (!frozen.ok) {
-            return { ok: false, text: `插件 ${plugin.pluginId} 快照冻结失败：${frozen.error}` };
-          }
-          const result = await options.pluginFacade.hostApi.tools.invoke({
-            pluginId: plugin.pluginId,
-            contributionId,
-            params: input.args,
-            agentId: view.agentId ?? "",
-            sessionId,
-            ...(frozen.snapshot !== undefined ? { snapshot: frozen.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot } : {}),
-            ...(frozen.state !== undefined ? { state: frozen.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState } : {}),
-            ...(input.signal !== undefined ? { signal: input.signal } : {}),
-          });
-          return result.ok
-            ? { ok: true, text: JSON.stringify(result.result) }
-            : { ok: false, text: `${result.code}: ${result.message}` };
-        } catch (error) {
-          return { ok: false, text: `subagent_operation_failed: ${error instanceof Error ? error.message.slice(0, 200) : "unknown"}` };
+        const missing = snapshot.toolIds.filter((name) => toolCatalog(name) === null);
+        if (missing.length > 0) {
+          return { ok: false, reason: `快照工具无法解析，拒绝创建 Run（fail-closed）：${missing.join(", ")}` };
         }
+        const executor = buildSubagentRunToolExecutor({
+          workspaceCwd: runtimeCwd,
+          ownerAgentId: view.agentId ?? sessionId,
+          sessionId,
+          runId,
+          snapshot,
+          spawnTurnId,
+          frozenPlugins: lastFrozenPluginSnapshots,
+          // exactOptionalPropertyTypes：subagentComposition 缺省（测试 harness）
+          // 时不传 leases——文件写工具按 fail-closed 拒绝（写 Lease 校验缺省 false）
+          ...(subagentComposition !== undefined ? { leases: subagentComposition.stores.leases } : {}),
+          toolPolicy: subagentToolPolicy,
+          ...(options.skillCoreService !== undefined ? { skillCore: options.skillCoreService } : {}),
+          pluginInvoke: async (input) => {
+            if (options.pluginFacade === undefined) {
+              return { ok: false, code: "subagent_plugin_unavailable", message: "插件服务未就绪" };
+            }
+            return options.pluginFacade.hostApi.tools.invoke({
+              pluginId: input.pluginId,
+              contributionId: input.contributionId,
+              params: input.params,
+              agentId: input.agentId,
+              sessionId: input.sessionId,
+              snapshot: input.snapshot as import("../../contracts/plugin-protocol.js").PluginExecutionSnapshot,
+              state: input.state as import("../../runtime/plugins/grants/execution-snapshot.js").ResolveState,
+              ...(input.signal !== undefined ? { signal: input.signal } : {}),
+            });
+          },
+        });
+        return { ok: true, executor };
       };
 
       const subagentLifecycle: import("../../runtime/session-runtime.js").SessionRuntimeOptions["subagentLifecycle"] =
@@ -504,7 +594,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         try {
           const services: SubagentToolServices = {
             ...subagentComposition.toolServices,
-            toolExecutor,
+            createRunToolExecutor,
             parentSnapshot,
             currentModel: () => (selectedModel !== null && selectedModel !== undefined ? { providerId: selectedModel.providerId, modelId: selectedModel.modelId } : null),
             toolCatalog,

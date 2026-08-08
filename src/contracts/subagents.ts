@@ -595,6 +595,11 @@ export const SUBAGENT_PLATFORM_FIXED_DENIALS = [
   "memory_intent",
   "memory_agent",
   "spawn_subagent",
+  // 复审 P0-3（§12.3）：Skill 安装/绑定/解绑/停用/Bundle 管理永不授予——
+  // 此前只按 administrative 分类在 read Run 拒绝，write Run 会漏入快照
+  "install_skill",
+  "manage_skills",
+  "manage_skill_bundle",
   "agent_admin",
   "provider_credentials",
   "plugin_admin",

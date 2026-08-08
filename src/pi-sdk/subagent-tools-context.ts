@@ -52,11 +52,17 @@ export interface SubagentToolServices {
   /** 父侧工具目录（EffectiveSnapshot.toolIds → 工具定义；未收录 → null） */
   readonly toolCatalog: (name: string) => SubagentSessionToolDef | null;
   /**
-   * 能力工具执行器（T9a §25.4）：父侧工具的真实执行路由——插件工具 →
-   * PluginFacade worker 执行（现场冻结授权快照）；文件/Skill 工具按 Phase 14
-   * 边界处理。unavailable → 拒绝（fail-closed，不允许静默无操作）。
+   * 能力工具执行器工厂（复审 P0-2/P0-3）：为每个 Run 构建 run-scoped 执行
+   * 器——spawn 时冻结插件执行快照（version/runtimeInstanceId/grantRevision
+   * 真实值）与 Skill 可见集，执行闭包只消费该冻结状态（当前 Run 不漂移）；
+   * 同时校验快照 toolIds 全部可解析、插件快照全部冻结成功，任何缺失 →
+   * { ok: false }（spawn fail-closed，不允许静默缩减快照）。
    */
-  readonly toolExecutor: (input: { readonly name: string; readonly args: unknown; readonly signal?: AbortSignal }) => Promise<SubagentToolInvokeResult>;
+  readonly createRunToolExecutor: (input: {
+    readonly runId: string;
+    readonly snapshot: import("../runtime/subagents/delegation-policy.js").EffectiveSnapshot;
+    readonly spawnTurnId: string | null;
+  }) => { readonly ok: true; readonly executor: (input: { readonly name: string; readonly args: unknown; readonly signal?: AbortSignal }) => Promise<SubagentToolInvokeResult> } | { readonly ok: false; readonly reason: string };
   /** 主会话工作区目录（Thread.workspaceCwd 冻结源） */
   readonly workspaceCwd: () => string;
   /** Thread 目录解析：<subagentsBase>/<owner>/subagents/<threadId>（§16.3） */
@@ -120,21 +126,29 @@ export function runWithSubagentContext<T>(ctx: SubagentToolContext, fn: () => T)
   return storage.run(ctx, fn);
 }
 
-// ── 能力工具执行器注册表（T9a §25.4）───────────────────────────
+// ── 能力工具执行器注册表（T9a §25.4 / 复审 P0-2）──────────────────
 //
-// 能力工具的目录（toolCatalog）与执行（toolExecutor）都是 per-Session 的
-// （插件绑定/授权随父会话变化）；SubagentSessionFactory 在组合根构造，拿
-// 不到 per-Session 插件工具。spawn/steer 工具在提交 Run 时把本 Session 的
-// toolExecutor 按 runId 注册到这里；pi-session-adapter 的缺省 abilityExecutor
-// 按 runId 查询执行。Run 终态/清理由注册表按 runId 惰性清理（上限保护）。
+// 能力工具的目录（toolCatalog）与执行（createRunToolExecutor）都是 per-Session
+// 的（插件绑定/授权随父会话变化）；SubagentSessionFactory 在组合根构造，拿
+// 不到 per-Session 插件工具。spawn/steer 工具在提交 Run 时把本 Session 构建的
+// run-scoped 执行器（已绑定 spawn 冻结快照）按 runId 注册到这里；
+// pi-session-adapter 的缺省 abilityExecutor 按 runId 查询执行。Run 终态/清理
+// 由注册表按 runId 惰性清理（上限保护）。
 
-const abilityExecutors = new Map<string, SubagentToolServices["toolExecutor"]>();
+/** run-scoped 能力工具执行器（spawn 冻结快照绑定后的执行闭包） */
+export type SubagentRunAbilityExecutor = (input: {
+  readonly name: string;
+  readonly args: unknown;
+  readonly signal?: AbortSignal;
+}) => Promise<SubagentToolInvokeResult>;
+
+const abilityExecutors = new Map<string, SubagentRunAbilityExecutor>();
 const MAX_ABILITY_EXECUTOR_ENTRIES = 256;
 
 /** 注册能力工具执行器（spawn/steer 提交 Run 时调用；同 runId 覆盖） */
 export function registerSubagentAbilityExecutor(
   runId: string,
-  executor: SubagentToolServices["toolExecutor"],
+  executor: SubagentRunAbilityExecutor,
 ): void {
   if (abilityExecutors.size >= MAX_ABILITY_EXECUTOR_ENTRIES && !abilityExecutors.has(runId)) {
     // 有界：超出后清理最早注册的 32 条（防泄漏）
@@ -147,7 +161,7 @@ export function registerSubagentAbilityExecutor(
 }
 
 /** 按 runId 查询（pi-session-adapter 缺省 abilityExecutor） */
-export function getSubagentAbilityExecutor(runId: string): SubagentToolServices["toolExecutor"] | undefined {
+export function getSubagentAbilityExecutor(runId: string): SubagentRunAbilityExecutor | undefined {
   return abilityExecutors.get(runId);
 }
 

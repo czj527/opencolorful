@@ -793,39 +793,143 @@ export class SkillCoreService {
    */
   async readSkillFileForSession(input: { readonly sessionId: string; readonly absPath: string }): Promise<SkillFileReadOutcome> {
     const frozen = this.turnSnapshots.get(input.sessionId);
-    const absPath = path.resolve(input.absPath);
+    return this.readSkillFileWithFrozen(input.sessionId, input.absPath, frozen);
+  }
+
+  /**
+   * Phase 14 复审 P0-3（§12.6）：Subagent Run 冻结的 Skill 受控读取。
+   * Run 的 Skill 快照在 spawn 时冻结（父 Session 同一 turn 的可见集子集）；
+   * 父 Session 进入新 Turn 后冻结快照已换新——无法再按 Run 冻结状态校验，
+   * 一律 denied（fail-closed：当前 Run 中 Skill 变化不生效，也不允许静默
+   * 改用新快照）。spawnTurnId 为空（无 turn 上下文）时退化为父 Session 行为。
+   */
+  async readSkillFileForSubagentRun(input: { readonly sessionId: string; readonly spawnTurnId: string | null; readonly absPath: string }): Promise<SkillFileReadOutcome> {
+    const frozen = this.turnSnapshots.get(input.sessionId);
+    if (input.spawnTurnId !== null && (frozen === undefined || frozen.turnId !== input.spawnTurnId)) {
+      return {
+        status: "denied",
+        reasonCode: "skill_snapshot_turn_changed",
+        reason: "父 Session 已进入新 Turn，无法按 Run 冻结的 Skill 快照校验，拒绝读取（fail-closed）",
+      };
+    }
+    return this.readSkillFileWithFrozen(input.sessionId, input.absPath, frozen);
+  }
+
+  /**
+   * Phase 14 复审 P0-3（§12.6）：按 run 冻结快照（父 Session spawn 时 turn 的
+   * 可见集）受控读取 Skill 正文（SKILL.md / 支持文件，relativePath 为标准
+   * 相对路径）。与 readSkillFileForSubagentRun 同一 turn 冻结门；skillRef 必须
+   * 命中冻结快照 entries（contentHash 精确一致）才授权读取——运行中 Skill
+   * 文件变化不生效，父 Session 换 turn 后 denied（fail-closed）。
+   */
+  async readSkillBodyForSubagentRun(input: {
+    readonly sessionId: string;
+    readonly spawnTurnId: string | null;
+    readonly skillRef: SkillRef;
+    readonly relativePath: string;
+  }): Promise<SkillFileReadOutcome> {
+    const frozen = this.turnSnapshots.get(input.sessionId);
+    if (input.spawnTurnId !== null && (frozen === undefined || frozen.turnId !== input.spawnTurnId)) {
+      return {
+        status: "denied",
+        reasonCode: "skill_snapshot_turn_changed",
+        reason: "父 Session 已进入新 Turn，无法按 Run 冻结的 Skill 快照校验，拒绝读取（fail-closed）",
+      };
+    }
+    if (frozen === undefined) {
+      return { status: "not-a-skill-file" as const, reason: "当前 Session 无冻结 Skill 快照" };
+    }
+    const entry = frozen.snapshot.entries.find(
+      (candidate) =>
+        candidate.skillRefKey === skillRefKey(input.skillRef) &&
+        candidate.skillRef.contentHash === input.skillRef.contentHash,
+    );
+    if (entry === undefined) {
+      return {
+        status: "denied",
+        reasonCode: "skill_not_in_snapshot",
+        reason: `Skill ${skillRefKey(input.skillRef)} 不在 Run 冻结快照可见集，拒绝读取（fail-closed）`,
+      };
+    }
+    return this.readBodyWithSnapshot(frozen.snapshot, entry.rootPath, input.skillRef, input.relativePath);
+  }
+
+  /** Skill 正文受控读取共用实现（成员/哈希/预算/审计由 SkillContentService 执行） */
+  private readBodyWithSnapshot(
+    snapshot: SkillSnapshot,
+    rootPath: string,
+    skillRef: SkillRef,
+    relativePathInput: string,
+  ): Promise<SkillFileReadOutcome> {
+    if (this.deps.contentService === undefined) {
+      return Promise.resolve({ status: "not-a-skill-file" as const, reason: "SkillContentService 未就绪" });
+    }
+    const relativePath = normalizeForwardSlashes(relativePathInput);
+    return this.deps.contentService.readSkillBody({ snapshot, skillRef, relativePath }).then(
+      (result) => ({
+        status: "ok" as const,
+        body: result.body,
+        truncated: result.truncated,
+        skillRefKey: skillRefKey(skillRef),
+        relativePath,
+      }),
+      (error) => ({
+        status: "denied" as const,
+        reasonCode: extractReasonCode(error),
+        reason: error instanceof Error ? error.message.slice(0, 240) : "Skill 文件受控读取被拒绝",
+      }),
+    );
+  }
+
+  /**
+   * Phase 14 复审 P0-3（§12.6）：父 Session 当前冻结 Turn 的可见 Skill 条目  /**
+   * Phase 14 复审 P0-3（§12.6）：父 Session 当前冻结 Turn 的可见 Skill 条目
+   * （Subagent 委派快照输入）。turnId 提供时校验冻结快照仍属同一 turn，
+   * 不一致 → 空列表（fail-closed：不委派过期/漂移的 Skill）。
+   */
+  listFrozenSkillEntriesForDelegation(input: { readonly sessionId: string; readonly turnId: string | null }): readonly {
+    readonly ref: SkillRef;
+    readonly contentHash: string;
+    readonly selectionMode: SkillSelectionMode;
+    readonly readiness: SkillReadiness;
+    readonly sourceKind: SkillSourceKind;
+  }[] {
+    const frozen = this.turnSnapshots.get(input.sessionId);
+    if (frozen === undefined) {
+      return [];
+    }
+    if (input.turnId !== null && frozen.turnId !== input.turnId) {
+      return []; // 快照已换 turn：不委派
+    }
+    return frozen.snapshot.entries
+      .filter((entry) => entry.readiness === "ready")
+      .map((entry) => ({
+        ref: entry.skillRef,
+        contentHash: entry.skillRef.contentHash,
+        selectionMode: entry.selection,
+        readiness: entry.readiness,
+        sourceKind: entry.skillRef.sourceKind,
+      }));
+  }
+
+  /** readSkillFileForSession / readSkillFileForSubagentRun 共用实现（成员/哈希/预算/审计全链） */
+  private async readSkillFileWithFrozen(
+    sessionId: string,
+    absPathInput: string,
+    frozen: { readonly turnId: string; readonly snapshot: SkillSnapshot } | undefined,
+  ): Promise<SkillFileReadOutcome> {
+    const absPath = path.resolve(absPathInput);
     const absCanonical = canonicalResolve(absPath);
     const read = (rootPath: string, skillRef: SkillRef, origin: string): Promise<SkillFileReadOutcome> => {
-      if (this.deps.contentService === undefined) {
-        return Promise.resolve({ status: "not-a-skill-file" as const, reason: "SkillContentService 未就绪" });
+      if (frozen === undefined) {
+        return Promise.resolve({ status: "not-a-skill-file" as const, reason: "当前 Session 无冻结 Skill 快照" });
       }
       const rel = path.relative(canonicalResolve(rootPath), absCanonical);
       if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
         return Promise.resolve({ status: "not-a-skill-file" as const, reason: `路径不在 ${origin} 根内` });
       }
-      const snapshot =
-        frozen !== undefined
-          ? frozen.snapshot
-          : undefined;
-      // 无冻结快照（Skill 系统未接入 turn）→ 不作为 Skill 文件处理
-      if (snapshot === undefined) {
-        return Promise.resolve({ status: "not-a-skill-file" as const, reason: "当前 Session 无冻结 Skill 快照" });
-      }
       const relativePath = rel.split(path.sep).join("/");
-      return this.deps.contentService!.readSkillBody({ snapshot, skillRef, relativePath }).then(
-        (result) => ({
-          status: "ok" as const,
-          body: result.body,
-          truncated: result.truncated,
-          skillRefKey: skillRefKey(skillRef),
-          relativePath,
-        }),
-        (error) => ({
-          status: "denied" as const,
-          reasonCode: extractReasonCode(error),
-          reason: error instanceof Error ? error.message.slice(0, 240) : "Skill 文件受控读取被拒绝",
-        }),
-      );
+      return this.readBodyWithSnapshot(frozen.snapshot, rootPath, skillRef, relativePath);
     };
 
     // 1. 当前 turn 可见/授权候选：冻结快照 entries + 当前 turn active grants
@@ -838,7 +942,7 @@ export class SkillCoreService {
       }
     }
     if (this.deps.sessionService !== undefined && frozen !== undefined) {
-      for (const grant of this.deps.sessionService.listActiveGrants(input.sessionId)) {
+      for (const grant of this.deps.sessionService.listActiveGrants(sessionId)) {
         if (grant.issuedTurnId !== frozen.turnId) {
           continue; // 跨 Turn grant 不纳入（禁止跨 Turn 重放）
         }
@@ -847,7 +951,7 @@ export class SkillCoreService {
           candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef, grantId: grant.grantId });
         }
       }
-      for (const grant of this.deps.sessionService.listTurnOverlays(input.sessionId, frozen.turnId)) {
+      for (const grant of this.deps.sessionService.listTurnOverlays(sessionId, frozen.turnId)) {
         const registered = this.deps.catalog.findByRefKey(grant.skillRefKey);
         if (registered !== undefined) {
           candidates.push({ rootPath: registered.rootPath, skillRef: registered.skillRef });
@@ -864,7 +968,7 @@ export class SkillCoreService {
         try {
           activated = this.deps.sessionService.activateActivationGrant({
             grantId: candidate.grantId,
-            sessionId: input.sessionId,
+            sessionId,
             turnId: frozen.turnId,
             skillRef: candidate.skillRef,
             contentHash: candidate.skillRef.contentHash,
@@ -2002,6 +2106,11 @@ export function extractReasonCode(error: unknown): SkillErrorCode {
  * 一致——路径存在 → realpath；不存在 → 向上遍历到最近存在的祖先拼接剩余
  * 相对路径。用于 Skill 根匹配，防止 Junction 别名绕过当前 Turn 快照检查。
  */
+/** 相对路径归一化为前向斜杠（Skill 支持文件契约用） */
+function normalizeForwardSlashes(relativePath: string): string {
+  return relativePath.split(path.sep).join("/");
+}
+
 function canonicalResolve(targetPath: string): string {
   try {
     return fs.realpathSync.native(targetPath);

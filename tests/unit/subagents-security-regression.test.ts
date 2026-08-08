@@ -84,6 +84,7 @@ import type {
 import { ProtocolDispatcher } from "../../src/runtime/subagents/protocol/protocol-dispatcher.js";
 import { ParentMailboxDeliveryCoordinator } from "../../src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.js";
 import { SubagentStartupRecovery } from "../../src/runtime/subagents/recovery/startup-recovery.js";
+import { SUBAGENT_FILE_TOOL_DEFS } from "../../src/server/routes/subagent-ability-tools.js";
 import { SubagentTranscriptView } from "../../src/runtime/subagents/transcript/transcript-view.js";
 import { SubagentArtifactFileService } from "../../src/runtime/subagents/transcript/artifact-files.js";
 import { SubagentReplayStore } from "../../src/runtime/subagents/transcript/replay-store.js";
@@ -186,12 +187,14 @@ class FauxSessionPort implements SubagentSessionPort {
     });
   }
 
-  followUp(message: string): void {
+  followUp(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.followUpMessages.push(message);
+    return "applied";
   }
 
-  steer(message: string): void {
+  steer(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.steerMessages.push(message);
+    return "applied";
   }
 
   abort(): void {
@@ -415,13 +418,13 @@ interface ToolHarness {
   readonly activity: ActivityRecorder;
   readonly audit: AuditRecorder;
   /** 运行期切换审计行为（fail-safe 测试：先正常 spawn，再注入 Recorder 故障） */
-  setAuditMode(mode: "accepted" | "rejected" | "throw" | "real"): void;
+  setAuditMode(mode: "accepted" | "rejected" | "throw" | "terminal-throw" | "real"): void;
   runIdOf(threadId: SubagentThreadId): SubagentRunId | null;
   runStatus(runId: SubagentRunId): string | null;
 }
 
 function createToolHarness(options: {
-  auditMode?: "accepted" | "rejected" | "throw" | "real";
+  auditMode?: "accepted" | "rejected" | "throw" | "terminal-throw" | "real";
 } = {}): ToolHarness {
   const { database } = createContext();
   const stores = createStores(database);
@@ -474,6 +477,13 @@ function createToolHarness(options: {
     if (auditState.mode === "throw") {
       throw new Error("recorder down（测试注入）");
     }
+    if (auditState.mode === "terminal-throw") {
+      // 复审 P1-1：started 审计正常，terminal 审计（spawn_completed 等）故障
+      if (!input.eventName.endsWith("spawn_started")) {
+        throw new Error("recorder down at terminal（测试注入）");
+      }
+      return { kind: "accepted", eventId: `audit-${auditCalls.length}`, rowId: auditCalls.length };
+    }
     if (auditState.mode === "real") {
       return audit.appendStrict(input);
     }
@@ -489,10 +499,18 @@ function createToolHarness(options: {
   const services: SubagentToolServices = {
     preferences: () => ({ subagents: { defaultModel: null } }),
     currentModel: () => ({ providerId: "faux", modelId: "faux-1" }),
-    parentSnapshot: () => ({ toolIds: ["read", "write", "bash"], pluginContributions: [], skillEntries: [] }),
+    parentSnapshot: () => ({ toolIds: ["read", "write"], pluginContributions: [], skillEntries: [] }),
     modelResolver: () => true,
-    toolCatalog: (name) => (name === "read" ? { name: "read", description: "read", parameters: { type: "object" } } : null),
-    toolExecutor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }),
+    // 复审 P0-3：目录覆盖全部快照文件工具（bash 与父会话一致不在有效能力）
+    toolCatalog: (name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) ?? null,
+    // 复审 P0-2/P0-3：run-scoped 执行器——快照 toolIds 必须全部可解析（fail-closed）
+    createRunToolExecutor: ({ snapshot }) => {
+      const missing = snapshot.toolIds.filter((name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) === null);
+      if (missing.length > 0) {
+        return { ok: false, reason: `快照工具无法解析（fail-closed）：${missing.join(", ")}` };
+      }
+      return { ok: true, executor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }) };
+    },
     workspaceCwd: () => WS,
     threadDirResolver: (input) => path.join(WS, "subagents", input.ownerAgentId, input.threadId),
     threads: stores.threads,
@@ -993,6 +1011,21 @@ describe("T9b-4 audit fail-closed", () => {
     expect(value.status).toBe("error");
     expect(value.code).toBe("subagent_operation_failed");
     expect(h.stores.threads.listByOwner(ownership(), 10)).toHaveLength(0);
+  });
+
+  it("复审 P1-1：spawn_completed 审计失败 → 证据转入 run.audit_pending_json（启动恢复补账）", async () => {
+    const h = createToolHarness({ auditMode: "terminal-throw" });
+    const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+    expect(out.kind).toBe("ok");
+    const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
+    expect(value.status).toBe("ok");
+    const runId = value.runId as SubagentRunId;
+    const run = h.stores.runs.get(runId, ownership());
+    expect(run).not.toBeNull();
+    // terminal 审计证据未丢：转入 auditPending（started 已 accepted）
+    const pending = JSON.parse(run?.auditPendingJson ?? "[]") as Array<{ eventName?: string }>;
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.some((entry) => entry.eventName === "audit.subagent.spawn_completed")).toBe(true);
   });
 
   it("spawn 正常路径写目录事件（audit.subagent.spawn_started/completed 真实落库）", async () => {

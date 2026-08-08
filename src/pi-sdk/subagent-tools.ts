@@ -11,6 +11,8 @@ import {
   SubagentTaskBriefV1Schema,
   type AgentMessageEnvelopeV1,
   type AgentMessageId,
+  type ParentMailboxId,
+  type SubagentCapabilitySummary,
   type SubagentRunId,
   type SubagentRunStatus,
   type SubagentSnapshotId,
@@ -26,6 +28,7 @@ import {
   sha256Hex,
   stableSerialize,
   summarizeEffectiveSnapshot,
+  type NormalizedCapabilityCeiling,
 } from "../runtime/subagents/delegation-policy.js";
 import { renderContextPacket, renderSteer, renderTaskBrief } from "../runtime/subagents/task-renderer.js";
 import { isSubagentRunTerminal } from "../contracts/subagents.js";
@@ -311,7 +314,14 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     return errorResult("subagent_limits_exceeded", limits.reason ?? "运行限制超出平台上限");
   }
 
-  // 3. EffectiveSnapshot（§12.1：父有效能力 ∩ ceiling - 固定禁用）
+  // 2.5 容量预检（复审 P1-2）：领域写入前检查，队列满/积压超限提前拒绝，
+  //     不创建无人调度的 Run（预检与 submit 之间无 await，无竞态）
+  if (!services.scheduler.canAccept()) {
+    return errorResult("subagent_runtime_unavailable", "Subagent 运行时排队积压超过上限，请稍后重试");
+  }
+
+  // 3. EffectiveSnapshot（§12.1：父有效能力 ∩ ceiling - 固定禁用）。parentSnapshot
+  //    现场冻结真实插件执行快照与当前 turn 的 Skill 可见集（复审 P0-2/P0-3）
   const parent = services.parentSnapshot();
   const snapshot = computeEffectiveSnapshot({
     parentToolIds: parent.toolIds,
@@ -320,9 +330,21 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     ceiling,
   });
 
-  // 4. durable 审计 started（§22.5 / §19.3：审计不可用/被拒 → fail-closed 不创建）
+  // 3.5 run-scoped 能力工具执行器（复审 P0-2/P0-3）：快照 toolIds 必须全部可
+  //     解析、插件执行快照必须全部冻结成功，任何缺失 → 整体拒绝（fail-closed，
+  //     不静默 filter 缩减、不创建快照与实际注册表不一致的 Run）
   const threadId = services.newId("sat_") as SubagentThreadId;
   const runId = services.newId("sar_") as SubagentRunId;
+  const executorResult = services.createRunToolExecutor({
+    runId,
+    snapshot,
+    spawnTurnId: ctx.turnIdSlot.current ?? null,
+  });
+  if (!executorResult.ok) {
+    return errorResult("subagent_operation_failed", executorResult.reason);
+  }
+
+  // 4. durable 审计 started（§22.5 / §19.3：审计不可用/被拒 → fail-closed 不创建）
   const triggerMessageId = services.newId("sam_") as AgentMessageId;
   const auditStarted = tryDurableAudit(ctx, threadId, runId, "audit.subagent.spawn_started");
   if (auditStarted !== null) {
@@ -369,7 +391,8 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
       now,
     });
   } catch (error) {
-    // domain write 失败（§22.5）：补写 failed terminal audit（best-effort）
+    // domain write 失败（§22.5）：补写 failed terminal audit（best-effort，
+    // 无 Run 可挂 auditPending；started 记录仍为证据）
     bestEffortAudit(ctx, threadId, runId, "audit.subagent.spawn_failed");
     return errorResult("subagent_operation_failed", `Thread 创建失败：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
   }
@@ -377,7 +400,7 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   // 6. 渲染任务 prompt（TaskBrief + ContextPacket）
   const prompt = [renderTaskBrief(raw.brief), renderContextPacket(raw.context)].join("\n\n");
 
-  // 7. 提交执行（容量排队；拒绝 → 保持 queued，返回错误）
+  // 7. 提交执行（容量预检后理论不可拒；拒绝路径可靠补偿，不留无人调度的 Run）
   const executeInput: ExecuteSubagentRunInput = {
     runId,
     threadId,
@@ -394,14 +417,16 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   };
   const outcome = services.scheduler.submit(executeInput);
   if (outcome.status === "rejected") {
-    // 容量竞态拒绝：Thread/Run 保持 queued（恢复流程兜底），报告稳定错误
-    return errorResult(outcome.reasonCode, `${outcome.reason}（Thread ${threadId} 保持 queued，可 close_subagent 清理）`);
+    // 防御补偿（正常路径已被 canAccept 预检排除）：终态化 queued Run + 关闭
+    // Thread——不留无人调度的 Run，也不要求主 Agent 手动 close 清理
+    compensateSchedulerRejected(ctx, { threadId, runId, ownership, reasonCode: outcome.reasonCode, reason: outcome.reason, now });
+    return errorResult(outcome.reasonCode, `${outcome.reason}（已补偿：Run 终态化并关闭 Thread）`);
   }
 
-  // T9a（§25.4）：注册本 Session 的能力工具执行器（子会话按 runId 路由真实执行）
-  registerSubagentAbilityExecutor(runId, (input) => services.toolExecutor(input));
+  // 8. 注册 run-scoped 能力工具执行器（spawn 冻结快照绑定，子会话按 runId 路由）
+  registerSubagentAbilityExecutor(runId, executorResult.executor);
 
-  // 8. 投影（thread.created / run.queued；best-effort）
+  // 9. 投影（thread.created / run.queued；best-effort）
   try {
     if (created !== null) {
       services.projector.projectThreadCreated(created.thread as never, ownership);
@@ -411,9 +436,10 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     // best-effort：投影失败不阻断 spawn
   }
 
-  // 9. durable 审计 terminal（§19.3：事件名用目录 audit.subagent.spawn_completed；
-  //    Thread 已合法创建，terminal 审计失败不阻断（证据由活动 auditMirror/面板可见））
-  bestEffortAudit(ctx, threadId, runId, "audit.subagent.spawn_completed");
+  // 10. durable 审计 terminal（复审 P1-1：spawn_completed 失败必须补偿——
+  //     Thread 已合法创建，审计证据转入 run.audit_pending_json 由启动恢复补账，
+  //     不能静默吞掉）
+  terminalAuditOrPending(ctx, threadId, runId, "audit.subagent.spawn_completed");
 
   return okResult({
     threadId,
@@ -455,6 +481,95 @@ function bestEffortAudit(ctx: SubagentToolContext, threadId: SubagentThreadId, r
     void ctx.services.audit(spawnAuditInput(ctx, threadId, runId, eventName));
   } catch {
     // 审计故障不阻断已完成的领域操作
+  }
+}
+
+/**
+ * terminal 审计（复审 P1-1，§19.3）：spawn_completed 是审计生命周期的收尾
+ * 证据——rejected/抛错不能静默吞掉。Thread 已合法创建，证据转入
+ * run.audit_pending_json（有界 32 条/8KB），由启动恢复第 5 步 replay 补账；
+ * 双故障（审计 + auditPending 持久都失败）才放弃（started 记录仍在）。
+ */
+function terminalAuditOrPending(ctx: SubagentToolContext, threadId: SubagentThreadId, runId: SubagentRunId, eventName: string): void {
+  try {
+    const result = ctx.services.audit(spawnAuditInput(ctx, threadId, runId, eventName));
+    if (result.kind === "accepted" || result.kind === "accepted-idempotent") {
+      return;
+    }
+    throw new Error(`审计拒绝（${eventName}）：${result.reason.slice(0, 160)}`);
+  } catch (error) {
+    try {
+      ctx.services.runs.appendAuditPending(
+        runId,
+        { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId },
+        spawnAuditInput(ctx, threadId, runId, eventName),
+      );
+    } catch {
+      // 双故障：started 审计记录仍为证据，放弃（不阻断 spawn 返回）
+    }
+  }
+}
+
+/**
+ * Scheduler 拒绝补偿（复审 P1-2）：正常路径已被 canAccept 预检排除，此处是
+ * 防御兜底——把 queued Run 终态化（queued → cancelled，转换表合法）并关闭
+ * Thread，不留无人调度的 Run（不再要求主 Agent 手动 close 清理）。
+ */
+function compensateSchedulerRejected(
+  ctx: SubagentToolContext,
+  input: {
+    readonly threadId: SubagentThreadId;
+    readonly runId: SubagentRunId;
+    readonly ownership: { readonly ownerAgentId: string; readonly parentSessionId: string };
+    readonly reasonCode: string;
+    readonly reason: string;
+    readonly now: string;
+  },
+): void {
+  const services = ctx.services;
+  const { threadId, runId, ownership, reasonCode, now } = input;
+  try {
+    const messageId = services.newId("sam_") as AgentMessageId;
+    services.transactions.completeRunWithResult({
+      runId,
+      threadId,
+      ownership,
+      from: "queued",
+      to: "cancelled",
+      result: null,
+      reasonCode: "subagent_scheduler_rejected",
+      usage: null,
+      resultEnvelope: {
+        protocol: SUBAGENT_MESSAGE_PROTOCOL,
+        version: 1,
+        messageId,
+        contextId: threadId,
+        taskId: runId,
+        sender: { kind: "system", id: "subagent-system" },
+        recipient: { kind: "parent_agent", id: ctx.ownerAgentId },
+        messageType: "status",
+        deliveryMode: "mailbox",
+        parts: [{ kind: "text", text: `cancelled（subagent_scheduler_rejected：${input.reason.slice(0, 160)}）` }],
+        metadata: { createdAt: now, traceId: `trace-${runId}`, schemaName: "subagent.status" },
+      },
+      mailbox: {
+        mailboxId: services.newId("smb_") as ParentMailboxId,
+        messageId,
+        notificationKind: "cancelled",
+        operationId: `subagent-scheduler-rejected-${runId}`,
+        triggerParentTurn: false,
+      },
+      now,
+    });
+    services.transactions.closeThread({
+      threadId,
+      ownership,
+      at: now,
+      closeReason: "subagent_scheduler_rejected",
+      suppressMailboxIds: [],
+    });
+  } catch {
+    // 补偿失败：Run 保持 queued，由启动恢复按 interrupted 终态化兜底
   }
 }
 
@@ -639,7 +754,31 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
   if (thread.status !== "open") {
     return errorResult("subagent_thread_state_conflict", `Thread ${run.threadId} 状态 ${thread.status}，不能创建新 Run`);
   }
+  // 容量预检（复审 P1-2）：领域写入前拒绝
+  if (!services.scheduler.canAccept()) {
+    return errorResult("subagent_runtime_unavailable", "Subagent 运行时排队积压超过上限，请稍后重试");
+  }
   const newRunId = services.newId("sar_") as SubagentRunId;
+  // 复审 P0-2（§12.6）：下一 Run 重新冻结快照——当前父能力 ∩ Thread ceiling
+  // （ceiling 从 Thread 冻结摘要保守重建：新 Run 不超过 Thread 已观测的有效
+  // 能力边界，权限只会缩小），插件执行快照与 Skill contentHash 全部现场
+  // 重新冻结，变化必须产生新 snapshotId，不复用旧 Run 的冻结状态
+  const parent = services.parentSnapshot();
+  const nextSnapshot = computeEffectiveSnapshot({
+    parentToolIds: parent.toolIds,
+    parentPluginContributions: parent.pluginContributions,
+    parentSkillEntries: parent.skillEntries,
+    ceiling: rebuildCeilingFromSummary(thread.capabilityCeiling as SubagentCapabilitySummary),
+  });
+  const executorResult = services.createRunToolExecutor({
+    runId: newRunId,
+    snapshot: nextSnapshot,
+    spawnTurnId: ctx.turnIdSlot.current ?? null,
+  });
+  if (!executorResult.ok) {
+    return errorResult("subagent_operation_failed", executorResult.reason);
+  }
+  const newSnapshotId = services.newId("sas_") as SubagentSnapshotId;
   try {
     services.runs.create(
       { runId: newRunId, threadId: run.threadId, triggerMessageId: messageId, limits: run.limits, createdAt: now },
@@ -648,22 +787,14 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
   } catch (error) {
     return errorResult("subagent_run_state_conflict", `创建新 Run 失败：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`);
   }
-  const snapshotId = run.snapshotId ?? (services.newId("sas_") as SubagentSnapshotId);
-  const snapshotJson = run.snapshotJson ?? stableSerialize({ toolIds: [] });
-  let snapshot: { toolIds?: readonly string[] };
-  try {
-    snapshot = JSON.parse(snapshotJson) as { toolIds?: readonly string[] };
-  } catch {
-    snapshot = {};
-  }
   const executeInput: ExecuteSubagentRunInput = {
     runId: newRunId,
     threadId: run.threadId,
     ownership,
-    snapshotId,
-    snapshotJson,
+    snapshotId: newSnapshotId,
+    snapshotJson: stableSerialize(nextSnapshot),
     prompt: renderSteer(steer),
-    abilityTools: (snapshot.toolIds ?? []).map((toolId) => services.toolCatalog(toolId)).filter((def): def is NonNullable<typeof def> => def !== null),
+    abilityTools: nextSnapshot.toolIds.map((toolId) => services.toolCatalog(toolId)).filter((def): def is NonNullable<typeof def> => def !== null),
     sessionDir: services.threadDirResolver({ threadId: run.threadId, ownerAgentId: ctx.ownerAgentId }),
     workspaceCwd: workspaceCwdOf(ctx),
     limits: run.limits,
@@ -671,10 +802,20 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
   };
   const outcome = services.scheduler.submit(executeInput);
   if (outcome.status === "rejected") {
-    return errorResult(outcome.reasonCode, outcome.reason);
+    // 防御补偿（预检后理论不可拒）：终态化新 Run（queued → cancelled），
+    // Thread 保持 open（steer 消息仍在，父 Agent 可重试）
+    compensateSchedulerRejected(ctx, {
+      threadId: run.threadId,
+      runId: newRunId,
+      ownership,
+      reasonCode: outcome.reasonCode,
+      reason: outcome.reason,
+      now,
+    });
+    return errorResult(outcome.reasonCode, `${outcome.reason}（已补偿：新 Run 终态化）`);
   }
-  // T9a（§25.4）：新 Run 注册能力工具执行器（复用同一父侧执行路由）
-  registerSubagentAbilityExecutor(newRunId, (input) => services.toolExecutor(input));
+  // 注册 run-scoped 能力工具执行器（复审 P0-2：新 Run 绑定自身冻结快照）
+  registerSubagentAbilityExecutor(newRunId, executorResult.executor);
   services.dispatcher.dispatch(messageId, ownership); // task/steer 记账（新 Run 已由 Host 渲染 trigger）
   return okResult({ messageId, delivery: "queued", targetRunId: runId, newRunId, queued: outcome.queued });
 }
@@ -815,4 +956,26 @@ function closeSubagent(ctx: SubagentToolContext, threadId: SubagentThreadId): Re
 
 function workspaceCwdOf(ctx: SubagentToolContext): string {
   return ctx.services.workspaceCwd();
+}
+
+/**
+ * 复审 P0-2（§12.6）：从 Thread 冻结的 CapabilitySummary 保守重建 ceiling。
+ * summary 只保留"创建时刻的有效交集"，不含原始 mode 与 allowlist——重建为
+ * allowlist（新 Run 不超过 Thread 已观测的有效能力边界，权限只会缩小，
+ * §10.10）；Skill 的 contentHash 由 parentSnapshot 现场重新解析（变化必须
+ * 产生新 snapshotId）。插件 pluginIds 从贡献限定名（pluginId.toolId）前缀
+ * 还原，只用于贡献级交集判断。
+ */
+function rebuildCeilingFromSummary(summary: SubagentCapabilitySummary): NormalizedCapabilityCeiling {
+  return {
+    tools: { mode: "allowlist", ids: [...summary.toolIds] },
+    plugins: {
+      mode: "allowlist",
+      pluginIds: [...new Set(summary.pluginContributionIds.map((id) => id.split(".")[0] ?? id))],
+      contributionIds: [...summary.pluginContributionIds],
+    },
+    skills: { mode: "allowlist", refs: [...summary.skillRefs] },
+    workspaceAccess: summary.workspaceAccess,
+    network: summary.network,
+  };
 }

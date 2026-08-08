@@ -84,7 +84,7 @@ export interface SubagentRuntimeComposition {
   readonly toolTracker: SubagentToolActivityTracker;
   readonly projector: SubagentObservabilityProjector;
   /** 主会话工具上下文注入的静态服务（per-Session 状态由 ensureRuntime 补充） */
-  readonly toolServices: Omit<SubagentToolServices, "parentSnapshot" | "currentModel" | "toolCatalog" | "workspaceCwd">;
+  readonly toolServices: Omit<SubagentToolServices, "parentSnapshot" | "currentModel" | "toolCatalog" | "workspaceCwd" | "createRunToolExecutor">;
   /** 稳定 ID 生成（sat_/sar_/sam_/saa_/smb_/sas_ 前缀） */
   readonly newId: (prefix: "sat_" | "sar_" | "sam_" | "saa_" | "smb_" | "sas_") => string;
   /** Thread 目录解析：<subagentsBase>/<owner>/subagents/<threadId>（§16.3） */
@@ -298,7 +298,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
       now,
       newId,
       threadDirResolver,
-    } as Omit<SubagentToolServices, "parentSnapshot" | "currentModel" | "toolCatalog" | "workspaceCwd">,
+    } as Omit<SubagentToolServices, "parentSnapshot" | "currentModel" | "toolCatalog" | "workspaceCwd" | "createRunToolExecutor">,
     newId,
     threadDirResolver,
     // T9b（§18.3）：父 Agent 写 Tool 的 operation-scoped short permit 守卫

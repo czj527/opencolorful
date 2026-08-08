@@ -91,8 +91,10 @@ describe("枚举与计划逐字一致", () => {
 
   it("平台固定禁用能力清单（§12.3）", () => {
     expect(SUBAGENT_PLATFORM_FIXED_DENIALS).toEqual([
-      "search_memory", "memory_intent", "memory_agent", "spawn_subagent", "agent_admin",
-      "provider_credentials", "plugin_admin", "skill_admin", "observability_admin",
+      "search_memory", "memory_intent", "memory_agent", "spawn_subagent",
+      // 复审 P0-3（§12.3）：Skill 安装/绑定/解绑/停用/Bundle 管理永不授予
+      "install_skill", "manage_skills", "manage_skill_bundle",
+      "agent_admin", "provider_credentials", "plugin_admin", "skill_admin", "observability_admin",
       "session_admin", "platform_config", "host_admin",
     ]);
   });

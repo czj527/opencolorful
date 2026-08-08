@@ -180,6 +180,10 @@ export const TOOL_SIDE_EFFECT_CLASSIFICATIONS: Readonly<Record<string, ToolSideE
   grep: "workspace-read",
   find: "workspace-read",
   ls: "workspace-read",
+  // Skill 只读元数据/正文（复审 P0-3：经 SkillCoreService/SkillContentService
+  // 受控读取，read Run 允许；安装/管理工具在固定禁用清单，永不授予）
+  search_skills: "workspace-read",
+  inspect_skill: "workspace-read",
   // 工作区写入
   write: "workspace-write",
   edit: "workspace-write",

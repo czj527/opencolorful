@@ -50,6 +50,15 @@ export class SubagentScheduler {
   }
 
   /**
+   * 容量预检（复审 P1-2）：spawn 在领域写入（创建 Thread/Run）之前检查，
+   * 队列满/积压超限 → 提前拒绝，不创建无人调度的 Run。预检与 submit 之间
+   * 无 await（spawn 全同步），单线程下无竞态；submit 拒绝路径仍保留补偿兜底。
+   */
+  canAccept(): boolean {
+    return this.deps.host.activeRunCount < this.capacity || this.queue.length < SUBAGENT_SCHEDULER_MAX_QUEUE;
+  }
+
+  /**
    * 提交 Run 执行：容量未满立即交给 Host；满则排队（FIFO）。
    * 同一 Run 重复提交拒绝（内存去重；DB 状态冲突由 Host 的
    * startWithSnapshot CAS 兜底）。
