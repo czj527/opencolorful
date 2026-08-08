@@ -166,8 +166,10 @@ describe("pi-session-adapter", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(started).toBe(false);
 
-    // followUp → 新一轮 prompt → 再次 terminal
-    session.followUp("补充：需要写测试");
+    // followUp → 新一轮 prompt → 再次 terminal（P0-1：真实投递——idle 会话
+    // 经 prompt+streamingBehavior 触发新轮；补一条响应模拟 provider 继续应答）
+    faux.appendResponses([fauxAssistantMessage("第二轮完成")]);
+    expect(session.followUp("补充：需要写测试")).toBe("applied");
     const secondTerminalDeadline = Date.now() + 10000;
     while (events.filter((event) => event.type === "terminal").length < 2 && Date.now() < secondTerminalDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -303,5 +305,32 @@ describe("pi-session-adapter", () => {
     expect(events.some((event) => event.type === "terminal" && event.reason === "interrupted")).toBe(true);
     expect(started).toBe(true); // abort = 会话终结
     session.dispose();
+  });
+
+  it("复审 P0-1：未就绪 → deferred、已终结 → failed（投递结果三态，不静默丢消息）", async () => {
+    const { dir, database } = createContext();
+    createThread(database);
+    const { faux, runtime } = await createModelRuntime(dir);
+    const factory = createPiSubagentSessionFactory({
+      threadStore: new ThreadStore(database),
+      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      authPath: path.join(dir, "auth.json"),
+      threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
+    });
+    const session = await factory.create({
+      threadId: THREAD_ID,
+      ownerAgentId: OWNERSHIP.ownerAgentId,
+      parentSessionId: OWNERSHIP.parentSessionId,
+      runId: RUN_ID,
+      sessionDir: path.join(dir, "session"),
+      workspaceCwd: "/tmp",
+    });
+    // 未 start（handle 未创建）：deferred——调用方（Dispatcher）延迟重试，不丢
+    expect(session.steer("早到的纠偏")).toBe("deferred");
+    expect(session.followUp("早到的 queue")).toBe("deferred");
+    // 已终结：failed——调用方按终态迟到结算
+    session.dispose();
+    expect(session.steer("迟到的纠偏")).toBe("failed");
+    expect(session.followUp("迟到的 queue")).toBe("failed");
   });
 });

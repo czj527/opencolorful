@@ -81,7 +81,7 @@ class FakeRuntimePort implements SubagentRuntimeDispatchPort {
   deliverParentMessage(
     input: { runId: SubagentRunId; messageType: "steer" | "cancel"; deliveryMode: "queue" | "interrupt" | "immediate" | "mailbox"; instruction: string | null },
     _ownership: SubagentOwnership,
-  ): "applied" | "not-active" {
+  ): "applied" | "deferred" | "not-active" {
     this.delivered.push(input);
     return this.notActive ? "not-active" : "applied";
   }

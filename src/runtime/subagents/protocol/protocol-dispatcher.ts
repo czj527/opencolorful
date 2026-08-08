@@ -32,7 +32,8 @@ import type { SubagentOwnership } from "../stores/types.js";
 // - task：Run 存在即视为由 Run 消费（T4 Host 启动时渲染 trigger 消息）；
 // - steer：queue → followUp；interrupt → steer；answer_input → resumeFromInput
 //   （§13.4）；active Run 由 Host 应用，queued/starting 延迟到激活后按
-//   sequence 应用（deferred + 短退避重试）；
+//   sequence 应用（deferred + 短退避重试）；P0-1：Host 返回 deferred（Session
+//   未就绪）同样走退避重试——消息保持 delivering，绝不静默丢弃/误标 delivered；
 // - cancel：active Run 交给 Host.cancelRun（→ cancelled 终态事务）；queued
 //   Run 直接终态化（§16.4 #5 取消终态 + terminal message + mailbox），并从
 //   Scheduler 排队队列移除；终态 Run 的消息迟到结算为 delivered（无副作用）；
@@ -53,7 +54,7 @@ export interface SubagentRuntimeDispatchPort {
       readonly instruction: string | null;
     },
     ownership: SubagentOwnership,
-  ): "applied" | "not-active";
+  ): "applied" | "deferred" | "not-active";
   resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership): boolean;
 }
 
@@ -64,7 +65,7 @@ export class RuntimeHostDispatchPort implements SubagentRuntimeDispatchPort {
     readonly messageType: "steer" | "cancel";
     readonly deliveryMode: SubagentDeliveryMode;
     readonly instruction: string | null;
-  }, ownership: SubagentOwnership): "applied" | "not-active"; resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): boolean }) {}
+  }, ownership: SubagentOwnership): "applied" | "deferred" | "not-active"; resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): boolean }) {}
 
   deliverParentMessage(
     input: {
@@ -74,7 +75,7 @@ export class RuntimeHostDispatchPort implements SubagentRuntimeDispatchPort {
       readonly instruction: string | null;
     },
     ownership: SubagentOwnership,
-  ): "applied" | "not-active" {
+  ): "applied" | "deferred" | "not-active" {
     return this.host.deliverParentMessage(input, ownership);
   }
 

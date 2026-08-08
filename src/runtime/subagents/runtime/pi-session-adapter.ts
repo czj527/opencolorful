@@ -14,6 +14,7 @@ import type { ThreadStore } from "../stores/thread-store.js";
 import { isSubagentInternalToolName } from "./internal-tools.js";
 import { getSubagentAbilityExecutor } from "../../../pi-sdk/subagent-tools-context.js";
 import type {
+  SubagentMessageDelivery,
   SubagentSessionEvent,
   SubagentSessionFactory,
   SubagentSessionPort,
@@ -33,6 +34,9 @@ import type {
 // - 事件映射：PiAgentEvent → SubagentSessionEvent（first-event / tool-call /
 //   model-iteration(message_end assistant) / token-usage(turn_end usage) /
 //   terminal(prompt resolve) / error(prompt reject)）；
+// - 纠偏（复审 P0-1）：followUp/steer 真实转发 PI followUp/steer（流式期间
+//   PI 内部排队插队，不是 prompt 追加）；会话未就绪 → deferred（调用方重试），
+//   已终结 → failed，绝不静默丢消息；
 // - 内部控制工具（§13.3）：invoke 经 tool-invoke 事件交给 RuntimeHost 处理
 //   （resolve 回调桥接）；能力工具由宿主注入的 abilityExecutor 执行；
 // - start promise 在会话终结（dispose/abort）时 resolve——T4 契约：
@@ -161,14 +165,24 @@ class PiSubagentSession implements SubagentSessionPort {
     });
   }
 
-  /** queue 纠偏（§13.4：queue → PI prompt 追加；本轮结束后应用） */
-  followUp(message: string): void {
-    void this.promptMessage(message);
+  /**
+   * queue 纠偏（§13.4 / 复审 P0-1）：真实转发 PI followUp——模型循环流式
+   * 期间由 PI 排队到 agent 结束后投递；非流式立即作为下一条用户消息。
+   * 会话未就绪（未创建 handle / 无首事件）→ deferred（调用方延迟重试，
+   * 不静默丢消息）；已终结 → failed。
+   */
+  followUp(message: string): SubagentMessageDelivery {
+    return this.deliver("followUp", message);
   }
 
-  /** interrupt 纠偏（§13.4：interrupt → PI prompt；PI 无独立 steer API） */
-  steer(message: string): void {
-    void this.promptMessage(message);
+  /**
+   * interrupt 纠偏（§13.4 / 复审 P0-1）：真实转发 PI steer——流式期间中断
+   * 插队（当前 turn 的 tool call 执行完后、下次 LLM 调用前投递）；非流式
+   * 立即作为下一条用户消息。不再退化为 prompt()（流式时缺少
+   * streamingBehavior 会抛错，且语义是"追加新轮"而非"纠偏插队"）。
+   */
+  steer(message: string): SubagentMessageDelivery {
+    return this.deliver("steer", message);
   }
 
   abort(): void {
@@ -203,24 +217,55 @@ class PiSubagentSession implements SubagentSessionPort {
 
   // ── 内部 ──────────────────────────────────────────────────────
 
-  /** 后续消息（followUp/steer/answer）：本轮结束后应用（§13.4 one-at-a-time） */
-  private promptMessage(message: string): void {
-    if (this.handle === null || this.disposed || this.firstEventSent === false) {
-      return; // 会话未启动/已终结：消息丢弃（Host 侧由终态检查兜底）
+  /**
+   * 真实投递（P0-1）：prompt + streamingBehavior——与 PI 的 sendUserMessage
+   * 等价（PI AgentSession 的官方投递路径）：
+   * - 流式执行中（isStreaming）：按 streamingBehavior 走真实 steer（中断插队，
+   *   当前 turn 的 tool call 执行完后、下次 LLM 调用前投递）或 followUp
+   *   （无更多 tool call/steer 后投递）队列——不再是"下一轮模拟"，也不再有
+   *   "流式缺 streamingBehavior 抛错"；prompt 在入队后立即 resolve，terminal
+   *   由 in-flight run 的 promise 在队列耗尽后统一发出（此处不重复发）；
+   * - 非流式（idle）：立即作为新用户消息触发新轮（steer/followUp 在 idle 时
+   *   只排队不触发，不能直接用），该轮结束 → terminal 事件；
+   * 会话未就绪（handle 未创建/无首事件）→ deferred（调用方延迟重试，不丢）；
+   * 已终结 → failed。
+   */
+  private deliver(kind: "steer" | "followUp", message: string): SubagentMessageDelivery {
+    if (this.disposed || this.terminated) {
+      return "failed"; // 会话已终结：调用方按终态结算
     }
-    const promptPromise = this.handle.prompt(message);
-    void promptPromise.then(
-      () => {
-        if (!this.disposed) {
-          this.emit({ type: "terminal", reason: "completed" });
-        }
-      },
-      (error: unknown) => {
-        if (!this.disposed) {
-          this.emit({ type: "error", message: error instanceof Error ? error.message.slice(0, 300) : "unknown" });
-        }
-      },
-    );
+    if (this.handle === null || !this.firstEventSent) {
+      return "deferred"; // 未就绪：消息不丢弃，调用方（Dispatcher）退避重试
+    }
+    try {
+      const promise = this.handle.prompt(message, { streamingBehavior: kind });
+      if (this.handle.isStreaming) {
+        // 流式：消息已入队（真实 steer/followUp 队列）；本轮 run 结束由
+        // 其自身 promise 发 terminal
+        void promise.catch((error: unknown) => {
+          if (!this.disposed) {
+            this.emit({ type: "error", message: `steer/followUp 投递失败：${error instanceof Error ? error.message.slice(0, 300) : "unknown"}` });
+          }
+        });
+      } else {
+        // idle：本轮结束 → terminal
+        void promise.then(
+          () => {
+            if (!this.disposed) {
+              this.emit({ type: "terminal", reason: "completed" });
+            }
+          },
+          (error: unknown) => {
+            if (!this.disposed) {
+              this.emit({ type: "error", message: error instanceof Error ? error.message.slice(0, 300) : "unknown" });
+            }
+          },
+        );
+      }
+      return "applied";
+    } catch {
+      return "failed";
+    }
   }
 
   /** SubagentSessionToolDef → PI customTool（PluginSessionTool 形状） */

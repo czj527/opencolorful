@@ -205,7 +205,22 @@ export type PiAgentEvent =
 export interface PiAgentSessionHandle {
   readonly sessionId: string;
   subscribe(listener: (event: PiAgentEvent) => void): () => void;
-  prompt(text: string): Promise<void>;
+  /**
+   * 启动一轮模型循环。流式执行期间必须传 streamingBehavior（PI 契约：
+   * 缺少时抛错）——纠偏一律走 steer/followUp，不用 prompt 追加。
+   */
+  prompt(text: string, options?: { readonly streamingBehavior?: "steer" | "followUp" }): Promise<void>;
+  /**
+   * Phase 14 复审 P0-1：透出底层 AgentSession 的真实纠偏 API（§13.4
+   * queue/interrupt 必须真实接入 PI followUp/steer，不是 prompt 模拟）：
+   * - steer：流式期间中断插队（当前 assistant turn 的 tool call 执行完后、
+   *   下一次 LLM 调用前投递）；非流式立即作为下一条用户消息；
+   * - followUp：排队到 agent 结束（无更多 tool call 与 steer 消息）后投递。
+   */
+  steer(text: string): Promise<void>;
+  followUp(text: string): Promise<void>;
+  /** 是否正在处理 agent run（P0-1：投递时区分"流式排队"与"idle 新轮"） */
+  readonly isStreaming: boolean;
   abort(): Promise<void>;
   compact(): Promise<void>;
   getUsageStats(): PiSessionUsageStats | undefined;

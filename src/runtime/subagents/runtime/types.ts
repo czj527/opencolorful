@@ -47,14 +47,22 @@ export interface SubagentSessionStartInput {
   readonly thinkingLevel?: string;
 }
 
+/** 纠偏/消息投递结果（P0-1 复审：不能静默丢消息，未就绪必须显式 deferred） */
+export type SubagentMessageDelivery = "applied" | "deferred" | "failed";
+
 /** Subagent 会话端口（宿主适配 PI AgentSession 实现） */
 export interface SubagentSessionPort {
   readonly sessionId: string;
   start(input: SubagentSessionStartInput): Promise<void>;
-  /** queue 纠偏 → PI followUp */
-  followUp(message: string): void;
-  /** interrupt 纠偏 → PI steer */
-  steer(message: string): void;
+  /**
+   * queue 纠偏 → PI followUp（P0-1：真实转发，不是 prompt 模拟）。
+   * - applied：消息已进入会话队列；
+   * - deferred：会话未就绪（未启动/无首事件）——调用方必须延迟重试，不得丢弃；
+   * - failed：会话已终结——调用方按终态结算（迟到的消息不再应用）。
+   */
+  followUp(message: string): SubagentMessageDelivery;
+  /** interrupt 纠偏 → PI steer（P0-1：真实转发） */
+  steer(message: string): SubagentMessageDelivery;
   abort(): void;
   dispose(): void;
   /** 订阅事件流；返回退订函数（重复订阅去重） */

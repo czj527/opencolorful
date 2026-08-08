@@ -567,11 +567,26 @@ export async function createPiFauxAgentSession(
         if (mapped) listener(mapped);
       });
     },
-    prompt(text) {
+    prompt(text, options) {
       if (sandboxCtx) {
-        return runWithSandboxContext(sandboxCtx, () => session.prompt(text));
+        return runWithSandboxContext(sandboxCtx, () => session.prompt(text, options));
       }
-      return session.prompt(text);
+      return session.prompt(text, options);
+    },
+    steer(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.steer(text));
+      }
+      return session.steer(text);
+    },
+    followUp(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.followUp(text));
+      }
+      return session.followUp(text);
+    },
+    get isStreaming(): boolean {
+      return session.isStreaming;
     },
     abort() {
       return session.abort();
@@ -712,11 +727,26 @@ export async function createPiAgentSession(
         if (mapped) listener(mapped);
       });
     },
-    prompt(text) {
+    prompt(text, options) {
       if (sandboxCtx) {
-        return runWithSandboxContext(sandboxCtx, () => session.prompt(text));
+        return runWithSandboxContext(sandboxCtx, () => session.prompt(text, options));
       }
-      return session.prompt(text);
+      return session.prompt(text, options);
+    },
+    steer(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.steer(text));
+      }
+      return session.steer(text);
+    },
+    followUp(text) {
+      if (sandboxCtx) {
+        return runWithSandboxContext(sandboxCtx, () => session.followUp(text));
+      }
+      return session.followUp(text);
+    },
+    get isStreaming(): boolean {
+      return session.isStreaming;
     },
     abort() {
       return session.abort();

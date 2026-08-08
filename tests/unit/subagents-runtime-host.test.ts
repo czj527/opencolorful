@@ -113,12 +113,14 @@ class FauxSessionPort implements SubagentSessionPort {
     });
   }
 
-  followUp(message: string): void {
+  followUp(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.followUpMessages.push(message);
+    return "applied";
   }
 
-  steer(message: string): void {
+  steer(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
     this.steerMessages.push(message);
+    return "applied";
   }
 
   abort(): void {
