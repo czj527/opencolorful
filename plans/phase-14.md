@@ -2681,3 +2681,19 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 **T12 后最终验收结论**：两轮复审共 12 项指控全部闭环（T11 六项 + T12 六项）；快照不可变、纠偏不丢失、审计链完整；全量质量门绿；**允许合并 `main`**。合并前建议按仓库惯例做一次 PR 级 review（工作树已清理，无未提交改动）。
 
 **合并建议**：`phase-14-subagent-runtime` → `main`（合并前建议按仓库惯例做一次 PR 级 review；工作树已清理，无未提交改动）。
+
+### T13: Final delivery and audit lifecycle fixes (2026-08-08)
+
+**Fixes**:
+
+- `answer_input` now rolls `running` back to `waiting_for_input` when PI rejects or defers delivery; rollback failure terminates the Run instead of leaving a false active state.
+- Spawn audit events always carry the stable lifecycle operation id `subagent-spawn-<runId>`, so pending replay is idempotent across crashes.
+- Spawn results now report `completed_with_audit_pending` or `completed_with_audit_failure` instead of presenting incomplete audit evidence as `ok`.
+
+**Focused verification (full suite intentionally skipped at user request)**:
+
+- `npx tsc --noEmit -p tsconfig.json` passed.
+- `npx vitest run tests/unit/subagents-runtime-host.test.ts tests/unit/subagents-protocol-dispatcher.test.ts tests/unit/subagents-security-regression.test.ts`: 58/58 passed.
+- `git diff --check` passed.
+
+**Conclusion**: the final blocking delivery-state defect and audit lifecycle gaps are closed; Phase 14 remains approved for fast-forward merge into `main`.

@@ -1022,14 +1022,15 @@ describe("T9b-4 audit fail-closed", () => {
     const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
     expect(out.kind).toBe("ok");
     const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
-    expect(value.status).toBe("ok");
+    expect(value.status).toBe("completed_with_audit_pending");
     // spawn 如实返回审计落点（不掩盖 pending）
     expect(value.auditStatus).toBe("audit_pending");
     const runId = value.runId as SubagentRunId;
     const run = h.stores.runs.get(runId, ownership());
     expect(run).not.toBeNull();
-    const pending = JSON.parse(run?.auditPendingJson ?? "[]") as Array<{ eventName?: string; pendingChannel?: string }>;
+    const pending = JSON.parse(run?.auditPendingJson ?? "[]") as Array<{ eventName?: string; pendingChannel?: string; trace?: { operationId?: string } }>;
     expect(pending.some((entry) => entry.eventName === "audit.subagent.spawn_completed" && entry.pendingChannel === "audit")).toBe(true);
+    expect(pending[0]?.trace?.operationId).toBe(`subagent-spawn-${runId}`);
 
     // 恢复器重放：audit 通道记录经 AuditRecorder.appendStrict 补回 Audit Ledger
     const recovery = new SubagentStartupRecovery({
@@ -1048,11 +1049,19 @@ describe("T9b-4 audit fail-closed", () => {
     expect(report.auditPendingReplayed).toBe(1);
     // AuditRecorder.appendStrict 会写 ledger 行 + auditMirror 行（event_id 前缀
     // "mirror:"）；断言 ledger 行存在（补账成功），pending 已清空
-    const rows = h.db.prepare("SELECT event_id, event_name FROM audit_events WHERE event_name = 'audit.subagent.spawn_completed'").all() as Array<{ event_id: string; event_name: string }>;
+    const rows = h.db.prepare("SELECT event_id, event_name, operation_id FROM audit_events WHERE event_name = 'audit.subagent.spawn_completed'").all() as Array<{ event_id: string; event_name: string; operation_id: string | null }>;
     const ledgerRows = rows.filter((row) => !row.event_id.startsWith("mirror:"));
     expect(ledgerRows.length).toBe(1);
+    expect(ledgerRows[0]?.operation_id).toBe(`subagent-spawn-${runId}`);
     const runAfter = h.stores.runs.get(runId, ownership());
     expect(runAfter?.auditPendingJson).toBeNull();
+
+    h.stores.runs.appendAuditPending(runId, ownership(), pending[0]);
+    const replayAgain = recovery.run();
+    expect(replayAgain.errors).toHaveLength(0);
+    const rowsAfterReplay = h.db.prepare("SELECT event_id FROM audit_events WHERE event_name = 'audit.subagent.spawn_completed'").all() as Array<{ event_id: string }>;
+    expect(rowsAfterReplay.filter((row) => !row.event_id.startsWith("mirror:"))).toHaveLength(1);
+    expect(h.stores.runs.get(runId, ownership())?.auditPendingJson).toBeNull();
   });
 
   it("复审 P1-1：spawn_completed 审计失败 → 证据转入 run.audit_pending_json（启动恢复补账）", async () => {
@@ -1060,7 +1069,7 @@ describe("T9b-4 audit fail-closed", () => {
     const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
     expect(out.kind).toBe("ok");
     const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
-    expect(value.status).toBe("ok");
+    expect(value.status).toBe("completed_with_audit_pending");
     const runId = value.runId as SubagentRunId;
     const run = h.stores.runs.get(runId, ownership());
     expect(run).not.toBeNull();
@@ -1076,10 +1085,23 @@ describe("T9b-4 audit fail-closed", () => {
     expect(out.kind).toBe("ok");
     const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
     expect(value.status).toBe("ok");
-    const rows = h.db.prepare("SELECT event_name FROM audit_events WHERE event_name LIKE 'audit.subagent.spawn_%'").all() as Array<{ event_name: string }>;
+    const rows = h.db.prepare("SELECT event_id, event_name, operation_id FROM audit_events WHERE event_name LIKE 'audit.subagent.spawn_%'").all() as Array<{ event_id: string; event_name: string; operation_id: string | null }>;
     const names = rows.map((row) => row.event_name).sort();
     expect(names).toContain("audit.subagent.spawn_started");
     expect(names).toContain("audit.subagent.spawn_completed");
+    const runId = value.runId as SubagentRunId;
+    expect(rows.filter((row) => !row.event_id.startsWith("mirror:")).every((row) => row.operation_id === `subagent-spawn-${runId}`)).toBe(true);
+  });
+
+  it("does not report ok when terminal audit and pending persistence both fail", async () => {
+    const h = createToolHarness({ auditMode: "terminal-throw" });
+    vi.spyOn(h.stores.runs, "appendAuditPending").mockImplementation(() => {
+      throw new Error("pending store unavailable");
+    });
+    const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+    const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
+    expect(value.status).toBe("completed_with_audit_failure");
+    expect(value.auditStatus).toBe("audit_failed");
   });
 
   it("cancel/close 在 Recorder 故障（审计抛错）时仍停止 Runtime（fail-safe-to-stop）", async () => {

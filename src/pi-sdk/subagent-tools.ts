@@ -440,8 +440,9 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   //     Thread 已合法创建，审计证据转入 run.audit_pending_json 由启动恢复按
   //     通道补账；结果如实返回主 Agent，不掩盖 auditPending）
   const auditStatus = terminalAuditOrPending(ctx, threadId, runId, "audit.subagent.spawn_completed");
+  const publicAuditStatus = auditStatus === "recorded" ? "recorded" : auditStatus === "pending" ? "audit_pending" : "audit_failed";
 
-  return okResult({
+  return textResult(JSON.stringify({
     threadId,
     runId,
     model: { providerId: model.providerId, modelId: model.modelId, source: model.source },
@@ -451,8 +452,13 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     // 复审 P1-1：terminal 审计落点——"recorded" 已入 Audit Ledger；
     // "audit_pending" 已缓冲到 run.audit_pending_json（启动恢复补账）；
     // "audit_failed" 双故障（started 记录仍在，证据可能缺失）
-    auditStatus: auditStatus === "recorded" ? "recorded" : auditStatus === "pending" ? "audit_pending" : "audit_failed",
-  });
+    auditStatus: publicAuditStatus,
+    status: auditStatus === "recorded"
+      ? "ok"
+      : auditStatus === "pending"
+        ? "completed_with_audit_pending"
+        : "completed_with_audit_failure",
+  }));
 }
 
 // ── spawn 审计 helpers（§19.3：目录事件名 + assertDurableAudit 语义）──
@@ -596,6 +602,7 @@ function spawnAuditInput(
   runId: SubagentRunId,
   eventName: string,
 ): import("../observability/audit-recorder.js").AuditRecordInput {
+  const inheritedTrace = ctx.traceSlot.current;
   return {
     eventName,
     payload: { action: "spawn_subagent", decision: "allowed", policyVersion: "subagents.v1" },
@@ -609,7 +616,14 @@ function spawnAuditInput(
       subagentThreadId: threadId,
       subagentRunId: runId,
     },
-    ...(ctx.traceSlot.current !== undefined ? { trace: ctx.traceSlot.current } : {}),
+    trace: inheritedTrace !== undefined
+      ? { ...inheritedTrace, operationId: `subagent-spawn-${runId}` }
+      : {
+          traceId: `trace-${runId}`,
+          spanId: `span-spawn-${runId}`,
+          operationId: `subagent-spawn-${runId}`,
+          linkedTraceIds: [],
+        },
   };
 }
 

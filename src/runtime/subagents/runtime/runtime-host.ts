@@ -171,6 +171,16 @@ export class SubagentRuntimeHost {
     // 就绪且有过首事件——deferred 理论不可达；防御：非 applied 返回 false 重试）
     const outcome = active.session === null ? undefined : await active.session.steer(answerText);
     if (outcome === undefined || outcome === "deferred" || outcome === "failed") {
+      // Restore the waiting state so the dispatcher can retry an unaccepted answer.
+      // If rollback fails, terminate instead of leaving a false running state.
+      try {
+        const rollbackAt = new Date(this.now()).toISOString();
+        this.deps.runs.transit({ runId, from: "running", to: "waiting_for_input", reasonCode: null, now: rollbackAt }, ownership);
+        active.waitingForInput = true;
+        this.pauseIdleTimer(active);
+      } catch (error) {
+        await this.terminal(runId, active.threadId, ownership, "failed", "subagent_operation_failed", null, error, "running");
+      }
       return false;
     }
     return true;

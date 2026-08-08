@@ -97,6 +97,7 @@ class FauxSessionPort implements SubagentSessionPort {
   startInput: SubagentSessionStartInput | null = null;
   readonly followUpMessages: string[] = [];
   readonly steerMessages: string[] = [];
+  readonly steerOutcomes: Array<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> = [];
   aborted = false;
   disposed = false;
   private readonly listeners = new Set<(event: SubagentSessionEvent) => void>();
@@ -120,7 +121,7 @@ class FauxSessionPort implements SubagentSessionPort {
 
   steer(message: string): Promise<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> {
     this.steerMessages.push(message);
-    return Promise.resolve("applied");
+    return Promise.resolve(this.steerOutcomes.shift() ?? "applied");
   }
 
   abort(): void {
@@ -442,12 +443,38 @@ describe("SubagentRuntimeHost：内部控制工具", () => {
     expect(h.terminals).toHaveLength(0);
 
     // 父回答恢复（waiting_for_input → running）后提交结果（succeeded 恢复路径）
-    h.host.resumeFromInput(RUN_ID, "否，不需要写 Lease", ownership(), new Date(Date.now() + 1000).toISOString());
+    await h.host.resumeFromInput(RUN_ID, "否，不需要写 Lease", ownership(), new Date(Date.now() + 1000).toISOString());
     await waitUntil(() => h.runs.get(RUN_ID, ownership())?.status === "running");
     const result = await session.invokeTool(REPORT_SUBAGENT_RESULT_TOOL, resultArgs());
     expect(result.ok).toBe(true);
     await waitUntil(() => h.terminals.length > 0);
     expect(h.terminals[0]?.status).toBe("succeeded");
+    session.finish();
+  });
+
+  it("answer_input rolls back to waiting_for_input when delivery fails and remains retryable", async () => {
+    const h = createHarness();
+    h.submit({});
+    h.scheduler.submit(executeInput());
+    const session = await waitForSession(h.factory);
+
+    const request = await session.invokeTool(REQUEST_PARENT_INPUT_TOOL, {
+      question: "Continue?",
+      reason: "Parent decision required",
+      expectedAnswerType: "choice",
+      choices: ["continue", "stop"],
+    });
+    expect(request.ok).toBe(true);
+    await waitUntil(() => h.runs.get(RUN_ID, ownership())?.status === "waiting_for_input");
+
+    session.steerOutcomes.push("failed");
+    await expect(h.host.resumeFromInput(RUN_ID, "continue", ownership(), new Date().toISOString())).resolves.toBe(false);
+    expect(h.runs.get(RUN_ID, ownership())?.status).toBe("waiting_for_input");
+
+    session.steerOutcomes.push("applied");
+    await expect(h.host.resumeFromInput(RUN_ID, "continue", ownership(), new Date().toISOString())).resolves.toBe(true);
+    expect(h.runs.get(RUN_ID, ownership())?.status).toBe("running");
+    expect(session.steerMessages).toEqual(["continue", "continue"]);
     session.finish();
   });
 });
