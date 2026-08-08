@@ -624,6 +624,74 @@ describe("P1-7：无 Agent Session 与 Session 临时绑定", () => {
 
 // ── P0-2：read 工具 Skill 受控读取路由 ─────────────────────────
 
+describe("Phase 14 复审 P0-3（第二轮）：Run 专属 Skill 快照（自包含不可变）", () => {
+  it("capture 后父换 turn 不影响 Run 快照读取（自包含、不依赖父当前槽）", async () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "run-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "run-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+
+    // spawn 点捕获（turn-9 冻结集）
+    const captured = harness.core.captureRunSkillSnapshot({ sessionId: "session-9", turnId: "turn-9" });
+    expect(captured.ok).toBe(true);
+    if (!captured.ok) return;
+    expect(captured.snapshot.entries.some((entry) => skillRefKey(entry.ref) === skillRefKey(ref))).toBe(true);
+
+    // 父 Session 进入新 Turn（快照槽被替换——模拟父继续工作）
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-10" });
+
+    // Run 专属快照读取不受影响（不再有 skill_snapshot_turn_changed denied）
+    const main = await harness.core.readSkillFileForRunSnapshot({ snapshot: captured.snapshot, absPath: path.join(dir, "SKILL.md") });
+    expect(main.status).toBe("ok");
+    if (main.status === "ok") {
+      expect(main.body).toContain("这是 Skill 正文。");
+      expect(main.relativePath).toBe("SKILL.md");
+    }
+    const body = await harness.core.readSkillBodyForRunSnapshot({ snapshot: captured.snapshot, skillRef: ref, relativePath: "SKILL.md" });
+    expect(body.status).toBe("ok");
+    if (body.status === "ok") expect(body.body).toContain("这是 Skill 正文。");
+  });
+
+  it("快照外 skillRef → denied；快照外路径 → not-a-skill-file（fail-closed 不回退裸读）", async () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "run-skill2", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "run-skill2", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    const captured = harness.core.captureRunSkillSnapshot({ sessionId: "session-9", turnId: "turn-9" });
+    expect(captured.ok).toBe(true);
+    if (!captured.ok) return;
+
+    // 另一个 Skill（未绑定 → 不在快照）→ denied
+    const otherDir = harness.makePackage("c-src", { name: "other-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(otherDir), { name: "other-skill", version: "1.0.0" });
+    const otherRef = skillRefOf(harness, otherDir);
+    const denied = await harness.core.readSkillBodyForRunSnapshot({ snapshot: captured.snapshot, skillRef: otherRef, relativePath: "SKILL.md" });
+    expect(denied.status).toBe("denied");
+
+    // 快照根外路径 → not-a-skill-file（回退普通沙箱读取）
+    const outside = path.join(harness.home, "outside.txt");
+    fs.writeFileSync(outside, "plain", "utf8");
+    const outsideResult = await harness.core.readSkillFileForRunSnapshot({ snapshot: captured.snapshot, absPath: outside });
+    expect(outsideResult.status).toBe("not-a-skill-file");
+  });
+
+  it("capture：turnId 与当前冻结不一致 → fail-closed {ok:false}（不委派漂移集）", () => {
+    const harness = setup();
+    const dir = harness.makePackage("b-src", { name: "cap-skill", version: "1.0.0" });
+    ingestManagedSkill(harness, path.dirname(dir), { name: "cap-skill", version: "1.0.0" });
+    const ref = skillRefOf(harness, dir);
+    harness.sessionService.bindTemporary({ sessionId: "session-9", skillRef: ref });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-9" });
+    harness.core.buildPiSkillsForTurn({ agentId: "", sessionId: "session-9", turnId: "turn-10" });
+    const captured = harness.core.captureRunSkillSnapshot({ sessionId: "session-9", turnId: "turn-9" });
+    expect(captured.ok).toBe(false);
+  });
+});
+
 describe("P0-2：readSkillFileForSession 三态路由", () => {
   it("命中可见 Skill 根 → ok（正文 + skillRefKey）；支持文件同样受控", async () => {
     const harness = setup();

@@ -126,6 +126,12 @@ export interface BuildSubagentRunToolExecutorInput {
   readonly toolPolicy?: ToolPolicy;
   /** Phase 13 Skill 受控读取（SkillCoreService；缺省 → Skill 工具不可用 fail-closed） */
   readonly skillCore?: SkillCoreService;
+  /**
+   * 复审 P0-3（第二轮）：Run 专属 Skill 快照（spawn 时一次性捕获，自包含不可变）。
+   * 提供后正文/受控读取一律基于该快照——父 Session 换 turn 不影响活动 Run；
+   * 缺省（无 Skill 系统/捕获失败）→ 回退旧 turn 门路径。
+   */
+  readonly runSkillSnapshot?: import("../../runtime/skills/core/skill-core-service.js").SubagentRunSkillSnapshot;
   /** 读文件大小上限（字节，缺省 256KB；超出截断并标记） */
   readonly maxReadBytes?: number;
 }
@@ -143,7 +149,12 @@ export type SubagentRunToolExecutor = (input: {
  * - Skill 工具 → 只暴露 run 冻结快照内的 Skill，正文经 SkillCoreService 受控读取。
  */
 export function buildSubagentRunToolExecutor(input: BuildSubagentRunToolExecutorInput): SubagentRunToolExecutor {
-  const { workspaceCwd, ownerAgentId, sessionId, runId, snapshot, spawnTurnId, frozenPlugins } = input;
+  const { workspaceCwd, ownerAgentId, sessionId, runId, snapshot, spawnTurnId } = input;
+  // 复审 P0-1（第二轮）纵深防御：执行器创建点复制并冻结插件快照 Map——
+  // 即使调用方误传 Session 级共享缓存，本执行器也只读取创建时内容（后续
+  // clear/refill 不影响活动 Run；readonly 约束由 Object.freeze 强制）
+  const frozenPlugins: ReadonlyMap<string, SubagentFrozenPluginContribution> =
+    Object.freeze(new Map(input.frozenPlugins));
   const skillRefKeys = new Set(snapshot.skills.map((entry) => skillRefKey(entry.ref)));
 
   return async (call): Promise<SubagentToolInvokeResult> => {
@@ -262,14 +273,20 @@ async function executeSkillTool(
     status: view.status,
   };
   if (args.readBody === true) {
-    // SKILL.md 正文经 SkillCoreService 受控读取（run 冻结快照成员 + 哈希 +
-    // 预算校验；父 Session 换 turn 后 denied，fail-closed 不回退裸读）
-    const outcome = await skillCore.readSkillBodyForSubagentRun({
-      sessionId: input.sessionId,
-      spawnTurnId: input.spawnTurnId,
-      skillRef: ref,
-      relativePath: "SKILL.md",
-    });
+    // SKILL.md 正文经 SkillCoreService 受控读取（run 专属快照成员 + 哈希 +
+    // 预算校验；父 Session 换 turn 不影响 Run 快照，fail-closed 不回退裸读）
+    const outcome = input.runSkillSnapshot !== undefined
+      ? await skillCore.readSkillBodyForRunSnapshot({
+          snapshot: input.runSkillSnapshot,
+          skillRef: ref,
+          relativePath: "SKILL.md",
+        })
+      : await skillCore.readSkillBodyForSubagentRun({
+          sessionId: input.sessionId,
+          spawnTurnId: input.spawnTurnId,
+          skillRef: ref,
+          relativePath: "SKILL.md",
+        });
     if (outcome.status === "ok") {
       output.body = outcome.body;
       output.truncated = outcome.truncated;
@@ -297,13 +314,19 @@ async function executeFileTool(
 
   try {
     if (call.name === "read") {
-      // Skill 文件优先走受控读取（P0-3：哈希/预算/审计；denied 不回退裸读）
+      // Skill 文件优先走受控读取（P0-3 + 复审 P0-3：Run 专属快照成员/哈希/
+      // 预算/审计；denied 不回退裸读；父换 turn 不影响 Run 快照）
       if (input.skillCore !== undefined && input.snapshot.skills.length > 0) {
-        const outcome: SkillFileReadOutcome = await input.skillCore.readSkillFileForSubagentRun({
-          sessionId: input.sessionId,
-          spawnTurnId: input.spawnTurnId,
-          absPath,
-        });
+        const outcome: SkillFileReadOutcome = input.runSkillSnapshot !== undefined
+          ? await input.skillCore.readSkillFileForRunSnapshot({
+              snapshot: input.runSkillSnapshot,
+              absPath,
+            })
+          : await input.skillCore.readSkillFileForSubagentRun({
+              sessionId: input.sessionId,
+              spawnTurnId: input.spawnTurnId,
+              absPath,
+            });
         if (outcome.status === "ok") {
           return { ok: true, text: outcome.body };
         }

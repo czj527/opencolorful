@@ -81,14 +81,14 @@ class FakeRuntimePort implements SubagentRuntimeDispatchPort {
   deliverParentMessage(
     input: { runId: SubagentRunId; messageType: "steer" | "cancel"; deliveryMode: "queue" | "interrupt" | "immediate" | "mailbox"; instruction: string | null },
     _ownership: SubagentOwnership,
-  ): "applied" | "deferred" | "not-active" {
+  ): Promise<"applied" | "deferred" | "not-active"> {
     this.delivered.push(input);
-    return this.notActive ? "not-active" : "applied";
+    return Promise.resolve(this.notActive ? "not-active" : "applied");
   }
 
-  resumeFromInput(runId: SubagentRunId, answerText: string, _ownership: SubagentOwnership): boolean {
+  resumeFromInput(runId: SubagentRunId, answerText: string, _ownership: SubagentOwnership): Promise<boolean> {
     this.resumeCalls.push({ runId, answerText });
-    return this.resumeOk;
+    return Promise.resolve(this.resumeOk);
   }
 }
 
@@ -244,10 +244,10 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
 }
 
 describe("ProtocolDispatcher：task 消息（store-first 记账）", () => {
-  it("task 消息 dispatch → delivered（Run 存在即视为由 Run 消费）", () => {
+  it("task 消息 dispatch → delivered（Run 存在即视为由 Run 消费）", async () => {
     const h = createHarness();
     const messageId = h.append(taskEnvelope());
-    const outcome = h.dispatcher.dispatch(messageId, OWNERSHIP);
+    const outcome = await h.dispatcher.dispatch(messageId, OWNERSHIP);
     expect(outcome.status).toBe("delivered");
     expect(h.messages.get(messageId, OWNERSHIP)?.deliveryStatus).toBe("delivered");
     expect(h.messages.get(messageId, OWNERSHIP)?.consumedAt).not.toBeNull();
@@ -255,86 +255,86 @@ describe("ProtocolDispatcher：task 消息（store-first 记账）", () => {
 });
 
 describe("ProtocolDispatcher：steer 投递（§13.4）", () => {
-  it("queue → followUp（Host deliverParentMessage，instruction 来自 SubagentSteerV1 data part）", () => {
+  it("queue → followUp（Host deliverParentMessage，instruction 来自 SubagentSteerV1 data part）", async () => {
     const h = createHarness();
     h.markRunning();
     const messageId = h.append(steerEnvelope(RUN_ID, "redirect", "queue"));
-    const outcome = h.dispatcher.dispatch(messageId, OWNERSHIP);
+    const outcome = await h.dispatcher.dispatch(messageId, OWNERSHIP);
     expect(outcome.status).toBe("delivered");
     expect(h.port.delivered).toHaveLength(1);
     expect(h.port.delivered[0]).toMatchObject({ runId: RUN_ID, messageType: "steer", deliveryMode: "queue", instruction: "请补充证据" });
   });
 
-  it("interrupt → steer", () => {
+  it("interrupt → steer", async () => {
     const h = createHarness();
     h.markRunning();
     const messageId = h.append(steerEnvelope(RUN_ID, "redirect", "interrupt"));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.delivered[0]?.deliveryMode).toBe("interrupt");
   });
 
-  it("answer_input → resumeFromInput（回答内容投递）", () => {
+  it("answer_input → resumeFromInput（回答内容投递）", async () => {
     const h = createHarness();
     h.markWaiting();
     const messageId = h.append(steerEnvelope(RUN_ID, "answer_input", "queue"));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.resumeCalls).toEqual([{ runId: RUN_ID, answerText: "请补充证据" }]);
   });
 
   it("steer 到 queued Run → deferred；激活后重试结算 delivered（不丢失）", async () => {
     const h = createHarness();
     const messageId = h.append(steerEnvelope(RUN_ID, "redirect", "queue"));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("deferred");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("deferred");
     expect(h.messages.get(messageId, OWNERSHIP)?.deliveryStatus).toBe("delivering");
     h.markRunning();
     await waitUntil(() => h.messages.get(messageId, OWNERSHIP)?.deliveryStatus === "delivered");
     expect(h.port.delivered).toHaveLength(1);
   });
 
-  it("steer data part 校验失败 → failed（不进入 Runtime，§8.3）；消息保留可诊断", () => {
+  it("steer data part 校验失败 → failed（不进入 Runtime，§8.3）；消息保留可诊断", async () => {
     const h = createHarness();
     h.markRunning();
     const envelope = steerEnvelope(RUN_ID, "redirect", "queue");
     const bad = { ...envelope, parts: [{ kind: "data" as const, schema: "subagent.steer.v1", value: { action: "bogus" } }] };
     const messageId = h.append(bad);
-    const outcome = h.dispatcher.dispatch(messageId, OWNERSHIP);
+    const outcome = await h.dispatcher.dispatch(messageId, OWNERSHIP);
     expect(outcome.status).toBe("failed");
     expect(h.port.delivered).toHaveLength(0);
     expect(h.messages.get(messageId, OWNERSHIP)?.deliveryStatus).toBe("failed");
   });
 
-  it("steer 到终态 Run → delivered（迟到消息无副作用）", () => {
+  it("steer 到终态 Run → delivered（迟到消息无副作用）", async () => {
     const h = createHarness();
     h.markTerminal();
     const messageId = h.append(steerEnvelope(RUN_ID, "redirect", "queue"));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.delivered).toHaveLength(0);
   });
 
-  it("text-only steer（无 data part）→ 文本按 queue 语义投递", () => {
+  it("text-only steer（无 data part）→ 文本按 queue 语义投递", async () => {
     const h = createHarness();
     h.markRunning();
     const envelope = steerEnvelope(RUN_ID, "redirect", "queue");
     const textOnly = { ...envelope, parts: [{ kind: "text" as const, text: "改为分析模式" }] };
     const messageId = h.append(textOnly);
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.delivered[0]?.instruction).toBe("改为分析模式");
   });
 });
 
 describe("ProtocolDispatcher：cancel 投递（§13.4 / §16.4 #5）", () => {
-  it("cancel 到 running Run → 交给 Host（deliverParentMessage cancel）→ delivered", () => {
+  it("cancel 到 running Run → 交给 Host（deliverParentMessage cancel）→ delivered", async () => {
     const h = createHarness();
     h.markRunning();
     const messageId = h.append(cancelEnvelope(RUN_ID));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.delivered).toEqual([{ runId: RUN_ID, messageType: "cancel", deliveryMode: "interrupt", instruction: null }]);
   });
 
-  it("cancel 到 queued Run → 直接终态化 cancelled + status message + mailbox，并移除 Scheduler 排队项", () => {
+  it("cancel 到 queued Run → 直接终态化 cancelled + status message + mailbox，并移除 Scheduler 排队项", async () => {
     const h = createHarness();
     const messageId = h.append(cancelEnvelope(RUN_ID));
-    const outcome = h.dispatcher.dispatch(messageId, OWNERSHIP);
+    const outcome = await h.dispatcher.dispatch(messageId, OWNERSHIP);
     expect(outcome.status).toBe("delivered");
     expect(h.runs.get(RUN_ID, OWNERSHIP)?.status).toBe("cancelled");
     expect(h.runs.get(RUN_ID, OWNERSHIP)?.reasonCode).toBe("subagent_cancelled_by_parent");
@@ -346,32 +346,32 @@ describe("ProtocolDispatcher：cancel 投递（§13.4 / §16.4 #5）", () => {
     expect(mailboxRows.some((row) => row.notificationKind === "cancelled" && row.triggerParentTurn === false)).toBe(true);
   });
 
-  it("cancel 到终态 Run → delivered（迟到结算）", () => {
+  it("cancel 到终态 Run → delivered（迟到结算）", async () => {
     const h = createHarness();
     h.markTerminal();
     const messageId = h.append(cancelEnvelope(RUN_ID));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
     expect(h.port.delivered).toHaveLength(0);
   });
 });
 
 describe("ProtocolDispatcher：幂等与重放（§25.2）", () => {
-  it("delivered 重放 → already-delivered，不重复执行副作用", () => {
+  it("delivered 重放 → already-delivered，不重复执行副作用", async () => {
     const h = createHarness();
     h.markRunning();
     const messageId = h.append(steerEnvelope(RUN_ID, "redirect", "queue"));
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("delivered");
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("already-delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("delivered");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("already-delivered");
     expect(h.port.delivered).toHaveLength(1);
   });
 
-  it("store-first：投递失败的消息保留在 Store（可重试，不删除）", () => {
+  it("store-first：投递失败的消息保留在 Store（可重试，不删除）", async () => {
     const h = createHarness();
     h.markRunning();
     const envelope = steerEnvelope(RUN_ID, "redirect", "queue");
     const bad = { ...envelope, parts: [{ kind: "data" as const, schema: "subagent.steer.v1", value: { action: "bogus" } }] };
     const messageId = h.append(bad);
-    expect(h.dispatcher.dispatch(messageId, OWNERSHIP).status).toBe("failed");
+    expect((await h.dispatcher.dispatch(messageId, OWNERSHIP)).status).toBe("failed");
     expect(h.messages.get(messageId, OWNERSHIP)).not.toBeNull();
   });
 
@@ -381,24 +381,24 @@ describe("ProtocolDispatcher：幂等与重放（§25.2）", () => {
     h.dispatcher.dispatch(messageId, OWNERSHIP); // deferred（queued）
     expect(h.messages.get(messageId, OWNERSHIP)?.deliveryStatus).toBe("delivering");
     h.markTerminal(); // 崩溃恢复后 Run 已是终态
-    const { retried } = h.dispatcher.retryPending();
+    const { retried } = await h.dispatcher.retryPending();
     expect(retried).toBeGreaterThan(0);
     expect(h.messages.get(messageId, OWNERSHIP)?.deliveryStatus).toBe("delivered");
   });
 });
 
 describe("extractSteerInstruction（§8.3 data part 校验）", () => {
-  it("合法 SubagentSteerV1 → 提取 action/instruction", () => {
+  it("合法 SubagentSteerV1 → 提取 action/instruction", async () => {
     const parsed = extractSteerInstruction(steerEnvelope(RUN_ID, "add_constraint", "interrupt").parts);
     expect(parsed).toEqual({ action: "add_constraint", instruction: "请补充证据", reason: "证据不足" });
   });
 
-  it("未知 schema data part + 文本 → 文本投递", () => {
+  it("未知 schema data part + 文本 → 文本投递", async () => {
     const parsed = extractSteerInstruction([{ kind: "text", text: "hello" }, { kind: "data", schema: "subagent.result.v1", value: {} }]);
     expect(parsed?.instruction).toBe("hello");
   });
 
-  it("无任何可解析内容 → null", () => {
+  it("无任何可解析内容 → null", async () => {
     expect(extractSteerInstruction([{ kind: "data", schema: "subagent.result.v1", value: {} }])).toBeNull();
   });
 });

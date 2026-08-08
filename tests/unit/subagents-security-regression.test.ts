@@ -187,14 +187,14 @@ class FauxSessionPort implements SubagentSessionPort {
     });
   }
 
-  followUp(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
+  followUp(message: string): Promise<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> {
     this.followUpMessages.push(message);
-    return "applied";
+    return Promise.resolve("applied");
   }
 
-  steer(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
+  steer(message: string): Promise<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> {
     this.steerMessages.push(message);
-    return "applied";
+    return Promise.resolve("applied");
   }
 
   abort(): void {
@@ -417,6 +417,7 @@ interface ToolHarness {
   readonly auditCalls: Array<{ eventName: string }>;
   readonly activity: ActivityRecorder;
   readonly audit: AuditRecorder;
+  readonly coordinator: ParentMailboxDeliveryCoordinator;
   /** 运行期切换审计行为（fail-safe 测试：先正常 spawn，再注入 Recorder 故障） */
   setAuditMode(mode: "accepted" | "rejected" | "throw" | "terminal-throw" | "real"): void;
   runIdOf(threadId: SubagentThreadId): SubagentRunId | null;
@@ -572,6 +573,7 @@ function createToolHarness(options: {
     setAuditMode(mode) {
       auditState.mode = mode;
     },
+    coordinator,
     runIdOf(threadId) {
       return stores.runs.listByThread(threadId, ownership()).at(-1)?.runId ?? null;
     },
@@ -1013,6 +1015,44 @@ describe("T9b-4 audit fail-closed", () => {
     expect(value.status).toBe("error");
     expect(value.code).toBe("subagent_operation_failed");
     expect(h.stores.threads.listByOwner(ownership(), 10)).toHaveLength(0);
+  });
+
+  it("复审 P1-1（第二轮）：audit pending 经 AuditRecorder 补账（按通道分流，不喂 ActivityRecorder）", async () => {
+    const h = createToolHarness({ auditMode: "terminal-throw" });
+    const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+    expect(out.kind).toBe("ok");
+    const value = (out as { kind: "ok"; value: Record<string, unknown> }).value;
+    expect(value.status).toBe("ok");
+    // spawn 如实返回审计落点（不掩盖 pending）
+    expect(value.auditStatus).toBe("audit_pending");
+    const runId = value.runId as SubagentRunId;
+    const run = h.stores.runs.get(runId, ownership());
+    expect(run).not.toBeNull();
+    const pending = JSON.parse(run?.auditPendingJson ?? "[]") as Array<{ eventName?: string; pendingChannel?: string }>;
+    expect(pending.some((entry) => entry.eventName === "audit.subagent.spawn_completed" && entry.pendingChannel === "audit")).toBe(true);
+
+    // 恢复器重放：audit 通道记录经 AuditRecorder.appendStrict 补回 Audit Ledger
+    const recovery = new SubagentStartupRecovery({
+      runs: h.stores.runs,
+      threads: h.stores.threads,
+      messages: h.stores.messages,
+      transactions: h.stores.transactions,
+      workspaceLeases: new WorkspaceLeaseStore(h.db),
+      coordinator: h.coordinator,
+      activity: h.activity,
+      audit: h.audit,
+      now: () => Date.now(),
+    });
+    const report = recovery.run();
+    expect(report.errors).toHaveLength(0);
+    expect(report.auditPendingReplayed).toBe(1);
+    // AuditRecorder.appendStrict 会写 ledger 行 + auditMirror 行（event_id 前缀
+    // "mirror:"）；断言 ledger 行存在（补账成功），pending 已清空
+    const rows = h.db.prepare("SELECT event_id, event_name FROM audit_events WHERE event_name = 'audit.subagent.spawn_completed'").all() as Array<{ event_id: string; event_name: string }>;
+    const ledgerRows = rows.filter((row) => !row.event_id.startsWith("mirror:"));
+    expect(ledgerRows.length).toBe(1);
+    const runAfter = h.stores.runs.get(runId, ownership());
+    expect(runAfter?.auditPendingJson).toBeNull();
   });
 
   it("复审 P1-1：spawn_completed 审计失败 → 证据转入 run.audit_pending_json（启动恢复补账）", async () => {

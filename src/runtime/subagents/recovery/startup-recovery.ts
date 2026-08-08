@@ -8,6 +8,7 @@ import {
   type SubagentThreadId,
 } from "../../../contracts/subagents.js";
 import type { ActivityRecorder } from "../../../observability/activity-recorder.js";
+import type { AuditRecorder } from "../../../observability/audit-recorder.js";
 import type { ParentMailboxDeliveryCoordinator } from "../mailbox/parent-mailbox-delivery-coordinator.js";
 import { MessageStore } from "../stores/message-store.js";
 import { RunStore } from "../stores/run-store.js";
@@ -49,6 +50,12 @@ export interface SubagentStartupRecoveryDeps {
   readonly coordinator: ParentMailboxDeliveryCoordinator;
   /** T9b：auditPending 补账的 Activity 落点（组合根必传；缺失时有 pending 即报错） */
   readonly activity?: ActivityRecorder;
+  /**
+   * 复审 P1-1（第二轮）：auditPending 补账的 Audit 落点——audit 通道记录
+   * （eventName 前缀 "audit."）必须经 AuditRecorder.appendStrict 重放，
+   * ActivityRecorder 会拒绝 audit 目录事件（补不回 Audit Ledger）。
+   */
+  readonly audit?: AuditRecorder;
   readonly now?: () => number;
 }
 
@@ -164,11 +171,39 @@ export class SubagentStartupRecovery {
       let allAccepted = true;
       for (const entry of entries) {
         try {
-          const result = this.deps.activity.append(entry as Parameters<ActivityRecorder["append"]>[0]);
-          if (result.kind === "rejected") {
-            allAccepted = false;
-            errors.push(`auditPending replay ${runId}: rejected（${result.reason.slice(0, 160)}）`);
-            break;
+          // 复审 P1-1（第二轮）：按通道分流——audit 目录事件（eventName 前缀
+          // "audit."）经 AuditRecorder.appendStrict 补回 Audit Ledger；其余
+          // （subagent.* 生命周期投影）经 ActivityRecorder.append 补回活动流。
+          // 显式 pendingChannel 标记优先（T12 起写入），旧记录按前缀启发式。
+          const channel = (entry as { pendingChannel?: unknown }).pendingChannel === "audit"
+            || (typeof (entry as { eventName?: unknown }).eventName === "string"
+              && (entry as { eventName: string }).eventName.startsWith("audit."))
+            ? "audit"
+            : "activity";
+          if (channel === "audit") {
+            if (this.deps.audit === undefined) {
+              allAccepted = false;
+              errors.push(`auditPending replay ${runId}: audit recorder 未配置（证据保留，待下次恢复）`);
+              break;
+            }
+            const result = this.deps.audit.appendStrict(entry as Parameters<AuditRecorder["appendStrict"]>[0]);
+            if (result.kind !== "accepted" && result.kind !== "accepted-idempotent") {
+              allAccepted = false;
+              errors.push(`auditPending replay ${runId}: audit rejected（${result.reason.slice(0, 160)}）`);
+              break;
+            }
+          } else {
+            if (this.deps.activity === undefined) {
+              allAccepted = false;
+              errors.push(`auditPending replay ${runId}: activity recorder 未配置（证据保留，待下次恢复）`);
+              break;
+            }
+            const result = this.deps.activity.append(entry as Parameters<ActivityRecorder["append"]>[0]);
+            if (result.kind === "rejected") {
+              allAccepted = false;
+              errors.push(`auditPending replay ${runId}: rejected（${result.reason.slice(0, 160)}）`);
+              break;
+            }
           }
         } catch (error) {
           allAccepted = false;

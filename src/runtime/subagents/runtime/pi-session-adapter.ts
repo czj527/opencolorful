@@ -169,10 +169,11 @@ class PiSubagentSession implements SubagentSessionPort {
   /**
    * queue 纠偏（§13.4 / 复审 P0-1）：真实转发 PI followUp——模型循环流式
    * 期间由 PI 排队到 agent 结束后投递；非流式立即作为下一条用户消息。
+   * 异步确认（复审 P0-2）：resolve 前等待 PI preflight 接受信号。
    * 会话未就绪（未创建 handle / 无首事件）→ deferred（调用方延迟重试，
-   * 不静默丢消息）；已终结 → failed。
+   * 不静默丢消息）；已终结/PI 拒绝 → failed。
    */
-  followUp(message: string): SubagentMessageDelivery {
+  followUp(message: string): Promise<SubagentMessageDelivery> {
     return this.deliver("followUp", message);
   }
 
@@ -182,7 +183,7 @@ class PiSubagentSession implements SubagentSessionPort {
    * 立即作为下一条用户消息。不再退化为 prompt()（流式时缺少
    * streamingBehavior 会抛错，且语义是"追加新轮"而非"纠偏插队"）。
    */
-  steer(message: string): SubagentMessageDelivery {
+  steer(message: string): Promise<SubagentMessageDelivery> {
     return this.deliver("steer", message);
   }
 
@@ -219,19 +220,23 @@ class PiSubagentSession implements SubagentSessionPort {
   // ── 内部 ──────────────────────────────────────────────────────
 
   /**
-   * 真实投递（P0-1）：prompt + streamingBehavior——与 PI 的 sendUserMessage
-   * 等价（PI AgentSession 的官方投递路径）：
+   * 真实投递（P0-1 + 复审 P0-2）：prompt + streamingBehavior + preflight 确认
+   * ——与 PI 的 sendUserMessage 等价（PI AgentSession 的官方投递路径）：
    * - 流式执行中（isStreaming）：按 streamingBehavior 走真实 steer（中断插队，
    *   当前 turn 的 tool call 执行完后、下次 LLM 调用前投递）或 followUp
-   *   （无更多 tool call/steer 后投递）队列——不再是"下一轮模拟"，也不再有
-   *   "流式缺 streamingBehavior 抛错"；prompt 在入队后立即 resolve，terminal
-   *   由 in-flight run 的 promise 在队列耗尽后统一发出（此处不重复发）；
+   *   （无更多 tool call/steer 后投递）队列；preflight(true) 在入队完成后同步
+   *   调用，prompt 立即 resolve——terminal 由 in-flight run 的 promise 统一发出；
    * - 非流式（idle）：立即作为新用户消息触发新轮（steer/followUp 在 idle 时
-   *   只排队不触发，不能直接用），该轮结束 → terminal 事件；
-   * 会话未就绪（handle 未创建/无首事件）→ deferred（调用方延迟重试，不丢）；
-   * 已终结 → failed。
+   *   只排队不触发，不能直接用）；preflight(true) 在发送前（_runAgentPrompt
+   *   之前）调用，不阻塞 turn；该轮结束 → terminal 事件；
+   * - 异步确认（P0-2）：resolve("applied") 只发生在 preflight(true)（PI 已接受
+   *   入队/已发送）之后；preflight(false) 或 promise reject（Provider/扩展 input
+   *   handler/校验异步拒绝）→ resolve("failed")——Dispatcher 不得结算 delivered，
+   *   纠偏不丢失；同步 throw（无模型/无 API key 等）→ failed；
+   * - 会话未就绪（handle 未创建/无首事件）→ deferred（调用方延迟重试，不丢）；
+   *   已终结 → failed。
    */
-  private deliver(kind: "steer" | "followUp", message: string): SubagentMessageDelivery {
+  private async deliver(kind: "steer" | "followUp", message: string): Promise<SubagentMessageDelivery> {
     if (this.disposed || this.terminated) {
       return "failed"; // 会话已终结：调用方按终态结算
     }
@@ -239,33 +244,44 @@ class PiSubagentSession implements SubagentSessionPort {
       return "deferred"; // 未就绪：消息不丢弃，调用方（Dispatcher）退避重试
     }
     try {
-      const promise = this.handle.prompt(message, { streamingBehavior: kind });
-      if (this.handle.isStreaming) {
-        // 流式：消息已入队（真实 steer/followUp 队列）；本轮 run 结束由
-        // 其自身 promise 发 terminal
-        void promise.catch((error: unknown) => {
-          if (!this.disposed) {
-            this.emit({ type: "error", message: `steer/followUp 投递失败：${error instanceof Error ? error.message.slice(0, 300) : "unknown"}` });
-          }
-        });
-      } else {
-        // idle：本轮结束 → terminal
-        void promise.then(
+      const handle = this.handle;
+      return await new Promise<SubagentMessageDelivery>((resolve) => {
+        let settled = false;
+        const settle = (delivery: SubagentMessageDelivery): void => {
+          if (settled) return;
+          settled = true;
+          resolve(delivery);
+        };
+        void handle.prompt(message, {
+          streamingBehavior: kind,
+          // PI 接受信号：所有接受路径（扩展命令/input handled/流式入队/非流式
+          // 发送前）同步调用 preflight(true)；拒绝路径 preflight(false) + throw
+          preflightResult: (ok: boolean) => {
+            settle(ok ? "applied" : "failed");
+          },
+        }).then(
           () => {
-            if (!this.disposed) {
-              this.emit({ type: "terminal", reason: "completed" });
+            // 兜底：prompt resolve 但 preflight 未触发（理论不可达；极端路径
+            // 如消息被拦截）——按 applied 结算（preflight 已覆盖拒绝路径）
+            settle("applied");
+            if (!handle.isStreaming) {
+              if (!this.disposed) {
+                this.emit({ type: "terminal", reason: "completed" });
+              }
             }
           },
           (error: unknown) => {
+            // Provider/扩展异步拒绝：preflight(false) 已触发 settle(failed)；
+            // 未触发时（同步 throw 已在 try 外捕获）兜底 failed + error 事件
+            settle("failed");
             if (!this.disposed) {
-              this.emit({ type: "error", message: error instanceof Error ? error.message.slice(0, 300) : "unknown" });
+              this.emit({ type: "error", message: `steer/followUp 投递失败：${error instanceof Error ? error.message.slice(0, 300) : "unknown"}` });
             }
           },
         );
-      }
-      return "applied";
+      });
     } catch {
-      return "failed";
+      return "failed"; // 同步 throw（无模型/无 API key/参数校验）
     }
   }
 

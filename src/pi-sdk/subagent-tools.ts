@@ -419,7 +419,7 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   if (outcome.status === "rejected") {
     // 防御补偿（正常路径已被 canAccept 预检排除）：终态化 queued Run + 关闭
     // Thread——不留无人调度的 Run，也不要求主 Agent 手动 close 清理
-    compensateSchedulerRejected(ctx, { threadId, runId, ownership, reasonCode: outcome.reasonCode, reason: outcome.reason, now });
+    compensateSchedulerRejected(ctx, { threadId, runId, ownership, reasonCode: outcome.reasonCode, reason: outcome.reason, now, closeThread: true });
     return errorResult(outcome.reasonCode, `${outcome.reason}（已补偿：Run 终态化并关闭 Thread）`);
   }
 
@@ -437,9 +437,9 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   }
 
   // 10. durable 审计 terminal（复审 P1-1：spawn_completed 失败必须补偿——
-  //     Thread 已合法创建，审计证据转入 run.audit_pending_json 由启动恢复补账，
-  //     不能静默吞掉）
-  terminalAuditOrPending(ctx, threadId, runId, "audit.subagent.spawn_completed");
+  //     Thread 已合法创建，审计证据转入 run.audit_pending_json 由启动恢复按
+  //     通道补账；结果如实返回主 Agent，不掩盖 auditPending）
+  const auditStatus = terminalAuditOrPending(ctx, threadId, runId, "audit.subagent.spawn_completed");
 
   return okResult({
     threadId,
@@ -448,6 +448,10 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
     capabilitySummary,
     queued: outcome.status === "accepted" ? outcome.queued : false,
     queuedAt: now,
+    // 复审 P1-1：terminal 审计落点——"recorded" 已入 Audit Ledger；
+    // "audit_pending" 已缓冲到 run.audit_pending_json（启动恢复补账）；
+    // "audit_failed" 双故障（started 记录仍在，证据可能缺失）
+    auditStatus: auditStatus === "recorded" ? "recorded" : auditStatus === "pending" ? "audit_pending" : "audit_failed",
   });
 }
 
@@ -487,14 +491,16 @@ function bestEffortAudit(ctx: SubagentToolContext, threadId: SubagentThreadId, r
 /**
  * terminal 审计（复审 P1-1，§19.3）：spawn_completed 是审计生命周期的收尾
  * 证据——rejected/抛错不能静默吞掉。Thread 已合法创建，证据转入
- * run.audit_pending_json（有界 32 条/8KB），由启动恢复第 5 步 replay 补账；
- * 双故障（审计 + auditPending 持久都失败）才放弃（started 记录仍在）。
+ * run.audit_pending_json（有界 32 条/8KB，带 pendingChannel:"audit" 标记），
+ * 由启动恢复第 5 步按通道分流（AuditRecorder.appendStrict）补回 Audit Ledger；
+ * 双故障（审计 + auditPending 持久都失败）→ "failed"（started 记录仍在）。
+ * 返回结果如实上报 spawn 调用方（复审 P1-1：不得固定 status:"ok" 掩盖 pending）。
  */
-function terminalAuditOrPending(ctx: SubagentToolContext, threadId: SubagentThreadId, runId: SubagentRunId, eventName: string): void {
+function terminalAuditOrPending(ctx: SubagentToolContext, threadId: SubagentThreadId, runId: SubagentRunId, eventName: string): "recorded" | "pending" | "failed" {
   try {
     const result = ctx.services.audit(spawnAuditInput(ctx, threadId, runId, eventName));
     if (result.kind === "accepted" || result.kind === "accepted-idempotent") {
-      return;
+      return "recorded";
     }
     throw new Error(`审计拒绝（${eventName}）：${result.reason.slice(0, 160)}`);
   } catch (error) {
@@ -502,10 +508,12 @@ function terminalAuditOrPending(ctx: SubagentToolContext, threadId: SubagentThre
       ctx.services.runs.appendAuditPending(
         runId,
         { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId },
-        spawnAuditInput(ctx, threadId, runId, eventName),
+        { ...spawnAuditInput(ctx, threadId, runId, eventName), pendingChannel: "audit" },
       );
+      return "pending";
     } catch {
-      // 双故障：started 审计记录仍为证据，放弃（不阻断 spawn 返回）
+      // 双故障：started 审计记录仍为证据；如实上报 failed（不阻断 spawn 返回）
+      return "failed";
     }
   }
 }
@@ -524,6 +532,12 @@ function compensateSchedulerRejected(
     readonly reasonCode: string;
     readonly reason: string;
     readonly now: string;
+    /**
+     * 复审 P1-2（第二轮）：首次 spawn 创建的全新 Thread 无任何价值——终态化
+     * Run 后一并关闭；已有 Thread 上的后续 Run 排队失败只终态化该 Run，
+     * Thread 保持 open（主 Agent 可重试），绝不能误关已有 Thread。
+     */
+    readonly closeThread: boolean;
   },
 ): void {
   const services = ctx.services;
@@ -561,13 +575,16 @@ function compensateSchedulerRejected(
       },
       now,
     });
-    services.transactions.closeThread({
-      threadId,
-      ownership,
-      at: now,
-      closeReason: "subagent_scheduler_rejected",
-      suppressMailboxIds: [],
-    });
+    if (input.closeThread) {
+      // 仅首次 spawn（全新 Thread）关闭；已有 Thread 的后续 Run 保留（可重试）
+      services.transactions.closeThread({
+        threadId,
+        ownership,
+        at: now,
+        closeReason: "subagent_scheduler_rejected",
+        suppressMailboxIds: [],
+      });
+    }
   } catch {
     // 补偿失败：Run 保持 queued，由启动恢复按 interrupted 终态化兜底
   }
@@ -705,7 +722,7 @@ function inspectSubagent(
   return okResult({ threadId, ...output });
 }
 
-function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): ReturnType<typeof textResult> {
+async function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Promise<ReturnType<typeof textResult>> {
   const services = ctx.services;
   const ownership = { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId };
   const runId = steer.targetRunId;
@@ -746,7 +763,7 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
 
   // 活动 Run：投递给 Runtime（queue→followUp / interrupt→steer / 延迟重试）
   if (!isSubagentRunTerminal(run.status)) {
-    services.dispatcher.dispatch(messageId, ownership);
+    await services.dispatcher.dispatch(messageId, ownership);
     return okResult({ messageId, delivery: steer.deliveryMode, targetRunId: runId, newRunId: null });
   }
 
@@ -811,12 +828,14 @@ function steerSubagent(ctx: SubagentToolContext, steer: SubagentSteerV1): Return
       reasonCode: outcome.reasonCode,
       reason: outcome.reason,
       now,
+      // 复审 P1-2：已有 Thread 上的新 Run——只终态化新 Run，Thread 保持 open
+      closeThread: false,
     });
-    return errorResult(outcome.reasonCode, `${outcome.reason}（已补偿：新 Run 终态化）`);
+    return errorResult(outcome.reasonCode, `${outcome.reason}（已补偿：新 Run 终态化，Thread 保持 open 可重试）`);
   }
   // 注册 run-scoped 能力工具执行器（复审 P0-2：新 Run 绑定自身冻结快照）
   registerSubagentAbilityExecutor(newRunId, executorResult.executor);
-  services.dispatcher.dispatch(messageId, ownership); // task/steer 记账（新 Run 已由 Host 渲染 trigger）
+  await services.dispatcher.dispatch(messageId, ownership); // task/steer 记账（新 Run 已由 Host 渲染 trigger）
   return okResult({ messageId, delivery: "queued", targetRunId: runId, newRunId, queued: outcome.queued });
 }
 
@@ -884,10 +903,10 @@ async function waitSubagent(
   return textResult(JSON.stringify({ status: allTerminalOrWaiting(second) ? "ok" : timedOut ? "timeout" : "ok", threads: second }));
 }
 
-function cancelSubagent(
+async function cancelSubagent(
   ctx: SubagentToolContext,
   raw: { threadId: SubagentThreadId; runId?: SubagentRunId; reason: string },
-): ReturnType<typeof textResult> {
+): Promise<ReturnType<typeof textResult>> {
   const services = ctx.services;
   const ownership = { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId };
   const run = raw.runId !== undefined
@@ -916,11 +935,11 @@ function cancelSubagent(
     metadata: { createdAt: now, traceId: `trace-${run.runId}`, schemaName: "subagent.cancel" },
   };
   const appended = services.messages.append({ envelope, ownership, createdAt: now }).message;
-  services.dispatcher.dispatch(messageId, ownership);
+  await services.dispatcher.dispatch(messageId, ownership);
   return okResult({ runId: run.runId, runStatus: "cancelling", messageId: appended.messageId });
 }
 
-function closeSubagent(ctx: SubagentToolContext, threadId: SubagentThreadId): ReturnType<typeof textResult> {
+async function closeSubagent(ctx: SubagentToolContext, threadId: SubagentThreadId): Promise<ReturnType<typeof textResult>> {
   const services = ctx.services;
   const ownership = { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId };
   const thread = services.threads.get(threadId, ownership);
@@ -933,7 +952,7 @@ function closeSubagent(ctx: SubagentToolContext, threadId: SubagentThreadId): Re
   const activeRun = services.runs.getActiveRunByThread(threadId, ownership);
   if (activeRun !== null) {
     // 有活动 Run：先取消（cancel 消息 + dispatch）
-    cancelSubagent(ctx, { threadId, runId: activeRun.runId, reason: "close_subagent: 关闭 Thread 前取消活动 Run" });
+    await cancelSubagent(ctx, { threadId, runId: activeRun.runId, reason: "close_subagent: 关闭 Thread 前取消活动 Run" });
   }
   const outcome = services.transactions.closeThread({
     threadId,

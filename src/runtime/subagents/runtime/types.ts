@@ -56,13 +56,14 @@ export interface SubagentSessionPort {
   start(input: SubagentSessionStartInput): Promise<void>;
   /**
    * queue 纠偏 → PI followUp（P0-1：真实转发，不是 prompt 模拟）。
-   * - applied：消息已进入会话队列；
+   * 异步确认（复审 P0-2）：resolve 前必须拿到 PI 的接受信号——
+   * - applied：PI 已接受（流式入队完成 / 非流式校验通过已发送）；
    * - deferred：会话未就绪（未启动/无首事件）——调用方必须延迟重试，不得丢弃；
-   * - failed：会话已终结——调用方按终态结算（迟到的消息不再应用）。
+   * - failed：会话已终结或 PI 拒绝（preflight(false)/抛错）——调用方不得结算 delivered。
    */
-  followUp(message: string): SubagentMessageDelivery;
-  /** interrupt 纠偏 → PI steer（P0-1：真实转发） */
-  steer(message: string): SubagentMessageDelivery;
+  followUp(message: string): Promise<SubagentMessageDelivery>;
+  /** interrupt 纠偏 → PI steer（P0-1：真实转发；异步确认同 followUp） */
+  steer(message: string): Promise<SubagentMessageDelivery>;
   abort(): void;
   dispose(): void;
   /** 订阅事件流；返回退订函数（重复订阅去重） */

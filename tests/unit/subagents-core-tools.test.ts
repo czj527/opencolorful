@@ -106,14 +106,14 @@ class FauxSessionPort implements SubagentSessionPort {
     });
   }
 
-  followUp(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
+  followUp(message: string): Promise<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> {
     this.followUpMessages.push(message);
-    return "applied";
+    return Promise.resolve("applied");
   }
 
-  steer(message: string): import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery {
+  steer(message: string): Promise<import("../../src/runtime/subagents/runtime/types.js").SubagentMessageDelivery> {
     this.steerMessages.push(message);
-    return "applied";
+    return Promise.resolve("applied");
   }
 
   abort(): void {
@@ -183,6 +183,8 @@ interface Harness {
   readonly terminals: Array<{ runId: string; status: string }>;
   runIdOf(threadId: SubagentThreadId): SubagentRunId | null;
   runStatus(runId: SubagentRunId): string | null;
+  /** 覆盖 run-scoped 执行器（fail-closed 注入；null 恢复默认） */
+  setRunToolExecutor(impl: SubagentToolServices["createRunToolExecutor"] | null): void;
 }
 
 function createStores(db: Database.Database) {
@@ -247,6 +249,15 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
   };
   const ownership: SubagentOwnership = { ownerAgentId: OWNER, parentSessionId: SESSION_ID };
 
+  // 可变执行器槽（fail-closed 测试覆盖用；默认按快照 toolIds 全量解析）
+  let runToolExecutorImpl: SubagentToolServices["createRunToolExecutor"] = ({ snapshot }) => {
+    const missing = snapshot.toolIds.filter((name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) === null);
+    if (missing.length > 0) {
+      return { ok: false, reason: `快照工具无法解析（fail-closed）：${missing.join(", ")}` };
+    }
+    return { ok: true, executor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }) };
+  };
+
   const services: SubagentToolServices = {
     preferences: () => ({ subagents: { defaultModel: null } }),
     currentModel: () => ({ providerId: "faux", modelId: "faux-1" }),
@@ -254,14 +265,9 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
     modelResolver: () => modelAvailable,
     // 复审 P0-3：目录覆盖全部快照文件工具（bash 与父会话一致不在有效能力）
     toolCatalog: (name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) ?? null,
-    // 复审 P0-2/P0-3：run-scoped 执行器——快照 toolIds 必须全部可解析（fail-closed）
-    createRunToolExecutor: ({ snapshot }) => {
-      const missing = snapshot.toolIds.filter((name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) === null);
-      if (missing.length > 0) {
-        return { ok: false, reason: `快照工具无法解析（fail-closed）：${missing.join(", ")}` };
-      }
-      return { ok: true, executor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }) };
-    },
+    // 复审 P0-2/P0-3：run-scoped 执行器——快照 toolIds 必须全部可解析（fail-closed）。
+    // 经可变槽委托（services 字段 readonly，测试通过 setRunToolExecutor 覆盖）
+    createRunToolExecutor: (input) => runToolExecutorImpl(input),
     workspaceCwd: () => paths.home,
     threadDirResolver: (input) => path.join(paths.subagentsBase, input.ownerAgentId, "subagents", input.threadId),
     threads: stores.threads,
@@ -306,6 +312,15 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
     services,
     tools,
     terminals,
+    setRunToolExecutor(impl: SubagentToolServices["createRunToolExecutor"] | null) {
+      runToolExecutorImpl = impl ?? (({ snapshot }) => {
+        const missing = snapshot.toolIds.filter((name) => SUBAGENT_FILE_TOOL_DEFS.find((def) => def.name === name) === null);
+        if (missing.length > 0) {
+          return { ok: false, reason: `快照工具无法解析（fail-closed）：${missing.join(", ")}` };
+        }
+        return { ok: true, executor: async (input) => ({ ok: false, text: `unavailable: ${input.name}` }) };
+      });
+    },
     runIdOf(threadId) {
       return stores.runs.listByThread(threadId, ownership).at(-1)?.runId ?? null;
     },
@@ -422,8 +437,7 @@ describe("spawn_subagent", () => {
 
   it("复审 P0-2/P0-3：执行器构建失败（快照工具无法解析）→ fail-closed，不创建 Thread/Run", async () => {
     const h = createHarness();
-    const original = h.services.createRunToolExecutor;
-    h.services.createRunToolExecutor = () => ({ ok: false, reason: "快照工具无法解析（fail-closed）：ghost_tool" });
+    h.setRunToolExecutor(() => ({ ok: false, reason: "快照工具无法解析（fail-closed）：ghost_tool" }));
     try {
       const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
       expect(out.status).toBe("error");
@@ -432,7 +446,7 @@ describe("spawn_subagent", () => {
       // 领域写入前拒绝：不创建任何 Thread/Run
       expect(h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10)).toHaveLength(0);
     } finally {
-      h.services.createRunToolExecutor = original;
+      h.setRunToolExecutor(null);
     }
   });
 
@@ -519,6 +533,42 @@ describe("steer_subagent", () => {
     // queue → followUp 投递
     await waitUntil(() => session.followUpMessages.length > 0);
     expect(session.followUpMessages[0]).toContain("Windows");
+  });
+
+  it("复审 P1-2：终态 Run 上 steer 新建 Run 的 submit 拒绝 → 新 Run 终态化且 Thread 保持 open", async () => {
+    const h = createHarness();
+    const spawned = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+    const threadId = spawned.threadId as SubagentThreadId;
+    const firstRunId = spawned.runId as SubagentRunId;
+    const session = h.factory.latest();
+    await waitUntil(() => session.startInput !== null);
+    await session.invokeTool("report_subagent_result", {
+      disposition: "satisfied", summary: "完成", criteria: [{ criterion: "c1", status: "met", evidenceRefs: [] }], artifacts: [], unresolvedIssues: [], recommendedNextAction: "accept",
+    });
+    session.finish();
+    await waitUntil(() => h.runStatus(firstRunId) === "succeeded");
+
+    // 新 Run 的 submit 被拒绝（防御路径；canAccept 预检后理论不可达）
+    const spy = vi.spyOn(h.scheduler, "submit").mockReturnValueOnce({
+      status: "rejected",
+      reasonCode: "subagent_runtime_unavailable",
+      reason: "测试注入：排队积压",
+    });
+    try {
+      const steer = await callTool(h, "steer_subagent", {
+        version: 1, targetRunId: firstRunId, action: "redirect", instruction: "再来一轮", reason: "补充", preserveCompletedWork: true, deliveryMode: "queue",
+      });
+      expect(steer.status).toBe("error");
+      expect(steer.message).toContain("Thread 保持 open");
+      // 已有 Thread 不被误关（主 Agent 可重试）
+      expect(h.stores.threads.get(threadId, { ownerAgentId: OWNER, parentSessionId: SESSION_ID })?.status).toBe("open");
+      // 新 Run 已终态化（cancelled/subagent_scheduler_rejected）
+      const runs = h.stores.runs.listByThread(threadId, { ownerAgentId: OWNER, parentSessionId: SESSION_ID });
+      expect(runs.at(-1)?.status).toBe("cancelled");
+      expect(runs.at(-1)?.reasonCode).toBe("subagent_scheduler_rejected");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("终态 Run + open Thread：创建下一 Run", async () => {

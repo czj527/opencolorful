@@ -439,6 +439,10 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       // bash 与父会话一致（Sandbox allowBash=false）不属于有效能力，从快照排除。
       const lastFrozenPluginSnapshots = new Map<string, { readonly snapshot: unknown; readonly state: unknown }>();
       const lastPluginFreezeFailures = new Map<string, string>();
+      // 复审 P0-3（第二轮）：Run 专属 Skill 快照——parentSnapshot（spawn 点）
+      // 一次性捕获，同一 spawn tick 内由 createRunToolExecutor 交给执行器；
+      // 快照自包含不可变，之后父 Session 换 turn 不影响活动 Run 的 Skill 权限
+      let lastRunSkillSnapshot: import("../../runtime/skills/core/skill-core-service.js").SubagentRunSkillSnapshot | null = null;
       const parentSnapshot = (): {
         toolIds: readonly string[];
         pluginContributions: readonly import("../../runtime/subagents/delegation-policy.js").ParentPluginContributionEntry[];
@@ -446,6 +450,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
       } => {
         lastFrozenPluginSnapshots.clear();
         lastPluginFreezeFailures.clear();
+        lastRunSkillSnapshot = null;
         const pluginContributions: import("../../runtime/subagents/delegation-policy.js").ParentPluginContributionEntry[] = [];
         const snapshotFactory = pluginSnapshotFactory();
         if (snapshotFactory !== undefined) {
@@ -471,17 +476,23 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           toolIds: [...(tools ?? []), ...(extraTools ?? []), ...pluginTools.map((tool) => tool.qualifiedName)]
             .filter((name) => name !== "bash"),
           pluginContributions,
-          // §12.6：Skill 委派 = 父 Session 当前冻结 turn 的可见集（contentHash
-          // 冻结；当前 Run 中变化不生效由受控读取的 turn 门保证）
+          // §12.6 + 复审 P0-3（第二轮）：Skill 委派 = Run 专属快照（spawn 时
+          // 一次性捕获父冻结 turn 的可见集；contentHash 冻结，当前 Run 中变化
+          // 不生效；父换 turn 不影响已委派集）
           skillEntries: (() => {
             if (options.skillCoreService === undefined) {
               return [];
             }
             try {
-              return options.skillCoreService.listFrozenSkillEntriesForDelegation({
+              const captured = options.skillCoreService.captureRunSkillSnapshot({
                 sessionId,
                 turnId: turnIdSlot.current ?? null,
-              }).map((entry) => ({
+              });
+              if (!captured.ok) {
+                return []; // 快照不可得/已换 turn → 不委派 Skill（偏空 fail-closed）
+              }
+              lastRunSkillSnapshot = captured.snapshot;
+              return captured.snapshot.entries.map((entry) => ({
                 ref: entry.ref,
                 contentHash: entry.contentHash,
                 selectionMode: entry.selectionMode,
@@ -489,7 +500,7 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
                 sourceKind: entry.sourceKind,
               }));
             } catch {
-              return []; // 冻结快照不可得 → 不委派 Skill（偏空 fail-closed）
+              return []; // 捕获异常 → 不委派 Skill（偏空 fail-closed）
             }
           })(),
         };
@@ -544,6 +555,12 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
         if (missing.length > 0) {
           return { ok: false, reason: `快照工具无法解析，拒绝创建 Run（fail-closed）：${missing.join(", ")}` };
         }
+        // 复审 P0-1（第二轮）：冻结快照必须按 Run 隔离——Session 级工作缓存
+        // lastFrozenPluginSnapshots 会在下一次 parentSnapshot() 时 clear/refill，
+        // 直接把引用交给 Run 执行器会导致旧 Run 消费新 Run 的插件版本/实例/授权。
+        // 这里生成独立不可变副本（freeze 后 Map 不可再增删），执行闭包只持有副本。
+        const frozenPlugins: ReadonlyMap<string, { readonly snapshot: unknown; readonly state: unknown }> =
+          Object.freeze(new Map(lastFrozenPluginSnapshots));
         const executor = buildSubagentRunToolExecutor({
           workspaceCwd: runtimeCwd,
           ownerAgentId: view.agentId ?? sessionId,
@@ -551,12 +568,14 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
           runId,
           snapshot,
           spawnTurnId,
-          frozenPlugins: lastFrozenPluginSnapshots,
+          frozenPlugins,
           // exactOptionalPropertyTypes：subagentComposition 缺省（测试 harness）
           // 时不传 leases——文件写工具按 fail-closed 拒绝（写 Lease 校验缺省 false）
           ...(subagentComposition !== undefined ? { leases: subagentComposition.stores.leases } : {}),
           toolPolicy: subagentToolPolicy,
           ...(options.skillCoreService !== undefined ? { skillCore: options.skillCoreService } : {}),
+          // 复审 P0-3（第二轮）：Run 专属 Skill 快照（同一 spawn tick 捕获，自包含不可变）
+          ...(lastRunSkillSnapshot !== null ? { runSkillSnapshot: lastRunSkillSnapshot } : {}),
           pluginInvoke: async (input) => {
             if (options.pluginFacade === undefined) {
               return { ok: false, code: "subagent_plugin_unavailable", message: "插件服务未就绪" };

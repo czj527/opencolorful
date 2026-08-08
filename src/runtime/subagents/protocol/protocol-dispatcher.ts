@@ -54,8 +54,8 @@ export interface SubagentRuntimeDispatchPort {
       readonly instruction: string | null;
     },
     ownership: SubagentOwnership,
-  ): "applied" | "deferred" | "not-active";
-  resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership): boolean;
+  ): Promise<"applied" | "deferred" | "not-active">;
+  resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership): Promise<boolean>;
 }
 
 /** 生产接线：把 SubagentRuntimeHost 适配为投递端口 */
@@ -65,7 +65,7 @@ export class RuntimeHostDispatchPort implements SubagentRuntimeDispatchPort {
     readonly messageType: "steer" | "cancel";
     readonly deliveryMode: SubagentDeliveryMode;
     readonly instruction: string | null;
-  }, ownership: SubagentOwnership): "applied" | "deferred" | "not-active"; resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): boolean }) {}
+  }, ownership: SubagentOwnership): Promise<"applied" | "deferred" | "not-active">; resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): Promise<boolean> }) {}
 
   deliverParentMessage(
     input: {
@@ -75,11 +75,11 @@ export class RuntimeHostDispatchPort implements SubagentRuntimeDispatchPort {
       readonly instruction: string | null;
     },
     ownership: SubagentOwnership,
-  ): "applied" | "deferred" | "not-active" {
+  ): Promise<"applied" | "deferred" | "not-active"> {
     return this.host.deliverParentMessage(input, ownership);
   }
 
-  resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership): boolean {
+  resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership): Promise<boolean> {
     return this.host.resumeFromInput(runId, answerText, ownership, new Date().toISOString());
   }
 }
@@ -131,7 +131,7 @@ export class ProtocolDispatcher {
    * 这里负责 delivery 状态流转与 Runtime 应用。幂等：delivered 重放返回
    * already-delivered，不重复副作用。
    */
-  dispatch(messageId: AgentMessageId, ownership: SubagentOwnership): DispatchResult {
+  async dispatch(messageId: AgentMessageId, ownership: SubagentOwnership): Promise<DispatchResult> {
     const message = this.deps.messages.get(messageId, ownership);
     if (message === null) {
       return { status: "failed", code: "subagent_not_found" };
@@ -173,10 +173,10 @@ export class ProtocolDispatcher {
    * 启动恢复/重试：扫描本 Server 未结算的父 → 子方向消息重新 dispatch
    * （§8.2：投递失败不删除记录，可重试；§16.5 启动恢复）。
    */
-  retryPending(): { readonly retried: number } {
+  async retryPending(): Promise<{ readonly retried: number }> {
     let retried = 0;
     for (const { message, ownership } of this.deps.messages.listUndeliveredToSubagentWithOwnership(500)) {
-      const outcome = this.dispatch(message.messageId, ownership);
+      const outcome = await this.dispatch(message.messageId, ownership);
       if (outcome.status === "delivered" || outcome.status === "already-delivered") {
         retried += 1;
       }
@@ -195,7 +195,7 @@ export class ProtocolDispatcher {
 
   // ── cancel ───────────────────────────────────────────────────
 
-  private dispatchCancel(message: SubagentMessageRecord, run: SubagentRunRecord, ownership: SubagentOwnership): DispatchResult {
+  private async dispatchCancel(message: SubagentMessageRecord, run: SubagentRunRecord, ownership: SubagentOwnership): Promise<DispatchResult> {
     const { messageId, runId } = message;
     if (run.status === "queued") {
       // queued Run 直接终态化（§16.4 #5：取消终态 + terminal message + mailbox）
@@ -233,7 +233,7 @@ export class ProtocolDispatcher {
       return { status: "delivered" };
     }
     // starting（未 active）/running/waiting_for_input：交给 Host.cancelRun
-    const outcome = this.deps.runtime.deliverParentMessage(
+    const outcome = await this.deps.runtime.deliverParentMessage(
       { runId, messageType: "cancel", deliveryMode: message.deliveryMode, instruction: null },
       ownership,
     );
@@ -246,7 +246,7 @@ export class ProtocolDispatcher {
 
   // ── steer ────────────────────────────────────────────────────
 
-  private dispatchSteer(message: SubagentMessageRecord, run: SubagentRunRecord, ownership: SubagentOwnership): DispatchResult {
+  private async dispatchSteer(message: SubagentMessageRecord, run: SubagentRunRecord, ownership: SubagentOwnership): Promise<DispatchResult> {
     const { messageId, runId } = message;
     const parsed = extractSteerInstruction(message.envelope.parts);
     if (parsed === null) {
@@ -261,14 +261,14 @@ export class ProtocolDispatcher {
       return this.defer(message, ownership);
     }
     if (parsed.action === "answer_input" && run.status === "waiting_for_input") {
-      const ok = this.deps.runtime.resumeFromInput(runId, parsed.instruction, ownership);
+      const ok = await this.deps.runtime.resumeFromInput(runId, parsed.instruction, ownership);
       if (ok) {
         this.markDelivered(messageId, ownership);
         return { status: "delivered" };
       }
       return this.defer(message, ownership);
     }
-    const outcome = this.deps.runtime.deliverParentMessage(
+    const outcome = await this.deps.runtime.deliverParentMessage(
       { runId, messageType: "steer", deliveryMode: message.deliveryMode, instruction: parsed.instruction },
       ownership,
     );
@@ -293,11 +293,9 @@ export class ProtocolDispatcher {
     }
     const timer = setTimeout(() => {
       this.deferredTimers.delete(message.messageId);
-      try {
-        this.dispatch(message.messageId, ownership); // 重新读取：状态可能已变化
-      } catch {
+      void this.dispatch(message.messageId, ownership).catch(() => {
         // 数据异常由诊断回调上报，不活锁
-      }
+      });
     }, delay);
     this.deferredTimers.set(message.messageId, timer);
     return { status: "deferred" };

@@ -208,8 +208,11 @@ export interface PiAgentSessionHandle {
   /**
    * 启动一轮模型循环。流式执行期间必须传 streamingBehavior（PI 契约：
    * 缺少时抛错）——纠偏一律走 steer/followUp，不用 prompt 追加。
+   * preflightResult（复审 P0-2）：PI 在"已接受"（扩展命令/input handled/
+   * 流式入队/非流式发送前）时同步回调 true；拒绝路径回调 false 后抛错——
+   * 投递端口据此异步确认 applied/failed，不得在确认前结算 delivered。
    */
-  prompt(text: string, options?: { readonly streamingBehavior?: "steer" | "followUp" }): Promise<void>;
+  prompt(text: string, options?: { readonly streamingBehavior?: "steer" | "followUp"; readonly preflightResult?: (ok: boolean) => void }): Promise<void>;
   /**
    * Phase 14 复审 P0-1：透出底层 AgentSession 的真实纠偏 API（§13.4
    * queue/interrupt 必须真实接入 PI followUp/steer，不是 prompt 模拟）：

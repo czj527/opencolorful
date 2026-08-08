@@ -155,7 +155,7 @@ export class SubagentRuntimeHost {
    * P0-1：steer 未 applied（未就绪/终结）→ false，Dispatcher 延迟重试，
    * 回答不会丢）。
    */
-  resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): boolean {
+  async resumeFromInput(runId: SubagentRunId, answerText: string, ownership: SubagentOwnership, at: string): Promise<boolean> {
     const active = this.active.get(runId);
     if (active === undefined || !active.waitingForInput || active.terminalHandled || active.leaseLost) {
       return false;
@@ -169,7 +169,7 @@ export class SubagentRuntimeHost {
     this.touchActivity(active); // 重新武装 idle 计时
     // interrupt 语义：PI steer（run 处于 waiting_for_input 时 Session 必然已
     // 就绪且有过首事件——deferred 理论不可达；防御：非 applied 返回 false 重试）
-    const outcome = active.session?.steer(answerText);
+    const outcome = active.session === null ? undefined : await active.session.steer(answerText);
     if (outcome === undefined || outcome === "deferred" || outcome === "failed") {
       return false;
     }
@@ -221,10 +221,12 @@ export class SubagentRuntimeHost {
    * T5 父 → 子协议消息投递（§13.4 queue → PI followUp；interrupt → PI steer；
    * stop → cancelRun）。instruction 由 Dispatcher 从 Envelope parts 渲染
    * （data part 过 TypeBox 校验，非法不入 Runtime，§8.3）。
-   * 返回 "applied"（已应用到活动 Session）/ "deferred"（Session 未就绪，
+   * 返回 "applied"（PI 已接受入队/已发送）/ "deferred"（Session 未就绪，
    * 调用方退避重试，不丢消息）/ "not-active"（Run 不在本 Host 活动）。
+   * 异步确认（复审 P0-2）：await 端口投递结果——只有 "applied" 才允许
+   * Dispatcher 结算 delivered；PI 异步拒绝 → deferred（重试/终态收敛）。
    */
-  deliverParentMessage(
+  async deliverParentMessage(
     input: {
       readonly runId: SubagentRunId;
       readonly messageType: "steer" | "cancel";
@@ -232,7 +234,7 @@ export class SubagentRuntimeHost {
       readonly instruction: string | null;
     },
     ownership: SubagentOwnership,
-  ): "applied" | "deferred" | "not-active" {
+  ): Promise<"applied" | "deferred" | "not-active"> {
     const active = this.active.get(input.runId);
     if (active === undefined || active.terminalHandled || active.leaseLost) {
       return "not-active";
@@ -248,8 +250,8 @@ export class SubagentRuntimeHost {
       // P0-1：真实投递三态——deferred 由 Dispatcher 退避重试（不标记 delivered，
       // 消息不会丢）；failed 也按 deferred 处理（会话终结后由终态迟到结算收敛）
       const outcome = input.deliveryMode === "interrupt"
-        ? active.session.steer(input.instruction)
-        : active.session.followUp(input.instruction);
+        ? await active.session.steer(input.instruction)
+        : await active.session.followUp(input.instruction);
       if (outcome === "deferred" || outcome === "failed") {
         return "deferred";
       }
@@ -494,7 +496,7 @@ export class SubagentRuntimeHost {
   private handleSessionEvent(
     input: ExecuteSubagentRunInput,
     active: ActiveRun,
-    session: { followUp(message: string): import("./types.js").SubagentMessageDelivery; steer(message: string): import("./types.js").SubagentMessageDelivery },
+    session: { followUp(message: string): Promise<import("./types.js").SubagentMessageDelivery>; steer(message: string): Promise<import("./types.js").SubagentMessageDelivery> },
     event: SubagentSessionEvent,
   ): void {
     const { runId, threadId, ownership } = input;
@@ -918,8 +920,8 @@ interface ActiveRun {
   abort: () => void;
   /** 会话引用（resumeFromInput 经端口投递回答；清理时置空） */
   session: {
-    followUp(message: string): import("./types.js").SubagentMessageDelivery;
-    steer(message: string): import("./types.js").SubagentMessageDelivery;
+    followUp(message: string): Promise<import("./types.js").SubagentMessageDelivery>;
+    steer(message: string): Promise<import("./types.js").SubagentMessageDelivery>;
   } | null;
 }
 

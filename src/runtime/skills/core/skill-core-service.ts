@@ -816,6 +816,97 @@ export class SkillCoreService {
   }
 
   /**
+   * Phase 14 复审 P0-3（第二轮）：Subagent Run 专属 Skill 快照（自包含、不可变）。
+   * 在 spawn 时一次性捕获父 Session 冻结 turn 的可见集——之后父 Session 无论
+   * 开始多少新 Turn，本 Run 的执行器都持有一份独立快照（baseSnapshot 引用 +
+   * entries 副本），读取不再依赖父 Session 当前的可变 turnSnapshots 槽。
+   * - turnId 提供且与当前冻结不一致 → { ok: false }（fail-closed：不委派漂移集）；
+   * - entries 只含 readiness=ready 的委派可见项（与 EffectiveSnapshot 声明一致）；
+   * - baseSnapshot 为不可变引用：turnSnapshots.set 替换的是槽位引用，已捕获
+   *   对象不被修改（SkillSnapshotService 每 turn 新建快照）。
+   */
+  captureRunSkillSnapshot(input: { readonly sessionId: string; readonly turnId: string | null }): {
+    readonly ok: true;
+    readonly snapshot: SubagentRunSkillSnapshot;
+  } | { readonly ok: false; readonly reason: string } {
+    const frozen = this.turnSnapshots.get(input.sessionId);
+    if (frozen === undefined) {
+      return { ok: false, reason: "父 Session 无冻结 Skill 快照（Skill 系统未接入当前 turn）" };
+    }
+    if (input.turnId !== null && frozen.turnId !== input.turnId) {
+      return { ok: false, reason: "父 Session 已进入新 Turn，不能按当前快照委派（fail-closed）" };
+    }
+    const entries = frozen.snapshot.entries
+      .filter((entry) => entry.readiness === "ready")
+      .map((entry) => ({
+        ref: entry.skillRef,
+        contentHash: entry.skillRef.contentHash,
+        selectionMode: entry.selection,
+        readiness: entry.readiness,
+        sourceKind: entry.skillRef.sourceKind,
+        rootPath: entry.rootPath,
+      }));
+    return {
+      ok: true,
+      snapshot: {
+        turnId: frozen.turnId,
+        entries: Object.freeze(entries.map((entry) => Object.freeze(entry))),
+        baseSnapshot: frozen.snapshot,
+      },
+    };
+  }
+
+  /**
+   * Phase 14 复审 P0-3（第二轮）：基于 Run 专属快照受控读取 Skill 正文。
+   * 不再查询父 Session 当前 turn——skillRef 必须命中 Run 快照 entries
+   * （skillRefKey + contentHash 精确一致）；成员/哈希/预算/审计由
+   * SkillContentService 对 baseSnapshot 执行。
+   */
+  readSkillBodyForRunSnapshot(input: {
+    readonly snapshot: SubagentRunSkillSnapshot;
+    readonly skillRef: SkillRef;
+    readonly relativePath: string;
+  }): Promise<SkillFileReadOutcome> {
+    const entry = input.snapshot.entries.find(
+      (candidate) =>
+        skillRefKey(candidate.ref) === skillRefKey(input.skillRef) &&
+        candidate.contentHash === input.skillRef.contentHash,
+    );
+    if (entry === undefined) {
+      return Promise.resolve({
+        status: "denied" as const,
+        reasonCode: "skill_not_in_snapshot",
+        reason: `Skill ${skillRefKey(input.skillRef)} 不在 Run 冻结快照可见集，拒绝读取（fail-closed）`,
+      });
+    }
+    return this.readBodyWithSnapshot(input.snapshot.baseSnapshot, entry.rootPath, input.skillRef, input.relativePath);
+  }
+
+  /**
+   * Phase 14 复审 P0-3（第二轮）：基于 Run 专属快照的 absPath 受控读取——
+   * 命中 Run 快照任一 Skill 根 → 受控读（哈希/预算/审计）；未命中 → 
+   * not-a-skill-file（调用方回退普通沙箱读取，PathGuard 兜底工作区边界）。
+   */
+  async readSkillFileForRunSnapshot(input: {
+    readonly snapshot: SubagentRunSkillSnapshot;
+    readonly absPath: string;
+  }): Promise<SkillFileReadOutcome> {
+    const absCanonical = canonicalResolve(path.resolve(input.absPath));
+    for (const entry of input.snapshot.entries) {
+      const rel = path.relative(canonicalResolve(entry.rootPath), absCanonical);
+      if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+        continue;
+      }
+      return this.readSkillBodyForRunSnapshot({
+        snapshot: input.snapshot,
+        skillRef: entry.ref,
+        relativePath: rel.split(path.sep).join("/"),
+      });
+    }
+    return { status: "not-a-skill-file" as const, reason: "路径不在 Run 冻结快照的 Skill 根内" };
+  }
+
+  /**
    * Phase 14 复审 P0-3（§12.6）：按 run 冻结快照（父 Session spawn 时 turn 的
    * 可见集）受控读取 Skill 正文（SKILL.md / 支持文件，relativePath 为标准
    * 相对路径）。与 readSkillFileForSubagentRun 同一 turn 冻结门；skillRef 必须
@@ -2106,6 +2197,28 @@ export function extractReasonCode(error: unknown): SkillErrorCode {
  * 一致——路径存在 → realpath；不存在 → 向上遍历到最近存在的祖先拼接剩余
  * 相对路径。用于 Skill 根匹配，防止 Junction 别名绕过当前 Turn 快照检查。
  */
+/**
+ * Phase 14 复审 P0-3（第二轮）：Subagent Run 专属 Skill 快照（自包含、不可变）。
+ * captureRunSkillSnapshot 在 spawn 时捕获；执行器持有一份，读取不再依赖父
+ * Session 当前 turn（父换 turn 不影响活动 Run 的已冻结 Skill 权限）。
+ */
+export interface SubagentRunSkillSnapshot {
+  /** 捕获时的父 Session turnId（诊断用；读取不校验父当前状态） */
+  readonly turnId: string;
+  /** 委派可见集（readiness=ready；与 EffectiveSnapshot 委派声明一致） */
+  readonly entries: readonly {
+    readonly ref: SkillRef;
+    readonly contentHash: string;
+    readonly selectionMode: SkillSelectionMode;
+    readonly readiness: SkillReadiness;
+    readonly sourceKind: SkillSourceKind;
+    /** 受控读取根目录（SkillContentService 成员/哈希校验基准） */
+    readonly rootPath: string;
+  }[];
+  /** 完整冻结快照（不可变引用；成员/哈希/预算/审计由 SkillContentService 执行） */
+  readonly baseSnapshot: SkillSnapshot;
+}
+
 /** 相对路径归一化为前向斜杠（Skill 支持文件契约用） */
 function normalizeForwardSlashes(relativePath: string): string {
   return relativePath.split(path.sep).join("/");

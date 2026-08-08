@@ -169,7 +169,7 @@ describe("pi-session-adapter", () => {
     // followUp → 新一轮 prompt → 再次 terminal（P0-1：真实投递——idle 会话
     // 经 prompt+streamingBehavior 触发新轮；补一条响应模拟 provider 继续应答）
     faux.appendResponses([fauxAssistantMessage("第二轮完成")]);
-    expect(session.followUp("补充：需要写测试")).toBe("applied");
+    await expect(session.followUp("补充：需要写测试")).resolves.toBe("applied");
     const secondTerminalDeadline = Date.now() + 10000;
     while (events.filter((event) => event.type === "terminal").length < 2 && Date.now() < secondTerminalDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -326,11 +326,11 @@ describe("pi-session-adapter", () => {
       workspaceCwd: "/tmp",
     });
     // 未 start（handle 未创建）：deferred——调用方（Dispatcher）延迟重试，不丢
-    expect(session.steer("早到的纠偏")).toBe("deferred");
-    expect(session.followUp("早到的 queue")).toBe("deferred");
+    await expect(session.steer("早到的纠偏")).resolves.toBe("deferred");
+    await expect(session.followUp("早到的 queue")).resolves.toBe("deferred");
     // 已终结：failed——调用方按终态迟到结算
     session.dispose();
-    expect(session.steer("迟到的纠偏")).toBe("failed");
-    expect(session.followUp("迟到的 queue")).toBe("failed");
+    await expect(session.steer("迟到的纠偏")).resolves.toBe("failed");
+    await expect(session.followUp("迟到的 queue")).resolves.toBe("failed");
   });
 });

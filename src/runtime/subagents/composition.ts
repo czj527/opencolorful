@@ -148,7 +148,9 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
         return;
       }
       try {
-        runs.appendAuditPending(input.runId, input.ownership, input.record);
+        // 复审 P1-1（第二轮）：pending 记录显式标记 activity 通道——启动恢复
+        // 按通道分流重放（audit 记录走 AuditRecorder，绝不喂给 ActivityRecorder）
+        runs.appendAuditPending(input.runId, input.ownership, { ...input.record, pendingChannel: "activity" });
       } catch {
         // 补账证据持久失败：静默（Recorder/DB 双故障时诊断由上层负责）
       }
@@ -237,6 +239,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
     workspaceLeases: leases,
     coordinator,
     activity, // T9b（§19.3）：auditPending 补账的 Activity 落点
+    audit, // 复审 P1-1（第二轮）：audit 通道 pending 记录经 AuditRecorder 补账
     now,
   });
   let availableFlag = false;
