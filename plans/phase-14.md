@@ -1,6 +1,6 @@
 # Phase 14：临时 Subagent Runtime 与父子任务协议
 
-**状态：已开发完成（T1-T10），复审修复完成（T11，2026-08-08），验收通过** | **规划基线：** `main`（Phase 13 最终自审合并点，`90cae72`）
+**状态：已开发完成（T1-T10），两轮复审修复完成（T11/T12，2026-08-08），验收通过** | **规划基线：** `main`（Phase 13 最终自审合并点，`90cae72`）
 **阶段定位：** 临时、无长期记忆、可观察、可由主 Agent 多轮纠偏的 Subagent Runtime 1.0；不实现多 Agent 协作
 **路线图依据：** [docs/positioning-and-roadmap.md](../docs/positioning-and-roadmap.md) Phase 14、[docs/infrastructure-decisions.md](../docs/infrastructure-decisions.md) 第四章
 **架构参考：** OpenHanako `lib/subagent-thread-store.ts`、`lib/subagent-run-store.ts`、`lib/tools/subagent-tool.ts`、`lib/deferred-result-coordinator.ts` 与 Session Preview；Codex `AgentControl`、`InterAgentCommunication`、Agent Status Subscribe 与 Mailbox；OpenClaw child session completion/yield 与幂等结果投递；Hermes background delegation heartbeat；PI AgentSession `steer` / `followUp`；A2A 1.0 Task / Context / Message / Artifact 语义
@@ -2658,5 +2658,26 @@ Phase 15+ 的外部 A2A、ACP、Channel、GraphRuntime、常驻团队和多 Agen
 | ④ auditPending 最小闭环 | **已补强**（6e39bef）：spawn_completed 审计失败 → run.audit_pending_json（启动恢复第 5 步补账）；双故障才放弃 |
 
 **T11 后最终验收结论**：复审 6 项指控全部闭环；已知限制清单清零；全量质量门绿；**允许合并 `main`**。合并前建议按仓库惯例做一次 PR 级 review（工作树已清理，无未提交改动）。
+
+### T12：第二轮独立复审修复（2026-08-08）——3×P0 + 3×P1 全部闭环
+
+**复审结论（暂不通过）**：E2E 全链已闭环，但独立复核发现 3 个 P0（Run 快照不可变/纠偏不丢失契约）与 3 个 P1：
+
+| 级别 | 指控 | 根因 | 修复（`95545f7`） |
+|---|---|---|---|
+| P0-1 | Run 级 Plugin Snapshot 被后续 Run 覆写 | `lastFrozenPluginSnapshots` 是 Session 级共享可变 Map，执行器持引用；下一次 parentSnapshot() clear/refill 后旧 Run 读到新 Run 快照 | Run 创建点生成 `Object.freeze(new Map(...))` 独立副本；执行器工厂内部再复制冻结（纵深防御）——旧 Run 只消费创建时内容 |
+| P0-2 | applied 早于 PI 实际接受，异步拒绝仍丢消息 | `handle.prompt()` 是 async，同步 try/catch 捕获不到 rejection；失败只发 error 事件，Dispatcher 已结算 delivered | 投递端口异步化（`Promise<SubagentMessageDelivery>`）+ PI preflight 接受信号：所有接受路径 `preflight(true)`（流式入队/非流式发送前），拒绝路径 `preflight(false)`+throw——确认后才 applied；异步拒绝 → failed（Dispatcher 退避重试/终态收敛）；dispatch/retryPending/steer/cancel/close 链同步异步化 |
+| P0-3 | Skill 依赖父 Session 当前 Turn，父换 turn 后 Run 失去已冻结 Skill | 读取时重新查 `turnSnapshots.get(parentSessionId)` 并要求 turnId 一致 | `captureRunSkillSnapshot`（spawn 时一次性捕获自包含不可变快照：entries 副本 + baseSnapshot 引用）+ `readSkillFileForRunSnapshot`/`readSkillBodyForRunSnapshot`——执行器持有 Run 专属快照，父换 turn 不影响 |
+| P1-1 | spawn_completed 的 auditPending 永远补不回 Audit Ledger | pending 记录被恢复器错误喂给 ActivityRecorder（拒绝 audit 通道事件）；spawn 固定返回 status:"ok" | pending 记录显式标记 `pendingChannel`（audit/activity）；启动恢复按通道分流——audit 目录事件（前缀 `audit.`）经 `AuditRecorder.appendStrict` 补账，activity 事件经 `ActivityRecorder.append`；spawn 如实返回 `auditStatus`（recorded/audit_pending/audit_failed） |
+| P1-2 | 后续 Run 的 Scheduler 补偿误关整个 Thread | steer 新建 Run 的拒绝路径复用首次 spawn 的补偿 helper，无条件 closeThread | `compensateSchedulerRejected` 增加 `closeThread` 参数：首次 spawn（全新 Thread）关闭；已有 Thread 上的新 Run 只终态化，Thread 保持 open 可重试 |
+| P1-3 | 声明的 TypeScript 质量门实际失败 | `tsc -p tsconfig.build.json` 排除 tests；`tsconfig.json` 全量有 5 个测试文件类型错误（readonly 赋值、Faux 端口 void） | 修复测试类型（harness 可变槽 `setRunToolExecutor`、Faux 端口异步化、dispatcher 断言 await）——`npx tsc --noEmit -p tsconfig.json` 零错误（含 tests） |
+
+**T12 后全量质量门**（主 Agent 独立复跑）：
+- `npx tsc --noEmit -p tsconfig.json` 零错误（含 tests；此前门误用 build 配置）；
+- `npm run test` 全量 **2073/2073**（175 文件，含新增 P0-1 快照隔离 2 例、P0-3 Run Skill 快照 3 例、P1-1 audit 通道重放 1 例、P1-2 steer 补偿保 Thread 1 例）；
+- `web:test` 426/426 + `web:build` ✓ + `check:pi-imports` 无违规；
+- Playwright 全量 59/59（含 Subagent 全链 E2E 2/2——异步投递链下真实 spawn → 子会话执行 → result → succeeded → 卡片 → /logs?subagent=）。
+
+**T12 后最终验收结论**：两轮复审共 12 项指控全部闭环（T11 六项 + T12 六项）；快照不可变、纠偏不丢失、审计链完整；全量质量门绿；**允许合并 `main`**。合并前建议按仓库惯例做一次 PR 级 review（工作树已清理，无未提交改动）。
 
 **合并建议**：`phase-14-subagent-runtime` → `main`（合并前建议按仓库惯例做一次 PR 级 review；工作树已清理，无未提交改动）。
