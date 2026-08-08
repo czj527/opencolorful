@@ -56,7 +56,8 @@ export const SUBAGENT_SYSTEM_PROMPT = [
 
 export interface PiSubagentSessionDeps {
   readonly threadStore: ThreadStore;
-  readonly modelRuntime: PiModelRuntimeHandle;
+  /** 模型运行时惰性解析（Provider upsert 重建 runtime；启动时捕获会拿旧实例） */
+  readonly modelRuntime: () => PiModelRuntimeHandle;
   /** 父会话 authPath（PI 会话目录/凭据解析基准） */
   readonly authPath: string;
   /** Thread 目录解析：<subagentsBase>/<owner>/subagents/<threadId>（§16.3） */
@@ -118,7 +119,7 @@ class PiSubagentSession implements SubagentSessionPort {
       throw new Error(`subagent thread ${this.input.threadId} not found`);
     }
     // 解析冻结模型（Thread 创建时 resolveSubagentModel 已选；此处取模型实例）
-    const resolved = this.deps.modelRuntime.resolveModel(thread.modelProviderId, thread.modelId);
+    const resolved = this.deps.modelRuntime().resolveModel(thread.modelProviderId, thread.modelId);
     if (!resolved) {
       throw new Error(`subagent model ${thread.modelProviderId}/${thread.modelId} unavailable`);
     }
@@ -130,7 +131,7 @@ class PiSubagentSession implements SubagentSessionPort {
       sessionId: this.sessionId,
       cwd: this.input.workspaceCwd,
       authPath: this.deps.authPath,
-      modelRuntime: this.deps.modelRuntime,
+      modelRuntime: this.deps.modelRuntime(),
       providerId: thread.modelProviderId,
       modelId: thread.modelId,
       sessionHandle: createInMemorySession(path.join(sessionDir, "pi")),

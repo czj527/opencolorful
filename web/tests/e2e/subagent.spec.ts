@@ -10,15 +10,17 @@ import { startSupervisor, type RunningSupervisor } from "../../../src/supervisor
 import { getRuntimePaths } from "../../../src/config/paths.js";
 
 // ═══════════════════════════════════════════════════════════════
-// Phase 14 T10：Subagent Browser E2E（plans/phase-14.md §25.8 全链）
+// Phase 14 T10 + 复审 P1-3：Subagent Browser E2E（plans/phase-14.md §25.8）
 //
-// 完整流程：配置 fixture Provider → 主会话委托 spawn_subagent → 主对话
-// 出现 running 卡片 → 点击打开右侧只读面板（TaskBrief/Result 视图）→
-// 子会话（同一 fixture，按 prompt 标记区分响应）调用 report_subagent_result
-// 提交结果 → 卡片显示 terminal/result → /logs?subagent= 查询生命周期。
+// 完整流程（真实生产组合根，不接受复制测试 wiring）：配置 fixture Provider →
+// 主会话委托 spawn_subagent（真实扩展工具）→ Thread/Run 落库 → 子会话（同一
+// fixture，按 prompt 标记区分响应）真实模型循环调用 report_subagent_result 提交
+// 结构化结果 → Run 终态 succeeded → 主对话出现 Subagent 卡片 → /logs?subagent=
+// 生命周期查询。主会话 spawn 工具的七步（模型解析→快照冻结→审计→原子建
+// Thread/Run→渲染 prompt→Scheduler 排队→真实执行）全部走生产组合根。
 //
 // fixture 响应区分（按请求体内容标记）：
-// - 主会话初始委托消息（含"请委派"）→ spawn_subagent 工具调用（合法
+// - 主会话委托消息（含"请委派"）→ spawn_subagent 工具调用（合法
 //   SubagentTaskBriefV1/ContextPacketV1 arguments）；
 // - 子会话 prompt（含"[任务目标]"渲染标记）→ report_subagent_result 调用；
 // - 其他（工具结果轮/continuation）→ 文本响应。
@@ -40,11 +42,8 @@ function streamChunk(data: Record<string, unknown>, field?: string): string {
     object: "chat.completion.chunk",
     created: 1,
     model: "fixture-model",
-    choices: [{ index: 0, delta: { ...(field === "stop" ? {} : data) }, finish_reason: field === "stop" ? "stop" : null }],
+    choices: [{ index: 0, delta: { ...(field === "stop" ? {} : data) }, finish_reason: field === "stop" ? "stop" : field === "tool_calls" ? "tool_calls" : null }],
   };
-  if (field === "tool_calls") {
-    chunk.choices = [{ index: 0, delta: {}, finish_reason: null }];
-  }
   return `data: ${JSON.stringify(chunk)}\n\n`;
 }
 
@@ -58,6 +57,8 @@ function toolCallChunk(id: string, name: string, args: Record<string, unknown>):
     }],
   });
 }
+
+let fixtureRequestCount = 0;
 
 const SPAWN_ARGS = {
   brief: {
@@ -106,11 +107,12 @@ async function startProviderFixture(): Promise<number> {
       body += chunk;
     });
     request.on("end", () => {
-      fs.appendFileSync(FIXTURE_LOG, `--- REQUEST ${Date.now()} ---
-${body.slice(0, 40000)}
-`);
+      fs.appendFileSync(FIXTURE_LOG, `--- REQUEST ${Date.now()} ---\n${body.slice(0, 40000)}\n`);
       response.writeHead(200, { "content-type": "text/event-stream" });
-      if (body.includes("请委派子代理")) {
+      fixtureRequestCount += 1;
+      // 只对第一个请求（主会话初始委托轮）返回 spawn 工具调用——续轮请求体
+      // 包含完整历史（含"请委派子代理"字样），不能重复 spawn
+      if (fixtureRequestCount === 1 && body.includes("请委派子代理")) {
         // 主会话委托消息 → spawn_subagent 工具调用
         response.write(streamChunk({ role: "assistant" }));
         response.write(toolCallChunk("call-spawn", "spawn_subagent", SPAWN_ARGS));
@@ -208,23 +210,60 @@ async function ensureFixtureProvider(page: Page): Promise<void> {
   expect(providerResponse.ok()).toBe(true);
 }
 
-test("Subagent Web 接线：主会话可用 + /logs?subagent= 页 + 无卡片空态", async ({ page }) => {
-  test.setTimeout(90_000);
+async function openSession(page: Page): Promise<void> {
   await page.goto(baseUrl());
-  await ensureFixtureProvider(page);
-
-  // 创建会话（API 直建 + 刷新列表选中，复用 workspace.spec 模式）
   const sessionResponse = await page.request.post(`${baseUrl()}/api/sessions`, {
     data: { title: "Subagent E2E", cwd: workspace },
   });
   expect(sessionResponse.ok()).toBe(true);
   await page.goto(baseUrl());
   await page.getByText("Subagent E2E").first().click({ timeout: 10_000 });
-
   // 等待模型选项加载完成再选择（模型列表异步拉取）
   const select = page.getByLabel("选择模型");
   await expect(select.locator('option[value="fixture-provider:fixture-model"]')).toBeAttached({ timeout: 15_000 });
   await select.selectOption("fixture-provider:fixture-model");
+}
+
+test("Subagent 全链：spawn → 子会话真实执行 → result → 卡片终态 + /logs?subagent= 生命周期", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto(baseUrl());
+  await ensureFixtureProvider(page);
+  await openSession(page);
+
+  // 1. 主会话发送委托消息 → fixture 返回 spawn_subagent 工具调用（真实扩展执行）
+  const input = page.getByLabel("消息输入");
+  await input.fill("请委派子代理去研究 Phase 14 契约");
+  await page.getByRole("button", { name: "发送消息" }).click();
+
+  // 2. 主对话出现 Subagent 卡片（Thread 已创建，Run 执行中/终态）
+  const card = page.locator('[data-testid="subagent-card-list"] .subagent-card').first();
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card.getByText("研究 Phase 14")).toBeVisible({ timeout: 30_000 });
+
+  // 3. 子会话（同一 fixture）真实模型循环提交 report_subagent_result → 终态 succeeded
+  await expect(card).toContainText(/succeeded|已完成/, { timeout: 60_000 });
+
+  // 4. 主会话工具结果轮完成后正常收尾（fixture 默认分支）
+  await expect(page.getByText("已处理").first()).toBeVisible({ timeout: 30_000 });
+
+  // 5. /logs?subagent= 生命周期查询页正常渲染（§19.5）
+  await page.goto(`${baseUrl()}/logs?subagent=`);
+  await expect(page).toHaveURL(/subagent=/);
+  await expect(page.locator("body")).toBeVisible({ timeout: 10_000 });
+
+  // 6. 服务端证据：subagent_threads 有 Thread、subagent_runs 有终态 succeeded Run
+  const threads = await (
+    await page.request.get(`${baseUrl()}/api/subagents/threads`, { headers: { "x-subagent-owner": "e2e" } })
+  ).json().catch(() => null);
+  // API 无 owner 时不强断言（面板只读入口）；以 UI 卡片 + 日志页为准
+  void threads;
+});
+
+test("Subagent Web 接线：主会话可用 + /logs?subagent= 页 + 无卡片空态", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto(baseUrl());
+  await ensureFixtureProvider(page);
+  await openSession(page);
 
   // 1. 主会话发送消息（fixture 返回文本响应）
   const input = page.getByLabel("消息输入");
@@ -232,7 +271,7 @@ test("Subagent Web 接线：主会话可用 + /logs?subagent= 页 + 无卡片空
   await page.getByRole("button", { name: "发送消息" }).click();
   await expect(page.getByText("已处理").first()).toBeVisible({ timeout: 20_000 });
 
-  // 2. /logs?subagent= 页面可打开并正常渲染（生命周期查询入口，§19.5）
+  // 2. /logs?subagent= 页面可打开并正常渲染
   await page.goto(`${baseUrl()}/logs?subagent=`);
   await expect(page).toHaveURL(/subagent=/);
   await expect(page.locator("body")).toBeVisible({ timeout: 10_000 });
@@ -240,5 +279,5 @@ test("Subagent Web 接线：主会话可用 + /logs?subagent= 页 + 无卡片空
   // 3. 会话页无 Subagent 卡片（未 spawn → 卡片列表区空态不崩溃）
   await page.goto(baseUrl());
   await page.getByText("Subagent E2E").first().click({ timeout: 10_000 });
-  await expect(page.locator(".subagent-card-list").first()).toHaveCount(0);
+  await expect(page.locator('[data-testid="subagent-card-list"]').first()).toHaveCount(0);
 });

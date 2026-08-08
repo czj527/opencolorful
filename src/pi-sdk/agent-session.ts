@@ -384,6 +384,15 @@ function minimalResourceLoader(
         errors.push(...skillToolsExtensionsLoaded.errors);
       }
 
+      // Phase 14 T6（复审 P1-3 根因修复）：Subagent Core 工具扩展必须进会话
+      // ExtensionRunner——此前只 ensure 加载、漏了加入 ResourceLoader，工具名
+      // 虽在 extraTools 里却被 setActiveToolsByName 静默丢弃（E2E 中 spawn 工具
+      // 一直"未注册"的根因）。Subagent Session 不传 extraTools，此处不加载。
+      if (subagentToolsExtensionsLoaded) {
+        extensions.push(...subagentToolsExtensionsLoaded.extensions);
+        errors.push(...subagentToolsExtensionsLoaded.errors);
+      }
+
       // 按需加载沙箱扩展
       if (useSandbox && sandboxExtensionsLoaded) {
         extensions.push(...sandboxExtensionsLoaded.extensions);

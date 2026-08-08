@@ -107,7 +107,7 @@ describe("pi-session-adapter", () => {
     const abilityCalls: Array<{ name: string }> = [];
     const factory = createPiSubagentSessionFactory({
       threadStore: new ThreadStore(database),
-      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      modelRuntime: () => ({ resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
       abilityExecutor: async (input) => {
@@ -192,7 +192,7 @@ describe("pi-session-adapter", () => {
     const abilityCalls: Array<{ name: string }> = [];
     const factory = createPiSubagentSessionFactory({
       threadStore: new ThreadStore(database),
-      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      modelRuntime: () => ({ resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
       abilityExecutor: async (input) => {
@@ -241,7 +241,7 @@ describe("pi-session-adapter", () => {
     });
     const factory = createPiSubagentSessionFactory({
       threadStore: new ThreadStore(database),
-      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      modelRuntime: () => ({ resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
       // 不传 abilityExecutor：缺省查 runId 注册表
@@ -279,7 +279,7 @@ describe("pi-session-adapter", () => {
     const events: SubagentSessionEvent[] = [];
     const factory = createPiSubagentSessionFactory({
       threadStore: new ThreadStore(database),
-      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      modelRuntime: () => ({ resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
     });
@@ -313,7 +313,7 @@ describe("pi-session-adapter", () => {
     const { faux, runtime } = await createModelRuntime(dir);
     const factory = createPiSubagentSessionFactory({
       threadStore: new ThreadStore(database),
-      modelRuntime: { resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never,
+      modelRuntime: () => ({ resolveModel: (p: string, m: string) => ({ providerId: p, modelId: m, model: runtime.getModel("faux", "faux-1"), runtime, credentialConfigured: true }) } as never),
       authPath: path.join(dir, "auth.json"),
       threadDirResolver: (input) => path.join(dir, input.ownerAgentId, "subagents", input.threadId),
     });

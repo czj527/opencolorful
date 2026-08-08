@@ -99,9 +99,10 @@ export interface SubagentRuntimeComposition {
     readonly canonicalWorkspace: string;
     readonly ownerAgentId: string;
   }) => { readonly allowed: boolean; readonly reason?: string; readonly release?: () => void };
-  readonly modelRuntime: PiModelRuntimeHandle;
   readonly authPath: string;
   /** 启动恢复执行（幂等；errors 为空 → available=true，§16.5） */
+  /** 模型运行时（惰性解析：Provider upsert 会重建 runtime，不能捕获启动时实例） */
+  readonly resolveModelRuntime: () => PiModelRuntimeHandle;
   runRecovery(): SubagentStartupRecoveryReport;
   /** 恢复完成后才为 true；spawn 前检查（§16.5 fail-closed） */
   readonly available: () => boolean;
@@ -168,7 +169,8 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
   let coordinator: ParentMailboxDeliveryCoordinator;
   const sessionFactory = createPiSubagentSessionFactory({
     threadStore: threads,
-    modelRuntime: modelService.getRuntime(),
+    // 惰性解析：Provider 配置变化（upsert 重建 runtime）后子会话拿到最新实例
+    modelRuntime: () => modelService.getRuntime(),
     authPath: paths.authFile,
     threadDirResolver,
   });
@@ -320,7 +322,7 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
         },
       };
     },
-    modelRuntime: modelService.getRuntime(),
+    resolveModelRuntime: () => modelService.getRuntime(),
     authPath: paths.authFile,
     runRecovery,
     available: () => availableFlag,
