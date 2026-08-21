@@ -1,4 +1,5 @@
 import { type SubagentOwnership } from "../stores/types.js";
+import { SubagentStoreError } from "../stores/errors.js";
 import type { SubagentMessageRecord } from "../stores/message-store.js";
 import { MessageStore } from "../stores/message-store.js";
 import type { SubagentRunRecord, SubagentRunUsage } from "../stores/run-store.js";
@@ -271,44 +272,50 @@ export class SubagentRuntimeHost {
 
   /**
    * 启动并执行一个 Run（异步；不阻塞调用方）。
-   * 所有失败路径都收敛到终态事务（failed/timed_out/budget_exhausted/interrupted），
-   * 不留下活动态 Run（Lease 丢失除外——停止写状态，恢复由启动恢复处理）。
+   *
+   * 启动 CAS（queued → starting + snapshot + Runtime Lease）在 execute 中同步执行：
+   * - CAS 成功 → void this.run(...) 并返回 {status:"started"}；
+   * - CAS 失败 → 返回 {status:"rejected", reasonCode, reason}，Run 保持原状态，
+   *   不进入活动表，由 Scheduler 调用方（spawn/steer）兜底终态化。
+   *
+   * 运行期失败路径在 run() 内收敛到终态事务（failed/timed_out/budget_exhausted/
+   * interrupted），不留下活动态 Run（Lease 丢失除外——停止写状态，恢复由启动恢复处理）。
    */
   execute(input: ExecuteSubagentRunInput): ExecuteSubagentRunResult {
     if (this.active.has(input.runId)) {
       return { status: "rejected", reasonCode: "subagent_run_state_conflict", reason: `Run ${input.runId} 已在本 Host 执行中` };
     }
-    void this.run(input);
-    return { status: "started" };
-  }
-
-  private async run(input: ExecuteSubagentRunInput): Promise<void> {
-    const { runId, threadId, ownership } = input;
     const holderId = `subagent-host`;
-    const nowIso = () => new Date(this.now()).toISOString();
+    const nowIso = new Date(this.now()).toISOString();
     let run: SubagentRunRecord;
     try {
-      // 1. queued → starting + snapshot + Runtime Lease（单事务，§16.4 #3）
+      // queued → starting + snapshot + Runtime Lease（单事务，§16.4 #3）
       run = this.deps.runs.startWithSnapshot(
         {
-          runId,
+          runId: input.runId,
           snapshotId: input.snapshotId,
           snapshotJson: input.snapshotJson,
           limits: input.limits,
           leaseBootId: this.deps.bootId,
           leaseHolderId: holderId,
           leaseExpiresAt: new Date(this.now() + this.runtimeLeaseTtlMs).toISOString(),
-          now: nowIso(),
+          now: nowIso,
         },
-        ownership,
+        input.ownership,
       );
     } catch (error) {
-      // 快照/租约事务失败：Run 未进入 starting（CAS 冲突或数据校验失败），
-      // 保持原状态由启动恢复/调用方兜底；记录到回调
-      this.deps.onRunProgress?.({ runId, text: `Run 启动失败（快照/租约事务）：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}` });
-      return;
+      // CAS/数据校验失败：Run 未进入 starting，保持原状态；surfacing 给 Scheduler
+      const reasonCode = error instanceof SubagentStoreError ? error.code : "subagent_operation_failed";
+      const reason = `Run ${input.runId} 启动失败（快照/租约事务）：${error instanceof Error ? error.message.slice(0, 160) : "unknown"}`;
+      this.deps.onRunProgress?.({ runId: input.runId, text: reason });
+      return { status: "rejected", reasonCode, reason };
     }
+    void this.run(input, run);
+    return { status: "started" };
+  }
 
+  private async run(input: ExecuteSubagentRunInput, run: SubagentRunRecord): Promise<void> {
+    const { runId, threadId, ownership } = input;
     const active: ActiveRun = {
       runId,
       threadId,

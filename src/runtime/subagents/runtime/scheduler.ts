@@ -72,7 +72,10 @@ export class SubagentScheduler {
       };
     }
     if (this.deps.host.activeRunCount < this.capacity) {
-      this.deps.host.execute(input);
+      const outcome = this.deps.host.execute(input);
+      if (outcome.status === "rejected") {
+        return outcome;
+      }
       return { status: "accepted", queued: false };
     }
     if (this.queue.length >= SUBAGENT_SCHEDULER_MAX_QUEUE) {

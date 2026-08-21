@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { buildSubagentRunToolExecutor } from "../../src/server/routes/subagent-ability-tools.js";
 import type { EffectiveSnapshot } from "../../src/runtime/subagents/delegation-policy.js";
+import {
+  getSubagentAbilityExecutor,
+  registerSubagentAbilityExecutor,
+  type SubagentRunAbilityExecutor,
+} from "../../src/pi-sdk/subagent-tools-context.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 14 复审 P0-1（第二轮）：run-scoped 执行器的快照隔离
@@ -79,5 +84,41 @@ describe("subagent-ability-tools（复审 P0-1 快照隔离）", () => {
     const outcome = await executor({ name: "pluginA.toolA", args: {} });
     expect(outcome.ok).toBe(false);
     expect(outcome.text).toContain("subagent_plugin_snapshot_missing");
+  });
+});
+
+describe("subagent-tools-context abilityExecutors 注册表", () => {
+  it("abilityExecutors 锚定在 globalThis[Symbol.for(\"opencolorful.subagent-tool-context-state\")]", () => {
+    const stateKey = Symbol.for("opencolorful.subagent-tool-context-state");
+    const globalState = globalThis as typeof globalThis & Record<symbol, unknown>;
+    const state = globalState[stateKey] as
+      | { abilityExecutors: Map<string, SubagentRunAbilityExecutor> }
+      | undefined;
+    expect(state).toBeDefined();
+    expect(state?.abilityExecutors).toBeInstanceOf(Map);
+  });
+
+  it("register/get 使用同一全局 Map 实例（跨导入路径一致）", () => {
+    const runId = "sar_run00000003";
+    const executor: SubagentRunAbilityExecutor = async () => ({ ok: true, text: "global" });
+    registerSubagentAbilityExecutor(runId, executor);
+
+    const stateKey = Symbol.for("opencolorful.subagent-tool-context-state");
+    const globalState = globalThis as typeof globalThis & Record<symbol, unknown>;
+    const state = globalState[stateKey] as { abilityExecutors: Map<string, SubagentRunAbilityExecutor> };
+
+    expect(state.abilityExecutors.get(runId)).toBe(executor);
+    expect(getSubagentAbilityExecutor(runId)).toBe(executor);
+  });
+
+  it("同 runId 覆盖，缺失返回 undefined", () => {
+    const runId = "sar_run00000004";
+    const first: SubagentRunAbilityExecutor = async () => ({ ok: true, text: "first" });
+    const second: SubagentRunAbilityExecutor = async () => ({ ok: true, text: "second" });
+    registerSubagentAbilityExecutor(runId, first);
+    registerSubagentAbilityExecutor(runId, second);
+    expect(getSubagentAbilityExecutor(runId)).toBe(second);
+
+    expect(getSubagentAbilityExecutor("sar_nonexistent")).toBeUndefined();
   });
 });

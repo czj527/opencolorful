@@ -105,6 +105,8 @@ export interface SubagentToolContext {
 export interface SubagentToolContextState {
   readonly storage: AsyncLocalStorage<SubagentToolContext>;
   readonly sessionContexts: Map<string, SubagentToolContext>;
+  /** run-scoped 能力工具执行器注册表（跨模块加载器边界共享，见 abilityExecutors） */
+  readonly abilityExecutors: Map<string, SubagentRunAbilityExecutor>;
 }
 
 const STATE_KEY = Symbol.for("opencolorful.subagent-tool-context-state");
@@ -114,19 +116,26 @@ if (!state) {
   state = {
     storage: new AsyncLocalStorage<SubagentToolContext>(),
     sessionContexts: new Map<string, SubagentToolContext>(),
+    abilityExecutors: new Map<string, SubagentRunAbilityExecutor>(),
   };
   globalState[STATE_KEY] = state;
 }
 
+// 兼容旧全局状态（由未带 abilityExecutors 的早期版本创建）：补齐字段
+if (state.abilityExecutors === undefined) {
+  (state as { abilityExecutors: Map<string, SubagentRunAbilityExecutor> }).abilityExecutors = new Map<string, SubagentRunAbilityExecutor>();
+}
+
 const storage = state.storage;
 const sessionContexts = state.sessionContexts;
+const abilityExecutors = state.abilityExecutors;
 
 /** 在直接调用/测试的异步上下文中注入 Subagent 工具上下文 */
 export function runWithSubagentContext<T>(ctx: SubagentToolContext, fn: () => T): T {
   return storage.run(ctx, fn);
 }
 
-// ── 能力工具执行器注册表（T9a §25.4 / 复审 P0-2）──────────────────
+// ── 能力工具执行器注册表（T9a §25.4 / 复审 P0-2 / #14）──────────────────
 //
 // 能力工具的目录（toolCatalog）与执行（createRunToolExecutor）都是 per-Session
 // 的（插件绑定/授权随父会话变化）；SubagentSessionFactory 在组合根构造，拿
@@ -134,6 +143,10 @@ export function runWithSubagentContext<T>(ctx: SubagentToolContext, fn: () => T)
 // run-scoped 执行器（已绑定 spawn 冻结快照）按 runId 注册到这里；
 // pi-session-adapter 的缺省 abilityExecutor 按 runId 查询执行。Run 终态/清理
 // 由注册表按 runId 惰性清理（上限保护）。
+//
+// 注册表锚定在 globalThis[Symbol.for("opencolorful.subagent-tool-context-state")]
+// 上（与 state/sessionContexts 同锚点），解决 jiti 加载的 PI 扩展与 tsx 原生加载
+// 的组合根跨模块加载器边界时各有一份 Map 的问题。
 
 /** run-scoped 能力工具执行器（spawn 冻结快照绑定后的执行闭包） */
 export type SubagentRunAbilityExecutor = (input: {
@@ -142,7 +155,6 @@ export type SubagentRunAbilityExecutor = (input: {
   readonly signal?: AbortSignal;
 }) => Promise<SubagentToolInvokeResult>;
 
-const abilityExecutors = new Map<string, SubagentRunAbilityExecutor>();
 const MAX_ABILITY_EXECUTOR_ENTRIES = 256;
 
 /** 注册能力工具执行器（spawn/steer 提交 Run 时调用；同 runId 覆盖） */

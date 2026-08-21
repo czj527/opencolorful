@@ -636,18 +636,36 @@ describe("SubagentRuntimeHost：heartbeat / Lease 丢失（§15.4）", () => {
 });
 
 describe("SubagentRuntimeHost：快照/启动失败 fail-closed", () => {
-  it("startWithSnapshot 冲突（Run 已被接管）→ 不终态化，保持原状态", async () => {
+  it("startWithSnapshot 冲突（Run 已被接管）→ execute 返回 rejected，不终态化，不进入活动表", async () => {
     const h = createHarness();
     h.submit({});
-    // 模拟恢复流程已把 Run 置为 starting（CAS 冲突）
+    // 模拟恢复流程已把 Run 置为 starting（CAS 冲突：startWithSnapshot 期望 queued）
     h.db.prepare("UPDATE subagent_runs SET status = 'starting' WHERE run_id = ?").run(RUN_ID);
-    h.scheduler.submit(executeInput());
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const outcome = h.scheduler.submit(executeInput());
+    expect(outcome).toEqual({
+      status: "rejected",
+      reasonCode: "subagent_run_state_conflict",
+      reason: expect.stringContaining("启动失败") as unknown as string,
+    });
+    expect(h.host.isRunActive(RUN_ID)).toBe(false);
     expect(h.terminals).toHaveLength(0);
     expect(h.factory.sessions).toHaveLength(0); // 未创建 Session
     const run = h.runs.get(RUN_ID, ownership());
     expect(run?.status).toBe("starting"); // 保持原状（恢复流程兜底）
     expect(h.progressEvents.some((event) => event.text.includes("启动失败"))).toBe(true);
+  });
+
+  it("execute() CAS 失败 → 返回 rejected 且不将 Run 加入活动表", () => {
+    const h = createHarness();
+    h.submit({});
+    // 直接调用 host.execute，不经过 Scheduler，制造 CAS 冲突
+    h.db.prepare("UPDATE subagent_runs SET status = 'running' WHERE run_id = ?").run(RUN_ID);
+    const outcome = h.host.execute(executeInput());
+    expect(outcome.status).toBe("rejected");
+    if (outcome.status === "rejected") {
+      expect(outcome.reasonCode).toBe("subagent_run_state_conflict");
+    }
+    expect(h.host.isRunActive(RUN_ID)).toBe(false);
   });
 
   it("Session 创建失败 → failed/subagent_operation_failed", async () => {
@@ -731,6 +749,20 @@ describe("SubagentScheduler：容量控制", () => {
     await session2?.invokeTool(REPORT_SUBAGENT_RESULT_TOOL, resultArgs());
     session2?.finish();
     await waitUntil(() => h.runs.get("sar_run000002" as SubagentRunId, ownership("agent-a", "sess-2"))?.status === "succeeded");
+  });
+
+  it("scheduler.submit 容量空闲分支传播 host.execute 的 rejected", () => {
+    const h = createHarness();
+    h.submit({});
+    // CAS 冲突：Run 不处于 queued
+    h.db.prepare("UPDATE subagent_runs SET status = 'starting' WHERE run_id = ?").run(RUN_ID);
+    const outcome = h.scheduler.submit(executeInput());
+    expect(outcome).toEqual({
+      status: "rejected",
+      reasonCode: "subagent_run_state_conflict",
+      reason: expect.stringContaining("启动失败") as unknown as string,
+    });
+    expect(h.host.isRunActive(RUN_ID)).toBe(false);
   });
 
   it("同一 Run 重复提交拒绝；排队超限 → subagent_runtime_unavailable", () => {
