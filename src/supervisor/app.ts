@@ -88,6 +88,7 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
         pid: controller.agentServerPid,
         port: agentStatus !== "stopped" ? agentServerPort : null,
         version: PLATFORM_VERSION,
+        watchdog: controller.getWatchdogStatus(),
       },
     };
     return context.json(response);

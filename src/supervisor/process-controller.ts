@@ -5,7 +5,7 @@ import path from "node:path";
 import type { RuntimePaths } from "../config/paths.js";
 import { readRuntimeState, isProcessRunning } from "../server/runtime-state.js";
 import { filterLogLines, type LogQuery, type LogTail } from "./log-filter.js";
-import type { AgentServerStatus, SupervisorState } from "./types.js";
+import type { AgentServerStatus, SupervisorState, WatchdogStatus } from "./types.js";
 import { instrument } from "../observability/instrument.js";
 
 export interface ProcessControllerOptions {
@@ -13,8 +13,20 @@ export interface ProcessControllerOptions {
   readonly agentServerPort: number;
   readonly supervisorPort: number;
   readonly entryScript?: string;
+  readonly autoRestartEnabled?: boolean;
+  readonly autoRestartMaxFailures?: number;
+  readonly autoRestartBaseDelayMs?: number;
+  readonly autoRestartMaxDelayMs?: number;
+  readonly autoRestartStabilityMs?: number;
+  readonly watchdogIntervalMs?: number;
 }
 
+const DEFAULT_AUTO_RESTART_ENABLED = true;
+const DEFAULT_AUTO_RESTART_MAX_FAILURES = 5;
+const DEFAULT_AUTO_RESTART_BASE_DELAY_MS = 1_000;
+const DEFAULT_AUTO_RESTART_MAX_DELAY_MS = 30_000;
+const DEFAULT_AUTO_RESTART_STABILITY_MS = 60_000;
+const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const HEALTH_TIMEOUT_MS = 15_000;
 
 function killProcessTree(pid: number): Promise<void> {
@@ -46,16 +58,53 @@ export class ProcessController {
   private child: ChildProcess | null = null;
   private startPromise: Promise<{ pid: number; port: number }> | null = null;
   private lifecycleStatus: AgentServerStatus = "stopped";
+  /** 正在主动停止的子进程，用于在 exit 事件异步触发时区分"主动 stop"与"意外退出" */
+  private stoppingChild: ChildProcess | null = null;
   private readonly paths: RuntimePaths;
   private readonly agentServerPort: number;
   private readonly supervisorPort: number;
   private readonly entryScript: string | undefined;
+
+  // 看门狗：期望状态与自动重启退避
+  private readonly autoRestartEnabled: boolean;
+  private readonly autoRestartMaxFailures: number;
+  private readonly autoRestartBaseDelayMs: number;
+  private readonly autoRestartMaxDelayMs: number;
+  private readonly autoRestartStabilityMs: number;
+  private readonly watchdogIntervalMs: number;
+  private desiredRunning: boolean = false;
+  private consecutiveFailures: number = 0;
+  private autoRestartTimer: ReturnType<typeof setTimeout> | null = null;
+  private autoRestartAt: number | null = null;
+  private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ProcessControllerOptions) {
     this.paths = options.paths;
     this.agentServerPort = options.agentServerPort;
     this.supervisorPort = options.supervisorPort;
     this.entryScript = options.entryScript;
+    this.autoRestartEnabled = options.autoRestartEnabled ?? DEFAULT_AUTO_RESTART_ENABLED;
+    this.autoRestartMaxFailures = options.autoRestartMaxFailures ?? DEFAULT_AUTO_RESTART_MAX_FAILURES;
+    this.autoRestartBaseDelayMs = options.autoRestartBaseDelayMs ?? DEFAULT_AUTO_RESTART_BASE_DELAY_MS;
+    this.autoRestartMaxDelayMs = options.autoRestartMaxDelayMs ?? DEFAULT_AUTO_RESTART_MAX_DELAY_MS;
+    this.autoRestartStabilityMs = options.autoRestartStabilityMs ?? DEFAULT_AUTO_RESTART_STABILITY_MS;
+    this.watchdogIntervalMs = options.watchdogIntervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
+    // 跨 supervisor 重启收养期望运行态：若 supervisor.json 中记录 agent server 在线/降级且 pid 仍存活，
+    // 新 controller 应将其视为期望运行，看门狗慢路径轮询兜底其死亡。
+    this.desiredRunning = this.inferDesiredRunningFromState();
+    if (this.desiredRunning) {
+      this.startStabilityWindow();
+    }
+    this.startWatchdogPolling();
+  }
+
+  private inferDesiredRunningFromState(): boolean {
+    const state = this.readSupervisorState();
+    if (state === undefined || state.agentServerPid === null) return false;
+    const status = state.agentServerStatus;
+    if (status !== "online" && status !== "degraded") return false;
+    return isProcessRunning(state.agentServerPid);
   }
 
   get agentServerRunning(): boolean {
@@ -83,6 +132,8 @@ export class ProcessController {
     if (this.startPromise !== null) {
       return this.startPromise;
     }
+    // 手动触发启动时，取消看门狗已排队的退避定时器，避免冗余重试
+    this.clearAutoRestartTimer();
     this.startPromise = this.doStartAgentServer();
     try {
       return await this.startPromise;
@@ -131,27 +182,36 @@ export class ProcessController {
       throw new Error("无法启动 Agent Server 子进程");
     }
 
-    // 子进程提前退出时立即失败；退出后清理引用与状态
+    // 子进程退出处理器：主动 stop 时 stoppingChild/lifecycleStatus 已标记；
+    // 意外退出且期望运行中则触发看门狗自动重起。
     let exitedEarly = false;
     child.once("exit", () => {
       exitedEarly = true;
       if (this.child === child) {
         this.child = null;
       }
-      this.lifecycleStatus = this.lifecycleStatus === "stopping" ? "stopped" : "error";
-      // 意外退出（非主动 stop）→ health degraded（agent server 崩溃的唯一外部观测点）
-      if (this.lifecycleStatus === "error") {
-        instrument.healthDegraded("Agent Server 进程意外退出");
-        instrument.error("supervisor.agent_server.exited", "Agent Server 进程意外退出");
+      const wasStopping = this.lifecycleStatus === "stopping" || this.stoppingChild === child;
+      this.lifecycleStatus = wasStopping ? "stopped" : "error";
+      if (wasStopping) {
+        this.updateAgentServerStatus("stopped");
+        return;
       }
-      this.updateAgentServerStatus(this.lifecycleStatus);
+      // 意外退出（非主动 stop）→ health degraded，并由看门狗在期望运行时排期重试
+      instrument.healthDegraded("Agent Server 进程意外退出");
+      instrument.error("supervisor.agent_server.exited", "Agent Server 进程意外退出");
+      if (this.desiredRunning) {
+        this.handleUnexpectedExit();
+      } else {
+        this.updateAgentServerStatus("error");
+      }
     });
 
     try {
       // 健康检查必须验证响应 PID 属于当前子进程，防止端口被其他服务占用时误判
       await this.waitForHealth(this.agentServerPort, HEALTH_TIMEOUT_MS, () => exitedEarly, pid);
     } catch (error) {
-      // 启动失败：清理子进程树、状态和引用
+      // 启动失败：清理子进程树、状态和引用；子进程退出事件处理器会在期望运行中
+      // 时继续退避，此处不再重复计数，避免一次失败被 double-count。
       await killProcessTree(pid);
       await waitForExit(pid, 3_000);
       if (this.child === child) {
@@ -174,15 +234,27 @@ export class ProcessController {
       updatedAt: new Date().toISOString(),
     });
     this.lifecycleStatus = "online";
+    this.desiredRunning = true;
+    this.startStabilityWindow();
     instrument.healthRecovered({ attributes: { agentServerPort: this.agentServerPort } });
 
     return { pid, port: this.agentServerPort };
   }
 
   async stopAgentServer(): Promise<void> {
+    // 主动 stop：取消期望运行态与所有看门狗定时器，防止与自动重启竞态
+    this.desiredRunning = false;
+    this.clearAutoRestartTimer();
+    this.clearStabilityTimer();
+
     const pid = this.agentServerPid;
+    const child = this.child;
+    if (child !== null) {
+      this.stoppingChild = child;
+    }
     if (pid === null || !isProcessRunning(pid)) {
       this.child = null;
+      this.stoppingChild = null;
       this.lifecycleStatus = "stopped";
       this.updateAgentServerStatus("stopped");
       return;
@@ -196,13 +268,45 @@ export class ProcessController {
       if (isProcessRunning(pid)) throw error;
     }
 
-    const exited = await waitForExit(pid, 10_000);
-    if (!exited) {
-      await killProcessTree(pid);
-      await waitForExit(pid, 3_000);
+    // Windows 上进程终止与 'exit' 事件存在异步窗口，isProcessRunning 可能先返回 false。
+    // 直接等待子进程 'exit' 事件，确保 exit 处理器在 stoppingChild 仍标记时完成，
+    // 避免被误判为意外退出。
+    if (child !== null) {
+      const exited = await new Promise<boolean>((resolve) => {
+        if (child.exitCode !== null) {
+          resolve(true);
+          return;
+        }
+        const timer = setTimeout(() => resolve(false), 10_000);
+        child.once("exit", () => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+      if (!exited) {
+        await killProcessTree(pid);
+        await new Promise<void>((resolve) => {
+          if (child.exitCode !== null) {
+            resolve();
+            return;
+          }
+          const timer = setTimeout(resolve, 3_000);
+          child.once("exit", () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+      }
+    } else {
+      const exited = await waitForExit(pid, 10_000);
+      if (!exited) {
+        await killProcessTree(pid);
+        await waitForExit(pid, 3_000);
+      }
     }
 
     this.child = null;
+    this.stoppingChild = null;
     this.lifecycleStatus = "stopped";
     this.updateAgentServerStatus("stopped");
   }
@@ -232,6 +336,110 @@ export class ProcessController {
       // 子进程仍在运行但健康端点短暂不可达时可恢复，不能把瞬时网络/启动抖动
       // 误报成不可恢复的错误；PID 不匹配仍在上方明确返回 error。
       return "degraded";
+    }
+  }
+
+  /**
+   * 看门狗当前状态，用于 Supervisor status 接口透传。
+   * 注意：处于退避等待期时 getAgentServerStatus 仍返回 error，语义不变。
+   */
+  getWatchdogStatus(): WatchdogStatus {
+    return {
+      consecutiveFailures: this.consecutiveFailures,
+      nextRetryAt: this.autoRestartAt !== null ? new Date(this.autoRestartAt).toISOString() : null,
+    };
+  }
+
+  /**
+   * 子进程意外退出或被收养进程死亡时的统一处理：
+   * 递增连续失败计数、置 error 态，并在期望运行时按退避策略排期自动重启。
+   */
+  private handleUnexpectedExit(): void {
+    this.clearStabilityTimer();
+    this.consecutiveFailures += 1;
+    this.updateAgentServerStatus("error");
+    this.scheduleAutoRestart();
+  }
+
+  /**
+   * 看门狗慢路径兜底：周期性检查期望运行中的进程是否仍在运行。
+   * 覆盖"收养的进程死亡无 exit 事件可挂"的场景。
+   */
+  private startWatchdogPolling(): void {
+    this.watchdogTimer = setInterval(() => {
+      if (!this.desiredRunning || this.autoRestartTimer !== null || this.startPromise !== null) {
+        return;
+      }
+      const pid = this.agentServerPid;
+      if (pid === null || !isProcessRunning(pid)) {
+        this.handleUnexpectedExit();
+      }
+    }, this.watchdogIntervalMs);
+    this.watchdogTimer.unref();
+  }
+
+  /**
+   * 自动重启退避调度。只有一个挂起的退避定时器；触发前复查 desiredRunning，
+   * 避免与并发 stop 竞态。达到上限后放弃并记录错误。
+   */
+  private scheduleAutoRestart(): void {
+    if (!this.autoRestartEnabled || !this.desiredRunning) {
+      return;
+    }
+    if (this.autoRestartTimer !== null) {
+      return;
+    }
+    if (this.consecutiveFailures > this.autoRestartMaxFailures) {
+      instrument.error(
+        "supervisor.agent_server.auto_restart_exhausted",
+        "Agent Server 自动重启已达上限",
+        { consecutiveFailures: this.consecutiveFailures, maxFailures: this.autoRestartMaxFailures },
+      );
+      this.autoRestartAt = null;
+      return;
+    }
+    const exponent = Math.max(0, this.consecutiveFailures - 1);
+    const delay = Math.min(
+      this.autoRestartBaseDelayMs * (2 ** exponent),
+      this.autoRestartMaxDelayMs,
+    );
+    this.autoRestartAt = Date.now() + delay;
+    this.autoRestartTimer = setTimeout(() => {
+      this.autoRestartTimer = null;
+      this.autoRestartAt = null;
+      if (!this.desiredRunning) {
+        return;
+      }
+      this.startAgentServer().catch(() => {
+        // 失败路径在 doStartAgentServer 中已更新计数并继续排期；
+        // 此处捕获仅避免 UnhandledPromiseRejection。
+      });
+    }, delay);
+    this.autoRestartTimer.unref();
+  }
+
+  /** 启动成功后开启稳定窗口，窗口期满仍在线则归零连续失败计数。 */
+  private startStabilityWindow(): void {
+    this.clearStabilityTimer();
+    this.stabilityTimer = setTimeout(() => {
+      this.stabilityTimer = null;
+      this.consecutiveFailures = 0;
+    }, this.autoRestartStabilityMs);
+    this.stabilityTimer.unref();
+  }
+
+  private clearAutoRestartTimer(): void {
+    if (this.autoRestartTimer !== null) {
+      clearTimeout(this.autoRestartTimer);
+      this.autoRestartTimer = null;
+    }
+    this.autoRestartAt = null;
+  }
+
+  private clearStabilityTimer(): void {
+    if (this.stabilityTimer !== null) {
+      clearTimeout(this.stabilityTimer);
+      this.stabilityTimer = null;
     }
   }
 

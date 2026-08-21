@@ -25,6 +25,11 @@ export interface SupervisorState {
   readonly updatedAt: string;
 }
 
+export interface WatchdogStatus {
+  readonly consecutiveFailures: number;
+  readonly nextRetryAt: string | null;
+}
+
 export interface SupervisorStatusResponse {
   readonly status: SupervisorStatus;
   readonly supervisor: {
@@ -38,6 +43,7 @@ export interface SupervisorStatusResponse {
     readonly pid: number | null;
     readonly port: number | null;
     readonly version: string | null;
+    readonly watchdog?: WatchdogStatus;
   };
 }
 
