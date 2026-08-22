@@ -19,7 +19,8 @@ Phase 8 已完成（2026-07-28）——Agent 模型去枚举化（identity v2，
 ## 开始开发
 
 ```powershell
-npm install
+# @hono/node-ws 目前仍声明 @hono/node-server 1.x peer；仓库现有组合需保留该兼容参数
+npm install --legacy-peer-deps
 npm run check
 
 # 可选：把开发数据隔离在项目内（该目录已被 Git 忽略）
@@ -39,6 +40,21 @@ npm run cli -- server start --foreground
 
 默认监听 `127.0.0.1:4310`，健康检查地址是
 `http://127.0.0.1:4310/api/health`。
+
+## Electron 桌面端原型
+
+`desktop/` 是独立的 Electron + React workspace，也是当前产品前端方向。第一版使用本地 mock 数据验证视觉、布局和交互，不直接导入后端实现或 PI SDK；现有 `web/` 继续作为浏览器端测试/运维客户端。
+
+```powershell
+# 启动 Vite renderer 与 Electron 壳
+npm run desktop:dev
+
+# 生产构建并从 dist 启动
+npm run desktop:build
+npm run desktop:start
+```
+
+桌面视觉基线见 [docs/design.md](docs/design.md)，仓库整理方向见 [docs/repository-layout.md](docs/repository-layout.md)。
 
 ## Supervisor 和 Web 工作台
 
@@ -100,6 +116,8 @@ cd web && npx playwright test
 - [架构说明](docs/architecture.md) — 平台层技术栈/模块边界/事件协议
 - [记忆系统架构](docs/memory-architecture.md) — 记忆数据流/两通道/存储语义权威（Phase 10/10.5 依据）
 - [开发流程](docs/development.md) — 角色/并行/质量门
+- [桌面端设计系统](docs/design.md) — Window Desk 视觉语言、信息架构与前后端边界
+- [仓库结构方向](docs/repository-layout.md) — Desktop workspace、未来 apps/packages 演进与 GitHub 发布清单
 - [产品说明](docs/product.md) — 旧定位（以 positioning-and-roadmap.md 为准）
 - [基础设施设计](docs/superpowers/specs/2026-07-21-agent-platform-foundation-design.md)
 - [Phase 0-7 计划](plans/phase-00.md) — 已完成历史阶段
@@ -120,10 +138,10 @@ cd web && npx playwright test
 
 ## 当前状态与下一阶段
 
-**平台层与 Agent 基础模型已完成（Phase 0-8）**：Server / Session / Provider / Supervisor / Web UI / Agent 身份证 / 底色 / Agent 工作目录 / Token 用量。
+**平台基础设施 Phase 0-14 已完成并验收**：Server / Session / Provider / Supervisor / Sandbox / Memory / Observability / Plugin / Skill / 临时 Subagent Runtime 均已有实现与阶段记录。
 
-**下一阶段核心目标（Phase 9-10）**：沙箱机制 / 记忆系统（案头/笺/今日记/往事/识见/手艺/梦境），穿插结构化日志框架。Phase 8 明确不提前实现 yuan 模板层、capabilities、skills、记忆和插件系统。
+**当前产品重点**：先完成 Electron 桌面端前端重构，以独立 renderer 和 mock adapter 确认 OpenColorful 的工作台形态，再通过稳定协议接入现有 Runtime。`web/` 暂时保留为测试与运维表面，不再承担最终视觉方向。
 
-**暂不做**：Electron 桌面端（Phase 10-11 后产品化阶段）、形态特化层（coding/design 专用交互基础设施）、技能自创、性格自我演变。
+**暂缓**：Cordis 化与 DeepSeek Harness 基座迁移。上游仍处快速演进阶段，当前不让其破坏性变化进入核心开发路径。
 
-**仍未完成的基础项**：OAuth、逐次工具审批、LAN/远程访问、云端同步、Web 端 A2UI/TokUI 完整交互组件渲染、Supervisor 系统服务注册。
+**仍需规划**：桌面数据适配层、Electron 安装包与自动更新、跨平台验收、OAuth、LAN/远程访问、云端同步，以及公开仓库的贡献与安全治理文件。

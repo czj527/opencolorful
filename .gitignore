@@ -8,6 +8,10 @@ coverage/
 *.tsbuildinfo
 web/test-results/
 web/playwright-report/
+.playwright-cli/
+/output/
+desktop/out/
+desktop/release/
 
 # Local runtime state, logs, and credentials.
 .env

@@ -1,0 +1,65 @@
+/* Providers 设置分区 — 复用 :root 设计令牌，亮暗主题自动适配 */
+.pv { display: grid; gap: 10px; }
+
+/* 列表 */
+.pv-list {
+  display: grid; grid-template-columns: 1fr; gap: 6px;
+  margin: 0; padding: 0; list-style: none;
+}
+.pv-list + .pv-actions { margin-top: 2px; }
+.pv-card {
+  display: grid; gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+}
+.pv-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pv-name {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600;
+}
+.pv-edit {
+  flex: 0 0 auto;
+  color: var(--text-3); font-size: 11px;
+}
+.pv-edit:hover { color: var(--accent); }
+.pv-card-meta {
+  display: block; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-2);
+}
+.pv-card-models { font-size: 10.5px; color: var(--text-3); }
+
+/* 操作行 */
+.pv-actions { display: flex; align-items: center; gap: 8px; }
+.pv-actions .btn:disabled { opacity: 0.55; cursor: default; }
+
+/* 表单 */
+.pv-form {
+  display: grid; gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.pv-field { display: grid; gap: 4px; }
+.pv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pv-label {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+}
+.pv-label em { color: var(--err); font-style: normal; }
+.pv-input, .pv-select {
+  width: 100%; height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); color: var(--text);
+  font-size: 12px;
+}
+.pv-input::placeholder { color: var(--text-3); }
+.pv-input:focus, .pv-select:focus { outline: none; border-color: var(--accent); }
+.pv-field.has-error .pv-input { border-color: var(--err); }
+.pv-hint { margin: 0; color: var(--text-3); font-size: 10.5px; }
+.pv-error { margin: 0; color: var(--err); font-size: 10.5px; }
+.pv-field .toggle { margin-top: 2px; }
+.pv-field .toggle:disabled { opacity: 0.55; cursor: default; }

@@ -1,0 +1,573 @@
+import { useEffect, useRef, useState } from "react";
+
+import { Timeline } from "./components/ChatView.js";
+import { Composer } from "./components/Composer.js";
+import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
+import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
+import { Sidebar, SidebarRail } from "./components/Sidebar.js";
+import { Titlebar, type PageId } from "./components/Titlebar.js";
+import { UsageBadge } from "./components/UsageBadge.js";
+import { WorkspaceBanner } from "./components/WorkspaceBanner.js";
+import {
+  createDataSource,
+  type ConnectionInfo,
+  type DesktopDataSource,
+  type ModelOption,
+  type ModelRef,
+  type PreferencesView,
+  type SessionSettingsView,
+  type SessionUsageView,
+} from "./data/source.js";
+import type { Agent, Thread, TimelineItem } from "./mock-data.js";
+import { MemoryPage } from "./pages/MemoryPage.js";
+import { LogsPage } from "./pages/LogsPage.js";
+import { useTheme } from "./theme.js";
+
+const NEW_THREAD = "new";
+
+/** 偏好接口缺失/不可用时的兜底：与后端默认一致，模型选择退回“首个已配置” */
+const FALLBACK_PREFERENCES: PreferencesView = {
+  defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
+};
+
+export function App() {
+  const theme = useTheme();
+  const [source, setSource] = useState<DesktopDataSource | null>(null);
+  const [page, setPage] = useState<PageId>("chat");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [agents, setAgents] = useState<readonly Agent[]>([]);
+  const [agentId, setAgentId] = useState("");
+  const [threads, setThreads] = useState<readonly Thread[]>([]);
+  const [archivedThreads, setArchivedThreads] = useState<readonly Thread[]>([]);
+  const [threadId, setThreadId] = useState<string>(NEW_THREAD);
+  const [items, setItems] = useState<readonly TimelineItem[]>([]);
+  const [draft, setDraft] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [dock, setDock] = useState<DockTool | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
+  const [models, setModels] = useState<readonly ModelOption[]>([]);
+  const [modelsRefresh, setModelsRefresh] = useState(0);
+  const [sessionSettings, setSessionSettings] = useState<SessionSettingsView | null>(null);
+  const [sessionUsage, setSessionUsage] = useState<SessionUsageView | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  // 新会话（未落库）时的本地选择；创建会话时下发到服务端。
+  // 初始对齐后端偏好默认（read-only / medium），偏好加载后再微调
+  const [draftModel, setDraftModel] = useState<ModelRef | null>(null);
+  const [draftThinking, setDraftThinking] = useState("medium");
+  const [draftToolMode, setDraftToolMode] = useState("read-only");
+  const [preferences, setPreferences] = useState<PreferencesView | null>(null);
+  // 偏好加载后不覆盖用户已做的手动选择（记录是否触碰过草稿运行设置）
+  const touchedThinking = useRef(false);
+  const touchedToolMode = useRef(false);
+  // 连接状态（台账 #12）：数据源探活/请求结果驱动，断线时 Titlebar 离线指示
+  const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+
+  // 启动：探测真实后端（IPC 桥），不可达回退 mock
+  useEffect(() => {
+    let cancelled = false;
+    void createDataSource().then((next) => {
+      if (!cancelled) setSource(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 连接状态订阅：ipc 为动态探活，mock 为静态一次性回调
+  useEffect(() => {
+    if (source === null) return;
+    setConnection(source.info);
+    if (source.subscribeConnection === undefined) return;
+    return source.subscribeConnection(setConnection);
+  }, [source]);
+
+  // Agent 列表
+  useEffect(() => {
+    if (source === null) return;
+    let cancelled = false;
+    source.listAgents().then((list) => {
+      if (cancelled) return;
+      setAgents(list);
+      setAgentId((current) => (current !== "" && list.some((agent) => agent.id === current)) ? current : list[0]?.id ?? "");
+    }).catch(() => {
+      if (!cancelled) setAgents([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const activeAgent = agents.find((agent) => agent.id === agentId) ?? agents[0];
+
+  useEffect(() => {
+    if (activeAgent !== undefined) source?.setActiveAgentName?.(activeAgent.name);
+  }, [source, activeAgent]);
+
+  // 全局偏好：草稿运行设置与默认模型的偏好来源（加载前草稿先用 medium/read-only 兜底）
+  useEffect(() => {
+    if (source === null) return;
+    let cancelled = false;
+    const load = source.getPreferences === undefined
+      ? Promise.resolve(null)
+      : source.getPreferences().catch(() => null);
+    load.then((value) => {
+      if (cancelled) return;
+      setPreferences(value ?? FALLBACK_PREFERENCES);
+      if (value === null) return; // 接口缺失/失败：保持兜底默认
+      if (!touchedThinking.current) setDraftThinking(value.defaults.thinkingLevel);
+      if (!touchedToolMode.current) setDraftToolMode(value.defaults.toolMode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  // 可用模型（真实数据源下来自已配置凭据的 Provider；Provider 变更后重拉）
+  useEffect(() => {
+    if (source === null) return;
+    let cancelled = false;
+    source.listModels().then((list) => {
+      if (cancelled) return;
+      setModels(list);
+      // 偏好未就绪时不自动选模型：避免先落到首个可用、偏好加载后被“当前值仍在列表”保留
+      if (preferences === null) return;
+      setDraftModel((current) => {
+        // ① 当前选择仍在列表则保持（含用户手动选择）
+        if (current !== null && list.some((option) => option.providerId === current.providerId && option.modelId === current.modelId)) return current;
+        // ② 偏好默认模型在列表且已配置凭据 → 优先采用
+        const preferred = preferences.defaults.model;
+        if (preferred !== null) {
+          const fromPref = list.find((option) => option.credentialConfigured && option.providerId === preferred.providerId && option.modelId === preferred.modelId);
+          if (fromPref !== undefined) return { providerId: fromPref.providerId, modelId: fromPref.modelId };
+        }
+        // ③ 偏好缺失/不可用 → 第一个已配置凭据的模型；④ 都没有 → null
+        const first = list.find((option) => option.credentialConfigured);
+        return first !== undefined ? { providerId: first.providerId, modelId: first.modelId } : null;
+      });
+    }).catch(() => {
+      if (!cancelled) setModels([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, modelsRefresh, preferences]);
+
+  const isNew = threadId === NEW_THREAD;
+
+  // 会话设置与用量（真实会话才拉取；新会话用本地草稿值）
+  useEffect(() => {
+    if (source === null || isNew) {
+      setSessionSettings(null);
+      setSessionUsage(null);
+      return;
+    }
+    let cancelled = false;
+    source.getSessionSettings(threadId).then((settings) => {
+      if (!cancelled) setSessionSettings(settings);
+    }).catch(() => {
+      if (!cancelled) setSessionSettings(null);
+    });
+    source.getSessionUsage(threadId).then((usage) => {
+      if (!cancelled) setSessionUsage(usage);
+    }).catch(() => {
+      if (!cancelled) setSessionUsage(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, threadId, isNew]);
+
+  // 一轮对话结束后刷新用量
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    const finished = wasStreaming.current && !streaming;
+    wasStreaming.current = streaming;
+    if (!finished || source === null || isNew) return;
+    source.getSessionUsage(threadId).then(setSessionUsage).catch(() => undefined);
+  }, [streaming, source, threadId, isNew]);
+
+  // 当前 Agent 的会话列表（含归档区）
+  useEffect(() => {
+    if (source === null || agentId === "") return;
+    let cancelled = false;
+    Promise.all([
+      source.listThreads(agentId),
+      source.listArchivedThreads(agentId),
+    ]).then(([list, archived]) => {
+      if (cancelled) return;
+      setThreads(list);
+      setArchivedThreads(archived);
+      setThreadId((current) => {
+        if (list.some((thread) => thread.id === current)) return current;
+        return list[0]?.id ?? NEW_THREAD;
+      });
+    }).catch(() => {
+      if (!cancelled) {
+        setThreads([]);
+        setArchivedThreads([]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, agentId]);
+
+  // 会话时间线订阅（含历史投影与实时事件）
+  useEffect(() => {
+    if (source === null) return;
+    if (threadId === NEW_THREAD) {
+      setItems([]);
+      setStreaming(false);
+      return;
+    }
+    return source.subscribeChat(threadId, (snapshot) => {
+      setItems(snapshot.items);
+      setStreaming(snapshot.streaming);
+    });
+  }, [source, threadId]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [settingsOpen]);
+
+  async function send() {
+    if (source === null || agentId === "") return;
+    const text = draft.trim();
+    if (text === "" || streaming) return;
+    setChatError(null);
+
+    if (text === "/compact") {
+      if (threadId === NEW_THREAD) {
+        setChatError("先发送消息创建会话");
+        return;
+      }
+      setDraft("");
+      try {
+        await source.compactSession(threadId);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "压缩失败";
+        if (message.includes("忙") || message.includes("BUSY") || message.includes("无法压缩")) {
+          setChatError("会话忙，压缩稍后再试");
+        } else {
+          setChatError(message);
+        }
+      }
+      return;
+    }
+
+    setDraft("");
+    try {
+      let target = threadId;
+      if (target === NEW_THREAD) {
+        const title = text.length > 18 ? `${text.slice(0, 18)}…` : text;
+        const thread = await source.createThread(agentId, title);
+        setThreads((current) => [thread, ...current]);
+        target = thread.id;
+        // 新会话创建后下发本地选择的模型与运行设置（失败不阻塞首条消息）
+        if (draftModel !== null) await source.updateSessionModel(thread.id, draftModel).catch(() => undefined);
+        await source.updateSessionSettings(thread.id, { thinkingLevel: draftThinking, toolMode: draftToolMode }).catch(() => undefined);
+        setThreadId(thread.id);
+      }
+      await source.sendPrompt(target, text);
+    } catch (cause) {
+      setChatError(cause instanceof Error ? cause.message : "发送失败");
+    }
+  }
+
+  function stopStreaming() {
+    if (source !== null && threadId !== NEW_THREAD) void source.abort(threadId);
+  }
+
+  function selectThread(id: string) {
+    setThreadId(id);
+    setPage("chat");
+  }
+
+  function startNewThread() {
+    setThreadId(NEW_THREAD);
+    setDraft("");
+    setPage("chat");
+  }
+
+  function updateThreadTitle(sessionId: string, title: string) {
+    if (source === null) return;
+    setThreads((current) => current.map((thread) => (thread.id === sessionId ? { ...thread, title } : thread)));
+    void source.updateThreadTitle(sessionId, title)
+      .then(() => {
+        if (agentId === "") return;
+        source.listThreads(agentId).then(setThreads).catch(() => undefined);
+      })
+      .catch((cause: unknown) => {
+        setChatError(cause instanceof Error ? cause.message : "重命名失败");
+      });
+  }
+
+  function unarchiveThread(sessionId: string) {
+    if (source === null) return;
+    void source.unarchiveThread(sessionId)
+      .then(() => {
+        if (agentId === "") return;
+        Promise.all([source.listThreads(agentId), source.listArchivedThreads(agentId)]).then(([list, archived]) => {
+          setThreads(list);
+          setArchivedThreads(archived);
+        }).catch(() => undefined);
+      })
+      .catch((cause: unknown) => {
+        setChatError(cause instanceof Error ? cause.message : "恢复失败");
+      });
+  }
+
+  function toggleDock(tool: DockTool) {
+    setDock((current) => (current === tool ? null : tool));
+  }
+
+  /* ---- 会话设置变更（既有会话直接写服务端并本地乐观更新；新会话记草稿） ---- */
+
+  function changeModel(next: ModelRef) {
+    if (isNew) {
+      setDraftModel(next);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, model: next }));
+    void source?.updateSessionModel(threadId, next).catch(() => setChatError("模型切换失败"));
+  }
+
+  function changeThinkingLevel(level: string) {
+    if (isNew) {
+      touchedThinking.current = true;
+      setDraftThinking(level);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, thinkingLevel: level }));
+    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch(() => setChatError("思考级别更新失败"));
+  }
+
+  function changeToolMode(mode: string) {
+    if (isNew) {
+      touchedToolMode.current = true;
+      setDraftToolMode(mode);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, toolMode: mode }));
+    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch(() => setChatError("工具模式更新失败"));
+  }
+
+  function confirmWorkspace() {
+    if (source === null || isNew) return;
+    setConfirming(true);
+    source.updateSessionSettings(threadId, { workspaceConfirmed: true })
+      .then(() => setSessionSettings((current) => (current === null ? current : { ...current, workspaceConfirmed: true })))
+      .catch(() => setChatError("工作区确认失败，请重试"))
+      .finally(() => setConfirming(false));
+  }
+
+  function switchToReadOnly() {
+    if (source === null || isNew) return;
+    setConfirming(true);
+    source.updateSessionSettings(threadId, { toolMode: "read-only" })
+      .then(() => setSessionSettings((current) => (current === null ? current : { ...current, toolMode: "read-only" })))
+      .catch(() => setChatError("切换只读失败，请重试"))
+      .finally(() => setConfirming(false));
+  }
+
+  if (source === null) {
+    return (
+      <div className="app">
+        <div className="boot-screen">正在连接 OpenColorful 后端…</div>
+      </div>
+    );
+  }
+
+  const activeThread = threads.find((thread) => thread.id === threadId);
+  const isNewThread = threadId === NEW_THREAD;
+  const chatTitle = isNewThread ? "新会话" : activeThread?.title ?? "会话";
+  const showEmptyState = page === "chat" && isNewThread;
+  const workspaceLabel = activeAgent?.workspace ?? "未设置工作目录";
+
+  const composerControls = {
+    models,
+    model: isNewThread ? draftModel : sessionSettings?.model ?? draftModel,
+    onModel: changeModel,
+    thinkingLevel: isNewThread ? draftThinking : sessionSettings?.thinkingLevel ?? draftThinking,
+    onThinkingLevel: changeThinkingLevel,
+    toolMode: isNewThread ? draftToolMode : sessionSettings?.toolMode ?? draftToolMode,
+    onToolMode: changeToolMode,
+    workspace: activeAgent?.workspace ?? null,
+  } as const;
+
+  const showWorkspaceBanner = !showEmptyState
+    && sessionSettings !== null
+    && sessionSettings.toolMode === "all"
+    && !sessionSettings.workspaceConfirmed;
+
+  return (
+    <div className="app">
+      <Titlebar
+        page={page}
+        onPage={setPage}
+        theme={theme}
+        streaming={streaming}
+        connection={connection ?? source.info}
+      />
+      <div className="app-body">
+        {sidebarCollapsed ? (
+          <SidebarRail
+            agents={agents}
+            activeAgent={activeAgent}
+            onAgent={setAgentId}
+            onExpand={() => setSidebarCollapsed(false)}
+            onNewThread={startNewThread}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        ) : (
+          <Sidebar
+            agents={agents}
+            activeAgent={activeAgent}
+            onAgent={setAgentId}
+            threads={threads}
+            archivedThreads={archivedThreads}
+            activeThreadId={threadId}
+            onThread={selectThread}
+            onNewThread={startNewThread}
+            onUpdateThreadTitle={updateThreadTitle}
+            onUnarchiveThread={unarchiveThread}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
+        <main className="main">
+          {page === "chat" && (
+            <section className="chat-page">
+              {!showEmptyState && (
+                <header className="chat-head">
+                  <div className="chat-head-title">
+                    <strong>{chatTitle}</strong>
+                    <span>{(activeAgent?.name ?? "Agent")} · {workspaceLabel}</span>
+                  </div>
+                  {sessionUsage !== null && <UsageBadge usage={sessionUsage} />}
+                  <DockToggleButtons dock={dock} onToggle={toggleDock} />
+                </header>
+              )}
+              {showWorkspaceBanner && (
+                <WorkspaceBanner
+                  cwd={sessionSettings.workspaceCwd}
+                  busy={confirming}
+                  onConfirm={confirmWorkspace}
+                  onReadOnly={switchToReadOnly}
+                />
+              )}
+              <div className="chat-scroll">
+                {showEmptyState ? (
+                  <div className="empty-state">
+                    {activeAgent === undefined ? (
+                      <>
+                        <h1>还没有可用的 Agent</h1>
+                        <p className="page-empty">请先在 Web 运维面（4311）创建 Agent，再回到桌面端。</p>
+                      </>
+                    ) : (
+                      <>
+                        <span className="empty-agent" style={{ background: activeAgent.color }} aria-hidden="true">
+                          {activeAgent.initial}
+                        </span>
+                        <h1>要做什么，交给{activeAgent.name}吧</h1>
+                        <p className="page-empty">新会话为草稿：发送首条消息后才会出现在会话列表</p>
+                        <div className="empty-agents">
+                          {agents.map((agent) => (
+                            <button
+                              key={agent.id}
+                              type="button"
+                              className={agent.id === agentId ? "is-active" : ""}
+                              onClick={() => setAgentId(agent.id)}
+                            >
+                              <span className="agent-dot" style={{ background: agent.color, width: 16, height: 16, fontSize: 9 }} aria-hidden="true">{agent.initial}</span>
+                              {agent.name}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="empty-composer">
+                          <Composer
+                            agentName={activeAgent.name}
+                            draft={draft}
+                            onDraft={setDraft}
+                            onSend={() => void send()}
+                            onStop={stopStreaming}
+                            streaming={streaming}
+                            autoFocus
+                            {...composerControls}
+                          />
+                        </div>
+                        {models.length > 0 && !models.some((option) => option.credentialConfigured) && (
+                          <button
+                            type="button"
+                            className="inline-action"
+                            onClick={() => {
+                              setSettingsCategory("models");
+                              setSettingsOpen(true);
+                            }}
+                          >
+                            还没有可用模型，去配置 Provider 与 API Key →
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <Timeline items={items} onOpenDiff={() => setDock("diff")} />
+                )}
+              </div>
+              {!showEmptyState && (
+                <div className="chat-composer">
+                  {chatError !== null && <div className="chat-error" role="alert">{chatError}</div>}
+                  <Composer
+                    agentName={activeAgent?.name ?? "Agent"}
+                    draft={draft}
+                    onDraft={setDraft}
+                    onSend={() => void send()}
+                    onStop={stopStreaming}
+                    streaming={streaming}
+                    {...composerControls}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+          {page === "memory" && activeAgent !== undefined && (
+            <div className="page-scroll"><MemoryPage source={source} agent={activeAgent} /></div>
+          )}
+          {page === "logs" && <div className="page-scroll"><LogsPage source={source} /></div>}
+        </main>
+        {page === "chat" && dock !== null && (
+          <Dock
+            tool={dock}
+            onSelect={setDock}
+            onClose={() => setDock(null)}
+            subagent={activeAgent === undefined ? undefined : {
+              source,
+              agentId: activeAgent.id,
+              sessionId: isNewThread ? null : threadId,
+            }}
+          />
+        )}
+      </div>
+      {settingsOpen && (
+        <SettingsModal
+          category={settingsCategory}
+          onCategory={setSettingsCategory}
+          onClose={() => setSettingsOpen(false)}
+          themeMode={theme.mode}
+          onThemeMode={theme.setMode}
+          dataSourceLabel={source.info.label}
+          source={source}
+          onProvidersChanged={() => setModelsRefresh((value) => value + 1)}
+        />
+      )}
+    </div>
+  );
+}

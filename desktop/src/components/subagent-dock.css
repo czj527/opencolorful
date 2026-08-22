@@ -1,0 +1,122 @@
+/* Subagent 只读面板 — 复用 :root 设计令牌，亮暗主题自动适配 */
+.subagent-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 顶部：返回 / 标题 / 刷新 */
+.subagent-dock-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.subagent-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.subagent-back:hover { background: var(--bg-hover); color: var(--text); }
+.subagent-title {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600;
+  text-align: center;
+}
+
+/* 列表：卡片 */
+.subagent-list { display: grid; gap: 6px; }
+.subagent-card {
+  display: grid; gap: 4px;
+  width: 100%; text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+  cursor: pointer;
+}
+.subagent-card:hover { background: var(--bg-hover); }
+.subagent-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.subagent-card-title {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; font-weight: 600;
+}
+.subagent-card-model { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--text-3); }
+.subagent-card-summary { font-size: 11.5px; line-height: 1.5; color: var(--text-2); }
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.subagent-card-foot { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text-3); }
+.subagent-card-foot .st-run { font-family: var(--mono); }
+
+/* 运行状态语义色 */
+.st-ok { color: var(--ok); }
+.st-warn { color: var(--warn); }
+.st-err { color: var(--err); }
+.st-muted { color: var(--text-3); }
+
+/* 详情 */
+.subagent-objective {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+  color: var(--text-2);
+  font-size: 11.5px; line-height: 1.6;
+  overflow-wrap: break-word; white-space: normal;
+}
+.subagent-section-title {
+  margin: 10px 0 6px;
+  font-size: 10.5px; font-weight: 650; color: var(--text-3);
+}
+.subagent-runs { display: grid; gap: 6px; }
+.subagent-run {
+  display: grid; gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+.subagent-run-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.subagent-run-id { font-family: var(--mono); font-size: 10px; color: var(--text-3); }
+.subagent-run-stats { display: flex; gap: 10px; font-family: var(--mono); font-size: 10px; color: var(--text-2); }
+.subagent-run-summary { font-size: 11px; line-height: 1.5; color: var(--text-2); }
+
+.subagent-messages { display: grid; gap: 2px; }
+.subagent-msg {
+  display: grid; gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+}
+.subagent-msg:hover { background: var(--bg-subtle); }
+.subagent-msg-head { display: flex; align-items: center; gap: 6px; }
+.subagent-msg-sender { font-size: 11px; font-weight: 600; }
+.subagent-msg-sender.is-parent { color: var(--accent); }
+.subagent-msg-sender.is-subagent { color: var(--violet); }
+.subagent-msg-sender.is-system { color: var(--text-3); }
+.subagent-msg-sender.is-other { color: var(--text-2); }
+.subagent-msg-text { font-size: 11.5px; line-height: 1.55; color: var(--text); overflow-wrap: break-word; white-space: normal; }
+
+.subagent-artifacts { display: grid; border-top: 1px solid var(--border); }
+.subagent-artifact {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.subagent-artifact-name {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 11px;
+}
+.subagent-artifact-kind { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--text-3); }
+.subagent-artifact-size { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--text-3); }

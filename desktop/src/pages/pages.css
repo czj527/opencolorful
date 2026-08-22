@@ -1,0 +1,11 @@
+/* 页面级额外样式：按需由页面 import（基础令牌见 styles.css :root） */
+
+/* LogsPage：实时跟随开关行 */
+.live-follow {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 2px; color: var(--text-2); font-size: 11.5px; white-space: nowrap;
+}
+
+/* LogsPage：加载更多按钮居中 */
+.load-more { display: flex; justify-content: center; margin-top: 12px; }
+.load-more .btn:disabled { opacity: 0.5; cursor: default; }
