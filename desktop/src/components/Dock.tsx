@@ -49,12 +49,12 @@ function TerminalPanel() {
     <div className="dock-panel terminal-panel">
       <div className="terminal-meta"><span>opencolorful · powershell</span><span className="chip">mock</span></div>
       <pre className="terminal-view"><code>
-        <span className="term-prompt">PS <local-workspace>\opencolorful&gt;</span> npm run desktop:build{"\n"}
+        <span className="term-prompt">{"PS <local-workspace>\\opencolorful&gt;"}</span> npm run desktop:build{"\n"}
         {"\n"}
         <span className="term-ok">✓</span> tsc --noEmit{"\n"}
         <span className="term-ok">✓</span> vite build · 412 kB{"\n"}
         {"\n"}
-        <span className="term-prompt">PS <local-workspace>\opencolorful&gt;</span> <span className="term-caret" />
+        <span className="term-prompt">{"PS <local-workspace>\\opencolorful&gt;"}</span> <span className="term-caret" />
       </code></pre>
     </div>
   );
