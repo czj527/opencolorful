@@ -92,7 +92,7 @@ describe("T9 幂等 retention", () => {
     insertOldActivity(db, "2026-01-01T00:00:00.000Z", "turn.completed");
     insertOldActivity(db, "2026-01-01T01:00:00.000Z", "turn.completed");
     insertOldActivity(db, "2026-01-02T00:00:00.000Z", "turn.failed");
-    insertOldActivity(db, "2026-07-15T00:00:00.000Z", "system.started"); // 30 天内保留
+    insertOldActivity(db, new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(), "system.started"); // 30 天内保留（相对当前时间，避免日期炸弹）
     insertOldAudit(db, "2026-01-01T00:00:00.000Z"); // audit 永不参与 retention
 
     const result = retention.runRetention(30);
