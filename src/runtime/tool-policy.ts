@@ -50,8 +50,12 @@ export class ToolPolicy {
       case "read-only":
         return [...READ_ONLY_TOOLS];
       case "all":
-        this.validateAllMode(cwd, confirmed);
-        return [...ALL_TOOLS];
+        // fail-safe：未确认工作区时降级为只读工具，不阻塞上层保存状态
+        if (confirmed === true) {
+          this.validateAllMode(cwd, confirmed);
+          return [...ALL_TOOLS];
+        }
+        return [...READ_ONLY_TOOLS];
       default:
         throw new Error(`未知工具模式: ${mode}`);
     }
@@ -77,6 +81,10 @@ export class ToolPolicy {
   ): { tools: string[]; sandboxWarnings: string[] } {
     const tools = this.resolveTools(mode, cwd, confirmed);
     const sandboxWarnings: string[] = [];
+
+    if (mode === "all" && confirmed !== true) {
+      sandboxWarnings.push("工作区未确认，已降级为只读工具");
+    }
 
     if (this.pathGuard && cwd) {
       const result = this.pathGuard.check("read", cwd);

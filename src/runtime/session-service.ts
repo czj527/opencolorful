@@ -188,6 +188,25 @@ export class SessionService {
     return this.getView(id);
   }
 
+  renameSession(id: string, title: string): SessionView {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      throw new Error("Session title 不能为空");
+    }
+    if (trimmed.length > 200) {
+      throw new Error("Session title 过长");
+    }
+    const metadata = this.index.get(id);
+    if (!metadata) {
+      throw new Error(`Session 不存在: ${id}`);
+    }
+    const session = this.open(id);
+    session.setTitle(trimmed);
+    session.persist();
+    this.index.updateSettings(id, { title: trimmed });
+    return this.getView(id);
+  }
+
   closeAll(): void {
     for (const session of this.active.values()) session.dispose();
     this.active.clear();

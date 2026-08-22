@@ -36,10 +36,6 @@ export function parseSessionSettings(value: unknown): SessionSettings {
     }
   }
 
-  if (settings.toolMode === "all" && !settings.workspaceConfirmed) {
-    throw new SessionSettingsValidationError("all 模式必须先确认工作区");
-  }
-
   return settings;
 }
 

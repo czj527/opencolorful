@@ -284,11 +284,13 @@ export function registerSessionRoutes(
       const requestedMode = typeof body.toolMode === "string"
         ? body.toolMode
         : current.toolMode;
-      const modeRequiresFreshConfirmation = requestedMode === "all" &&
-        current.toolMode !== "all";
+      // 仅当 cwd 变更且会把写权限带到新目录时才强制重新确认；
+      // 从非 all 切到 all 但未确认则放行，由运行时降级为只读工具。
+      const willHaveWritePermission = requestedMode === "all" ||
+        current.toolMode === "all";
       if (
-        requestedMode === "all" &&
-        (cwdChanged || modeRequiresFreshConfirmation) &&
+        cwdChanged &&
+        willHaveWritePermission &&
         body.workspaceConfirmed !== true
       ) {
         return context.json(
@@ -372,6 +374,26 @@ export function registerSessionRoutes(
         });
       }
       return context.json(sessionService.getView(sessionId));
+    } catch {
+      return context.json(createApiError("NOT_FOUND", "Session 不存在"), 404);
+    }
+  });
+
+  app.put("/api/sessions/:id/title", async (context) => {
+    try {
+      const sessionId = context.req.param("id");
+      // 验证 session 存在（不存在时 getView 抛错）
+      sessionService.getView(sessionId);
+      const body = (await context.req.json()) as { title?: unknown };
+      if (typeof body.title !== "string" || !body.title.trim()) {
+        return context.json(createApiError("INVALID_INPUT", "Session title 不能为空"), 400);
+      }
+      const trimmed = body.title.trim();
+      if (trimmed.length > 200) {
+        return context.json(createApiError("INVALID_INPUT", "Session title 过长"), 400);
+      }
+      const updated = sessionService.renameSession(sessionId, trimmed);
+      return context.json(updated);
     } catch {
       return context.json(createApiError("NOT_FOUND", "Session 不存在"), 404);
     }

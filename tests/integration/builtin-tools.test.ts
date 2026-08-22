@@ -61,10 +61,19 @@ describe("tool policy", () => {
     expect(tools).toContain("bash");
   });
 
-  it("throws when all mode is not confirmed", () => {
+  it("degrades all mode to read-only tools when not confirmed", () => {
     const policy = new ToolPolicy();
-    expect(() => policy.resolveTools("all", process.cwd(), false)).toThrow("确认");
-    expect(() => policy.resolveTools("all", process.cwd(), undefined)).toThrow("确认");
+    const falseConfirmed = policy.resolveTools("all", process.cwd(), false);
+    expect(falseConfirmed).toContain("read");
+    expect(falseConfirmed).toContain("grep");
+    expect(falseConfirmed).toContain("find");
+    expect(falseConfirmed).toContain("ls");
+    expect(falseConfirmed).not.toContain("write");
+    expect(falseConfirmed).not.toContain("edit");
+    expect(falseConfirmed).not.toContain("bash");
+
+    const undefinedConfirmed = policy.resolveTools("all", process.cwd(), undefined);
+    expect(undefinedConfirmed).toEqual(falseConfirmed);
   });
 
   it("throws when cwd does not exist", () => {

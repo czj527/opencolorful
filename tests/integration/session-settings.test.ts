@@ -14,6 +14,7 @@ import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { createServerApp } from "../../src/server/app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { parseSessionSettings } from "../../src/contracts/session-settings.js";
+import { ToolPolicy } from "../../src/runtime/tool-policy.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -85,10 +86,12 @@ describe("session settings", () => {
     ctx.database.close();
   });
 
-  it("rejects all mode without workspace confirmation", async () => {
+  it("creates session in all mode without confirmation and runtime degrades to read-only", async () => {
     const ctx = createContext();
+    const promptService = new PromptService();
     const { app } = createServerApp({
       sessionService: ctx.service,
+      promptService,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
@@ -97,20 +100,78 @@ describe("session settings", () => {
     const createResp = await app.request("http://local/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "未确认", cwd: process.cwd() }),
+      body: JSON.stringify({ title: "未确认 all", cwd: process.cwd(), toolMode: "all" }),
     });
-    const session = (await createResp.json()) as { id: string };
+    expect(createResp.status).toBe(201);
+    const session = (await createResp.json()) as { id: string; toolMode: string; workspaceConfirmed: boolean; workspaceCwd: string };
+    expect(session.toolMode).toBe("all");
+    expect(session.workspaceConfirmed).toBe(false);
+
+    const policy = new ToolPolicy();
+    expect(policy.resolveTools("all", session.workspaceCwd, false)).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+
+    promptService.dispose();
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("confirms all mode and exposes full tools after invalidating runtime", async () => {
+    const ctx = createContext();
+    const promptService = new PromptService();
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      promptService,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "待确认", cwd: process.cwd(), toolMode: "all" }),
+    });
+    const session = (await createResp.json()) as { id: string; workspaceCwd: string };
+
+    // 建立一次 runtime，使其在确认后被 invalidate
+    const runtime = await SessionRuntime.create({
+      sessionId: session.id,
+      cwd: session.workspaceCwd,
+      sessionDir: ctx.paths.sessions,
+      authPath: ctx.paths.authFile,
+      providerId: "faux",
+      modelId: "faux-1",
+      faux: { response: "ok" },
+      publish: () => {},
+      sessionHandle: ctx.service.open(session.id),
+    });
+    promptService.register(runtime);
 
     const resp = await app.request(
       `http://local/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ toolMode: "all" }),
+        body: JSON.stringify({ workspaceConfirmed: true }),
       },
     );
-    expect(resp.status).toBe(400);
+    expect(resp.status).toBe(200);
+    const updated = (await resp.json()) as { workspaceConfirmed: boolean; toolMode: string };
+    expect(updated.workspaceConfirmed).toBe(true);
+    expect(updated.toolMode).toBe("all");
 
+    // invalidate 后再次解析应拿到完整工具集
+    expect(promptService.hasRuntime(session.id)).toBe(false);
+    const policy = new ToolPolicy();
+    expect(policy.resolveTools("all", session.workspaceCwd, true)).toContain("write");
+    expect(policy.resolveTools("all", session.workspaceCwd, true)).toContain("bash");
+
+    promptService.dispose();
     ctx.service.closeAll();
     ctx.database.close();
   });
@@ -147,6 +208,43 @@ describe("session settings", () => {
     const updated = (await resp.json()) as { toolMode: string; workspaceConfirmed: boolean };
     expect(updated.toolMode).toBe("all");
     expect(updated.workspaceConfirmed).toBe(true);
+
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("allows switching from read-only to all without reconfirmation and degrades tools", async () => {
+    const ctx = createContext();
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
+    const createResp = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "切换 all", cwd: process.cwd() }),
+    });
+    const session = (await createResp.json()) as { id: string; workspaceCwd: string };
+
+    const resp = await app.request(
+      `http://local/api/sessions/${session.id}/settings`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ toolMode: "all" }),
+      },
+    );
+    expect(resp.status).toBe(200);
+    const updated = (await resp.json()) as { toolMode: string; workspaceConfirmed: boolean };
+    expect(updated.toolMode).toBe("all");
+    expect(updated.workspaceConfirmed).toBe(false);
+
+    const policy = new ToolPolicy();
+    expect(policy.resolveTools("all", session.workspaceCwd, false)).not.toContain("write");
+    expect(policy.resolveTools("all", session.workspaceCwd, false)).not.toContain("bash");
 
     ctx.service.closeAll();
     ctx.database.close();

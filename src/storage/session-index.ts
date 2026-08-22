@@ -97,11 +97,15 @@ export class SessionIndex {
 
   updateSettings(
     id: string,
-    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean; thinkingLevel?: string },
+    settings: { toolMode?: string; workspaceCwd?: string; workspaceConfirmed?: boolean; thinkingLevel?: string; title?: string },
     updatedAt = new Date().toISOString(),
   ): SessionMetadata {
     const sets: string[] = ["updated_at = ?"];
     const params: unknown[] = [updatedAt];
+    if (settings.title !== undefined) {
+      sets.push("title = ?");
+      params.push(settings.title);
+    }
     if (settings.toolMode !== undefined) {
       sets.push("tool_mode = ?");
       params.push(settings.toolMode);
