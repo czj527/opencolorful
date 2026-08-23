@@ -36,7 +36,7 @@
     "test:skills-live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-agent-core": "0.84.2",
     "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@hono/node-server": "2.0.11",
