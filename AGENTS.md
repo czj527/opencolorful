@@ -4,15 +4,15 @@
 
 ## 核心理念与定位
 
-**OpenColorful = 承载 agent 完整一生的本地优先平台基础设施。**
+**OpenColorful = 本地优先的个人助理 Agent 平台与个人效率工作台。**
 
-核心理念：**给每个 agent 完整的一生**。agent 不只是"有用的工具"——它有自我（人格、性格、记忆、想法）、有成长、有生活、有社交。它的职业形态（coding 工程师 / 设计师 / 文档撰写员 / 陪伴朋友）由创建者通过插件特化决定，**平台不预设 agent 是什么**。我们关注 agent 的"自我"，而非市面 agent 追求的"有用性"。
+近期目标是先做出一个真正好用、可控、可持续的个人助理 Agent，再让用户和 Agent 在同一个工作台里管理项目、资料、任务与日程。“给 Agent 完整的一生”是远期愿景，不是当前产品承诺。
 
-三层架构：
+当前产品结构：
 
-- **Agent 生命基础设施层**（核心，部分完成）：agent 的"自我"——身份与底色（✅ Phase 8）/ 记忆(dreaming) / 成长(curator) / 生活(案头+笺) / 社交(多 agent) / 运行时(✅ Phase 0-7)
-- **形态特化层**（待建，关键难点）：插件化的完整交互基础设施（coding IDE+终端+浏览器 / design 画布 / 文档编辑器 / 陪伴对话）。**注意：形态特化 ≠ 技能包**，是完整交互基础设施（专用 UI+工具链+工作区）
-- **生态流转层**（待建）：角色卡一生档案 / 人格模板市场 / 技能包市场 / Bridge 多平台
+- **个人助理层**（近期）：人格、记忆、文件、工具、Skill、Plugin、提醒和有限主动性；
+- **人与 Agent 工作台**（下一阶段）：用户项目、任务、资料、日程与 Agent 会话、工作空间的一体化；
+- **生态与自扩展层**（远期）：Bridge、角色卡、技能生态以及受约束的 Cordis 化能力演进。
 
 完整定位与路线见 [docs/positioning-and-roadmap.md](docs/positioning-and-roadmap.md)；基础设施边界与选型见 [docs/infrastructure-decisions.md](docs/infrastructure-decisions.md)。
 
@@ -20,7 +20,11 @@
 
 | 文档 | 作用 | 何时读 |
 |---|---|---|
-| `docs/positioning-and-roadmap.md` | **核心理念与开发路线权威**（定位/三层架构/Phase 8-14+/差异化） | 必读，理解项目是什么 |
+| `docs/positioning-and-roadmap.md` | **产品定位与开发路线权威**（个人助理/工作台/远期自扩展） | 必读，理解项目是什么 |
+| `docs/project-status.md` | **当前状态权威**（当前基线、活动阶段、优先级、状态更新规则） | 每次接手任务时读 |
+| `docs/document-governance.md` | **文档治理与变更影响权威**（事实归属、计划生命周期、CI 门禁） | 每次新增功能或跨边界修改时读 |
+| `docs/ci-cd.md` | GitHub Actions、分支保护和发布流程 | 修改 CI/CD 或准备发布时读 |
+| `plans/README.md` | 阶段计划生命周期、状态词和完成标准 | 创建或接续 Phase 时读 |
 | `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/日志 Electron 时机/流程评估） | 必读，理解边界与选型 |
 | `docs/logging-architecture.md` | **Phase 11 日志架构权威**（三通道、trace、持久化、扩展接入、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
 | `docs/architecture.md` | 架构说明（Phase 0-3 平台层技术栈/模块边界/事件协议） | 改平台层时读 |
@@ -34,7 +38,7 @@
 | `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已实现并验收） | 接续可观测性工作时读 |
 | `plans/phase-12.md` | Phase 12 通用插件系统计划、实施记录与验收结论（已完成） | 接续插件、Skill 或 Subagent 工作时读 |
 | `plans/phase-13.md` | Phase 13 Skill 系统与 Agent Skills 生态兼容计划（已完成） | 接续 Skill 或 Subagent 工作时读 |
-| `plans/phase-14.md` | Phase 14 临时 Subagent Runtime 与父子任务协议计划（草案） | 开发或评审 Subagent 时必读 |
+| `plans/phase-14.md` | Phase 14 临时 Subagent Runtime 与父子任务协议计划（已完成实施记录） | 开发或评审 Subagent 时必读 |
 
 ## 参考仓库
 
@@ -50,10 +54,11 @@
 - **Phase 11 已完成并验收（2026-08-03）**：Diagnostic/Activity/Audit 三通道、Trace、严格审计生命周期、查询/保留/恢复与 `/logs`。
 - **Phase 12 已完成并验收（2026-08-05）**：通用插件系统、四类 Runtime、10 类扩展点、生态适配、Agent 绑定、权限快照、开发循环和全链路日志。
 - **Phase 13 已完成（2026-08-07）**：Agent Skills 标准兼容、Catalog/Bundle/绑定、会话内安装、PI 渐进披露、每 turn 快照、插件 Skill 和日志闭环。
-- **当前阶段（Phase 14 规划）**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill、用户只读观察、主 Agent 可纠偏的 Subagent Runtime 1.0；不聚焦多 Agent 协作。详见 `plans/phase-14.md`。
-- **当前定位已重新明确（2026-07-27）**：从"全能私人助理平台"修正为"承载 agent 完整一生的平台基础设施"。
+- **Phase 14 已完成并验收**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill、用户只读观察、主 Agent 可纠偏的 Subagent Runtime 1.0；不聚焦多 Agent 协作。详见 `docs/project-status.md` 和 `plans/phase-14.md`。
+- **当前工作阶段（Governance G0）**：补齐 GitHub Actions、文档变更审计、公开协作和可复现质量门；后续产品工作以 `docs/project-status.md` 为准。
+- **当前定位已重新明确（2026-08-22）**：从“承载 agent 完整一生的平台基础设施”调整为“个人助理 Agent 平台与个人效率工作台”；完整一生和自我扩展保留为远期愿景。
 
-接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。
+接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。文档治理检查可单独运行 `npm run check:docs`。
 
 ## 当前实现边界
 
@@ -75,12 +80,12 @@
 
 下一阶段核心目标：
 
-- Skill Catalog、来源/版本/哈希和 Agent/Bundle 绑定；
-- 会话内搜索、检查、安装和风险确认；
-- PI 原生渐进披露、不可变 turn snapshot 和安全内容读取；
-- Skill 对 Phase 9 Sandbox、Phase 11 Observability、Phase 12 Plugin Skill Bundle 的统一接入。
+- Governance G0：GitHub Actions、文档变更审计、分支保护和可复现发布；
+- Product P1：以 openhanako 为参考，补齐个人助理的首个可用垂直切片；
+- Desktop：继续完善真实数据适配、跨平台构建和普通用户使用体验；
+- Product P2：建设用户与 Agent 同级的项目、任务、资料和日程工作台。
 
-暂不做（等自我层稳定）：Electron 桌面端、形态特化层（coding/design 专用交互基础设施）、技能自创（手艺高阶）、性格自我演变（风险极高，yuan 作稳定锚点不漂移）。
+暂不做：Agent 完整生活、无约束的自我成长、自动编写并直接安装插件、广泛的多 Agent 团队/DAG 编排和未经治理的远程 Bridge；这些属于 P3/R1 之后的路线。
 
 ## 架构硬约束
 

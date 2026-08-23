@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "documentationPaths": [
+    "^AGENTS\\.md$",
+    "^CLAUDE\\.md$",
+    "^README\\.md$",
+    "^CONTRIBUTING\\.md$",
+    "^SECURITY\\.md$",
+    "^CHANGELOG\\.md$",
+    "^docs/",
+    "^plans/",
+    "^\\.github/"
+  ],
+  "productionPaths": [
+    "^src/",
+    "^packages/",
+    "^web/",
+    "^desktop/",
+    "^scripts/",
+    "^package\\.json$",
+    "^package-lock\\.json$",
+    "^tsconfig[^/]*\\.json$",
+    "^vite\\.config\\.ts$",
+    "^vitest[^/]*\\.config\\.ts$"
+  ],
+  "testOnlyPaths": [
+    "^tests/",
+    "^web/tests/",
+    "^web/src/.*\\.(test|spec)\\.[cm]?[jt]sx?$"
+  ],
+  "exemptionForbiddenPaths": [
+    "^src/",
+    "^packages/",
+    "^web/",
+    "^desktop/",
+    "^package\\.json$",
+    "^package-lock\\.json$",
+    "^\\.github/workflows/",
+    "^\\.github/dependabot\\.yml$"
+  ],
+  "rules": [
+    {
+      "id": "runtime-contract",
+      "label": "Runtime、跨进程契约或服务端行为",
+      "patterns": [
+        "^src/contracts/",
+        "^src/runtime/",
+        "^src/server/",
+        "^packages/plugin-(protocol|sdk|runtime)/"
+      ],
+      "requiredDocPatterns": [
+        "^docs/architecture\\.md$",
+        "^docs/(infrastructure-decisions|logging-architecture|memory-architecture)\\.md$",
+        "^plans/",
+        "^AGENTS\\.md$"
+      ],
+      "requiredChecks": ["typecheck", "contract/integration tests"]
+    },
+    {
+      "id": "persistence",
+      "label": "SQLite、JSONL、恢复或迁移",
+      "patterns": [
+        "^src/storage/",
+        "^src/.*(storage|persistence|migration|session).*",
+        "^tests/.*(migration|recovery|restore).*"
+      ],
+      "requiredDocPatterns": [
+        "^docs/architecture\\.md$",
+        "^docs/migrations/",
+        "^docs/(memory-architecture|logging-architecture)\\.md$",
+        "^plans/"
+      ],
+      "requiredChecks": ["migration/recovery test", "npm run check"]
+    },
+    {
+      "id": "agent-behavior",
+      "label": "PI 适配、Agent、Plugin、Skill 或 Subagent 行为",
+      "patterns": [
+        "^src/pi-sdk/",
+        "^src/.*(agent|plugin|skill|subagent|memory).*"
+      ],
+      "requiredDocPatterns": [
+        "^docs/architecture\\.md$",
+        "^docs/(infrastructure-decisions|memory-architecture|logging-architecture|plugin-development|skill-development)\\.md$",
+        "^plans/",
+        "^AGENTS\\.md$"
+      ],
+      "requiredChecks": ["PI/plugin import checks", "focused tests", "snapshot/integration tests"]
+    },
+    {
+      "id": "ui",
+      "label": "Web 或 Desktop 用户界面",
+      "patterns": ["^web/", "^desktop/"],
+      "requiredDocPatterns": [
+        "^docs/design.*",
+        "^docs/project-status\\.md$",
+        "^plans/"
+      ],
+      "requiredChecks": ["web unit tests", "web build", "Playwright E2E"]
+    },
+    {
+      "id": "security",
+      "label": "沙箱、权限、凭据或审计",
+      "patterns": [
+        "^src/.*(sandbox|security|auth|credential|policy|audit).*",
+        "^SECURITY\\.md$"
+      ],
+      "requiredDocPatterns": [
+        "^SECURITY\\.md$",
+        "^docs/(architecture|logging-architecture|infrastructure-decisions)\\.md$",
+        "^plans/"
+      ],
+      "requiredChecks": ["negative/security regression tests", "npm run check"]
+    },
+    {
+      "id": "delivery",
+      "label": "构建、依赖、生成物或 CI",
+      "patterns": [
+        "^package\\.json$",
+        "^package-lock\\.json$",
+        "^scripts/",
+        "^tsconfig[^/]*\\.json$",
+        "^vite\\.config\\.ts$",
+        "^vitest[^/]*\\.config\\.ts$",
+        "^\\.github/workflows/",
+        "^\\.github/dependabot\\.yml$"
+      ],
+      "requiredDocPatterns": [
+        "^docs/ci-cd\\.md$",
+        "^docs/release\\.md$",
+        "^docs/document-governance\\.md$",
+        "^CHANGELOG\\.md$",
+        "^plans/"
+      ],
+      "requiredChecks": ["npm ci --legacy-peer-deps", "npm run check"]
+    }
+  ]
+}

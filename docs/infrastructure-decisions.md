@@ -139,19 +139,17 @@
 
 **建议**：从 Phase 9-10 起就穿插搭"结构化日志框架 + 关键行为埋点"，Phase 11 再把这些埋点统一收拢为可观测性契约、查询接口和诊断视图。这样既不阻塞前置安全/记忆开发，也不会把日志工作误解为可有可无的旁支。
 
-## 八、现在就做 Electron 桌面端合不合适？
+## 八、Electron 桌面端的定位
 
-**不合适，现在不做**。
+Electron 桌面端已经进入仓库，当前作为个人助理产品和工作台的主要前端方向。
 
-- **理由**：
-  - server-first 架构已把 runtime 和 UI 分离，web UI 完全支撑开发
-  - Electron 本质是"把 web UI 包成桌面应用 + 主进程能力"，是**产品化打包**，不是核心
-  - 现在 agent 自我层（记忆/成长/形态特化）还在建，过早 Electron 会增加打包/构建/IPC 复杂度，拖慢核心
-  - openhanako 也是核心稳定后才上的桌面
-- **预留**：保证 server/web 接口干净（HTTP/SSE/WS），未来 Electron 主进程只是 thin wrapper + 本地系统能力（文件对话框、托盘、自启动）
-- **时机**：生命基础设施层基本完成（约 Phase 10-11）后，作为产品化阶段单独做
+- server-first 仍然成立：Runtime 由 Server 持有，Desktop 通过主进程 IPC 代理访问 HTTP/SSE/WS；
+- renderer 不直接导入 Server 实现或 PI SDK，只消费 DesktopDataSource 等稳定接口；
+- 当前桌面端优先验证布局、交互、真实数据适配和工作台形态，不等同于已经完成安装包、签名、自动更新和跨平台发布；
+- Web 继续保留为浏览器运维、测试和协议验收客户端；
+- 桌面发布、更新通道、签名、公证和回滚另行进入发布计划。
 
-**结论**：Phase 8-10 专注 server + web，Electron 留到后期。Phase 8 已按此边界完成，Phase 9-10 继续沿用。web UI 既是开发便利，也是多端形态之一（未来还有 TUI/移动端）。
+**结论**：Electron 不再是“暂不做”的能力，而是当前产品化路径的一部分；它必须继续遵守 Server-first、凭据不出主进程和 renderer 隔离等边界。
 
 ## 九、开发流程规范合不合理？
 
@@ -175,22 +173,18 @@
 
 ## 十、当前阶段开发节奏建议
 
-### 优先做（生命基础设施层，给 agent 一生铺路）
-1. **Phase 8（已完成）** Agent 去类型枚举 + identity/底色/settings 三文件地基
-2. **Phase 9（下一阶段）** 沙箱机制层
-3. **Phase 10 → 10.5** 记忆系统（四段上下文、主动回想、长期记忆 Agent 整理）——核心
-4. **Phase 11（结构化日志）**：Phase 9-10 先埋关键事件，Phase 11 统一日志 Envelope、关联 ID、脱敏、查询和诊断
+当前不再按历史 Phase 0-14 继续扩张平台底座，而是使用独立的工作轨道：
 
-Phase 8 的最终实现没有提前加入 capabilities、skills、scene、记忆目录或 yuan 持久化引用；底色模板仅初始化创建表单，创建后 Agent 只依赖自身底色数据。
+1. **Governance G0**：GitHub Actions、文档变更审计、分支保护、依赖治理和可复现发布；
+2. **Product P1**：以 openhanako 为参考，补齐个人助理的首个可用垂直切片；
+3. **Desktop**：完善真实数据适配、跨平台构建和普通用户体验；
+4. **Product P2**：建设用户与 Agent 同级的项目、任务、资料和日程工作台；
+5. **P3/R1**：再评估 Bridge、多 Agent 团队、Cordis 化和 Agent 自扩展。
 
-### 暂不做（等自我层稳定）
-- Electron 桌面端（Phase 10-11 后产品化阶段）
-- 形态特化层（coding/design 专用交互基础设施）——等插件系统（Phase 12）就绪后
-- 技能自创（手艺的高阶能力）——后续未排期，待插件/技能系统阶段另行评估
-- 性格自我演变——风险极高，建议不做或强约束
+技能自创、无约束的性格自我演变和 Agent 完整生活不属于当前验收条件。质量门、契约、沙箱、凭据隔离、事件 Replay 和审计边界继续保留。
 
 ### 开发流程
-保留质量门和契约，简化角色话术和 Phase 步骤。
+保留质量门和契约，按 docs/project-status.md、docs/document-governance.md 和 plans/README.md 的新治理规则执行。
 
 ---
 

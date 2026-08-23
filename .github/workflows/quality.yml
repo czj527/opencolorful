@@ -1,0 +1,68 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  governance:
+    name: Governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check document governance
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node scripts/verify-document-governance.mjs
+
+  quality:
+    name: Typecheck, tests and builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Use Node.js 22.19.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Run repository quality gate
+        run: npm run check
+
+  browser:
+    name: Browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Use Node.js 22.19.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run browser acceptance tests
+        working-directory: web
+        run: npx playwright test
