@@ -90,7 +90,7 @@
     {
       "id": "ui",
       "label": "Web 或 Desktop 用户界面",
-      "patterns": ["^web/", "^desktop/"],
+      "patterns": ["^web/(?!package\\.json$)", "^desktop/(?!package\\.json$)"],
       "requiredDocPatterns": [
         "^docs/design.*",
         "^docs/project-status\\.md$",
@@ -118,6 +118,8 @@
       "patterns": [
         "^package\\.json$",
         "^package-lock\\.json$",
+        "^web/package\\.json$",
+        "^desktop/package\\.json$",
         "^scripts/",
         "^tsconfig[^/]*\\.json$",
         "^vite\\.config\\.ts$",

@@ -52,9 +52,9 @@
 | Runtime / 契约 | `src/runtime/`、`src/contracts/`、`src/server/` | 架构、计划或 ADR；类型/契约测试 |
 | 持久化 | `src/storage/`、migration、JSONL/SQLite 代码 | 数据模型、迁移/恢复说明；迁移测试 |
 | Agent 行为 | `src/pi-sdk/`、Agent/Plugin/Skill/Subagent 代码 | 生命周期/权限/架构文档；snapshot 或集成测试 |
-| Web / Desktop | `web/`、`desktop/` | 设计或计划；组件测试和 Browser E2E |
+| Web / Desktop | `web/`、`desktop/`（各自 `package.json` 除外，归发布/生成物） | 设计或计划；组件测试和 Browser E2E |
 | 安全 | sandbox、auth、credentials、policy、审计代码 | `SECURITY.md` 或专题安全文档；负例测试 |
-| 发布 / 生成物 | `package.json`、脚本、生成目录、CI | 开发/发布文档；干净安装和构建 |
+| 发布 / 生成物 | `package.json`（含 `web/`、`desktop/` 的）、脚本、生成目录、CI | 开发/发布文档；干净安装和构建 |
 
 ## 5. CI 门禁
 
