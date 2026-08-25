@@ -84,6 +84,20 @@ async function waitForStatus(
   throw new Error(`等待 ${expected} 超时: status=${await controller.getAgentServerStatus()}`);
 }
 
+/**
+ * 轮询直到条件满足。用于在看门狗计数的稳定可读窗口内取样：
+ * 失败计数在退出处理时递增，且退出处理会清除稳定计时器——计数在
+ * 下一次启动成功 + 稳定窗口期满之前保持不变。
+ */
+async function waitForCondition(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("等待条件超时");
+}
+
 function createController(
   home: string,
   paths: ReturnType<typeof getRuntimePaths>,
@@ -128,10 +142,11 @@ describe("supervisor watchdog", () => {
 
     // 使用 SIGTERM 让子进程优雅关闭、立即释放端口，避免端口未释放导致重试失败
     process.kill(first.pid, "SIGTERM");
+    // 崩溃证据在自动拉起前读取：失败计数在退出处理时递增，且退出处理会清除
+    // 稳定计时器——计数在下一次启动成功 + 稳定窗口期满之前稳定可读；
+    // 若等 online 再读，CI 上启动耗时可能超过稳定窗口，计数已被归零。
+    await waitForCondition(() => controller.getWatchdogStatus().consecutiveFailures > 0);
     const second = await waitForOnline(controller, 10_000);
-    // 不断言 pid 变化：POSIX 上子进程退出后 PID 可被立即复用（Linux CI 实测
-    // 复用同号）。崩溃→自动拉起的证据是看门狗已记录失败（稳定窗口后才归零）。
-    expect(controller.getWatchdogStatus().consecutiveFailures).toBeGreaterThan(0);
     expect(isProcessRunning(second.pid)).toBe(true);
 
     // 自动拉起成功后，看门狗计数应被稳定窗口归零
@@ -209,24 +224,24 @@ describe("supervisor watchdog", () => {
     const first = await controller.startAgentServer();
     process.kill(first.pid, "SIGTERM");
 
-    // 等待自动重试成功；连续失败计数应大于 0（Windows 端口释放时机可能导致 1 次额外失败）
-    // （不断言 pid 变化：POSIX 会立即复用刚退出进程的 PID）
-    const second = await waitForOnline(controller, 10_000);
+    // 探知失败即读（退出处理递增计数并清除稳定计时器，窗口内读数稳定；
+    // Windows 端口释放时机可能导致 1 次额外失败）。不断言 pid 变化：
+    // POSIX 会立即复用刚退出进程的 PID。
+    await waitForCondition(() => controller.getWatchdogStatus().consecutiveFailures > 0);
     const failuresBeforeReset = controller.getWatchdogStatus().consecutiveFailures;
-    expect(failuresBeforeReset).toBeGreaterThan(0);
+    const second = await waitForOnline(controller, 10_000);
 
     // 等待稳定窗口过期，使计数归零
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(controller.getWatchdogStatus().consecutiveFailures).toBe(0);
 
     process.kill(second.pid, "SIGTERM");
-    // 稳定窗口后再次失败，计数重新从 0 开始累加（仍大于 0）
+    // 稳定窗口后再次失败，计数重新从 0 开始累加
+    await waitForCondition(() => controller.getWatchdogStatus().consecutiveFailures > 0);
+    const failuresAfterReset = controller.getWatchdogStatus().consecutiveFailures;
+    // 若未重置，第二次事件会在 failuresBeforeReset 基础上继续累加（必然更大）
+    expect(failuresAfterReset).toBeLessThanOrEqual(failuresBeforeReset + 1);
     await waitForOnline(controller, 10_000);
-
-    const watchdog = controller.getWatchdogStatus();
-    expect(watchdog.consecutiveFailures).toBeGreaterThan(0);
-    // 若未重置，第二次事件会在 failuresBeforeReset 基础上继续累加，因此应小于该值加 1
-    expect(watchdog.consecutiveFailures).toBeLessThanOrEqual(failuresBeforeReset + 1);
   }, 30_000);
 
   it("exposes watchdog fields on status endpoint", async () => {

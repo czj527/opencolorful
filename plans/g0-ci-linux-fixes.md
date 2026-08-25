@@ -157,3 +157,18 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
   after stability window / adopts desired running state across supervisor restart。
 
 变更：`tests/integration/supervisor-watchdog.test.ts`（纯测试，无生产代码改动）。
+
+## 第六轮（main run 32859113973 复查后）
+
+`supervisor-watchdog` 的 stability-window 用例再次失败，但断言从 pid 变为
+`expected 0 to be greater than 0`——暴露出更深的时序竞态：**自动拉起成功
+即开启稳定窗口（300ms），CI 上 tsx 冷启动耗时超过窗口期，waitForOnline
+返回 online 时失败计数已被归零**，"重启成功后读计数 > 0"这一观测点本身
+不成立。
+
+修复（纯测试）：改为在"死亡被探知"时立即取样——失败计数在退出处理时
+递增，且退出处理会清除稳定计时器，计数在下一次启动成功 + 稳定窗口期满
+之前保持稳定。新增 waitForCondition 轮询 helper；stability-window 用例
+第二段同样改为探知即读。
+
+变更：`tests/integration/supervisor-watchdog.test.ts`（纯测试，无生产代码改动）。
