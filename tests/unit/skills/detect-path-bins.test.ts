@@ -4,14 +4,18 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { detectPathBins } from "../../../src/runtime/skills/composition.js";
+import { DETECT_PATH_BINS_DEFAULT_LIMITS, detectPathBins } from "../../../src/runtime/skills/composition.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 13 T11（P1-6）detectPathBins 上限测试
-// - 单目录上限 500、全 PATH 上限 5000（per-dir 配额，不跨目录累计）：
-//   超大目录占满全局配额会把后续目录（如 git 所在目录）挤出检测结果，
-//   P1-6 要求上限按目录分配，检测语义不随 PATH 目录数量劣化。
+// - 限额语义：per-dir 配额不跨目录累计，超大目录不挤占后续目录
+//   （如 git 所在目录）的检测配额；
+// - 限额行为用注入的小额 { perDir: 500, total: 5000 } 验证（避免在测试中
+//   创建数万个文件）；生产默认值见 DETECT_PATH_BINS_DEFAULT_LIMITS，
+//   必须能容纳真实 Linux 系统目录（/usr/bin 可达数千条目）。
 // ═══════════════════════════════════════════════════════════════
+
+const TEST_LIMITS = { perDir: 500, total: 5000 } as const;
 
 const dirs: string[] = [];
 
@@ -62,7 +66,7 @@ describe("detectPathBins（P1-6）", () => {
     const dirB = makeDir("b");
     fs.writeFileSync(path.join(dirB, binName("git")), "", "utf8");
 
-    const bins = withPath([dirA, dirB], () => detectPathBins());
+    const bins = withPath([dirA, dirB], () => detectPathBins(TEST_LIMITS));
     expect(bins).toContain("git");
     // 目录 A 第 501+ 个文件被单目录上限截断（seq-500/seq-599 不应出现）
     expect(bins).not.toContain("seq-599");
@@ -73,7 +77,7 @@ describe("detectPathBins（P1-6）", () => {
     fillFiles(dir, 501);
     fs.writeFileSync(path.join(dir, binName("tail-marker")), "", "utf8"); // 第 502 个
 
-    const bins = withPath([dir], () => detectPathBins());
+    const bins = withPath([dir], () => detectPathBins(TEST_LIMITS));
     expect(bins).toContain("seq-499"); // 第 500 个（0 起始）→ 进入
     expect(bins).not.toContain("tail-marker"); // 超出 500 → 截断
   });
@@ -88,7 +92,7 @@ describe("detectPathBins（P1-6）", () => {
     const last = makeDir("last");
     fs.writeFileSync(path.join(last, binName("never-seen")), "", "utf8");
 
-    const bins = withPath([...many, last], () => detectPathBins());
+    const bins = withPath([...many, last], () => detectPathBins(TEST_LIMITS));
     expect(bins).toContain("seq-0"); // 前 10 目录正常
     expect(bins).not.toContain("never-seen"); // 配额用尽 → 第 11 目录跳过
   });
@@ -100,5 +104,12 @@ describe("detectPathBins（P1-6）", () => {
 
     const bins = withPath([missing, "", good], () => detectPathBins());
     expect(bins).toContain("node");
+  });
+
+  it("默认限额能容纳真实 Linux 系统目录（/usr/bin 数千条目）", () => {
+    // 护栏：默认值若被改小（如回到 500/5000），CI Linux 上 git 会被挤出
+    // 检测范围，requires.bins 误判 blocked（composition-root 集成测试会挂）。
+    expect(DETECT_PATH_BINS_DEFAULT_LIMITS.perDir).toBeGreaterThanOrEqual(4000);
+    expect(DETECT_PATH_BINS_DEFAULT_LIMITS.total).toBeGreaterThanOrEqual(40000);
   });
 });

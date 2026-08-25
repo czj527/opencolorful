@@ -24,7 +24,9 @@ import { sha256Hex, stableSerialize } from "../../src/runtime/subagents/delegati
 // ═══════════════════════════════════════════════════════════════
 
 const PARENT_SESSION = "session-parent";
-const WORKSPACE = "D:\\work\\project";
+// 工作区 fixture 必须是宿主平台上的绝对路径（isWorkspaceRelativePath 依赖
+// path.resolve/isPathInside 的真实解析），否则 POSIX 宿主上解析结果失真。
+const WORKSPACE = process.platform === "win32" ? "D:\\work\\project" : "/tmp/work/project";
 
 interface FixtureMessages {
   [messageId: string]: { readonly sessionId: string; readonly content: string };
@@ -337,9 +339,10 @@ describe("工具函数", () => {
   });
 
   it("isWorkspaceRelativePath 边界判定", () => {
-    expect(isWorkspaceRelativePath("D:\\work\\project", "docs/plan.md")).toBe(true);
-    expect(isWorkspaceRelativePath("D:\\work\\project", "../secret.txt")).toBe(false);
-    expect(isWorkspaceRelativePath("D:\\work\\project", "D:\\other\\file.txt")).toBe(false);
-    expect(isWorkspaceRelativePath("D:\\work\\project", "")).toBe(false);
+    expect(isWorkspaceRelativePath(WORKSPACE, "docs/plan.md")).toBe(true);
+    expect(isWorkspaceRelativePath(WORKSPACE, "../secret.txt")).toBe(false);
+    // Windows 形态绝对路径在任何宿主上都拒绝（与平台无关的 fail-closed）
+    expect(isWorkspaceRelativePath(WORKSPACE, "D:\\other\\file.txt")).toBe(false);
+    expect(isWorkspaceRelativePath(WORKSPACE, "")).toBe(false);
   });
 });

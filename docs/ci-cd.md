@@ -6,7 +6,7 @@
 
 1. **Governance**：分析 diff，按 `docs/change-impact.json` 检查文档收口和例外理由。
 2. **Typecheck, tests and builds**：Node 22.19、干净 `npm ci --legacy-peer-deps`、仓库 `npm run check`。
-3. **Browser E2E**：安装 Chromium，从 `web/` 运行 Playwright。
+3. **Browser E2E**：先构建插件包与 Web 客户端（`build:protocol` + `build:sdk` + `web:build`，E2E 依赖插件包 `dist/` 与 `web/dist/`），安装 Chromium 后从 `web/` 运行 Playwright。
 
 ## GitHub 仓库设置
 

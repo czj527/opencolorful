@@ -34,7 +34,9 @@ function makeTurnCompletedEvent(
   turnId: string,
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number },
   context?: { tokens: number | null; contextWindow: number; percent: number | null },
-  timestamp = "2026-07-25T12:00:00.000Z",
+  // 默认用当前时间：summary(days) 按 now-days 过滤，硬编码历史时间戳
+  // 会在超过窗口期后变成日期炸弹（测试随日历翻转而失败）。
+  timestamp = new Date().toISOString(),
 ): PlatformEventEnvelope {
   return {
     protocolVersion: 1,

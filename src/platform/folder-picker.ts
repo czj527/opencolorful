@@ -86,7 +86,9 @@ export class WindowsFolderPicker implements FolderPicker {
           return resolve({ path: null, cancelled: true });
         }
         // 路径校验：必须是绝对路径、不允许 ..
-        if (!path.isAbsolute(trimmed)) {
+        // 输出一定来自 Windows PowerShell，用 win32 语义判定，
+        // 与宿主平台无关（否则 Linux CI 上 C:\ 会被误判为非绝对路径）。
+        if (!path.win32.isAbsolute(trimmed)) {
           return reject(new Error(`返回非绝对路径: ${trimmed}`));
         }
         if (trimmed.includes("..")) {

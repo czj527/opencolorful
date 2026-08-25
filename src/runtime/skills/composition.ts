@@ -127,15 +127,33 @@ export function buildSkillReadinessEnvironment(options: {
 /**
  * PATH 可解析的二进制名（Skill requires.bins 门控依据）。
  * Windows 匹配 .exe/.cmd/.bat/.ps1；POSIX 直接列文件名。
- * T11（P1-6）：单目录上限 500、全 PATH 上限 5000——超大目录占满全局配额
- * 会把后续目录（如 git 所在目录）挤出检测结果；上限只保护性能，不改变语义。
+ *
+ * T11（P1-6）：限额只防病态 PATH（超大目录耗尽内存/拖慢启动），不改变语义；
+ * 限额按目录分配，超大目录不挤占后续目录的配额。
+ *
+ * 默认值必须容纳真实系统目录：ubuntu 等 Linux 发行版的 /usr/bin 有数千个
+ * 条目（CI runner 上约 2700+），500/5000 的旧默认值会把 git 这类位于
+ * 大目录后段的二进制挤出检测结果，导致 requires.bins 误判 blocked。
+ * 目录枚举成本由 readdirSync 产生（与限额无关），限额仅限制 Set 收录数。
  */
-export function detectPathBins(): string[] {
+export interface DetectPathBinsLimits {
+  /** 单目录最多收录的条目数 */
+  readonly perDir: number;
+  /** 全部 PATH 目录累计最多扫描的条目数 */
+  readonly total: number;
+}
+
+export const DETECT_PATH_BINS_DEFAULT_LIMITS: DetectPathBinsLimits = {
+  perDir: 5000,
+  total: 50000,
+};
+
+export function detectPathBins(limits: DetectPathBinsLimits = DETECT_PATH_BINS_DEFAULT_LIMITS): string[] {
   const bins = new Set<string>();
   const entries = (process.env.PATH ?? "").split(path.delimiter);
   let scanned = 0;
   for (const entry of entries) {
-    if (entry === "" || scanned >= 5000) {
+    if (entry === "" || scanned >= limits.total) {
       continue;
     }
     let names: readonly string[];
@@ -146,7 +164,7 @@ export function detectPathBins(): string[] {
     }
     let perDir = 0;
     for (const name of names) {
-      if (perDir >= 500 || scanned >= 5000) {
+      if (perDir >= limits.perDir || scanned >= limits.total) {
         break;
       }
       if (process.platform === "win32") {

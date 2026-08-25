@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
-**更新时间：2026-08-22**
-**当前基线：** `main`  0ba4f9b
+**更新时间：2026-08-23**
+**当前基线：** `main`  `555313a`
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，不复用历史 Phase 编号。
 
 ## 当前结论
@@ -24,7 +24,7 @@
 
 ## 当前优先级
 
-1. 建立 GitHub Actions 质量门和文档变更审计。
+1. 建立 GitHub Actions 质量门和文档变更审计（workflow 已建立；Linux 适配修复进行中，见 `plans/g0-ci-linux-fixes.md`）。
 2. 保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建。
 3. 把个人助理的首个垂直切片写成独立 Feature Spec 和实施计划，再进入代码阶段。
 4. 暂不把 Phase 15+ 的多 Agent 团队、Bridge、DAG 编排或自我扩展能力混入当前 Phase。

@@ -313,12 +313,24 @@ export function resourceLabel(ref: SubagentContextRefV1): string {
 /**
  * workspace_file 归属检查（§9.2 / §12.7）：相对路径解析到父工作区
  * canonical 内；绝对路径、`..` 越界、空路径一律拒绝。
+ *
+ * 判定与宿主平台无关：ContextPacket 可能引用任一平台风格的相对路径，
+ * POSIX 宿主不能把 Windows 绝对路径（D:\…）或反斜杠穿越（..\）误判为
+ * 合法相对路径。统一按正斜杠归一后拒绝任何 `..` 段（fail-closed：
+ * 合法引用不需要父目录段）。
  */
 export function isWorkspaceRelativePath(workspaceCwd: string, relativePath: string): boolean {
-  if (path.isAbsolute(relativePath) || relativePath.length === 0) {
+  if (relativePath.length === 0) {
     return false;
   }
-  const resolved = path.resolve(workspaceCwd, relativePath);
+  if (path.isAbsolute(relativePath) || path.win32.isAbsolute(relativePath)) {
+    return false;
+  }
+  const normalized = relativePath.replace(/\\/g, "/");
+  if (normalized.split("/").includes("..")) {
+    return false;
+  }
+  const resolved = path.resolve(workspaceCwd, normalized);
   return isPathInside(workspaceCwd, resolved);
 }
 

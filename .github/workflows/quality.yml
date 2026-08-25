@@ -61,6 +61,12 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+      # E2E 前置构建（与 npm run check 一致的最小集合）：
+      # - 插件包 dist：agent server 子进程（tsx 跑 src/cli/main.ts）经 workspace
+      #   exports 解析 @opencolorful/plugin-* 到 dist，缺失会导致子进程启动失败；
+      # - web/dist：supervisor 静态资源目录，缺失则页面没有可测的 UI。
+      - name: Build plugin packages and web client
+        run: npm run build:protocol && npm run build:sdk && npm run web:build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Run browser acceptance tests

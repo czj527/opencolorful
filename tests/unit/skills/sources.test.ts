@@ -140,9 +140,12 @@ describe("信任配置读写", () => {
   it("save/load 往返一致", () => {
     const { paths, home } = tempPaths();
     const store = new SkillSourceTrustStore(paths);
-    store.save({ version: 1, trustedRoots: ["C:\\work\\proj"], disabledKinds: [], trustedSourceIds: { "ext://a": true } });
+    // trustedRoots 必须是宿主平台的绝对路径：load 会经 path.resolve 归一化，
+    // Windows 形态路径在 POSIX 宿主上不是绝对路径，归一化结果会失真。
+    const trustedRoot = process.platform === "win32" ? "C:\\work\\proj" : "/work/proj";
+    store.save({ version: 1, trustedRoots: [trustedRoot], disabledKinds: [], trustedSourceIds: { "ext://a": true } });
     const loaded = store.load();
-    expect(loaded.trustedRoots).toContain("C:\\work\\proj");
+    expect(loaded.trustedRoots).toContain(path.resolve(trustedRoot));
     expect(loaded.trustedSourceIds["ext://a"]).toBe(true);
     fs.rmSync(home, { recursive: true, force: true });
   });
