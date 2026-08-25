@@ -97,3 +97,18 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
 
 - `tests/unit/subagents-mailbox-coordinator.test.ts`（CI 高负载等待窗口放宽）
 - `web/tests/e2e/phase8.spec.ts`（目录选择用例平台分支）
+
+## 第三轮（CI run 32826242166 复查后）
+
+第二轮推送后：后端 vitest **2092 过 / 0 败 / 3 跳过**（Linux 全绿，Q1-Q5
+修复全部生效）。新暴露两类问题：
+
+- web 单测 `new-session-page.test.tsx` 4 败：`DirectoryPicker` 按
+  `navigator.userAgent` 判定平台，happy-dom 默认 UA 派生自宿主
+  （win32 含 "win32"，linux 不含）——Linux CI 上选择器落到手工输入模式，
+  「选择目录」按钮不存在。修复：测试文件显式固定 Windows UA。
+- Browser E2E 58 过 / 1 败：`phase6.spec.ts` 对话时间线用例第二轮对话后
+  「发送消息」按钮 30s 未恢复（turn 2 未在窗口内完成）。疑似高负载时序
+  抖动，已通过 `gh run rerun --failed` 单跑复验；若复现则单独深挖。
+
+变更：`web/src/features/sessions/new-session-page.test.tsx`（固定 UA，消除宿主派生）。

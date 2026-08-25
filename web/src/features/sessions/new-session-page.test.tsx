@@ -10,8 +10,10 @@
  *  6. 无 Agent 无 cwd 时禁用发送
  *
  * Mock 策略：用 vi.fn 替换 ApiClient 实例方法，避免触发真实网络。
- * happy-dom 默认 UA 含 "Win32"，DirectoryPicker 进入原生选择模式，
- * 测试中通过 mock api.pickDirectory 注入路径。
+ * happy-dom 默认 UA 派生自宿主平台（win32→含 "win32"，linux→不含），
+ * 而 DirectoryPicker 按 UA 判定平台（仅 Windows 显示原生选择按钮）——
+ * 为避免 Linux CI 上选择器落到手工输入模式，测试显式固定 Windows UA，
+ * 并通过 mock api.pickDirectory 注入路径。
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
@@ -25,6 +27,12 @@ import type {
   SessionView,
 } from "../../lib/types.js";
 import { renderWithTheme } from "../../test/render.js";
+
+// 固定 Windows UA：让 DirectoryPicker 在任何宿主平台上都进入原生选择模式
+Object.defineProperty(window.navigator, "userAgent", {
+  value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  configurable: true,
+});
 
 // --- 测试夹具 ---
 
