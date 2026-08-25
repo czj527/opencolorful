@@ -459,14 +459,16 @@ describe("Mailbox 投递：父 busy / 触发失败 / 打断（§14.2 / §T5 交�
     h.coordinator.signal({ threadId: THREAD_ID });
     await waitUntil(() => h.port.startCalls.length === 1);
     h.port.finishNext({ status: "rejected", reasonCode: "parent_session_busy" });
+    // CI 高负载下定时器调度可能显著延迟，本用例验证的是退避重试语义
+    // 而非时序本身，等待窗口放宽到 10s（默认 2s 在 CI 上偶发超时）。
     await waitUntil(() => {
       const rows = h.mailboxStore.listByThread(THREAD_ID, OWNERSHIP);
       return rows.some((row) => row.status === "failed" && row.lastErrorCode === "parent_session_busy" && row.nextRetryAt !== null);
-    });
+    }, 10_000);
     // 退避到期后 retryPending 重新投递（delivering 视为可重试，§14.3）
-    await waitUntil(() => h.port.startCalls.length >= 2);
+    await waitUntil(() => h.port.startCalls.length >= 2, 10_000);
     h.port.finishNext({ status: "triggered" });
-    await waitUntil(() => h.mailboxStore.listByThread(THREAD_ID, OWNERSHIP).every((row) => row.status === "delivered"));
+    await waitUntil(() => h.mailboxStore.listByThread(THREAD_ID, OWNERSHIP).every((row) => row.status === "delivered"), 10_000);
   });
 
   it("被用户打断（interrupted）→ delivered（已触发一次，不重复触发）", async () => {

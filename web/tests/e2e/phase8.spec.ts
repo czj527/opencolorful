@@ -289,9 +289,16 @@ test.describe("Phase 8：底色模板创建 Agent 与 NewSessionPage", () => {
     await page.goto(`${baseUrl()}/new`);
     await expect(page.getByText("新建会话").first()).toBeVisible({ timeout: 10_000 });
 
-    // Windows 平台应显示"选择目录"按钮（navigator.userAgent 含 Win）
+    // Windows 平台应显示"选择目录"按钮（navigator.userAgent 含 Win）；
+    // 非 Windows 平台原生选择不可用，UI 回退为手工输入（不渲染按钮）。
     const pickBtn = page.getByRole("button", { name: "选择目录" });
     const isWindows = await page.evaluate(() => /Win/i.test(navigator.userAgent));
+    if (!isWindows) {
+      await expect(pickBtn).toHaveCount(0);
+      await expect(page.getByLabel("默认工作目录路径")).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId("directory-picker-value")).toHaveText("未设置");
+      return;
+    }
     await expect(pickBtn).toBeVisible({ timeout: 5_000 });
 
     // 点击前先验证目录未设置
@@ -305,9 +312,6 @@ test.describe("Phase 8：底色模板创建 Agent 与 NewSessionPage", () => {
 
     // 验证 mock 路径回填
     await expect(page.getByTestId("directory-picker-value")).toHaveText(mockedPath, { timeout: 5_000 });
-
-    // 平台断言（仅 Windows 走原生路径）
-    expect(isWindows).toBe(true);
   });
 
   test("d. 草稿离开不落库：进 /new 输入草稿 → 返回 → 不产生新 Session", async ({ page }) => {

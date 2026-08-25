@@ -84,4 +84,16 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
 
 - `detectPathBins` 默认限额提升后，病态 PATH（十万级条目目录）仍被 total 限额截断；
   真实发行版 bin 目录规模远低于默认值。
-- E2E 在 Linux 的其余平台假设（如有个别用例依赖 Windows 行为）待 CI 转绿过程中逐一暴露。
+
+## 第二轮（CI run 32825328632 复查后）
+
+第一轮推送后：Governance 转绿；Quality 2091/2095，仅
+`subagents-mailbox-coordinator` 退避重试用例在高负载下 waitUntil 2s 超时
+（定时器调度延迟，非语义问题；上一轮 CI 该用例通过）——该用例三处等待
+窗口放宽到 10s。Browser E2E 从 57 败降至 **58 过 / 1 败**：唯一失败是
+`phase8.spec.ts` 原生目录选择用例在 Linux 下仍断言「选择目录」按钮可见，
+而 UI 设计上非 Windows 回退手工输入（不渲染按钮）——用例补平台分支：
+非 Windows 断言按钮不存在 + 手工输入框可见。
+
+- `tests/unit/subagents-mailbox-coordinator.test.ts`（CI 高负载等待窗口放宽）
+- `web/tests/e2e/phase8.spec.ts`（目录选择用例平台分支）
