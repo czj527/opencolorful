@@ -1,9 +1,10 @@
 # G0-CI-1：GitHub Actions 质量门 Linux 适配修复
 
-- **状态**：进行中
+- **状态**：已完成
 - **基线**：`main` `555313a`（docs: streamline public repository documentation）
 - **类型**：Governance G0 / CI 修复波次（非产品 Phase）
 - **建立原因**：首次运行 `quality.yml` 即全红（push run 32626964096），main 失去门禁意义。
+- **完成**：`main` `7247ef6`，CI run 32827194306 三 job 全绿（Governance / Quality / Browser E2E）。
 
 ## 背景与问题
 
@@ -78,7 +79,8 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
   web:build / tsc build / desktop:build
 - [x] `npx vitest run` 全量通过（178 文件 / 2095 用例，本地 Windows）
 - [x] `cd web; npx playwright test` 本地通过（59/59，1.4m）
-- [ ] GitHub Actions Quality / Browser E2E 转绿
+- [x] GitHub Actions Quality / Browser E2E 转绿（run 32827194306，三 job 全过；
+  phase6 时间线用例的失败确认为高负载抖动，复跑即过，未再复现）
 
 ## 已知边界
 
