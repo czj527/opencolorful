@@ -11,12 +11,12 @@
     "start": "electron electron/main.cjs"
   },
   "dependencies": {
-    "lucide-react": "^1.25.0",
+    "lucide-react": "^1.33.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@types/react": "^19.1.0",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.6.0",
     "electron": "^37.2.6",
