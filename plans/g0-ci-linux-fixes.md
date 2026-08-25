@@ -143,3 +143,17 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
 - `src/runtime/subagents/stores/parent-mailbox-store.ts`（新增 nextRetryDueAt）
 - `src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.ts`（防搁浅补排）
 - `tests/unit/subagents-mailbox-coordinator.test.ts`（回归用例）
+
+## 第五轮（main run 32856659603 复查后）
+
+`supervisor-watchdog.test.ts` 三处断言"重启后 pid 不同"——POSIX 会立即复用
+刚退出进程的 PID（Linux CI 实测 `expected 3988 not to be 3988`），断言本身
+不可移植。修复：
+
+- 改用看门狗证据链替代 pid 比较：崩溃→`consecutiveFailures > 0`（稳定窗口
+  后才归零）、杀掉后先等状态翻转为非 online（死亡被探知）再等恢复 online
+  （新进程拉起），不依赖 pid 数值差异。
+- 涉及用例：auto-restarts after unexpected exit / resets consecutive failures
+  after stability window / adopts desired running state across supervisor restart。
+
+变更：`tests/integration/supervisor-watchdog.test.ts`（纯测试，无生产代码改动）。

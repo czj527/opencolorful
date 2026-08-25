@@ -129,7 +129,9 @@ describe("supervisor watchdog", () => {
     // 使用 SIGTERM 让子进程优雅关闭、立即释放端口，避免端口未释放导致重试失败
     process.kill(first.pid, "SIGTERM");
     const second = await waitForOnline(controller, 10_000);
-    expect(second.pid).not.toBe(first.pid);
+    // 不断言 pid 变化：POSIX 上子进程退出后 PID 可被立即复用（Linux CI 实测
+    // 复用同号）。崩溃→自动拉起的证据是看门狗已记录失败（稳定窗口后才归零）。
+    expect(controller.getWatchdogStatus().consecutiveFailures).toBeGreaterThan(0);
     expect(isProcessRunning(second.pid)).toBe(true);
 
     // 自动拉起成功后，看门狗计数应被稳定窗口归零
@@ -208,8 +210,8 @@ describe("supervisor watchdog", () => {
     process.kill(first.pid, "SIGTERM");
 
     // 等待自动重试成功；连续失败计数应大于 0（Windows 端口释放时机可能导致 1 次额外失败）
+    // （不断言 pid 变化：POSIX 会立即复用刚退出进程的 PID）
     const second = await waitForOnline(controller, 10_000);
-    expect(second.pid).not.toBe(first.pid);
     const failuresBeforeReset = controller.getWatchdogStatus().consecutiveFailures;
     expect(failuresBeforeReset).toBeGreaterThan(0);
 
@@ -292,21 +294,21 @@ describe("supervisor watchdog", () => {
     // 外部杀掉被收养的 server 进程
     process.kill(firstPid, "SIGTERM");
 
-    // 等待 B 的看门狗慢路径轮询发现死亡并自动拉起
-    const deadline = Date.now() + 10_000;
-    let newPid: number | null = null;
-    while (Date.now() < deadline) {
-      const status = await controllerB.getAgentServerStatus();
-      const pid = controllerB.agentServerPid;
-      if (status === "online" && pid !== null && pid !== firstPid) {
-        newPid = pid;
+    // 等待 B 的看门狗慢路径轮询发现死亡并自动拉起。
+    // 不以 pid 变化为条件：POSIX 会立即复用刚退出进程的 PID。
+    // 改为先等状态翻转为非 online（死亡被探知），再等恢复 online（新进程拉起）。
+    const downDeadline = Date.now() + 10_000;
+    let downDetected = false;
+    while (Date.now() < downDeadline) {
+      if ((await controllerB.getAgentServerStatus()) !== "online") {
+        downDetected = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    expect(downDetected).toBe(true);
 
-    expect(newPid).not.toBeNull();
-    expect(isProcessRunning(newPid!)).toBe(true);
-    expect(newPid).not.toBe(firstPid);
+    const restarted = await waitForOnline(controllerB, 10_000);
+    expect(isProcessRunning(restarted.pid)).toBe(true);
   }, 30_000);
 });
