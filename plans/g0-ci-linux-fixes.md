@@ -114,3 +114,32 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
   抖动，已通过 `gh run rerun --failed` 单跑复验；若复现则单独深挖。
 
 变更：`web/src/features/sessions/new-session-page.test.tsx`（固定 UA，消除宿主派生）。
+
+## 第四轮（合并后 main run 32853669356 复查后）——升级为生产代码修复
+
+`subagents-mailbox-coordinator` 退避重试用例在 10s 窗口下仍超时失败，证实不是
+负载抖动而是真实缺陷：**退避重试搁浅**。
+
+根因：触发失败后 `scheduleRetry` 排一个一次性 `setTimeout(delay)`，定时器
+回调里 `retryTimer` 先置 null 再 `attemptDelivery` 扫描"已到期"行。若定时器
+触发时刻略早于 `next_retry_at`（libuv 循环时间与 Date.now 的毫秒级偏差），
+扫描结果为空，方法直接返回——没有补排后续定时器，该 failed 行永久搁浅到
+下次 signal/重启。CI Linux 上间歇复现（本地 Windows 不易复现），语义上
+§14.3 的"指数退避重试"保证存在漏洞。
+
+修复（生产代码）：
+- `ParentMailboxStore.nextRetryDueAt(ownership)`：返回该父 Session 最近一个
+  failed 行的到期时间（MIN(next_retry_at)）。
+- `attemptDelivery` 在"无已到期行"和"只有非触发行"两个提前返回点调用
+  `scheduleNextDueRetry`：按最近到期时间 +1ms 补排定时器；若再次早触发则
+  继续顺延（自愈，不会搁浅）。
+
+测试：
+- 新增"failed 退避行未到期时重复 signal 不丢不重"回归用例；
+- 第二轮放宽的三处 waitUntil 保留（语义修复后作为安全余量）。
+- 本地：mailbox 20/20、subagents 相关 43/43、tsc 通过。
+
+变更：
+- `src/runtime/subagents/stores/parent-mailbox-store.ts`（新增 nextRetryDueAt）
+- `src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.ts`（防搁浅补排）
+- `tests/unit/subagents-mailbox-coordinator.test.ts`（回归用例）

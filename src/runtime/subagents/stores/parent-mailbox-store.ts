@@ -236,6 +236,22 @@ export class ParentMailboxStore {
   }
 
   /**
+   * 某父 Session 最近一个 failed 行的到期时间（退避重试排程用）。
+   * 投递扫描只取"已到期"行；调用方用本方法为"未到期"行补排定时器，
+   * 防止一次性定时器早于 next_retry_at 触发后行被搁浅。
+   */
+  nextRetryDueAt(ownership: SubagentOwnership): string | null {
+    const row = this.database
+      .prepare(
+        `SELECT MIN(next_retry_at) AS due_at FROM subagent_parent_mailbox
+         WHERE status = 'failed' AND next_retry_at IS NOT NULL
+           AND owner_agent_id = @owner AND parent_session_id = @session`,
+      )
+      .get({ owner: ownership.ownerAgentId, session: ownership.parentSessionId }) as { due_at: string | null };
+    return row.due_at;
+  }
+
+  /**
    * T5 父侧 cursor 分页（§8.4 / §14.1：父侧轮询/等待新通知）。
    * 所有状态（queued/delivering/delivered/suppressed/failed）均可查询；
    * 严格归属过滤；after 为空返回最新一批（created_at ASC, mailbox_id ASC）。

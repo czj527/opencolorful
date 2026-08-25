@@ -481,6 +481,29 @@ describe("Mailbox 投递：父 busy / 触发失败 / 打断（§14.2 / §T5 交�
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(h.port.startCalls).toHaveLength(1); // 不重试
   });
+
+  it("failed 退避行未到期时重复 signal 不丢不重（防搁浅兜底）", async () => {
+    const h = createHarness({ retryBaseDelayMs: 50 });
+    h.makeTerminalMailbox("completed");
+    h.coordinator.signal({ threadId: THREAD_ID });
+    await waitUntil(() => h.port.startCalls.length === 1);
+    h.port.finishNext({ status: "rejected", reasonCode: "parent_session_busy" });
+    await waitUntil(() => {
+      const rows = h.mailboxStore.listByThread(THREAD_ID, OWNERSHIP);
+      return rows.some((row) => row.status === "failed" && row.nextRetryAt !== null);
+    });
+    // 退避未到期时连续 signal：不得重复触发，也不得把重试弄丢
+    h.coordinator.signal({ threadId: THREAD_ID });
+    h.coordinator.signal({ threadId: THREAD_ID });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(h.port.startCalls).toHaveLength(1);
+    // 到期后恰好重试一次
+    await waitUntil(() => h.port.startCalls.length === 2, 10_000);
+    h.port.finishNext({ status: "triggered" });
+    await waitUntil(() => h.mailboxStore.listByThread(THREAD_ID, OWNERSHIP).every((row) => row.status === "delivered"), 10_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.port.startCalls).toHaveLength(2);
+  });
 });
 
 describe("Mailbox 查询：cursor 分页与 wait（§8.4 / §14.1）", () => {

@@ -287,6 +287,10 @@ export class ParentMailboxDeliveryCoordinator {
       (row) => row.parentSessionId === sessionId && row.ownerAgentId === entry.port.ownerAgentId,
     );
     if (rows.length === 0) {
+      // 无已到期行：若存在未到期的 failed 退避行，按最近到期时间补排定时器——
+      // 一次性重试定时器若早于 next_retry_at 触发（时钟/事件循环偏差），
+      // 行会永久搁浅直到下次 signal/重启（§14.3 退避重试的空洞）。
+      this.scheduleNextDueRetry(sessionId, entry);
       return;
     }
     // failed 且已到期 → requeue（保留 last_error_code 供诊断；§14.3）
@@ -307,6 +311,7 @@ export class ParentMailboxDeliveryCoordinator {
     }
     const triggerRows = rows.filter((row) => row.triggerParentTurn);
     if (triggerRows.length === 0) {
+      this.scheduleNextDueRetry(sessionId, entry);
       return;
     }
 
@@ -387,6 +392,21 @@ export class ParentMailboxDeliveryCoordinator {
       entry.retryTimer = null;
       this.attemptDelivery(sessionId);
     }, delayMs);
+  }
+
+  /**
+   * 存在未到期 failed 退避行时，按最近到期时间补排重试（§14.3 兜底）。
+   * 一次性 setTimeout 触发时刻可能略早于 next_retry_at（libuv 循环时间与
+   * Date.now 的毫秒级偏差），此时扫描不到到期行；不补排则该行搁浅到
+   * 下次 signal/重启。+1ms 越过边界；若再次早触发则继续顺延（自愈）。
+   */
+  private scheduleNextDueRetry(sessionId: string, entry: SessionEntry): void {
+    const dueAt = this.deps.mailboxStore.nextRetryDueAt({ ownerAgentId: entry.port.ownerAgentId, parentSessionId: sessionId });
+    if (dueAt === null) {
+      return;
+    }
+    const delay = Math.max(new Date(dueAt).getTime() - this.now(), 0) + 1;
+    this.scheduleRetry(sessionId, delay);
   }
 
   // ── continuation 输入渲染（§14.2：只含摘要，不复制 transcript）──
