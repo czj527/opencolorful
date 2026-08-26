@@ -8,15 +8,22 @@
 |---|---|
 | 项目是什么、长期往哪走 | `docs/positioning-and-roadmap.md`（README 为公开摘要） |
 | 当前处于什么阶段 | `docs/project-status.md` |
-| 这个阶段如何实现、如何验收 | `plans/phase-xx.md` |
+| 这个阶段如何实现、如何验收 | `plans/` 下对应计划文件 |
 | 单个功能为什么这样设计 | `docs/superpowers/specs/` 或 `docs/adr/` |
 | 当前任务做到哪一步 | GitHub Issue / Project Board 和计划的实施记录 |
 | 已发布给用户的变化 | `CHANGELOG.md` |
 
+## 命名规则（2026-08-26 起）
+
+- `plans/g<N>-*.md`：治理轨道计划（如 `g1-repo-convergence.md`）；
+- `plans/p<N>-*.md`：产品阶段实施计划（如 `p1-personal-assistant.md`）；
+- `plans/<功能名>.md`：跨阶段的功能专项计划（如 `desktop-parity.md`）；其内部波次用功能前缀编号（如 D0-D7），不复用产品 P 编号；
+- `plans/phase-*.md`：平台底座期历史命名，已全部归档，不再新建。
+
 ## 新建或接续阶段
 
 1. 先更新 `docs/project-status.md` 和路线图中的阶段状态。
-2. 从 `docs/development.md` 附录模板创建 `plans/phase-xx.md`。
+2. 按上述命名规则创建计划文件，结构参考 `docs/development.md` 附录模板。
 3. 在计划顶部写状态、基线提交、范围、非目标、依赖、影响文件、质量门和验收标准。
 4. 共享契约、迁移和权限边界必须先串行冻结，再派发互不重叠的任务。
 5. 实施过程中只在计划的“实施记录”回写真实提交、命令、结果和偏差。
