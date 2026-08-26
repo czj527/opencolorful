@@ -22,41 +22,32 @@
 |---|---|---|
 | `docs/positioning-and-roadmap.md` | **产品定位与开发路线权威**（个人助理/工作台/远期自扩展） | 必读，理解项目是什么 |
 | `docs/project-status.md` | **当前状态权威**（当前基线、活动阶段、优先级、状态更新规则） | 每次接手任务时读 |
-| `docs/document-governance.md` | **文档治理与变更影响权威**（事实归属、计划生命周期、CI 门禁） | 每次新增功能或跨边界修改时读 |
+| `docs/document-governance.md` | **文档治理与变更影响权威**（单人+AI agent 护栏定位、事实归属、CI 门禁） | 每次新增功能或跨边界修改时读 |
+| `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/Electron 定位） | 必读，理解边界与选型 |
+| `plans/g1-repo-convergence.md` | G1 仓库收敛与 Desktop 优先计划 | 涉及前端归属、文档结构、编号时读 |
+| `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md` | P1 切片 1 规格（个人助理首个垂直切片） | 做 P1 功能时必读 |
+| `plans/desktop-parity.md` | 桌面全能力对齐（D 波次，已并入 P1） | 做桌面功能时读 |
 | `docs/ci-cd.md` | GitHub Actions、分支保护和发布流程 | 修改 CI/CD 或准备发布时读 |
-| `plans/README.md` | 阶段计划生命周期、状态词和完成标准 | 创建或接续 Phase 时读 |
-| `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/日志 Electron 时机/流程评估） | 必读，理解边界与选型 |
-| `docs/logging-architecture.md` | **Phase 11 日志架构权威**（三通道、trace、持久化、扩展接入、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
-| `docs/architecture.md` | 架构说明（Phase 0-3 平台层技术栈/模块边界/事件协议） | 改平台层时读 |
-| `docs/development.md` | 开发流程规范（角色/并行/质量门）——部分已被本文件简化 | 改流程前读 |
-| `docs/product.md` | 产品说明（旧定位，部分已过时，以 positioning-and-roadmap.md 为准） | 参考历史 |
-| `plans/phase-00~07.md` | 已完成阶段计划 | 了解历史 |
-| `plans/phase-08.md` | Phase 8 实施计划、范围校正与验收记录 | 接续 Agent 模型工作时读 |
-| `plans/phase-09.md` | Phase 9 实施计划与验收记录 | 了解历史 |
-| `plans/phase-10.md` | Phase 10 实施计划、评审修复与验收记录 | 了解历史 |
-| `plans/phase-10.5.md` | Phase 10.5 记忆 Agent 与后台整理计划 | 进入记忆 Agent 阶段时读 |
-| `plans/phase-11.md` | Phase 11 完整日志系统开发计划（已实现并验收） | 接续可观测性工作时读 |
-| `plans/phase-12.md` | Phase 12 通用插件系统计划、实施记录与验收结论（已完成） | 接续插件、Skill 或 Subagent 工作时读 |
-| `plans/phase-13.md` | Phase 13 Skill 系统与 Agent Skills 生态兼容计划（已完成） | 接续 Skill 或 Subagent 工作时读 |
-| `plans/phase-14.md` | Phase 14 临时 Subagent Runtime 与父子任务协议计划（已完成实施记录） | 开发或评审 Subagent 时必读 |
+| `plans/README.md` | 计划生命周期、状态词和完成标准 | 创建或接续计划时读 |
+| `docs/logging-architecture.md` | 日志架构权威（三通道、trace、持久化、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
+| `docs/memory-architecture.md` | 记忆架构权威 | 开发或评审记忆功能时读 |
+| `docs/architecture.md` | 架构说明（平台层技术栈/模块边界/事件协议） | 改平台层时读 |
+| `docs/development.md` | 开发流程规范——部分已被本文件简化 | 改流程前读 |
+| `docs/product.md` | 产品说明（旧定位，已过时，以 roadmap 为准） | 参考历史 |
+| `plans/phase-00~14.md` | 平台底座阶段计划，**已全部归档** | 仅查历史证据时读 |
 
 ## 参考仓库
 
-`<local-workspace>\references\` 下有 8 个参考仓库（`pi` / `oh-my-pi` / `openhanako` / `openclaw` / `hermes-agent` / `lobe-chat` / `codex` / `opencode`），**只用于研究，不属于本仓库，不要加入本仓库 Git 历史**。各项目定位与借鉴点见 positioning-and-roadmap.md 第六章。
+`<local-workspace>\references\` 下有 9 个参考仓库（`pi` / `oh-my-pi` / `openhanako` / `openclaw` / `hermes-agent` / `lobe-chat` / `codex` / `opencode` / `deepseek-harness`），**只用于研究，不属于本仓库，不要加入本仓库 Git 历史**。各项目定位与借鉴点见 positioning-and-roadmap.md 第六章。
 
 ## 当前开发状态
 
-- **Phase 0-7 已完成并通过验收（2026-07-25）**：平台层运行时底座——Server / Session / Provider / Supervisor / Web UI / Agent 身份证+人设注入 / Token 用量 / UI 重构。质量门全过，Playwright 23/23。
-- **Phase 8 已完成（2026-07-28）**：Agent 模型去枚举化（identity v2，无 `type`）、底色与运行设置分离、旧数据迁移、底色模板、Windows 工作目录选择、独立 Agent 创建/编辑页和新会话创建页。模板只用于初始化，不是 Agent 的持久化依赖。
-- **Phase 9 已完成（2026-07-28 验收，已合并）**：应用层 PathGuard 沙箱系统（能力声明 + 执行边界 + 审计日志），多轮安全审查后合入 `main`。
-- **Phase 10 已完成（2026-08-01 验收，`phase-10-complete`）**：记忆系统底座——openhanako 四段 Markdown 传送带、PI 分支感知 rolling summary、事件索引（FTS5 + CJK n-gram）、`search_memory` 主动回想（RecallEpisode + Agent SSE）、intent-only 记忆工具、封存队列、dirty 恢复与 `/memory` 只读页。
-- **Phase 10.5 已完成（2026-08-03）**：记忆 Agent、sealed batch、retention/activation 强度、proposal + MemoryPolicy 审批、每日/每周整理和 deep-dive。
-- **Phase 11 已完成并验收（2026-08-03）**：Diagnostic/Activity/Audit 三通道、Trace、严格审计生命周期、查询/保留/恢复与 `/logs`。
-- **Phase 12 已完成并验收（2026-08-05）**：通用插件系统、四类 Runtime、10 类扩展点、生态适配、Agent 绑定、权限快照、开发循环和全链路日志。
-- **Phase 13 已完成（2026-08-07）**：Agent Skills 标准兼容、Catalog/Bundle/绑定、会话内安装、PI 渐进披露、每 turn 快照、插件 Skill 和日志闭环。
-- **Phase 14 已完成并验收**：临时、无长期记忆、可自定义模型/工具/Plugin/Skill、用户只读观察、主 Agent 可纠偏的 Subagent Runtime 1.0；不聚焦多 Agent 协作。详见 `docs/project-status.md` 和 `plans/phase-14.md`。
-- **当前工作阶段（Governance G0）**：补齐 GitHub Actions、文档变更审计、公开协作和可复现质量门；后续产品工作以 `docs/project-status.md` 为准。
-- **当前定位已重新明确（2026-08-22）**：从“承载 agent 完整一生的平台基础设施”调整为“个人助理 Agent 平台与个人效率工作台”；完整一生和自我扩展保留为远期愿景。
+当前状态权威是 `docs/project-status.md`（每次接手必读），本节只保留入口摘要：
+
+- 平台底座 Phase 0-14 已全部完成并归档（实施证据在 `plans/phase-00~14.md`，不作为当前待办）；
+- G0 仓库治理已完成（2026-08-26）：CI 三 job、分支保护、文档治理生效；
+- **当前主线**：G1 仓库收敛（`plans/g1-repo-convergence.md`）+ P1 个人助理切片 1（`docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`，桌面补齐 D 波次并入 P1 轨道）；
+- 当前定位（2026-08-22 明确，2026-08-26 收敛）：本地优先的个人助理 Agent 平台与个人效率工作台；`desktop/` 为唯一产品前端，`web/` 保留为浏览器运维、测试与协议验收客户端。
 
 接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。文档治理检查可单独运行 `npm run check:docs`。
 
@@ -78,12 +69,11 @@
 - 多 Agent 身份证 + 底色人设注入 + Token 用量全链路。
 - Phase 8 Agent 基础模型：`identity.json`、`base-color.json`、`settings.json`、底色模板 API、创建/编辑路由与新会话创建页。
 
-下一阶段核心目标：
+当前主线目标：
 
-- Governance G0：GitHub Actions、文档变更审计、分支保护和可复现发布；
-- Product P1：以 openhanako 为参考，补齐个人助理的首个可用垂直切片；
-- Desktop：继续完善真实数据适配、跨平台构建和普通用户使用体验；
-- Product P2：建设用户与 Agent 同级的项目、任务、资料和日程工作台。
+- Governance G1：仓库收敛与 Desktop 优先（`plans/g1-repo-convergence.md`）；
+- Product P1 切片 1：可用的桌面个人助理（onboarding、对话主干补齐、人格可见、记忆日用、错误恢复，规格见文档导航）；
+- 随后：P1 切片 2（提醒与有限主动性）、P2 个人效率工作台。
 
 暂不做：Agent 完整生活、无约束的自我成长、自动编写并直接安装插件、广泛的多 Agent 团队/DAG 编排和未经治理的远程 Bridge；这些属于 P3/R1 之后的路线。
 

@@ -95,17 +95,24 @@ OpenColorful 不把自己定位成 openhanako 的复制品，而是采用“先�
 
 ## 五、开发路线
 
-产品路线使用 P 编号；仓库治理使用独立的 G 编号；历史平台建设 Phase 0-14 保留为实施证据，不再复用为当前产品阶段。
+产品路线使用 P 编号；仓库治理使用独立的 G 编号；桌面补齐波次使用 D 编号（`plans/desktop-parity.md`）。历史平台建设 Phase 0-14 保留为实施证据，不再复用为当前产品阶段。
 
-### G0：仓库治理与可复现交付
+### G0：仓库治理与可复现交付（已完成 2026-08-26）
 
-当前工作重点：
+- GitHub Actions 覆盖文档治理、类型检查、测试、Web 构建、Desktop 构建和 Browser E2E，三 job 全绿；
+- 固定 Node/npm 版本和依赖安装方式，`main` 保持可安装、可构建、可测试；
+- 分支保护生效（必须 PR、三检查必过、禁 force push），Dependabot 存量清零，发布、变更记录和公开协作流程建立；
+- 文档事实归属、变更影响审计和例外机制生效。
 
-- GitHub Actions 覆盖文档治理、类型检查、测试、Web 构建、Desktop 构建和 Browser E2E；
-- 固定 Node/npm 版本和依赖安装方式；
-- 保持 main 可安装、可构建、可测试；
-- 完成分支保护、依赖更新、发布、变更记录和公开协作流程；
-- 建立文档事实归属、变更影响审计和例外机制。
+修复台账见 `plans/g0-ci-linux-fixes.md`。
+
+### G1：仓库收敛与 Desktop 优先（进行中）
+
+- `desktop/` 为唯一产品前端；`web/` 冻结新功能，保留为浏览器运维、测试与协议验收客户端；
+- CI/CD 与文档治理重定位为"单人作者 + AI 开发 agent"的护栏，而非多人协作门禁；
+- 文档减负、编号去冲突（桌面波次改 D 编号）、平台冻结纪律（P1 完成前不新增平台层抽象）。
+
+计划见 `plans/g1-repo-convergence.md`。
 
 ### P1：个人助理基础体验
 
@@ -116,6 +123,8 @@ OpenColorful 不把自己定位成 openhanako 的复制品，而是采用“先�
 - Skill、Plugin 和可迁移的 Agent 配置；
 - 会话管理、后台任务、提醒和有限主动性；
 - 面向普通用户的首次启动、模型配置、权限解释和错误恢复。
+
+首个垂直切片规格：`docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`；桌面补齐波次（`plans/desktop-parity.md`，D 编号）并入本阶段执行。
 
 退出条件：OpenColorful 至少能够承担一个普通用户的日常个人助理工作。
 
