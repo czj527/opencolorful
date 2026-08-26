@@ -25,7 +25,7 @@
 
 ## 当前优先级
 
-1. 建立 P1 实施计划（`plans/p1-personal-assistant.md`），调度切片 1 与 D 波次。
+1. 执行 P1 实施计划（`plans/p1-personal-assistant.en.md`），调度切片 1 与 D 波次。
 2. 冻结平台扩张：不新增平台层抽象，Phase 15+、Bridge、DAG、Cordis 化继续冻结（G1.5）。
 3. 保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建。
 
