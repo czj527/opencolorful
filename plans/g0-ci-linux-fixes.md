@@ -172,3 +172,19 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
 第二段同样改为探知即读。
 
 变更：`tests/integration/supervisor-watchdog.test.ts`（纯测试，无生产代码改动）。
+
+## 第七轮（PR #13 run 32952453626 首跑失败、重跑转绿）
+
+`plugin-runtime-host.test.ts` 的"P1 旧快照调用新 Runtime 被拒绝"用例 flake：
+断言 rejected 留痕的 `currentRuntimeInstanceId` 等于 `start()` 后缓存的实例 id。
+但 runtime-host 存在崩溃自动重建路径（`restartInstance`，新 UUID 实例 ID 替换
+`instances` map）；CI 上 worker 子进程偶发 start 后退出被重建，invoke 时当前
+实例已换，缓存 id 过期。同一代码重跑即绿，坐实时序 flake（D1a 波次曾观察到
+同文件另一次并行时序 flake）。
+
+该用例要验证的语义是"旧快照被 fail-closed 拒绝 + 留痕字段正确"，"测试期间
+实例零重启"不是有效前提（自动重建是生产特性）。修复为语义断言：
+`currentRuntimeInstanceId` 非空字符串且不等于被拒绝的旧实例 id。
+
+变更：`tests/integration/plugin-runtime-host.test.ts`（纯测试，无生产代码改动）。
+若同类 flake 再出现，评估为 restartInstance 路径加测试专用抑制开关。
