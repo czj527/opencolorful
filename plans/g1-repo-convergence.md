@@ -1,6 +1,6 @@
 # G1：仓库收敛与 Desktop 优先
 
-**状态：进行中** | 基线：`main`（`fa6da19`）| 类型：治理轨道（纯文档与流程，无生产代码变更）
+**状态：已完成（2026-08-26）** | 基线：`main`（`fa6da19`）| 类型：治理轨道（纯文档与流程，无生产代码变更）
 **上游：** `docs/positioning-and-roadmap.md` §五；**关联：** `plans/desktop-parity.md`、`docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`
 
 ## 一、背景与决策来源
@@ -71,4 +71,4 @@ P1 完成前不开新的平台层抽象（新契约面、新投影层、新存�
 
 ## 实施记录
 
-2026-08-26：T1-T8 全部落地（本 PR）。验证：`npm run check:docs` 通过（8 个变更文件全部合规）。Governance CI 结果在合并前回填。
+2026-08-26：T1-T8 全部落地于 PR #11（squash 合并 `d085d28`）；状态收口于后续单文档 PR。验证：`npm run check:docs` 通过（8 个变更文件全部合规）；PR #11 CI run 32949866672 三 job 全绿（Governance 6s / Browser E2E 2m13s / Typecheck, tests and builds 5m1s）。验收标准四项全部满足：活跃文档无第二套 P 编号、project-status 反映真实状态、AGENTS.md 活动导航不再逐条罗列历史 phase、治理定位段落生效。

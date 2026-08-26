@@ -106,7 +106,7 @@ OpenColorful 不把自己定位成 openhanako 的复制品，而是采用“先�
 
 修复台账见 `plans/g0-ci-linux-fixes.md`。
 
-### G1：仓库收敛与 Desktop 优先（进行中）
+### G1：仓库收敛与 Desktop 优先（已完成 2026-08-26）
 
 - `desktop/` 为唯一产品前端；`web/` 冻结新功能，保留为浏览器运维、测试与协议验收客户端；
 - CI/CD 与文档治理重定位为"单人作者 + AI 开发 agent"的护栏，而非多人协作门禁；

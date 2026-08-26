@@ -46,7 +46,7 @@
 
 - 平台底座 Phase 0-14 已全部完成并归档（实施证据在 `plans/phase-00~14.md`，不作为当前待办）；
 - G0 仓库治理已完成（2026-08-26）：CI 三 job、分支保护、文档治理生效；
-- **当前主线**：G1 仓库收敛（`plans/g1-repo-convergence.md`）+ P1 个人助理切片 1（`docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`，桌面补齐 D 波次并入 P1 轨道）；
+- **当前主线**：P1 个人助理切片 1（`docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`，桌面补齐 D 波次并入 P1 轨道）；G1 仓库收敛已完成（`plans/g1-repo-convergence.md`）；
 - 当前定位（2026-08-22 明确，2026-08-26 收敛）：本地优先的个人助理 Agent 平台与个人效率工作台；`desktop/` 为唯一产品前端，`web/` 保留为浏览器运维、测试与协议验收客户端。
 
 接手后必须重新运行验证（`npm run check`），不得直接复述历史测试数字。文档治理检查可单独运行 `npm run check:docs`。
@@ -71,7 +71,6 @@
 
 当前主线目标：
 
-- Governance G1：仓库收敛与 Desktop 优先（`plans/g1-repo-convergence.md`）；
 - Product P1 切片 1：可用的桌面个人助理（onboarding、对话主干补齐、人格可见、记忆日用、错误恢复，规格见文档导航）；
 - 随后：P1 切片 2（提醒与有限主动性）、P2 个人效率工作台。
 
