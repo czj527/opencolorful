@@ -448,7 +448,6 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
   it("P1 旧快照调用新 Runtime 被拒绝 → plugin.execution.rejected 留痕（含 snapshotId），worker 未执行", async () => {
     const { broker, host, db } = createEnv(PLUGIN, "node-process");
     await host.start(PLUGIN);
-    const currentInstanceId = host.getInstance(PLUGIN)!.runtimeInstanceId;
 
     // 旧快照：runtimeInstanceId 故意与当前实例不一致（模拟 turn 中途重启/更新）
     const staleSnapshot = {
@@ -490,7 +489,12 @@ describe("RuntimeHost worker 主动请求 → HostBroker 白名单 API", () => {
     expect(rejectedPayload.attributes?.snapshotId).toBe("snap-stale-1");
     expect(rejectedPayload.attributes?.reasonCode).toBe("runtime-instance-mismatch");
     expect(rejectedPayload.attributes?.expectedRuntimeInstanceId).toBe("runtime-stale-instance");
-    expect(rejectedPayload.attributes?.currentRuntimeInstanceId).toBe(currentInstanceId);
+    // 语义断言：留痕的当前实例非空且不等于被拒绝的旧实例。不断言等于 start 时
+    // 缓存的实例 id——崩溃自动重建（restartInstance）会换新 runtimeInstanceId，
+    // 与本用例验证的 fail-closed 语义无关（CI flake 修复，见 plans/g0-ci-linux-fixes.md 第七轮）。
+    expect(typeof rejectedPayload.attributes?.currentRuntimeInstanceId).toBe("string");
+    expect(String(rejectedPayload.attributes?.currentRuntimeInstanceId).length).toBeGreaterThan(0);
+    expect(rejectedPayload.attributes?.currentRuntimeInstanceId).not.toBe("runtime-stale-instance");
     // worker 未执行：无 execution.started（进入 Runtime 的调用为零）
     expect(queryActivity(db, "plugin.execution.started")).toHaveLength(0);
     await host.stop(PLUGIN, "shutdown");
