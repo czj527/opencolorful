@@ -12,9 +12,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import type { ChatEvent, ChatMessage, EventKind, TimelineItem } from "../mock-data.js";
+import type { DesktopDataSource } from "../data/source.js";
 
 const eventIcons: Record<EventKind, LucideIcon> = {
   thinking: CircleCheck,
@@ -27,7 +28,9 @@ const eventIcons: Record<EventKind, LucideIcon> = {
   status: CircleAlert,
 };
 
-function MessageRow({ message }: { readonly message: ChatMessage }) {
+const NEW_THREAD = "new";
+
+const MessageRow = memo(function MessageRow({ message }: { readonly message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
     <article className={`msg msg-${message.role}`}>
@@ -41,7 +44,7 @@ function MessageRow({ message }: { readonly message: ChatMessage }) {
       </div>
     </article>
   );
-}
+});
 
 function EventDetail({ event, onOpenDiff }: { readonly event: ChatEvent; readonly onOpenDiff: () => void }) {
   if (event.kind === "tool" && event.tools) {
@@ -122,7 +125,7 @@ function EventDetail({ event, onOpenDiff }: { readonly event: ChatEvent; readonl
   return event.detail ? <p className="detail-text">{event.detail}</p> : null;
 }
 
-function EventRow({ event, onOpenDiff }: { readonly event: ChatEvent; readonly onOpenDiff: () => void }) {
+const EventRow = memo(function EventRow({ event, onOpenDiff }: { readonly event: ChatEvent; readonly onOpenDiff: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [approval, setApproval] = useState<"pending" | "approved" | "denied">("pending");
   const Icon = eventIcons[event.kind];
@@ -171,7 +174,7 @@ function EventRow({ event, onOpenDiff }: { readonly event: ChatEvent; readonly o
       )}
     </article>
   );
-}
+});
 
 export function Timeline({ items, onOpenDiff }: { readonly items: readonly TimelineItem[]; readonly onOpenDiff: () => void }) {
   return (
@@ -183,4 +186,34 @@ export function Timeline({ items, onOpenDiff }: { readonly items: readonly Timel
       )}
     </div>
   );
+}
+
+interface ChatViewProps {
+  readonly source: DesktopDataSource;
+  readonly threadId: string;
+  readonly onOpenDiff: () => void;
+  /** 快照 streaming 布尔的最小回传通道：仅布尔翻转时 App 壳重渲染（setState 本身稳定） */
+  readonly onStreamingChange: (streaming: boolean) => void;
+}
+
+/**
+ * 会话时间线容器：items/streaming 的 subscribeChat 订阅下沉在这里，
+ * 流式重渲染留在聊天列内部，不波及 App 壳（App 只经 onStreamingChange 收到布尔翻转）。
+ */
+export function ChatView({ source, threadId, onOpenDiff, onStreamingChange }: ChatViewProps) {
+  const [items, setItems] = useState<readonly TimelineItem[]>([]);
+
+  useEffect(() => {
+    if (threadId === NEW_THREAD) {
+      setItems([]);
+      onStreamingChange(false);
+      return;
+    }
+    return source.subscribeChat(threadId, (snapshot) => {
+      setItems(snapshot.items);
+      onStreamingChange(snapshot.streaming);
+    });
+  }, [source, threadId, onStreamingChange]);
+
+  return <Timeline items={items} onOpenDiff={onOpenDiff} />;
 }
