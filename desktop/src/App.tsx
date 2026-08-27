@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Timeline } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
+import type { AssistantStatus } from "./components/AgentCard.js";
 import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
 import { Sidebar, SidebarRail } from "./components/Sidebar.js";
@@ -425,6 +426,14 @@ export function App() {
   // 显式进入（空态入口）或首启自动进入；退出后本次运行内不再自动弹出
   const showOnboarding = page === "onboarding" || (firstRun.status === "first-run" && !onboardingDismissed);
 
+  // T4 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
+  const assistantStatus: AssistantStatus = (() => {
+    const conn = connection ?? source.info;
+    if (!conn.connected) return { label: "离线", tone: "offline" };
+    if (streaming) return { label: "运行中", tone: "busy" };
+    return { label: "空闲", tone: "ok" };
+  })();
+
   function enterOnboarding() {
     setOnboardingDismissed(false);
     setPage("onboarding");
@@ -494,6 +503,7 @@ export function App() {
             onCollapse={() => setSidebarCollapsed(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenAssistantProfile={() => setPage("profile")}
+            assistantStatus={assistantStatus}
           />
         )}
         <main className="main">

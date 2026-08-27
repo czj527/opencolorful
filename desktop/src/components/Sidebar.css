@@ -1,0 +1,24 @@
+.agent-card.is-empty .agent-card-body {
+  cursor: default;
+}
+
+.agent-card.is-empty .agent-card-body:hover {
+  background: transparent;
+}
+
+.thread-group {
+  margin-bottom: 4px;
+}
+
+.thread-group:last-child {
+  margin-bottom: 0;
+}
+
+.thread-group > header {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 5px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+}
