@@ -16,6 +16,8 @@ interface SidebarProps {
   readonly onUnarchiveThread: (sessionId: string) => void;
   readonly onCollapse: () => void;
   readonly onOpenSettings: () => void;
+  /** T4 身份证卡入口：打开助理档案页。T0 先行声明以固定车道接口（T4 消费）。 */
+  readonly onOpenAssistantProfile?: () => void;
 }
 
 interface SidebarRailProps {

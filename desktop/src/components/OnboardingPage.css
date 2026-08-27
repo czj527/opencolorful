@@ -1,0 +1,34 @@
+/* OnboardingPage — T0 骨架样式。T1 向导表单样式追加在本文件（lane A 拥有）。
+   约定：新增页面/组件使用同名单文件 CSS 并由组件自行 import，
+   避免并行任务同时改 styles.css 产生冲突。 */
+
+.onboarding { min-height: 0; display: flex; background: var(--bg); }
+
+.onboarding-rail {
+  width: 220px; flex: 0 0 auto; padding: 28px 18px;
+  background: var(--bg-subtle); border-right: 1px solid var(--border);
+}
+.onboarding-brand { display: block; margin: 0 0 18px 4px; color: var(--text-3); font-size: 11px; }
+
+.onboarding-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.onboarding-steps li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--radius); color: var(--text-3);
+}
+.onboarding-steps li.is-current { background: var(--bg-active); color: var(--text); }
+.onboarding-step-no {
+  width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center;
+  border: 1px solid var(--border-strong); border-radius: 50%;
+  font-family: var(--mono); font-size: 10.5px;
+}
+.onboarding-steps li.is-current .onboarding-step-no { border-color: var(--accent); color: var(--accent); }
+.onboarding-step-copy { min-width: 0; display: grid; gap: 1px; }
+.onboarding-step-copy strong { font-size: 12.5px; font-weight: 600; }
+.onboarding-step-copy small { color: var(--text-3); font-size: 10.5px; }
+
+.onboarding-main { flex: 1; min-width: 0; display: grid; place-items: center; padding: 32px; }
+.onboarding-card { max-width: 460px; display: grid; gap: 10px; }
+.onboarding-card h1 { margin: 0; font-size: 18px; font-weight: 650; }
+.onboarding-card p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.7; }
+.onboarding-card .onboarding-note { color: var(--text-3); font-size: 11.5px; }
+.onboarding-actions { display: flex; gap: 8px; margin-top: 8px; }
