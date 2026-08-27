@@ -117,6 +117,15 @@ export async function startSupervisor(options: StartSupervisorOptions): Promise<
   nodeWebSocket.injectWebSocket(server);
   instrument.supervisorServerStarted();
 
+  // T11：`supervisor start` 语义 = 整个后端一次带起。HTTP 监听就绪后立即把 agent
+  // server 期望态置为 running 并复用现有 spawn/看门狗路径拉起子进程，无需手动
+  // POST /api/supervisor/start。不阻塞返回：启动失败由看门狗退避重试，supervisor
+  // 始终存活；启动期间状态经 /api/supervisor/status 呈现为 starting → online。
+  void controller.startAgentServer().catch(() => {
+    // 失败路径已在 doStartAgentServer 中记录并交给看门狗排期重试，
+    // 此处仅吞掉 rejection，避免 UnhandledPromiseRejection。
+  });
+
   let stopped = false;
   return {
     port: supervisorPort,
