@@ -17,6 +17,7 @@ export type ErrorContext =
   | "switchReadOnly"
   | "listProviders"
   | "saveProvider"
+  | "createAgent"
   | "loadLogs"
   | "queryActivity"
   | "loadMoreActivity";
@@ -45,6 +46,7 @@ const FALLBACK: Record<ErrorContext, string> = {
   switchReadOnly: "切换只读模式失败，请重试。",
   listProviders: "Provider 列表加载失败，请重试。",
   saveProvider: "Provider 保存失败，请检查表单内容后重试。",
+  createAgent: "创建助理失败，请重试。",
   loadLogs: "日志加载失败，请重试。",
   queryActivity: "活动事件加载失败，请重试。",
   loadMoreActivity: "加载更多失败，请重试。",

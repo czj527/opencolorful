@@ -188,3 +188,19 @@ workflow 的 browser job 缺少构建步骤：插件包 `dist/`（agent server �
 
 变更：`tests/integration/plugin-runtime-host.test.ts`（纯测试，无生产代码改动）。
 若同类 flake 再出现，评估为 restartInstance 路径加测试专用抑制开关。
+
+## 第八轮（PR #21，2026-08-27）：phase6 时间线用例复发处置 + CI 诊断能力
+
+第三轮记录过的 `phase6.spec.ts` 对话时间线用例（第二轮对话后「发送消息」30s 未恢复）
+在 T5 分支 CI 上连续 4 次复现（同分支同断言）；同窗口 main 与其他 PR 的 E2E 全绿，
+T5 分支本地（Windows）全量 59/59 通过。排查结论：
+
+- T5 服务端 diff（pinned POST/DELETE 薄路由）对该用例是**死代码**（web E2E 从不调用）；
+  桌面端文件不被 web E2E 加载；运行时代码与 base 逐字节等价（除路由注册）。
+- 失败模式是"第二轮流式 30s 未完成"的等待超时，与第三轮判定的"高负载时序抖动"一致；
+  CI 该 job 失败轮耗时 ~7min vs 正常 2m16s（runner 慢约 3 倍）。
+- 处置按"复现则深挖"：不扩大超时遮掩，改为给 CI 补诊断能力——
+  `web/playwright.config.ts` 失败时保留 trace + 截图，`quality.yml` 失败时上传
+  `web/test-results/` artifact（保留 7 天）。诊断合入后第 5 次 CI 转绿并合并。
+- 后续：若该用例再失败，下载 artifact 用 `npx playwright show-trace` 看真实页面状态，
+  坐实"turn 2 流式未结束"的链路位置（faux provider / SSE / 投影）再定论。

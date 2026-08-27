@@ -23,7 +23,9 @@ import type {
   ActivityFilter,
   ActivityPageResult,
   AgentProfileView,
+  AgentTemplateView,
   ConnectionInfo,
+  CreateAgentInput,
   DesktopDataSource,
   LogsPageData,
   MemoryAgentSettingsView,
@@ -74,6 +76,18 @@ const DECOR_COLORS: Record<string, string> = {
   pink: "#d07fa8",
   green: "#4caf7d",
 };
+
+/** AgentView（服务端）→ 桌面 Agent 卡片模型（listAgents / createAgent 共用） */
+function mapAgentView(view: AgentViewWire, index: number): Agent {
+  return {
+    id: view.identity.id,
+    name: view.identity.name,
+    initial: view.identity.name.slice(0, 1) || "A",
+    color: DECOR_COLORS[view.decorColor ?? ""] ?? Object.values(DECOR_COLORS)[index % 7] ?? "#5b8def",
+    description: (view.baseColor?.persona ?? "").split(/[。！？\n]/)[0]?.slice(0, 26) ?? "",
+    ...(view.settings?.defaultCwd ? { workspace: view.settings.defaultCwd } : {}),
+  };
+}
 
 function unwrap<T>(value: unknown, key: string): T {
   if (value !== null && typeof value === "object" && key in (value as Record<string, unknown>)) {
@@ -240,14 +254,21 @@ export class IpcDataSource implements DesktopDataSource {
   async listAgents(): Promise<readonly Agent[]> {
     const data = await this.request<unknown>("GET", "/api/agents");
     this.agentViews = asArray<AgentViewWire>(unwrap(data, "agents"));
-    return this.agentViews.map((view, index) => ({
-      id: view.identity.id,
-      name: view.identity.name,
-      initial: view.identity.name.slice(0, 1) || "A",
-      color: DECOR_COLORS[view.decorColor ?? ""] ?? Object.values(DECOR_COLORS)[index % 7] ?? "#5b8def",
-      description: (view.baseColor?.persona ?? "").split(/[。！？\n]/)[0]?.slice(0, 26) ?? "",
-      ...(view.settings?.defaultCwd ? { workspace: view.settings.defaultCwd } : {}),
-    }));
+    return this.agentViews.map((view, index) => mapAgentView(view, index));
+  }
+
+  /* ---- T1：onboarding 创建助理 ---- */
+
+  async listAgentTemplates(): Promise<readonly AgentTemplateView[]> {
+    const data = await this.request<unknown>("GET", "/api/agents/templates");
+    return asArray<AgentTemplateView>(data);
+  }
+
+  async createAgent(input: CreateAgentInput): Promise<Agent> {
+    const body: Record<string, unknown> = { name: input.name, baseColor: input.baseColor };
+    if (input.defaultCwd !== undefined) body["defaultCwd"] = input.defaultCwd;
+    const view = await this.request<AgentViewWire>("POST", "/api/agents", body);
+    return mapAgentView(view, 0);
   }
 
   async listThreads(agentId: string): Promise<readonly Thread[]> {

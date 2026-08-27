@@ -102,6 +102,27 @@ export interface PreferencesView {
   };
 }
 
+/** T1：onboarding 底色模板（对齐 GET /api/agents/templates → contracts/base-color-templates.ts） */
+export interface AgentTemplateView {
+  readonly key: string;
+  readonly label: string;
+  readonly description: string;
+  readonly color: string;
+  readonly baseColor: {
+    readonly persona: string;
+    readonly personality: readonly string[];
+    readonly replyStyle: string;
+    readonly innerSetting: string;
+  };
+}
+
+/** T1：onboarding 创建助理输入（对齐 POST /api/agents；不带 id，由服务端生成） */
+export interface CreateAgentInput {
+  readonly name: string;
+  readonly baseColor: AgentTemplateView["baseColor"];
+  readonly defaultCwd?: string | null;
+}
+
 /* ---- 日志服务端查询 ---- */
 
 export interface ActivityFilter {
@@ -249,6 +270,10 @@ export interface DesktopDataSource {
   updateMemorySettings(agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void>;
   addPinnedMemory(agentId: string, content: string): Promise<PinnedMemory>;
   removePinnedMemory(agentId: string, pinnedId: string): Promise<void>;
+
+  /* T1：onboarding 创建助理 */
+  listAgentTemplates(): Promise<readonly AgentTemplateView[]>;
+  createAgent(input: CreateAgentInput): Promise<Agent>;
 
   /* 日志 */
   getLogsData(): Promise<LogsPageData>;
