@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { formatErrorAdvice, toUserError } from "../errors.js";
 import type { DesktopDataSource, ProviderInput, ProviderView } from "../data/source.js";
 import "./providers.css";
 
@@ -140,7 +141,7 @@ export function ProvidersSettings({ source, onChanged }: ProvidersSettingsProps)
     setProviders(null);
     source.listProviders()
       .then(setProviders)
-      .catch((cause: unknown) => setListError(cause instanceof Error ? cause.message : "Provider 列表加载失败"));
+      .catch((cause: unknown) => setListError(formatErrorAdvice(toUserError(cause, "listProviders"))));
   }, [source]);
 
   useEffect(() => {
@@ -210,7 +211,7 @@ export function ProvidersSettings({ source, onChanged }: ProvidersSettingsProps)
       loadList();
       onChanged();
     } catch (cause) {
-      setSaveError(cause instanceof Error ? cause.message : "保存 Provider 失败");
+      setSaveError(formatErrorAdvice(toUserError(cause, "saveProvider")));
     } finally {
       setSaving(false);
     }
