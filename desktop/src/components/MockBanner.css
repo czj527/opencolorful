@@ -1,0 +1,8 @@
+/* T9 mock 模式横幅：琥珀色整条，不可关闭（连上后端即消失） */
+.mock-banner {
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #fff;
+  background: var(--warn);
+}

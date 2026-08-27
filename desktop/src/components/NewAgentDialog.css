@@ -1,19 +1,17 @@
-/* NewSessionDialog — T3 桌面端高级新建会话表单。
- * 约定：新增组件使用同名单文件 CSS 并由组件自行 import，不改动共享 styles.css。
- */
+/* NewAgentDialog — T9 新建助理弹窗。约定：组件同名单文件 CSS，不改动共享 styles.css。 */
 
-.new-session-dialog {
+.new-agent-dialog {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 110;
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--overlay);
 }
 
-.new-session-card {
-  width: min(480px, 100%);
+.new-agent-card {
+  width: min(440px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
   display: grid;
@@ -22,24 +20,24 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow);
 }
 
-.new-session-head {
+.new-agent-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.new-session-head h2 {
+.new-agent-head h2 {
   margin: 0;
   font-size: 15px;
   font-weight: 650;
   color: var(--text);
 }
 
-.new-session-close {
+.new-agent-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -53,22 +51,21 @@
   cursor: pointer;
 }
 
-.new-session-close:hover {
+.new-agent-close:hover {
   border-color: var(--border);
   color: var(--text);
 }
 
-.new-session-form { display: grid; gap: 12px; }
+.new-agent-form { display: grid; gap: 12px; }
 
-.new-session-field { display: grid; gap: 5px; }
+.new-agent-field { display: grid; gap: 5px; }
 
-.new-session-field > span {
+.new-agent-field > span {
   font-size: 11.5px;
   color: var(--text-2);
 }
 
-.new-session-field input,
-.new-session-field select {
+.new-agent-field input {
   height: 32px;
   padding: 0 10px;
   border: 1px solid var(--border-strong);
@@ -79,45 +76,62 @@
   font-family: inherit;
 }
 
-.new-session-field input:focus,
-.new-session-field select:focus {
+.new-agent-field input:focus {
   border-color: var(--accent);
   outline: none;
 }
 
-.new-session-field input:disabled,
-.new-session-field select:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.new-agent-directory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.new-agent-directory-row input { font-family: var(--mono); }
+
+.new-agent-templates {
+  display: grid;
+  gap: 6px;
 }
 
-.new-session-directory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-
-.new-session-directory-row input { font-family: var(--mono); }
-
-.new-session-check {
+.new-agent-template {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 8px 10px;
+  text-align: left;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-subtle);
-  color: var(--text-2);
-  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
   cursor: pointer;
 }
 
-.new-session-check input { margin: 0; }
+.new-agent-template:hover { border-color: var(--border-strong); }
 
-.new-session-hint {
-  margin: 0;
-  color: var(--text-3);
-  font-size: 11px;
-  line-height: 1.5;
+.new-agent-template.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
-.new-session-error {
+.new-agent-template i {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.new-agent-template span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.new-agent-template strong { font-size: 12.5px; }
+.new-agent-template small {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-agent-error {
   padding: 8px 10px;
   border: 1px solid var(--err);
   border-radius: var(--radius);
@@ -126,17 +140,11 @@
   font-size: 12px;
 }
 
-/* T9：助理选择器下的"新建助理…"入口 */
-.new-session-create-agent {
-  justify-self: start;
-  font-size: 11.5px;
-}
-
-.new-session-footer {
+.new-agent-footer {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
 }
 
-.new-session-footer-gap { flex: 1; }
+.new-agent-footer-gap { flex: 1; }

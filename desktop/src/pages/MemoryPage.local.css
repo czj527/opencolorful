@@ -16,3 +16,14 @@
   background: var(--bg); color: var(--text); font-size: 12.5px;
 }
 .memory-add-pinned input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* T9：页内助理选择器（多助理时显示在页头） */
+.page-agent-select {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 6px;
+  font-size: 12px; color: var(--text-2);
+}
+.page-agent-select select {
+  height: 28px; padding: 0 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12px; font-family: inherit;
+}

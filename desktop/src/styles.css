@@ -64,6 +64,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 ::selection { background: var(--accent-soft); }
 
 .app { height: 100%; display: grid; grid-template-rows: 40px minmax(0, 1fr); background: var(--bg); }
+/* T9 mock 横幅在场时加一行（仅 mock 模式渲染 MockBanner） */
+.app.has-mock-banner { grid-template-rows: 40px auto minmax(0, 1fr); }
 .app-body { min-height: 0; display: flex; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 
@@ -144,15 +146,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   background: var(--bg-subtle); border-right: 1px solid var(--border);
 }
 .sidebar-head { position: relative; display: flex; align-items: flex-start; gap: 4px; padding: 10px 8px 6px; }
-.agent-button {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
-  padding: 6px 7px; border-radius: var(--radius); text-align: left;
-}
-.agent-button:hover { background: var(--bg-hover); }
-.agent-button-copy { flex: 1; min-width: 0; display: grid; gap: 1px; }
-.agent-button-copy strong { font-size: 12.5px; }
-.agent-button-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10.5px; }
-.agent-button > svg { color: var(--text-3); }
 .agent-dot {
   flex: 0 0 auto; display: inline-grid; place-items: center;
   border-radius: 50%; color: #fff; font-weight: 650; line-height: 1;
@@ -188,10 +181,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   gap: 4px; padding: 8px 0;
   background: var(--bg-subtle); border-right: 1px solid var(--border);
 }
-.rail-agents { display: grid; gap: 6px; margin-top: 6px; }
-.rail-agent { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; }
-.rail-agent:hover { background: var(--bg-hover); }
-.rail-agent.is-active { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent); }
 .rail-spacer { flex: 1; }
 
 .thread-list { display: grid; gap: 1px; overflow: auto; scrollbar-width: thin; }
@@ -256,7 +245,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   height: 44px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--border);
 }
-.chat-head-title { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.chat-head-title { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 9px; }
 .chat-head-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .chat-head-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10.5px; font-family: var(--mono); }
 .dock-toggles { display: flex; gap: 2px; }
@@ -371,10 +360,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   min-height: 100%; display: grid; align-content: center; justify-items: center;
   gap: 14px; padding: 40px 24px 90px; text-align: center;
 }
-.empty-agent {
-  width: 46px; height: 46px; display: grid; place-items: center;
-  border-radius: 50%; color: #fff; font-size: 20px; font-weight: 650;
-}
 .empty-state h1 { margin: 0; font-size: 17px; font-weight: 600; }
 .empty-agents { display: flex; gap: 6px; }
 .empty-agents button {
@@ -385,6 +370,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .empty-agents button:hover { border-color: var(--border-strong); color: var(--text); }
 .empty-agents button.is-active { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
 .empty-composer { width: min(680px, 100%); margin-top: 12px; text-align: left; }
+/* T9：空态动作行（高级新建 / 新建助理） */
+.empty-actions { display: flex; gap: 14px; }
 
 /* ---------- dock ---------- */
 .dock {

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AgentChip } from "./components/AgentChip.js";
+import { AgentIdCard, type AssistantStatus } from "./components/AgentIdCard.js";
 import { ChatView } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
-import type { AssistantStatus } from "./components/AgentCard.js";
+import { MockBanner } from "./components/MockBanner.js";
+import { NewAgentDialog } from "./components/NewAgentDialog.js";
 import { NewSessionDialog } from "./components/NewSessionDialog.js";
 import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
@@ -36,13 +39,21 @@ const FALLBACK_PREFERENCES: PreferencesView = {
   defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
 };
 
+/**
+ * T9 会话中心 IA：不再有全局"当前助理"。
+ * - 会话列表跨助理展示，行内 badge 自标识归属（≥2 助理时）；
+ * - `draftAgentId` 只表示"新会话归属"的用户显式选择（"" = 自动推导：最近会话的助理 → 首个助理）；
+ * - 已落库会话的助理由 thread.agentId 决定，会话头 chip 只读、点击进档案页；
+ * - 档案页/记忆页各自持有目标助理（profileAgentId / memoryAgentId）。
+ */
 export function App() {
   const theme = useTheme();
   const [source, setSource] = useState<DesktopDataSource | null>(null);
   const [page, setPage] = useState<PageId>("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [agents, setAgents] = useState<readonly Agent[]>([]);
-  const [agentId, setAgentId] = useState("");
+  // 新会话归属的显式选择；"" 表示未选，走自动推导（最近会话助理 → 首个助理）
+  const [draftAgentId, setDraftAgentId] = useState("");
   const [threads, setThreads] = useState<readonly Thread[]>([]);
   const [archivedThreads, setArchivedThreads] = useState<readonly Thread[]>([]);
   const [threadId, setThreadId] = useState<string>(NEW_THREAD);
@@ -59,6 +70,11 @@ export function App() {
   const [confirming, setConfirming] = useState(false);
   // T3：高级新建会话弹窗
   const [newSessionOpen, setNewSessionOpen] = useState(false);
+  // T9：新建助理弹窗
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
+  // 档案页 / 记忆页各自的目标助理（"" = 跟随草稿助理推导）
+  const [profileAgentId, setProfileAgentId] = useState("");
+  const [memoryAgentId, setMemoryAgentId] = useState("");
   // 新会话（未落库）时的本地选择；创建会话时下发到服务端。
   // 初始对齐后端偏好默认（read-only / medium），偏好加载后再微调
   const [draftModel, setDraftModel] = useState<ModelRef | null>(null);
@@ -93,7 +109,7 @@ export function App() {
     return source.subscribeConnection(setConnection);
   }, [source]);
 
-  // Agent 列表（onboarding 创建新助理后通过 agentsRefresh 重拉）
+  // Agent 列表（onboarding/新建助理后通过 agentsRefresh 重拉）
   const [agentsRefresh, setAgentsRefresh] = useState(0);
   useEffect(() => {
     if (source === null) return;
@@ -101,7 +117,8 @@ export function App() {
     source.listAgents().then((list) => {
       if (cancelled) return;
       setAgents(list);
-      setAgentId((current) => (current !== "" && list.some((agent) => agent.id === current)) ? current : list[0]?.id ?? "");
+      // 显式选择的助理被删除等失效场景：回退自动推导
+      setDraftAgentId((current) => (current !== "" && !list.some((agent) => agent.id === current)) ? "" : current);
     }).catch(() => {
       if (!cancelled) setAgents([]);
     });
@@ -110,11 +127,20 @@ export function App() {
     };
   }, [source, agentsRefresh]);
 
-  const activeAgent = agents.find((agent) => agent.id === agentId) ?? agents[0];
+  const agentsById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
+  const showAgentBadge = agents.length >= 2;
 
-  useEffect(() => {
-    if (activeAgent !== undefined) source?.setActiveAgentName?.(activeAgent.name);
-  }, [source, activeAgent]);
+  // 草稿助理推导：显式选择 > 最近会话的助理 > 首个助理（T9：不靠全局切换器，靠上下文）
+  const draftAgent = useMemo(() => {
+    const explicit = agentsById.get(draftAgentId);
+    if (explicit !== undefined) return explicit;
+    const fromThread = threads.find((thread) => thread.agentId !== null);
+    if (fromThread !== undefined && fromThread.agentId !== null) {
+      const byThread = agentsById.get(fromThread.agentId);
+      if (byThread !== undefined) return byThread;
+    }
+    return agents[0];
+  }, [agents, agentsById, draftAgentId, threads]);
 
   // 全局偏好：草稿运行设置与默认模型的偏好来源（加载前草稿先用 medium/read-only 兜底）
   useEffect(() => {
@@ -199,13 +225,13 @@ export function App() {
     source.getSessionUsage(threadId).then(setSessionUsage).catch(() => undefined);
   }, [streaming, source, threadId, isNew]);
 
-  // 当前 Agent 的会话列表（含归档区）
+  // 全量会话列表（T9：跨助理，含归档区；行内 badge 标识归属）
   useEffect(() => {
-    if (source === null || agentId === "") return;
+    if (source === null) return;
     let cancelled = false;
     Promise.all([
-      source.listThreads(agentId),
-      source.listArchivedThreads(agentId),
+      source.listThreads(),
+      source.listArchivedThreads(),
     ]).then(([list, archived]) => {
       if (cancelled) return;
       setThreads(list);
@@ -223,7 +249,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [source, agentId]);
+  }, [source]);
 
   // App 壳只保留 streaming 布尔，经窄选择器订阅（不回传 items）：仅在布尔翻转时触发
   // App 重渲染（setStreaming 同值自动 bail）。items/完整快照仍由 ChatView 订阅——
@@ -248,8 +274,27 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [settingsOpen]);
 
+  const activeThread = threads.find((thread) => thread.id === threadId);
+  // 已落库会话的助理由 thread.agentId 决定（历史 null → undefined，不显示 chip）
+  const threadAgent = activeThread?.agentId != null ? agentsById.get(activeThread.agentId) : undefined;
+  // 会话头展示的助理：草稿态 = 草稿助理（新会话归属）；已落库 = 会话自身助理
+  const headerAgent = isNew ? draftAgent : threadAgent;
+
+  // mock 演示源跟随 UI 上下文的助理名（真实数据源从会话归属推导，此方法仅 mock 使用）
+  useEffect(() => {
+    const name = headerAgent?.name;
+    if (name !== undefined) source?.setActiveAgentName?.(name);
+  }, [source, headerAgent]);
+
+  function reloadThreads(currentSource: DesktopDataSource) {
+    Promise.all([currentSource.listThreads(), currentSource.listArchivedThreads()]).then(([list, archived]) => {
+      setThreads(list);
+      setArchivedThreads(archived);
+    }).catch(() => undefined);
+  }
+
   async function send() {
-    if (source === null || agentId === "") return;
+    if (source === null) return;
     const text = draft.trim();
     if (text === "" || streaming) return;
     setChatError(null);
@@ -286,8 +331,12 @@ export function App() {
     try {
       let target = threadId;
       if (target === NEW_THREAD) {
+        if (draftAgent === undefined) {
+          setChatError("还没有可用助理，请先完成引导或新建助理");
+          return;
+        }
         const title = text.length > 18 ? `${text.slice(0, 18)}…` : text;
-        const thread = await source.createThread(agentId, title);
+        const thread = await source.createThread(draftAgent.id, title);
         setThreads((current) => [thread, ...current]);
         target = thread.id;
         // 新会话创建后下发本地选择的模型与运行设置（失败不阻塞首条消息）
@@ -316,34 +365,27 @@ export function App() {
     setPage("chat");
   }
 
-  // T3：从高级新建表单创建会话后，切换到目标 Agent 并选中新会话
+  // T3：从高级新建表单创建会话后，选中新会话并把它设为新会话归属默认
   function completeNewSession(thread: Thread, selectedAgentId: string) {
-    if (source === null) return;
-    setAgentId(selectedAgentId);
-    if (selectedAgentId !== agentId) {
-      Promise.all([source.listThreads(selectedAgentId), source.listArchivedThreads(selectedAgentId)])
-        .then(([list, archived]) => {
-          setThreads(list);
-          setArchivedThreads(archived);
-          setThreadId(thread.id);
-        })
-        .catch(() => undefined);
-    } else {
-      setThreads((current) => [thread, ...current]);
-      setThreadId(thread.id);
-    }
+    setDraftAgentId(selectedAgentId);
+    setThreads((current) => [thread, ...current]);
+    setThreadId(thread.id);
     setPage("chat");
     setNewSessionOpen(false);
+  }
+
+  // T9：新建助理完成：刷新列表并设为新会话归属
+  function completeNewAgent(agent: Agent) {
+    setNewAgentOpen(false);
+    setDraftAgentId(agent.id);
+    setAgentsRefresh((value) => value + 1);
   }
 
   function updateThreadTitle(sessionId: string, title: string) {
     if (source === null) return;
     setThreads((current) => current.map((thread) => (thread.id === sessionId ? { ...thread, title } : thread)));
     void source.updateThreadTitle(sessionId, title)
-      .then(() => {
-        if (agentId === "") return;
-        source.listThreads(agentId).then(setThreads).catch(() => undefined);
-      })
+      .then(() => reloadThreads(source))
       .catch((cause: unknown) => {
         setChatError(userErrorNode(cause, "renameThread"));
       });
@@ -352,13 +394,7 @@ export function App() {
   function unarchiveThread(sessionId: string) {
     if (source === null) return;
     void source.unarchiveThread(sessionId)
-      .then(() => {
-        if (agentId === "") return;
-        Promise.all([source.listThreads(agentId), source.listArchivedThreads(agentId)]).then(([list, archived]) => {
-          setThreads(list);
-          setArchivedThreads(archived);
-        }).catch(() => undefined);
-      })
+      .then(() => reloadThreads(source))
       .catch((cause: unknown) => {
         setChatError(userErrorNode(cause, "unarchiveThread"));
       });
@@ -407,6 +443,12 @@ export function App() {
     );
   }
 
+  /** 进入某个助理的档案页（T9：档案页目标由入口决定，不再有全局当前助理） */
+  function openProfile(agent: Agent) {
+    setProfileAgentId(agent.id);
+    setPage("profile");
+  }
+
   /* ---- 会话设置变更（既有会话直接写服务端并本地乐观更新；新会话记草稿） ---- */
 
   const changeModel = useCallback((next: ModelRef) => {
@@ -441,12 +483,20 @@ export function App() {
   // 组件隔离：稳定回调使下游 memo（Composer 子组件）在流式刷新期间不被重渲染
   const onOpenDiff = useCallback(() => setDock("diff"), []);
 
-  // T4 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
+  // 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
   const assistantStatus = useMemo<AssistantStatus>(() => {
     const conn = connection ?? source?.info ?? null;
     if (conn === null || !conn.connected) return { label: "离线", tone: "offline" };
     if (streaming) return { label: "运行中", tone: "busy" };
     return { label: "空闲", tone: "ok" };
+  }, [connection, streaming, source]);
+
+  // chip 状态点更克制：只在"运行中/离线"时出现，空闲不渲染
+  const chipStatus = useMemo<AssistantStatus | undefined>(() => {
+    const conn = connection ?? source?.info ?? null;
+    if (conn !== null && !conn.connected) return { label: "离线", tone: "offline" };
+    if (streaming) return { label: "运行中", tone: "busy" };
+    return undefined;
   }, [connection, streaming, source]);
 
   // 会话运行设置组合：流式期间 items 刷新不重建该对象，Composer 免于重渲染
@@ -458,8 +508,10 @@ export function App() {
     onThinkingLevel: changeThinkingLevel,
     toolMode: isNew ? draftToolMode : sessionSettings?.toolMode ?? draftToolMode,
     onToolMode: changeToolMode,
-    workspace: activeAgent?.workspace ?? null,
-  } as const), [isNew, models, draftModel, sessionSettings, draftThinking, draftToolMode, activeAgent, changeModel, changeThinkingLevel, changeToolMode]);
+    workspace: isNew
+      ? draftAgent?.workspace ?? null
+      : sessionSettings?.workspaceCwd ?? threadAgent?.workspace ?? null,
+  } as const), [isNew, models, draftModel, sessionSettings, draftThinking, draftToolMode, draftAgent, threadAgent, changeModel, changeThinkingLevel, changeToolMode]);
 
   if (source === null) {
     return (
@@ -482,21 +534,25 @@ export function App() {
     setPage("chat");
   }
 
-  // T1 向导完成：重拉 Agent 列表、选中新助理、进入新会话草稿；首启状态随真实数据自然消失
+  // T1 向导完成：重拉 Agent 列表、设为新会话归属、进入新会话草稿；首启状态随真实数据自然消失
   function completeOnboarding(newAgentId: string) {
     setOnboardingDismissed(true);
     firstRun.refresh();
     setAgentsRefresh((value) => value + 1);
-    setAgentId(newAgentId);
+    setDraftAgentId(newAgentId);
     setThreadId(NEW_THREAD);
     setPage("chat");
   }
 
-  const activeThread = threads.find((thread) => thread.id === threadId);
   const isNewThread = threadId === NEW_THREAD;
   const chatTitle = isNewThread ? "新会话" : activeThread?.title ?? "会话";
   const showEmptyState = page === "chat" && isNewThread;
-  const workspaceLabel = activeAgent?.workspace ?? "未设置工作目录";
+  const workspaceLabel = isNewThread
+    ? draftAgent?.workspace ?? "未设置工作目录"
+    : sessionSettings?.workspaceCwd ?? threadAgent?.workspace ?? "未设置工作目录";
+
+  const profileAgent = agentsById.get(profileAgentId) ?? draftAgent;
+  const memoryAgent = agentsById.get(memoryAgentId) ?? draftAgent;
 
   const showWorkspaceBanner = !showEmptyState
     && sessionSettings !== null
@@ -504,7 +560,7 @@ export function App() {
     && !sessionSettings.workspaceConfirmed;
 
   return (
-    <div className="app">
+    <div className={source.info.mode === "mock" ? "app has-mock-banner" : "app"}>
       <Titlebar
         page={page}
         onPage={setPage}
@@ -512,35 +568,30 @@ export function App() {
         streaming={streaming}
         connection={connection ?? source.info}
       />
+      {source.info.mode === "mock" && <MockBanner />}
       {showOnboarding ? (
         <OnboardingPage source={source} onExit={exitOnboarding} onComplete={completeOnboarding} />
       ) : (
       <div className="app-body">
         {sidebarCollapsed ? (
           <SidebarRail
-            agents={agents}
-            activeAgent={activeAgent}
-            onAgent={setAgentId}
             onExpand={() => setSidebarCollapsed(false)}
             onNewThread={startNewThread}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : (
           <Sidebar
-            agents={agents}
-            activeAgent={activeAgent}
-            onAgent={setAgentId}
             threads={threads}
             archivedThreads={archivedThreads}
             activeThreadId={threadId}
+            agentsById={agentsById}
+            showAgentBadge={showAgentBadge}
             onThread={selectThread}
             onNewThread={startNewThread}
             onUpdateThreadTitle={updateThreadTitle}
             onUnarchiveThread={unarchiveThread}
             onCollapse={() => setSidebarCollapsed(true)}
             onOpenSettings={() => setSettingsOpen(true)}
-            onOpenAssistantProfile={() => setPage("profile")}
-            assistantStatus={assistantStatus}
           />
         )}
         <main className="main">
@@ -548,9 +599,16 @@ export function App() {
             <section className="chat-page">
               {!showEmptyState && (
                 <header className="chat-head">
+                  {headerAgent !== undefined && (
+                    <AgentChip
+                      agent={headerAgent}
+                      status={chipStatus}
+                      onOpenProfile={() => openProfile(headerAgent)}
+                    />
+                  )}
                   <div className="chat-head-title">
                     <strong>{chatTitle}</strong>
-                    <span>{(activeAgent?.name ?? "Agent")} · {workspaceLabel}</span>
+                    <span>{workspaceLabel}</span>
                   </div>
                   {sessionUsage !== null && <UsageBadge usage={sessionUsage} />}
                   <DockToggleButtons dock={dock} onToggle={toggleDock} />
@@ -567,35 +625,39 @@ export function App() {
               <div className="chat-scroll">
                 {showEmptyState ? (
                   <div className="empty-state">
-                    {activeAgent === undefined ? (
+                    {draftAgent === undefined ? (
                       <>
-                        <h1>还没有可用的 Agent</h1>
+                        <h1>还没有可用的助理</h1>
                         <p className="page-empty">跟随引导创建你的第一个助理并接入模型，两分钟即可开始对话。</p>
                         <button type="button" className="btn btn-primary" onClick={enterOnboarding}>开始引导</button>
                       </>
                     ) : (
                       <>
-                        <span className="empty-agent" style={{ background: activeAgent.color }} aria-hidden="true">
-                          {activeAgent.initial}
-                        </span>
-                        <h1>要做什么，交给{activeAgent.name}吧</h1>
+                        <AgentIdCard
+                          agent={draftAgent}
+                          status={assistantStatus}
+                          onOpenProfile={() => openProfile(draftAgent)}
+                        />
+                        <h1>要做什么，交给{draftAgent.name}吧</h1>
                         <p className="page-empty">新会话为草稿：发送首条消息后才会出现在会话列表</p>
-                        <div className="empty-agents">
-                          {agents.map((agent) => (
-                            <button
-                              key={agent.id}
-                              type="button"
-                              className={agent.id === agentId ? "is-active" : ""}
-                              onClick={() => setAgentId(agent.id)}
-                            >
-                              <span className="agent-dot" style={{ background: agent.color, width: 16, height: 16, fontSize: 9 }} aria-hidden="true">{agent.initial}</span>
-                              {agent.name}
-                            </button>
-                          ))}
-                        </div>
+                        {showAgentBadge && (
+                          <div className="empty-agents">
+                            {agents.map((agent) => (
+                              <button
+                                key={agent.id}
+                                type="button"
+                                className={agent.id === draftAgent.id ? "is-active" : ""}
+                                onClick={() => setDraftAgentId(agent.id)}
+                              >
+                                <span className="agent-dot" style={{ background: agent.color, width: 16, height: 16, fontSize: 9 }} aria-hidden="true">{agent.initial}</span>
+                                {agent.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <div className="empty-composer">
                           <Composer
-                            agentName={activeAgent.name}
+                            agentName={draftAgent.name}
                             draft={draft}
                             onDraft={setDraft}
                             onSend={() => void send()}
@@ -605,13 +667,22 @@ export function App() {
                             {...composerControls}
                           />
                         </div>
-                        <button
-                          type="button"
-                          className="inline-action"
-                          onClick={() => setNewSessionOpen(true)}
-                        >
-                          高级新建…
-                        </button>
+                        <div className="empty-actions">
+                          <button
+                            type="button"
+                            className="inline-action"
+                            onClick={() => setNewSessionOpen(true)}
+                          >
+                            高级新建…
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-action"
+                            onClick={() => setNewAgentOpen(true)}
+                          >
+                            新建助理…
+                          </button>
+                        </div>
                         {models.length > 0 && !models.some((option) => option.credentialConfigured) && (
                           <button
                             type="button"
@@ -635,7 +706,7 @@ export function App() {
                 <div className="chat-composer">
                   {chatError !== null && <div className="chat-error" role="alert">{chatError}</div>}
                   <Composer
-                    agentName={activeAgent?.name ?? "Agent"}
+                    agentName={headerAgent?.name ?? "Agent"}
                     draft={draft}
                     onDraft={setDraft}
                     onSend={() => void send()}
@@ -647,12 +718,12 @@ export function App() {
               )}
             </section>
           )}
-          {page === "memory" && activeAgent !== undefined && (
-            <div className="page-scroll"><MemoryPage source={source} agent={activeAgent} /></div>
+          {page === "memory" && memoryAgent !== undefined && (
+            <div className="page-scroll"><MemoryPage source={source} agent={memoryAgent} agents={agents} onAgent={setMemoryAgentId} /></div>
           )}
           {page === "logs" && <div className="page-scroll"><LogsPage source={source} /></div>}
-          {page === "profile" && activeAgent !== undefined && (
-            <div className="page-scroll"><AgentProfilePage agent={activeAgent} source={source} /></div>
+          {page === "profile" && profileAgent !== undefined && (
+            <div className="page-scroll"><AgentProfilePage agent={profileAgent} source={source} /></div>
           )}
         </main>
         {page === "chat" && dock !== null && (
@@ -660,9 +731,9 @@ export function App() {
             tool={dock}
             onSelect={setDock}
             onClose={() => setDock(null)}
-            subagent={activeAgent === undefined ? undefined : {
+            subagent={headerAgent === undefined ? undefined : {
               source,
-              agentId: activeAgent.id,
+              agentId: headerAgent.id,
               sessionId: isNewThread ? null : threadId,
             }}
           />
@@ -681,17 +752,28 @@ export function App() {
           onProvidersChanged={() => setModelsRefresh((value) => value + 1)}
         />
       )}
-      {newSessionOpen && source !== null && activeAgent !== undefined && (
+      {newSessionOpen && draftAgent !== undefined && (
         <NewSessionDialog
           source={source}
           agents={agents}
-          agentId={agentId}
+          agentId={draftAgent.id}
           models={models}
           draftToolMode={draftToolMode}
           draftThinking={draftThinking}
           draftModel={draftModel}
           onCreated={completeNewSession}
+          onCreateAgent={() => {
+            setNewSessionOpen(false);
+            setNewAgentOpen(true);
+          }}
           onClose={() => setNewSessionOpen(false)}
+        />
+      )}
+      {newAgentOpen && (
+        <NewAgentDialog
+          source={source}
+          onCreated={completeNewAgent}
+          onClose={() => setNewAgentOpen(false)}
         />
       )}
     </div>

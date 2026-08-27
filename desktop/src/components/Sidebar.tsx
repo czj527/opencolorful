@@ -1,51 +1,36 @@
-import { Archive, CalendarClock, ChevronDown, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings } from "lucide-react";
+import { Archive, ChevronDown, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { AgentCard, type AssistantStatus } from "./AgentCard.js";
 import type { Agent, Thread } from "../mock-data.js";
 import "./Sidebar.css";
 
+/**
+ * T9 会话中心 IA：侧栏不再有全局"当前助理"概念（无卡片、无切换器）。
+ * 会话行在助理数 ≥2 时用 badge 自标识所属助理（参考 openhanako SessionList AgentBadge）。
+ */
 interface SidebarProps {
-  readonly agents: readonly Agent[];
-  readonly activeAgent: Agent | undefined;
-  readonly onAgent: (id: string) => void;
   readonly threads: readonly Thread[];
   readonly archivedThreads: readonly Thread[];
   readonly activeThreadId: string;
+  /** 助理 id → Agent 映射（会话行 badge 用） */
+  readonly agentsById: ReadonlyMap<string, Agent>;
+  /** 助理数 ≥2 时才显示 badge（单助理是噪音） */
+  readonly showAgentBadge: boolean;
   readonly onThread: (id: string) => void;
   readonly onNewThread: () => void;
   readonly onUpdateThreadTitle: (sessionId: string, title: string) => void;
   readonly onUnarchiveThread: (sessionId: string) => void;
   readonly onCollapse: () => void;
   readonly onOpenSettings: () => void;
-  /** T4 身份证卡入口：打开助理档案页。T0 先行声明以固定车道接口（T4 消费）。 */
-  readonly onOpenAssistantProfile?: () => void;
-  /** T4 真实运行时状态；未提供时身份证卡不渲染状态行。 */
-  readonly assistantStatus?: AssistantStatus;
 }
 
 interface SidebarRailProps {
-  readonly agents: readonly Agent[];
-  readonly activeAgent: Agent | undefined;
-  readonly onAgent: (id: string) => void;
   readonly onExpand: () => void;
   readonly onNewThread: () => void;
   readonly onOpenSettings: () => void;
 }
 
-function AgentDot({ agent, size = 20 }: { readonly agent: Agent; readonly size?: number }) {
-  return (
-    <span
-      className="agent-dot"
-      style={{ width: size, height: size, background: agent.color, fontSize: size * 0.55 }}
-      aria-hidden="true"
-    >
-      {agent.initial}
-    </span>
-  );
-}
-
-export function SidebarRail({ agents, activeAgent, onAgent, onExpand, onNewThread, onOpenSettings }: SidebarRailProps) {
+export function SidebarRail({ onExpand, onNewThread, onOpenSettings }: SidebarRailProps) {
   return (
     <aside className="sidebar-rail" aria-label="会话侧栏（已收起）">
       <button type="button" className="icon-btn" aria-label="展开侧栏" title="展开侧栏" onClick={onExpand}>
@@ -54,20 +39,6 @@ export function SidebarRail({ agents, activeAgent, onAgent, onExpand, onNewThrea
       <button type="button" className="icon-btn" aria-label="新建会话" title="新建会话" onClick={onNewThread}>
         <Plus size={16} />
       </button>
-      <div className="rail-agents" role="group" aria-label="切换 Agent">
-        {agents.map((agent) => (
-          <button
-            key={agent.id}
-            type="button"
-            className={`rail-agent${agent.id === activeAgent?.id ? " is-active" : ""}`}
-            aria-label={`切换到 ${agent.name}`}
-            title={agent.name}
-            onClick={() => onAgent(agent.id)}
-          >
-            <AgentDot agent={agent} size={22} />
-          </button>
-        ))}
-      </div>
       <div className="rail-spacer" />
       <button type="button" className="icon-btn" aria-label="设置" title="设置" onClick={onOpenSettings}>
         <Settings size={15} />
@@ -83,14 +54,26 @@ function formatArchivedTime(iso: string | undefined): string {
   return `${date.getMonth() + 1}-${date.getDate()}`;
 }
 
+/** 会话行助理 badge：色点 + 名字（agentId 为 null 的历史会话不显示） */
+function ThreadAgentBadge({ agent }: { readonly agent: Agent }) {
+  return (
+    <span className="thread-agent-badge">
+      <i style={{ background: agent.color }} aria-hidden="true" />
+      {agent.name}
+    </span>
+  );
+}
+
 function ThreadRow({
   thread,
   isActive,
+  agentBadge,
   onClick,
   onUpdateTitle,
 }: {
   readonly thread: Thread;
   readonly isActive: boolean;
+  readonly agentBadge: Agent | null;
   readonly onClick: () => void;
   readonly onUpdateTitle: (title: string) => void;
 }) {
@@ -179,7 +162,11 @@ function ThreadRow({
           </button>
         </span>
       </span>
-      <small><i className={`status-dot status-${thread.status}`} aria-hidden="true" />{thread.preview}</small>
+      <small>
+        {agentBadge !== null && <ThreadAgentBadge agent={agentBadge} />}
+        <i className={`status-dot status-${thread.status}`} aria-hidden="true" />
+        {thread.preview}
+      </small>
     </button>
   );
 }
@@ -188,12 +175,16 @@ function ThreadGroup({
   title,
   threads,
   activeThreadId,
+  agentsById,
+  showAgentBadge,
   onThread,
   onUpdateThreadTitle,
 }: {
   readonly title: string;
   readonly threads: readonly Thread[];
   readonly activeThreadId: string;
+  readonly agentsById: ReadonlyMap<string, Agent>;
+  readonly showAgentBadge: boolean;
   readonly onThread: (id: string) => void;
   readonly onUpdateThreadTitle: (sessionId: string, title: string) => void;
 }) {
@@ -207,6 +198,11 @@ function ThreadGroup({
             key={thread.id}
             thread={thread}
             isActive={thread.id === activeThreadId}
+            agentBadge={
+              showAgentBadge && thread.agentId !== null
+                ? agentsById.get(thread.agentId) ?? null
+                : null
+            }
             onClick={() => onThread(thread.id)}
             onUpdateTitle={(title) => onUpdateThreadTitle(thread.id, title)}
           />
@@ -218,11 +214,9 @@ function ThreadGroup({
 
 export function Sidebar(props: SidebarProps) {
   const {
-    agents, activeAgent, onAgent, threads, archivedThreads, activeThreadId,
+    threads, archivedThreads, activeThreadId, agentsById, showAgentBadge,
     onThread, onNewThread, onUpdateThreadTitle, onUnarchiveThread, onCollapse, onOpenSettings,
-    onOpenAssistantProfile, assistantStatus,
   } = props;
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
 
   const activeThreads = threads.filter((thread) => thread.status === "active");
@@ -230,71 +224,32 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-head">
-        {activeAgent === undefined ? (
-          <div className="agent-card is-empty">
-            <div className="agent-card-tools">
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="收起侧栏"
-                title="收起侧栏"
-                onClick={onCollapse}
-              >
-                <PanelLeftClose size={15} />
-              </button>
-            </div>
-            <div className="agent-card-body">
-              <span className="agent-card-avatar" style={{ background: "var(--text-3)" }} aria-hidden="true">?</span>
-              <span className="agent-card-copy">
-                <strong>无 Agent</strong>
-                <small>完成首次引导后出现在这里</small>
-              </span>
-            </div>
-          </div>
-        ) : (
-          <>
-            <AgentCard
-              agent={activeAgent}
-              status={assistantStatus}
-              onOpenProfile={onOpenAssistantProfile}
-              onToggleSwitch={() => setAgentMenuOpen((v) => !v)}
-              switchOpen={agentMenuOpen}
-              onCollapse={onCollapse}
-            />
-            {agentMenuOpen && (
-              <>
-                <div className="menu-backdrop" onMouseDown={() => setAgentMenuOpen(false)} />
-                <div className="agent-menu" role="menu">
-                  {agents.map((agent) => (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      className={agent.id === activeAgent.id ? "is-active" : ""}
-                      onClick={() => { onAgent(agent.id); setAgentMenuOpen(false); }}
-                    >
-                      <AgentDot agent={agent} size={18} />
-                      <span><strong>{agent.name}</strong><small>{agent.description}</small></span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
+      <div className="sidebar-head sidebar-head-simple">
+        <button type="button" className="btn btn-primary sidebar-new-thread" onClick={onNewThread}>
+          <Plus size={15} />
+          新建会话
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="收起侧栏"
+          title="收起侧栏"
+          onClick={onCollapse}
+        >
+          <PanelLeftClose size={15} />
+        </button>
       </div>
 
       <div className="sidebar-section">
         <header>
           <span>会话</span>
-          <button type="button" className="icon-btn" aria-label="新建会话" title="新建会话" onClick={onNewThread}>
-            <Plus size={16} />
-          </button>
         </header>
         <ThreadGroup
           title="进行中"
           threads={activeThreads}
           activeThreadId={activeThreadId}
+          agentsById={agentsById}
+          showAgentBadge={showAgentBadge}
           onThread={onThread}
           onUpdateThreadTitle={onUpdateThreadTitle}
         />
@@ -302,6 +257,8 @@ export function Sidebar(props: SidebarProps) {
           title="最近"
           threads={recentThreads}
           activeThreadId={activeThreadId}
+          agentsById={agentsById}
+          showAgentBadge={showAgentBadge}
           onThread={onThread}
           onUpdateThreadTitle={onUpdateThreadTitle}
         />
@@ -324,38 +281,35 @@ export function Sidebar(props: SidebarProps) {
           </header>
           {archivedOpen && (
             <div className="thread-list archived-list">
-              {archivedThreads.map((thread) => (
-                <div key={thread.id} className="thread-row archived-row">
-                  <span className="thread-row-top">
-                    <strong>{thread.title}</strong>
-                    <time>{formatArchivedTime(thread.archivedAt)}</time>
-                  </span>
-                  <span className="archived-actions">
-                    <small>已归档</small>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={() => onUnarchiveThread(thread.id)}
-                    >
-                      <RotateCcw size={11} />恢复
-                    </button>
-                  </span>
-                </div>
-              ))}
+              {archivedThreads.map((thread) => {
+                const agent = showAgentBadge && thread.agentId !== null
+                  ? agentsById.get(thread.agentId)
+                  : undefined;
+                return (
+                  <div key={thread.id} className="thread-row archived-row">
+                    <span className="thread-row-top">
+                      <strong>{thread.title}</strong>
+                      <time>{formatArchivedTime(thread.archivedAt)}</time>
+                    </span>
+                    <span className="archived-actions">
+                      <small>已归档{agent !== undefined ? ` · ${agent.name}` : ""}</small>
+                      <button
+                        type="button"
+                        className="btn btn-small"
+                        onClick={() => onUnarchiveThread(thread.id)}
+                      >
+                        <RotateCcw size={11} />恢复
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
       <div className="sidebar-spacer" />
-
-      <div className="sidebar-section">
-        <header><span>定时任务</span></header>
-        <button type="button" className="plain-row">
-          <CalendarClock size={14} />
-          <span><strong>每周记忆整理</strong><small>周日 21:00 · 空闲窗口</small></span>
-        </button>
-      </div>
 
       <div className="sidebar-foot">
         <button type="button" className="plain-row" onClick={onOpenSettings}>

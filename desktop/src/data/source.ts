@@ -29,6 +29,14 @@ export interface AgentProfileView {
   readonly decorColor: string;
 }
 
+/** T9：底色编辑补丁（对齐 PUT /api/agents/:id/base-color 的可写字段） */
+export interface AgentBaseColorPatch {
+  readonly persona?: string;
+  readonly personality?: readonly string[];
+  readonly replyStyle?: string;
+  readonly innerSetting?: string;
+}
+
 /** T5：记忆设置入口只暴露最常用的字段（完整对象在 IPC 实现中与远端合并） */
 export interface MemoryAgentSettingsView {
   readonly enabled: boolean;
@@ -247,10 +255,10 @@ export interface DesktopDataSource {
   listProviders(): Promise<readonly ProviderView[]>;
   upsertProvider(provider: ProviderInput, apiKey?: string): Promise<void>;
 
-  /* 会话 */
+  /* 会话（T9 起列表跨助理返回，每行 Thread 自带 agentId；是否展示归属 badge 由 UI 按助理数量决定） */
   listAgents(): Promise<readonly Agent[]>;
-  listThreads(agentId: string): Promise<readonly Thread[]>;
-  listArchivedThreads(agentId: string): Promise<readonly Thread[]>;
+  listThreads(): Promise<readonly Thread[]>;
+  listArchivedThreads(): Promise<readonly Thread[]>;
   createThread(agentId: string, title: string, options?: CreateThreadOptions): Promise<Thread>;
   updateThreadTitle(sessionId: string, title: string): Promise<void>;
   unarchiveThread(sessionId: string): Promise<void>;
@@ -281,6 +289,8 @@ export interface DesktopDataSource {
   /* T5：助理档案与记忆日用写操作 */
   getAgentProfile(agentId: string): Promise<AgentProfileView>;
   updateAgentProfile(agentId: string, patch: { readonly name?: string; readonly description?: string }): Promise<void>;
+  /** T9：底色（人设）编辑 → PUT /api/agents/:id/base-color */
+  updateAgentBaseColor(agentId: string, patch: AgentBaseColorPatch): Promise<void>;
   getMemorySettings(agentId: string): Promise<MemoryAgentSettingsView>;
   updateMemorySettings(agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void>;
   addPinnedMemory(agentId: string, content: string): Promise<PinnedMemory>;
