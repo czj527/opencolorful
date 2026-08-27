@@ -114,3 +114,10 @@ supervisor.json 无记录 → false），而"当前行为是期望态=stopped �
   职责就是托管与重试），与既有看门狗语义一致。
 - **web/ 越界一处**：`web/tests/e2e/plugin-smoke.spec.ts` 注释更新（见改动清单），如主 Agent
   不同意可单独回退该行。
+## 补记（2026-08-27 主 agent）：CI Browser E2E 8 用例红——真实破坏，非 flake
+
+**根因**：`startSupervisor` 自动拉起后，agent server 经历 `starting` 态；"启动 Server"按钮仅在 `stopped/error` 渲染（`web/src/components/ServerStatusBar.tsx:64`）。phase6/subagent/workspace 三个 spec 的 `ensureFixtureProvider` helper 旧路径 `status !== "online" → 点按钮`，在 starting 窗口必超时。
+
+**修复（主 agent）**：三处 helper 改为幂等 `POST /api/supervisor/start` + `expect(...).toPass` 轮询 online。workspace.spec 中先 stop 再点按钮的 3 处属"显式停止→按钮出现"路径，不受 T11 影响，未动。
+
+**教训**：子 agent lane log 已明确建议主 agent 复核时跑 `cd web; npx playwright test`，主 agent 只跑了 tsc+supervisor 套件——复核门禁遗漏，记入流程教训：后端行为面变更必须跑 web E2E。
