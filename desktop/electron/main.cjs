@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } = require("electron");
 const path = require("node:path");
 
 const { apiRequest, resolveBase } = require("./api-proxy.cjs");
@@ -53,6 +53,16 @@ ipcMain.on("window:close", () => mainWindow?.close());
 
 // 数据通道：API 代理 + SSE 订阅（renderer 沙箱，不直连网络）
 ipcMain.handle("desktop:api", (_event, request) => apiRequest(request));
+
+// 原生目录选择：T1 onboarding 需要用户指定助理工作目录；返回绝对路径或 null，不暴露完整 dialog 结果
+ipcMain.handle("desktop:pick-directory", async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 ipcMain.on("desktop:sse-sub", (event, payload) => {
   if (!payload || typeof payload.subId !== "string") return;
   sseManager.subscribe(event.sender, payload.subId, payload.path, payload.lastEventId);

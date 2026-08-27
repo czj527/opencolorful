@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("desktopShell", {
   minimize: () => ipcRenderer.send("window:minimize"),
   toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
   close: () => ipcRenderer.send("window:close"),
+  pickDirectory: () => ipcRenderer.invoke("desktop:pick-directory"),
 });
 
 // 数据桥：通用 API 代理 + SSE 订阅。主进程限制 path 必须以 /api/ 开头。
