@@ -13,6 +13,7 @@ import {
   markPromptFailed,
   markPromptSent,
   projectHistory,
+  seedItems,
   snapshotOf,
   type ChatSnapshot,
   type HistoryEntry,
@@ -135,6 +136,10 @@ interface ChatChannel {
   readonly handlers: Set<(snapshot: ChatSnapshot) => void>;
   sseSubId: string | null;
   historyLoaded: boolean;
+  /** 合批窗内排队的事件（leading 事件已立即应用，不在此列） */
+  pending: LiveEnvelope[];
+  /** 当前 pendingFlush 的调度句柄；null 表示无进行中的合批窗口 */
+  flushToken: { cancel: () => void } | null;
 }
 
 /** 后端可达性巡检间隔（连接状态动态化的慢路径；请求成功/失败是快路径） */
@@ -344,7 +349,7 @@ export class IpcDataSource implements DesktopDataSource {
       void this.request<SessionViewWire>("GET", `/api/sessions/${encodeURIComponent(sessionId)}`)
         .then((session) => {
           channel.projector.agentName = this.agentNameOf(session.agentId);
-          channel.projector.items = projectHistory(session.messageEntries, channel.projector.agentName);
+          seedItems(channel.projector, projectHistory(session.messageEntries, channel.projector.agentName));
           this.notify(channel);
         })
         .catch((cause: unknown) => {
@@ -357,6 +362,12 @@ export class IpcDataSource implements DesktopDataSource {
     return () => {
       channel.handlers.delete(handler);
       if (channel.handlers.size === 0) {
+        // 取消订阅即取消合批窗口：不再消费该 channel 的排队事件
+        if (channel.flushToken !== null) {
+          channel.flushToken.cancel();
+          channel.flushToken = null;
+        }
+        channel.pending.length = 0;
         if (channel.sseSubId !== null) this.api.unsubscribeEvents(channel.sseSubId);
         this.chats.delete(sessionId);
       }
@@ -743,7 +754,11 @@ export class IpcDataSource implements DesktopDataSource {
   private chatFor(sessionId: string): ChatChannel {
     let channel = this.chats.get(sessionId);
     if (channel === undefined) {
-      channel = { projector: createProjector(this.agentNameOf(null)), handlers: new Set(), sseSubId: null, historyLoaded: false };
+      channel = {
+        projector: createProjector(this.agentNameOf(null)),
+        handlers: new Set(), sseSubId: null, historyLoaded: false,
+        pending: [], flushToken: null,
+      };
       this.chats.set(sessionId, channel);
     }
     return channel;
@@ -752,6 +767,37 @@ export class IpcDataSource implements DesktopDataSource {
   private notify(channel: ChatChannel) {
     const snapshot = snapshotOf(channel.projector);
     for (const handler of channel.handlers) handler(snapshot);
+  }
+
+  /**
+   * SSE 事件按 channel 合批：leading 事件立即应用并通知（保住首个 token 的呈现延迟），
+   * 同帧（rAF 不可用退 50ms）内到达的后续事件入队，trailing flush 时依次应用、只通知一次。
+   */
+  private enqueueChatEvent(channel: ChatChannel, envelope: LiveEnvelope): void {
+    if (channel.flushToken === null) {
+      applyEvent(channel.projector, envelope);
+      this.notify(channel);
+      channel.flushToken = this.scheduleFlush(channel);
+    } else {
+      channel.pending.push(envelope);
+    }
+  }
+
+  private scheduleFlush(channel: ChatChannel): { cancel: () => void } {
+    const flush = () => {
+      channel.flushToken = null;
+      if (channel.pending.length === 0) return;
+      const queued = channel.pending;
+      channel.pending = [];
+      for (const envelope of queued) applyEvent(channel.projector, envelope);
+      this.notify(channel);
+    };
+    if (typeof requestAnimationFrame === "function") {
+      const rafId = requestAnimationFrame(flush);
+      return { cancel: () => cancelAnimationFrame(rafId) };
+    }
+    const timerId = setTimeout(flush, 50);
+    return { cancel: () => clearTimeout(timerId) };
   }
 
   private ensureEventRouter() {
@@ -766,8 +812,7 @@ export class IpcDataSource implements DesktopDataSource {
         } catch {
           return;
         }
-        applyEvent(channel.projector, envelope);
-        this.notify(channel);
+        this.enqueueChatEvent(channel, envelope);
         return;
       }
       const activityHandler = this.activityStreamHandlers.get(subId);

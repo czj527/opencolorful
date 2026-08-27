@@ -35,14 +35,43 @@ export interface ProjectorState {
   pendingPrompt: boolean;
   readonly seenStreams: Set<string>;
   agentName: string;
+  /** id → items 下标索引：replaceItem / 事件 upsert 定位 O(1)（替代 items.find 线性扫描） */
+  readonly indexOf: Map<string, number>;
+  /** 最后一条 message 型 item 的下标（-1 表示还没有）；事件追加不影响它 */
+  lastMessageIndex: number;
+  /** items 自上次快照后被原地改动；snapshotOf 时重建数组以获得新引用（不可变契约） */
+  dirty: boolean;
 }
 
 export function createProjector(agentName: string): ProjectorState {
-  return { items: [], streaming: false, activeStreamId: null, pendingPrompt: false, seenStreams: new Set(), agentName };
+  return {
+    items: [], streaming: false, activeStreamId: null, pendingPrompt: false,
+    seenStreams: new Set(), agentName,
+    indexOf: new Map(), lastMessageIndex: -1, dirty: false,
+  };
 }
 
 export function snapshotOf(state: ProjectorState): ChatSnapshot {
+  // 合批窗口内 applyEvent 只做 items 就地累积；快照（flush）时才重建数组：
+  // React 依赖 items 引用变化触发重渲染，而数组拷贝从"每事件"降到"每 flush 一次"
+  if (state.dirty) {
+    state.items = [...state.items];
+    state.dirty = false;
+  }
   return { items: state.items, streaming: state.streaming };
+}
+
+/** 整表替换（历史投影 / 外部重建）：重建索引与末消息指针；数组已是新引用，不置 dirty */
+export function seedItems(state: ProjectorState, items: TimelineItem[]): void {
+  state.items = items;
+  state.indexOf.clear();
+  let lastMessageIndex = -1;
+  items.forEach((item, index) => {
+    state.indexOf.set(item.id, index);
+    if (item.type === "message") lastMessageIndex = index;
+  });
+  state.lastMessageIndex = lastMessageIndex;
+  state.dirty = false;
 }
 
 /** 历史重建：用户消息 →（思考）→（工具）→ 助手回答（语义对齐 web buildChatStateFromHistory） */
@@ -83,20 +112,56 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * id → 下标定位。索引一致时 O(1) 命中；索引失效（如 mock 源直接覆写 items 数组、
+ * 历史重建）时自愈：线性扫一次重建该条目并回填索引——只发生在失效瞬间，稳态热路径不扫描。
+ */
+function indexById(state: ProjectorState, id: string): number {
+  const index = state.indexOf.get(id);
+  if (index !== undefined && index < state.items.length && state.items[index]?.id === id) return index;
+  const found = state.items.findIndex((item) => item.id === id);
+  if (found !== -1) state.indexOf.set(id, found);
+  return found;
+}
+
+/** 原地替换第 index 个条目：不重建数组（Items 不可变契约由 snapshotOf 每 flush 兑现） */
+function setItemAt(state: ProjectorState, index: number, next: TimelineItem) {
+  state.items[index] = next;
+  if (next.type === "message") state.lastMessageIndex = Math.max(state.lastMessageIndex, index);
+  state.dirty = true;
+}
+
+/** 追加条目：push 原地累积，同步索引与末消息指针 */
+function appendItem(state: ProjectorState, item: TimelineItem) {
+  const index = state.items.length;
+  state.items.push(item);
+  state.indexOf.set(item.id, index);
+  if (item.type === "message") state.lastMessageIndex = index;
+  state.dirty = true;
+}
+
 function replaceItem(state: ProjectorState, id: string, next: TimelineItem) {
-  const index = state.items.findIndex((item) => item.id === id);
-  if (index === -1) {
-    state.items = [...state.items, next];
+  const index = indexById(state, id);
+  if (index !== -1) {
+    setItemAt(state, index, next);
   } else {
-    state.items = [...state.items.slice(0, index), next, ...state.items.slice(index + 1)];
+    appendItem(state, next);
   }
 }
 
+/** 最后一条 message 型条目：末消息指针 O(1)；指针失效（外部覆写）时自愈回填 */
 function lastMessage(state: ProjectorState): ChatMessage | undefined {
-  for (let index = state.items.length - 1; index >= 0; index -= 1) {
-    const item = state.items[index];
-    if (item?.type === "message") return item;
+  const index = state.lastMessageIndex;
+  const item = index >= 0 && index < state.items.length ? state.items[index] : undefined;
+  if (item !== undefined && item.type === "message") return item;
+  for (let cursor = state.items.length - 1; cursor >= 0; cursor -= 1) {
+    const candidate = state.items[cursor];
+    if (candidate?.type === "message") {
+      state.lastMessageIndex = cursor;
+      return candidate;
+    }
   }
+  state.lastMessageIndex = -1;
   return undefined;
 }
 
@@ -110,8 +175,9 @@ function toolEventId(streamKey: string): string {
 
 function upsertToolEvent(state: ProjectorState, streamKey: string, mutate: (rows: ToolCall[]) => ToolCall[]) {
   const id = toolEventId(streamKey);
-  const existing = state.items.find((item) => item.id === id);
-  const rows = existing?.type === "event" ? [...existing.tools ?? []] : [];
+  const index = indexById(state, id);
+  const existing = index !== -1 ? state.items[index] : undefined;
+  const rows = existing?.type === "event" ? [...(existing.tools ?? [])] : [];
   const nextRows = mutate(rows);
   const done = nextRows.filter((row) => row.status !== "running").length;
   const running = nextRows.length - done;
@@ -126,7 +192,7 @@ function upsertToolEvent(state: ProjectorState, streamKey: string, mutate: (rows
 export function applyLocalUserMessage(state: ProjectorState, content: string) {
   state.pendingPrompt = true;
   state.streaming = true;
-  state.items = [...state.items, { id: `local-user-${Date.now()}`, type: "message", role: "user", body: content, meta: "刚刚" }];
+  appendItem(state, { id: `local-user-${Date.now()}`, type: "message", role: "user", body: content, meta: "刚刚" });
 }
 
 /** prompt 被服务端接受后登记 streamId（202 响应到达时） */
@@ -171,10 +237,10 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
       break;
     }
     case "message.started": {
-      state.items = [...state.items, {
+      appendItem(state, {
         id: envelope.eventId, type: "message", role: "assistant",
         author: state.agentName, body: "", meta: "正在输入…", streaming: true,
-      }];
+      });
       break;
     }
     case "message.delta": {
@@ -184,10 +250,10 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
       if (last !== undefined && last.role === "assistant" && last.streaming === true) {
         replaceItem(state, last.id, { ...last, body: last.body + delta });
       } else {
-        state.items = [...state.items, {
+        appendItem(state, {
           id: envelope.eventId, type: "message", role: "assistant",
           author: state.agentName, body: delta, meta: "正在输入…", streaming: true,
-        }];
+        });
       }
       break;
     }
@@ -197,16 +263,17 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
       if (last !== undefined && last.role === "assistant" && last.streaming === true) {
         replaceItem(state, last.id, { ...last, body: content !== "" ? content : last.body, streaming: false, meta: "刚刚" });
       } else if (content !== "") {
-        state.items = [...state.items, {
+        appendItem(state, {
           id: envelope.eventId, type: "message", role: "assistant",
           author: state.agentName, body: content, meta: "刚刚",
-        }];
+        });
       }
       break;
     }
     case "thinking.delta": {
       const id = `thinking-${streamKey}`;
-      const existing = state.items.find((item) => item.id === id);
+      const index = indexById(state, id);
+      const existing = index !== -1 ? state.items[index] : undefined;
       const detail = (existing?.type === "event" ? existing.detail ?? "" : "") + asString(payload["delta"]);
       replaceItem(state, id, {
         id, type: "event", kind: "thinking", title: "思考",
@@ -318,7 +385,8 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
         });
       }
       const thinkingId = `thinking-${streamKey}`;
-      const thinking = state.items.find((item) => item.id === thinkingId);
+      const thinkingIndex = indexById(state, thinkingId);
+      const thinking = thinkingIndex !== -1 ? state.items[thinkingIndex] : undefined;
       if (thinking?.type === "event" && thinking.summary === "正在思考…") {
         replaceItem(state, thinkingId, { ...thinking, summary: "思考完成" });
       }

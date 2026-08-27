@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Timeline } from "./components/ChatView.js";
+import { ChatView } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
 import type { AssistantStatus } from "./components/AgentCard.js";
@@ -21,7 +21,7 @@ import {
   type SessionSettingsView,
   type SessionUsageView,
 } from "./data/source.js";
-import type { Agent, Thread, TimelineItem } from "./mock-data.js";
+import type { Agent, Thread } from "./mock-data.js";
 import { toUserError, type ErrorContext } from "./errors.js";
 import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
@@ -46,7 +46,6 @@ export function App() {
   const [threads, setThreads] = useState<readonly Thread[]>([]);
   const [archivedThreads, setArchivedThreads] = useState<readonly Thread[]>([]);
   const [threadId, setThreadId] = useState<string>(NEW_THREAD);
-  const [items, setItems] = useState<readonly TimelineItem[]>([]);
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [chatError, setChatError] = useState<React.ReactNode | null>(null);
@@ -226,16 +225,16 @@ export function App() {
     };
   }, [source, agentId]);
 
-  // 会话时间线订阅（含历史投影与实时事件）
+  // App 壳只保留 streaming 布尔，经窄选择器订阅（不回传 items）：仅在布尔翻转时触发
+  // App 重渲染（setStreaming 同值自动 bail）。items/完整快照仍由 ChatView 订阅——
+  // 两者共享同一 channel，任一订阅存活期间 SSE 流与 projector 持续推进（切页不中断）。
   useEffect(() => {
     if (source === null) return;
     if (threadId === NEW_THREAD) {
-      setItems([]);
       setStreaming(false);
       return;
     }
     return source.subscribeChat(threadId, (snapshot) => {
-      setItems(snapshot.items);
       setStreaming(snapshot.streaming);
     });
   }, [source, threadId]);
@@ -369,37 +368,6 @@ export function App() {
     setDock((current) => (current === tool ? null : tool));
   }
 
-  /* ---- 会话设置变更（既有会话直接写服务端并本地乐观更新；新会话记草稿） ---- */
-
-  function changeModel(next: ModelRef) {
-    if (isNew) {
-      setDraftModel(next);
-      return;
-    }
-    setSessionSettings((current) => (current === null ? current : { ...current, model: next }));
-    void source?.updateSessionModel(threadId, next).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeModel")));
-  }
-
-  function changeThinkingLevel(level: string) {
-    if (isNew) {
-      touchedThinking.current = true;
-      setDraftThinking(level);
-      return;
-    }
-    setSessionSettings((current) => (current === null ? current : { ...current, thinkingLevel: level }));
-    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeThinking")));
-  }
-
-  function changeToolMode(mode: string) {
-    if (isNew) {
-      touchedToolMode.current = true;
-      setDraftToolMode(mode);
-      return;
-    }
-    setSessionSettings((current) => (current === null ? current : { ...current, toolMode: mode }));
-    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeTool")));
-  }
-
   function confirmWorkspace() {
     if (source === null || isNew) return;
     setConfirming(true);
@@ -439,6 +407,60 @@ export function App() {
     );
   }
 
+  /* ---- 会话设置变更（既有会话直接写服务端并本地乐观更新；新会话记草稿） ---- */
+
+  const changeModel = useCallback((next: ModelRef) => {
+    if (isNew) {
+      setDraftModel(next);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, model: next }));
+    void source?.updateSessionModel(threadId, next).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeModel")));
+  }, [isNew, source, threadId]);
+
+  const changeThinkingLevel = useCallback((level: string) => {
+    if (isNew) {
+      touchedThinking.current = true;
+      setDraftThinking(level);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, thinkingLevel: level }));
+    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeThinking")));
+  }, [isNew, source, threadId]);
+
+  const changeToolMode = useCallback((mode: string) => {
+    if (isNew) {
+      touchedToolMode.current = true;
+      setDraftToolMode(mode);
+      return;
+    }
+    setSessionSettings((current) => (current === null ? current : { ...current, toolMode: mode }));
+    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeTool")));
+  }, [isNew, source, threadId]);
+
+  // 组件隔离：稳定回调使下游 memo（Composer 子组件）在流式刷新期间不被重渲染
+  const onOpenDiff = useCallback(() => setDock("diff"), []);
+
+  // T4 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
+  const assistantStatus = useMemo<AssistantStatus>(() => {
+    const conn = connection ?? source?.info ?? null;
+    if (conn === null || !conn.connected) return { label: "离线", tone: "offline" };
+    if (streaming) return { label: "运行中", tone: "busy" };
+    return { label: "空闲", tone: "ok" };
+  }, [connection, streaming, source]);
+
+  // 会话运行设置组合：流式期间 items 刷新不重建该对象，Composer 免于重渲染
+  const composerControls = useMemo(() => ({
+    models,
+    model: isNew ? draftModel : sessionSettings?.model ?? draftModel,
+    onModel: changeModel,
+    thinkingLevel: isNew ? draftThinking : sessionSettings?.thinkingLevel ?? draftThinking,
+    onThinkingLevel: changeThinkingLevel,
+    toolMode: isNew ? draftToolMode : sessionSettings?.toolMode ?? draftToolMode,
+    onToolMode: changeToolMode,
+    workspace: activeAgent?.workspace ?? null,
+  } as const), [isNew, models, draftModel, sessionSettings, draftThinking, draftToolMode, activeAgent, changeModel, changeThinkingLevel, changeToolMode]);
+
   if (source === null) {
     return (
       <div className="app">
@@ -449,14 +471,6 @@ export function App() {
 
   // 显式进入（空态入口）或首启自动进入；退出后本次运行内不再自动弹出
   const showOnboarding = page === "onboarding" || (firstRun.status === "first-run" && !onboardingDismissed);
-
-  // T4 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
-  const assistantStatus: AssistantStatus = (() => {
-    const conn = connection ?? source.info;
-    if (!conn.connected) return { label: "离线", tone: "offline" };
-    if (streaming) return { label: "运行中", tone: "busy" };
-    return { label: "空闲", tone: "ok" };
-  })();
 
   function enterOnboarding() {
     setOnboardingDismissed(false);
@@ -483,17 +497,6 @@ export function App() {
   const chatTitle = isNewThread ? "新会话" : activeThread?.title ?? "会话";
   const showEmptyState = page === "chat" && isNewThread;
   const workspaceLabel = activeAgent?.workspace ?? "未设置工作目录";
-
-  const composerControls = {
-    models,
-    model: isNewThread ? draftModel : sessionSettings?.model ?? draftModel,
-    onModel: changeModel,
-    thinkingLevel: isNewThread ? draftThinking : sessionSettings?.thinkingLevel ?? draftThinking,
-    onThinkingLevel: changeThinkingLevel,
-    toolMode: isNewThread ? draftToolMode : sessionSettings?.toolMode ?? draftToolMode,
-    onToolMode: changeToolMode,
-    workspace: activeAgent?.workspace ?? null,
-  } as const;
 
   const showWorkspaceBanner = !showEmptyState
     && sessionSettings !== null
@@ -625,7 +628,7 @@ export function App() {
                     )}
                   </div>
                 ) : (
-                  <Timeline items={items} onOpenDiff={() => setDock("diff")} />
+                  <ChatView source={source} threadId={threadId} onOpenDiff={onOpenDiff} onStreamingChange={setStreaming} />
                 )}
               </div>
               {!showEmptyState && (
