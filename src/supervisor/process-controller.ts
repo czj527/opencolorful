@@ -217,6 +217,16 @@ export class ProcessController {
       if (this.child === child) {
         this.child = null;
       }
+      // 启动期间被显式 stop 竞态打断（T11 自动拉起后更易触达：如 Ctrl+C 立即退出）
+      // 时保留 stopped 语义，不得覆盖为 error——否则快速 start→stop 会让状态误报 error。
+      // exit 处理器对 lifecycleStatus 的赋值对控制流分析不可见，TS 会把这里窄化为
+      // "starting"，因此用显式转换读取真实状态再比较。
+      const statusAtFailure = this.lifecycleStatus as AgentServerStatus;
+      if (statusAtFailure === "stopping" || statusAtFailure === "stopped" || this.stoppingChild === child) {
+        this.lifecycleStatus = "stopped";
+        this.updateAgentServerStatus("stopped");
+        throw error;
+      }
       this.lifecycleStatus = "error";
       instrument.healthDegraded(error instanceof Error ? error : String(error));
       this.updateAgentServerStatus("error");

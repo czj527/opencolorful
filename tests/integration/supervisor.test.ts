@@ -43,6 +43,21 @@ function makeTempHome(prefix = "opencolorful-supervisor-"): { home: string; path
 
 const CLI_ENTRY = path.resolve(import.meta.dirname, "../../src/cli/main.ts");
 
+/** T11：轮询 supervisor status 直到 agent server online（自动拉起后无需手动 POST）。 */
+async function waitForAgentOnline(supervisorPort: number, timeoutMs = 20_000): Promise<SupervisorStatusResponse> {
+  const deadline = Date.now() + timeoutMs;
+  let body: SupervisorStatusResponse | undefined;
+  while (Date.now() < deadline) {
+    const response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    body = (await response.json()) as SupervisorStatusResponse;
+    if (body.agentServer.status === "online") {
+      return body;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`等待 agent server online 超时: ${body?.agentServer.status ?? "无响应"}`);
+}
+
 async function findFreePort(): Promise<number> {
   const { createServer } = await import("node:net");
   return new Promise((resolve, reject) => {
@@ -198,22 +213,9 @@ describe("supervisor", () => {
       entryScript: CLI_ENTRY,
     });
 
-    // Status should show stopped
-    let statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
-    expect(statusResponse.status).toBe(200);
-    let body = (await statusResponse.json()) as SupervisorStatusResponse;
-    expect(body.agentServer.status).toBe("stopped");
-
-    // Start agent server via API
-    const startResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, {
-      method: "POST",
-    });
-    expect(startResponse.status).toBe(201);
-
-    // Check status again
-    statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
-    body = (await statusResponse.json()) as SupervisorStatusResponse;
-    expect(body.agentServer.status).toBe("online");
+    // T11 起 startSupervisor 自动拉起 agent server（原断言"启动后即为 stopped"已是被
+    // 修复的行为）：先确认自动拉起完成，再验证 stop 后 supervisor 仍存活。
+    await waitForAgentOnline(supervisorPort);
 
     // Stop agent server
     const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, {
@@ -222,9 +224,10 @@ describe("supervisor", () => {
     expect(stopResponse.status).toBe(200);
 
     // Supervisor should still be running
-    statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
-    body = (await statusResponse.json()) as SupervisorStatusResponse;
+    const statusResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    const body = (await statusResponse.json()) as SupervisorStatusResponse;
     expect(body.agentServer.status).toBe("stopped");
+    expect(body.supervisor.port).toBe(supervisorPort);
   }, 60_000);
 
   it("stop and restart via API work correctly", async () => {
@@ -260,6 +263,100 @@ describe("supervisor", () => {
       method: "POST",
     });
     expect(response.status).toBe(200);
+  }, 60_000);
+
+  it("auto-starts agent server on supervisor start without manual POST", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const supervisorPort = await findFreePort();
+
+    supervisorInstance = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: agentPort,
+      entryScript: CLI_ENTRY,
+    });
+
+    // T11：不得依赖手动 POST /api/supervisor/start；轮询 status 直到自动拉起完成
+    const body = await waitForAgentOnline(supervisorPort);
+    expect(body.agentServer.status).toBe("online");
+    expect(body.agentServer.pid).not.toBeNull();
+    expect(body.supervisor.port).toBe(supervisorPort);
+    expect(body.supervisor.pid).toBe(process.pid);
+  }, 60_000);
+
+  it("duplicate POST /api/supervisor/start is idempotent after auto-start", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const supervisorPort = await findFreePort();
+
+    supervisorInstance = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: agentPort,
+      entryScript: CLI_ENTRY,
+    });
+
+    await waitForAgentOnline(supervisorPort);
+
+    const first = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST" });
+    expect(first.status).toBe(201);
+    const firstBody = (await first.json()) as { status: string; pid: number };
+
+    const second = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST" });
+    expect(second.status).toBe(201);
+    const secondBody = (await second.json()) as { status: string; pid: number };
+    expect(secondBody.pid).toBe(firstBody.pid);
+  }, 60_000);
+
+  it("does not resurrect agent server after explicit stop even with a scheduled retry", async () => {
+    const { paths } = makeTempHome();
+    const agentPort = await findFreePort();
+    const supervisorPort = await findFreePort();
+
+    supervisorInstance = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: agentPort,
+      entryScript: CLI_ENTRY,
+    });
+    const started = await waitForAgentOnline(supervisorPort);
+    const pid = started.agentServer.pid;
+    if (pid === null) {
+      throw new Error("agent server pid 缺失");
+    }
+
+    // 外部强杀模拟意外崩溃 → 看门狗应排期自动重启（nextRetryAt 非空）
+    process.kill(pid, "SIGKILL");
+    const retryDeadline = Date.now() + 15_000;
+    while (Date.now() < retryDeadline) {
+      const response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+      const current = (await response.json()) as SupervisorStatusResponse;
+      if (current.agentServer.watchdog?.nextRetryAt !== null) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // 显式 stop：应取消已排期的重试并把期望态置为 stopped
+    const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, { method: "POST" });
+    expect(stopResponse.status).toBe(200);
+
+    const afterStopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    const afterStop = (await afterStopResponse.json()) as SupervisorStatusResponse;
+    expect(afterStop.agentServer.status).toBe("stopped");
+    expect(afterStop.agentServer.pid).toBeNull();
+    expect(afterStop.agentServer.watchdog?.nextRetryAt).toBeNull();
+    // 崩溃确实被计数过（>0 而非 0），证明这不是"从未崩溃"的空转断言
+    expect(afterStop.agentServer.watchdog?.consecutiveFailures).toBeGreaterThan(0);
+
+    // 等待超过已排期重试的退避窗口（默认基线 1s），确认没有复活
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    const laterResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+    const later = (await laterResponse.json()) as SupervisorStatusResponse;
+    expect(later.agentServer.status).toBe("stopped");
+    expect(later.agentServer.pid).toBeNull();
+    expect(later.agentServer.watchdog?.nextRetryAt).toBeNull();
   }, 60_000);
 
   it("returns 404 for unknown non-API routes", async () => {
