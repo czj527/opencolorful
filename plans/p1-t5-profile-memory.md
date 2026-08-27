@@ -173,3 +173,9 @@ Both `AgentProfilePage` and `MemoryPage` can add/remove pinned memories. This is
 - No new Playwright/desktop E2E tests were added; coverage is unit/integration only.
 - `AgentProfilePage` cannot be exercised end-to-end with write operations until `App.tsx` passes `source`.
 - Memory settings `updateMemorySettings` always fetches the full settings object before patching; this adds one extra round-trip but keeps schema validation happy.
+
+## 5. Integration & CI investigation (main agent, 2026-08-27)
+
+- Main-agent integration fixes on top of the subagent work: `App.tsx` now passes `source` to `AgentProfilePage`; mock `getMemoryData` returns the mutable `mockPinned` (subagent had left it on the static fixture, so pinned writes were invisible in mock mode).
+- Re-verified after fixes: `desktop:build` green, root `tsc --noEmit` green, `memory-admin-api.test.ts` 11/11 green.
+- **CI episode**: Browser E2E `phase6` timeline test (turn-2 "发送消息" not visible within 30s) failed 4/4 on this branch while local full suite passed 59/59 and main stayed green. T5's server diff is inert for that test (new pinned POST/DELETE routes are never called by the web E2E; desktop files are not loaded). Per the g0 ledger's "若复现则单独深挖", added failure diagnostics instead of blindly retrying or masking with a bigger timeout: `web/playwright.config.ts` now retains trace + screenshot on failure, and `quality.yml` uploads `web/test-results/` as an artifact on failure.

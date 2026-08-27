@@ -11,5 +11,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1",
     headless: true,
+    // CI 间歇失败诊断：失败时保留 trace 与截图，经 workflow 的 artifact 上传回收
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
 });

@@ -72,3 +72,11 @@ jobs:
       - name: Run browser acceptance tests
         working-directory: web
         run: npx playwright test
+      # 失败时上传 trace/截图/error-context，供间歇失败的远程深挖（台账：g0 第三轮 phase6）
+      - name: Upload Playwright failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: web/test-results/
+          retention-days: 7
