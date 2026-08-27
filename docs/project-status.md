@@ -25,7 +25,7 @@
 
 ## 当前优先级
 
-1. P1 切片 1 真实后端验收：作者执行 `plans/desktop-e2e-test-plan.md` 波次七 I1-I14 用例（需真实 API Key），并真实日用 ≥5 天；验收中发现的问题走缺陷修复 PR。
+1. **P1 切片 1.5 可用性攻坚**（规格 `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`，计划 `plans/p1-slice-1.5-usability.en.md`，待作者批准后开工）：作者初测判定"达不到可用级别"，修复 SSE 卡顿 / 设置页 25 个死控件 / 会话中心 IA；落地后作者执行波次八验收（I 组回归 + 切片 1.5 验证项），再继续 5 天日用。
 2. 冻结平台扩张：不新增平台层抽象，Phase 15+、Bridge、DAG、Cordis 化继续冻结（G1.5）。
 3. 保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建。
 
