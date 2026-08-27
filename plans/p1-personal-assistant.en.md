@@ -91,6 +91,11 @@ Per `AGENTS.md` — every gate run separately before merge. Risk-driven matrix (
 
 ## Implementation Log
 
-- 2026-08-27: Author design input absorbed (Kimi Code sidebar grouping, openhanako profile/mood, ID-card assistant surface) → spec §二补 + plan §2a; T0/T4/T5 rescoped; slice-2 backlog recorded, not committed.
+- 2026-08-27: Author design input absorbed (Kimi Code sidebar grouping, openhanako profile/mood, ID-card assistant surface) → spec §二补 + plan §2a; T0/T4/T5 rescoped; slice-2 backlog recorded, not committed. (PR #16)
+- 2026-08-27 T0 (main agent, serial): onboarding route skeleton + `useFirstRun` + empty-state entry + profile route stub.
+  - Files: `desktop/src/use-first-run.ts`, `components/OnboardingPage.tsx/.css`, `pages/AgentProfilePage.tsx/.css` (stub), `Titlebar.tsx` (PageId + onboarding/profile hidden routes), `Sidebar.tsx` (`onOpenAssistantProfile` optional prop contract for T4), `App.tsx` (wiring).
+  - Convention: new page/component styles live in co-located single-file CSS imported by the component — keeps parallel lanes out of shared `styles.css`.
+  - First-run = no agents OR no credential-configured provider; derived from real backend state, no persisted "done" flag; probe failure fails open to `ready`.
+  - Gates: `npm run desktop:build` green (tsc + vite); full `npm run check` + CI. Pending: author manual run with fresh `OPENCOLORFUL_HOME` to see auto-entry (dev machines with existing agents/providers never auto-enter).
 
 (filled during execution: dispatches, commits, verification evidence, deviations)
