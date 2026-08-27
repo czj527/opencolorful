@@ -134,9 +134,15 @@ const baseUrl = () => `http://127.0.0.1:${supervisorPort}`;
 
 async function ensureFixtureProvider(page: Page): Promise<void> {
   const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+  // T11 起 supervisor start 自动拉起 agent server（此处多为 starting）；"启动 Server"
+  // 按钮仅在 stopped/error 渲染（ServerStatusBar.tsx），starting 时无按钮可点。
+  // 改为幂等 POST start + 轮询直到 online。
   if (status.agentServer.status !== "online") {
-    await page.getByRole("button", { name: "启动 Server" }).click();
-    await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
+    await page.request.post(`${baseUrl()}/api/supervisor/start`);
+    await expect(async () => {
+      const current = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
+      expect(current.agentServer.status).toBe("online");
+    }).toPass({ timeout: 30_000 });
   }
 
   const providerResponse = await page.request.put(`${baseUrl()}/api/settings/providers`, {

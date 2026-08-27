@@ -45,8 +45,8 @@ test.beforeAll(async () => {
     entryScript: CLI_ENTRY,
     webDistDir: WEB_DIST,
   });
-  // startSupervisor 不自动启动 agent server；/api/plugins 需经 supervisor 代理到真实
-  // agent server（含 Phase 12 插件路由）。startAgentServer 自带健康等待（HTTP 就绪）。
+  // T11 起 startSupervisor 自动拉起 agent server；/api/plugins 需经 supervisor 代理到
+  // 真实 agent server（含 Phase 12 插件路由）。此处调用幂等，仅确保已就绪。
   await supervisor.controller.startAgentServer();
 });
 

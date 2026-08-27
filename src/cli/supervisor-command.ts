@@ -15,7 +15,7 @@ export async function runSupervisorCommand(args: readonly string[]): Promise<voi
       agentServerPort: agentPort,
     });
     console.log(`opencolorful supervisor online: http://127.0.0.1:${supervisor.port}`);
-    console.log(`agent server port: ${supervisor.agentServerPort}`);
+    console.log(`agent server 正在拉起: http://127.0.0.1:${supervisor.agentServerPort}（状态见 /api/supervisor/status）`);
     await new Promise<void>((resolve) => {
       const shutdown = () => {
         void supervisor.stop().finally(resolve);
