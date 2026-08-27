@@ -171,6 +171,7 @@ export function Composer({
               type="button"
               className="chip chip-btn composer-chip"
               disabled={streaming || noModels}
+              title={noModels ? "还没有可用模型，请先在设置 → 模型与 Provider 中配置凭据" : undefined}
               aria-haspopup="menu"
               aria-expanded={openMenu === "model"}
               onClick={() => toggle("model")}

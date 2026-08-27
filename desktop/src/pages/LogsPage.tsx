@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 
+import { formatErrorAdvice, toUserError } from "../errors.js";
 import type { ActivityFilter, DesktopDataSource, LogsPageData } from "../data/source.js";
 import {
   activityCategories,
@@ -103,6 +104,7 @@ function ActivityView({ source, refreshKey }: {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -128,13 +130,13 @@ function ActivityView({ source, refreshKey }: {
         setOpenId(null);
       })
       .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : "活动加载失败");
+        if (!cancelled) setError(formatErrorAdvice(toUserError(cause, "queryActivity")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [source, category, level, status, debouncedSearch, refreshKey]);
+  }, [source, category, level, status, debouncedSearch, refreshKey, retryCount]);
 
   useEffect(() => {
     if (!liveFollow) return undefined;
@@ -162,7 +164,7 @@ function ActivityView({ source, refreshKey }: {
         setRows((prev) => dedupeById([...prev, ...result.rows]));
         setNextCursor(result.nextCursor);
       })
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "加载更多失败"))
+      .catch((cause: unknown) => setError(formatErrorAdvice(toUserError(cause, "loadMoreActivity"))))
       .finally(() => setLoadingMore(false));
   };
 
@@ -197,7 +199,12 @@ function ActivityView({ source, refreshKey }: {
           {liveRows.length > 0 && <span className="badge badge-ok">+{liveRows.length}</span>}
         </label>
       </div>
-      {error !== null && <div className="chat-error" role="alert">{error}</div>}
+      {error !== null && (
+        <div className="chat-error" role="alert">
+          {error}
+          <button type="button" className="inline-action" onClick={() => setRetryCount((n) => n + 1)}>重试</button>
+        </div>
+      )}
       {loading ? (
         <p className="page-empty">正在加载活动事件…</p>
       ) : (
@@ -372,7 +379,7 @@ export function LogsPage({ source }: LogsPageProps) {
     setError(null);
     source.getLogsData()
       .then(setData)
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "日志加载失败"))
+      .catch((cause: unknown) => setError(formatErrorAdvice(toUserError(cause, "loadLogs"))))
       .finally(() => setLoading(false));
   };
 
@@ -402,7 +409,12 @@ export function LogsPage({ source }: LogsPageProps) {
         <p>Diagnostic / Activity / Audit 三通道；所有敏感值已脱敏，账本只读。</p>
         {data !== null && <HealthBadges health={data.health} />}
       </header>
-      {error !== null && <div className="chat-error" role="alert">{error}</div>}
+      {error !== null && (
+        <div className="chat-error" role="alert">
+          {error}
+          <button type="button" className="inline-action" onClick={load}>重试</button>
+        </div>
+      )}
       {loading && <p className="page-empty">正在加载日志…</p>}
       {!loading && data !== null && (
         <>

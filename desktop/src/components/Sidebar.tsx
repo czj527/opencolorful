@@ -1,7 +1,9 @@
 import { Archive, CalendarClock, ChevronDown, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { AgentCard, type AssistantStatus } from "./AgentCard.js";
 import type { Agent, Thread } from "../mock-data.js";
+import "./Sidebar.css";
 
 interface SidebarProps {
   readonly agents: readonly Agent[];
@@ -18,6 +20,8 @@ interface SidebarProps {
   readonly onOpenSettings: () => void;
   /** T4 身份证卡入口：打开助理档案页。T0 先行声明以固定车道接口（T4 消费）。 */
   readonly onOpenAssistantProfile?: () => void;
+  /** T4 真实运行时状态；未提供时身份证卡不渲染状态行。 */
+  readonly assistantStatus?: AssistantStatus;
 }
 
 interface SidebarRailProps {
@@ -180,48 +184,102 @@ function ThreadRow({
   );
 }
 
+function ThreadGroup({
+  title,
+  threads,
+  activeThreadId,
+  onThread,
+  onUpdateThreadTitle,
+}: {
+  readonly title: string;
+  readonly threads: readonly Thread[];
+  readonly activeThreadId: string;
+  readonly onThread: (id: string) => void;
+  readonly onUpdateThreadTitle: (sessionId: string, title: string) => void;
+}) {
+  if (threads.length === 0) return null;
+  return (
+    <div className="thread-group">
+      <header>{title}</header>
+      <div className="thread-list">
+        {threads.map((thread) => (
+          <ThreadRow
+            key={thread.id}
+            thread={thread}
+            isActive={thread.id === activeThreadId}
+            onClick={() => onThread(thread.id)}
+            onUpdateTitle={(title) => onUpdateThreadTitle(thread.id, title)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar(props: SidebarProps) {
   const {
     agents, activeAgent, onAgent, threads, archivedThreads, activeThreadId,
     onThread, onNewThread, onUpdateThreadTitle, onUnarchiveThread, onCollapse, onOpenSettings,
+    onOpenAssistantProfile, assistantStatus,
   } = props;
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
+
+  const activeThreads = threads.filter((thread) => thread.status === "active");
+  const recentThreads = threads.filter((thread) => thread.status !== "active");
 
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
         {activeAgent === undefined ? (
-          <div className="agent-button is-empty"><span className="agent-button-copy"><strong>无 Agent</strong><small>请在运维面创建</small></span></div>
-        ) : (
-          <button type="button" className="agent-button" onClick={() => setAgentMenuOpen((v) => !v)} aria-expanded={agentMenuOpen}>
-            <AgentDot agent={activeAgent} />
-            <span className="agent-button-copy">
-              <strong>{activeAgent.name}</strong>
-              <small>{activeAgent.description}</small>
-            </span>
-            <ChevronDown size={13} />
-          </button>
-        )}
-        <button type="button" className="icon-btn" aria-label="收起侧栏" title="收起侧栏" onClick={onCollapse}>
-          <PanelLeftClose size={15} />
-        </button>
-        {agentMenuOpen && activeAgent !== undefined && (
-          <>
-            <div className="menu-backdrop" onMouseDown={() => setAgentMenuOpen(false)} />
-            <div className="agent-menu" role="menu">
-              {agents.map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  className={agent.id === activeAgent.id ? "is-active" : ""}
-                  onClick={() => { onAgent(agent.id); setAgentMenuOpen(false); }}
-                >
-                  <AgentDot agent={agent} size={18} />
-                  <span><strong>{agent.name}</strong><small>{agent.description}</small></span>
-                </button>
-              ))}
+          <div className="agent-card is-empty">
+            <div className="agent-card-tools">
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="收起侧栏"
+                title="收起侧栏"
+                onClick={onCollapse}
+              >
+                <PanelLeftClose size={15} />
+              </button>
             </div>
+            <div className="agent-card-body">
+              <span className="agent-card-avatar" style={{ background: "var(--text-3)" }} aria-hidden="true">?</span>
+              <span className="agent-card-copy">
+                <strong>无 Agent</strong>
+                <small>完成首次引导后出现在这里</small>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <AgentCard
+              agent={activeAgent}
+              status={assistantStatus}
+              onOpenProfile={onOpenAssistantProfile}
+              onToggleSwitch={() => setAgentMenuOpen((v) => !v)}
+              switchOpen={agentMenuOpen}
+              onCollapse={onCollapse}
+            />
+            {agentMenuOpen && (
+              <>
+                <div className="menu-backdrop" onMouseDown={() => setAgentMenuOpen(false)} />
+                <div className="agent-menu" role="menu">
+                  {agents.map((agent) => (
+                    <button
+                      key={agent.id}
+                      type="button"
+                      className={agent.id === activeAgent.id ? "is-active" : ""}
+                      onClick={() => { onAgent(agent.id); setAgentMenuOpen(false); }}
+                    >
+                      <AgentDot agent={agent} size={18} />
+                      <span><strong>{agent.name}</strong><small>{agent.description}</small></span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -233,17 +291,20 @@ export function Sidebar(props: SidebarProps) {
             <Plus size={16} />
           </button>
         </header>
-        <div className="thread-list">
-          {threads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              thread={thread}
-              isActive={thread.id === activeThreadId}
-              onClick={() => onThread(thread.id)}
-              onUpdateTitle={(title) => onUpdateThreadTitle(thread.id, title)}
-            />
-          ))}
-        </div>
+        <ThreadGroup
+          title="进行中"
+          threads={activeThreads}
+          activeThreadId={activeThreadId}
+          onThread={onThread}
+          onUpdateThreadTitle={onUpdateThreadTitle}
+        />
+        <ThreadGroup
+          title="最近"
+          threads={recentThreads}
+          activeThreadId={activeThreadId}
+          onThread={onThread}
+          onUpdateThreadTitle={onUpdateThreadTitle}
+        />
       </div>
 
       {archivedThreads.length > 0 && (

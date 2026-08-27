@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Timeline } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
+import type { AssistantStatus } from "./components/AgentCard.js";
 import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
 import { Sidebar, SidebarRail } from "./components/Sidebar.js";
@@ -20,6 +21,7 @@ import {
   type SessionUsageView,
 } from "./data/source.js";
 import type { Agent, Thread, TimelineItem } from "./mock-data.js";
+import { toUserError, type ErrorContext } from "./errors.js";
 import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
 import { LogsPage } from "./pages/LogsPage.js";
@@ -46,7 +48,7 @@ export function App() {
   const [items, setItems] = useState<readonly TimelineItem[]>([]);
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatError, setChatError] = useState<React.ReactNode | null>(null);
   const [dock, setDock] = useState<DockTool | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
@@ -249,6 +251,13 @@ export function App() {
     if (text === "" || streaming) return;
     setChatError(null);
 
+    // 断线 / 离线时明确提示，不静默失败（仅 IPC 真实数据源；mock 模式仍可本地演示）
+    const currentConnection = connection ?? source.info;
+    if (currentConnection.mode === "ipc" && !currentConnection.connected) {
+      setChatError(userErrorNode(new Error("offline"), "send"));
+      return;
+    }
+
     if (text === "/compact") {
       if (threadId === NEW_THREAD) {
         setChatError("先发送消息创建会话");
@@ -258,13 +267,15 @@ export function App() {
       try {
         await source.compactSession(threadId);
       } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "压缩失败";
-        if (message.includes("忙") || message.includes("BUSY") || message.includes("无法压缩")) {
-          setChatError("会话忙，压缩稍后再试");
-        } else {
-          setChatError(message);
-        }
+        setChatError(userErrorNode(cause, "compact"));
       }
+      return;
+    }
+
+    // 没有已配置凭据的模型时给出配置入口
+    const hasUsableModel = models.some((option) => option.credentialConfigured);
+    if (!hasUsableModel) {
+      setChatError(userErrorNode(new Error("未配置模型"), "send"));
       return;
     }
 
@@ -283,7 +294,7 @@ export function App() {
       }
       await source.sendPrompt(target, text);
     } catch (cause) {
-      setChatError(cause instanceof Error ? cause.message : "发送失败");
+      setChatError(userErrorNode(cause, "send"));
     }
   }
 
@@ -311,7 +322,7 @@ export function App() {
         source.listThreads(agentId).then(setThreads).catch(() => undefined);
       })
       .catch((cause: unknown) => {
-        setChatError(cause instanceof Error ? cause.message : "重命名失败");
+        setChatError(userErrorNode(cause, "renameThread"));
       });
   }
 
@@ -326,7 +337,7 @@ export function App() {
         }).catch(() => undefined);
       })
       .catch((cause: unknown) => {
-        setChatError(cause instanceof Error ? cause.message : "恢复失败");
+        setChatError(userErrorNode(cause, "unarchiveThread"));
       });
   }
 
@@ -342,7 +353,7 @@ export function App() {
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, model: next }));
-    void source?.updateSessionModel(threadId, next).catch(() => setChatError("模型切换失败"));
+    void source?.updateSessionModel(threadId, next).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeModel")));
   }
 
   function changeThinkingLevel(level: string) {
@@ -352,7 +363,7 @@ export function App() {
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, thinkingLevel: level }));
-    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch(() => setChatError("思考级别更新失败"));
+    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeThinking")));
   }
 
   function changeToolMode(mode: string) {
@@ -362,7 +373,7 @@ export function App() {
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, toolMode: mode }));
-    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch(() => setChatError("工具模式更新失败"));
+    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeTool")));
   }
 
   function confirmWorkspace() {
@@ -370,7 +381,7 @@ export function App() {
     setConfirming(true);
     source.updateSessionSettings(threadId, { workspaceConfirmed: true })
       .then(() => setSessionSettings((current) => (current === null ? current : { ...current, workspaceConfirmed: true })))
-      .catch(() => setChatError("工作区确认失败，请重试"))
+      .catch((cause: unknown) => setChatError(userErrorNode(cause, "confirmWorkspace")))
       .finally(() => setConfirming(false));
   }
 
@@ -379,8 +390,29 @@ export function App() {
     setConfirming(true);
     source.updateSessionSettings(threadId, { toolMode: "read-only" })
       .then(() => setSessionSettings((current) => (current === null ? current : { ...current, toolMode: "read-only" })))
-      .catch(() => setChatError("切换只读失败，请重试"))
+      .catch((cause: unknown) => setChatError(userErrorNode(cause, "switchReadOnly")))
       .finally(() => setConfirming(false));
+  }
+
+  /** 把底层异常转成带下一步动作的中文错误节点 */
+  function userErrorNode(cause: unknown, context: ErrorContext): React.ReactNode {
+    const { message, action } = toUserError(cause, context);
+    if (action === undefined) return message;
+    return (
+      <>
+        {message}
+        <button
+          type="button"
+          className="inline-action"
+          onClick={() => {
+            setSettingsCategory(action.category);
+            setSettingsOpen(true);
+          }}
+        >
+          {action.label}
+        </button>
+      </>
+    );
   }
 
   if (source === null) {
@@ -393,6 +425,14 @@ export function App() {
 
   // 显式进入（空态入口）或首启自动进入；退出后本次运行内不再自动弹出
   const showOnboarding = page === "onboarding" || (firstRun.status === "first-run" && !onboardingDismissed);
+
+  // T4 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
+  const assistantStatus: AssistantStatus = (() => {
+    const conn = connection ?? source.info;
+    if (!conn.connected) return { label: "离线", tone: "offline" };
+    if (streaming) return { label: "运行中", tone: "busy" };
+    return { label: "空闲", tone: "ok" };
+  })();
 
   function enterOnboarding() {
     setOnboardingDismissed(false);
@@ -463,6 +503,7 @@ export function App() {
             onCollapse={() => setSidebarCollapsed(true)}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenAssistantProfile={() => setPage("profile")}
+            assistantStatus={assistantStatus}
           />
         )}
         <main className="main">
