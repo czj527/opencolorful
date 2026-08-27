@@ -222,6 +222,21 @@ export interface ProviderInput {
   }[];
 }
 
+/** T3：高级新建会话可覆盖的运行选项 */
+export interface CreateThreadOptions {
+  /** 覆盖 Agent 默认工作目录；缺省沿用 Agent defaultCwd */
+  readonly cwd?: string;
+  /** 工具模式；缺省由服务端偏好决定 */
+  readonly toolMode?: string;
+  /** 思考级别；缺省由服务端偏好决定 */
+  readonly thinkingLevel?: string;
+  /**
+   * 工作区确认（仅 toolMode=all 时有意义）：必须如实转发用户在表单里的勾选状态。
+   * 缺省/未确认时服务端按 fail-safe 降级只读并走横幅确认流程（安全语义，不许自动置真）。
+   */
+  readonly workspaceConfirmed?: boolean;
+}
+
 /** renderer 只依赖这个接口；Mock 与 IPC 实现可互换（docs/design.md §7） */
 export interface DesktopDataSource {
   readonly info: ConnectionInfo;
@@ -236,7 +251,7 @@ export interface DesktopDataSource {
   listAgents(): Promise<readonly Agent[]>;
   listThreads(agentId: string): Promise<readonly Thread[]>;
   listArchivedThreads(agentId: string): Promise<readonly Thread[]>;
-  createThread(agentId: string, title: string): Promise<Thread>;
+  createThread(agentId: string, title: string, options?: CreateThreadOptions): Promise<Thread>;
   updateThreadTitle(sessionId: string, title: string): Promise<void>;
   unarchiveThread(sessionId: string): Promise<void>;
   compactSession(sessionId: string): Promise<void>;

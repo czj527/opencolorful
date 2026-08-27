@@ -4,6 +4,7 @@ import { Timeline } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
 import type { AssistantStatus } from "./components/AgentCard.js";
+import { NewSessionDialog } from "./components/NewSessionDialog.js";
 import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
 import { Sidebar, SidebarRail } from "./components/Sidebar.js";
@@ -57,6 +58,8 @@ export function App() {
   const [sessionSettings, setSessionSettings] = useState<SessionSettingsView | null>(null);
   const [sessionUsage, setSessionUsage] = useState<SessionUsageView | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // T3：高级新建会话弹窗
+  const [newSessionOpen, setNewSessionOpen] = useState(false);
   // 新会话（未落库）时的本地选择；创建会话时下发到服务端。
   // 初始对齐后端偏好默认（read-only / medium），偏好加载后再微调
   const [draftModel, setDraftModel] = useState<ModelRef | null>(null);
@@ -312,6 +315,26 @@ export function App() {
     setThreadId(NEW_THREAD);
     setDraft("");
     setPage("chat");
+  }
+
+  // T3：从高级新建表单创建会话后，切换到目标 Agent 并选中新会话
+  function completeNewSession(thread: Thread, selectedAgentId: string) {
+    if (source === null) return;
+    setAgentId(selectedAgentId);
+    if (selectedAgentId !== agentId) {
+      Promise.all([source.listThreads(selectedAgentId), source.listArchivedThreads(selectedAgentId)])
+        .then(([list, archived]) => {
+          setThreads(list);
+          setArchivedThreads(archived);
+          setThreadId(thread.id);
+        })
+        .catch(() => undefined);
+    } else {
+      setThreads((current) => [thread, ...current]);
+      setThreadId(thread.id);
+    }
+    setPage("chat");
+    setNewSessionOpen(false);
   }
 
   function updateThreadTitle(sessionId: string, title: string) {
@@ -579,6 +602,13 @@ export function App() {
                             {...composerControls}
                           />
                         </div>
+                        <button
+                          type="button"
+                          className="inline-action"
+                          onClick={() => setNewSessionOpen(true)}
+                        >
+                          高级新建…
+                        </button>
                         {models.length > 0 && !models.some((option) => option.credentialConfigured) && (
                           <button
                             type="button"
@@ -646,6 +676,19 @@ export function App() {
           dataSourceLabel={source.info.label}
           source={source}
           onProvidersChanged={() => setModelsRefresh((value) => value + 1)}
+        />
+      )}
+      {newSessionOpen && source !== null && activeAgent !== undefined && (
+        <NewSessionDialog
+          source={source}
+          agents={agents}
+          agentId={agentId}
+          models={models}
+          draftToolMode={draftToolMode}
+          draftThinking={draftThinking}
+          draftModel={draftModel}
+          onCreated={completeNewSession}
+          onClose={() => setNewSessionOpen(false)}
         />
       )}
     </div>

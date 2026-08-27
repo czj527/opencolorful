@@ -157,7 +157,7 @@ export class MockDataSource implements DesktopDataSource {
     return Promise.resolve(this.threads.filter((thread) => Boolean(thread.archivedAt)));
   }
 
-  createThread(_agentId: string, title: string): Promise<Thread> {
+  createThread(_agentId: string, title: string, _options?: import("./source.js").CreateThreadOptions): Promise<Thread> {
     this.idCounter += 1;
     const thread: Thread = { id: `t${this.idCounter}`, title, preview: "刚刚创建", time: "刚刚", status: "active" };
     this.threads.unshift(thread);

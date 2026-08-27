@@ -277,11 +277,17 @@ export class IpcDataSource implements DesktopDataSource {
     return sessions.filter((session) => !session.archived).map((session) => this.threadFromSession(session));
   }
 
-  async createThread(agentId: string, title: string): Promise<Thread> {
+  async createThread(agentId: string, title: string, options?: import("./source.js").CreateThreadOptions): Promise<Thread> {
     const view = this.agentViews.find((item) => item.identity.id === agentId);
-    const cwd = view?.settings?.defaultCwd ?? null;
-    if (cwd === null) throw new Error("该 Agent 未配置默认工作目录，请先在设置中配置");
-    const session = await this.request<SessionViewWire>("POST", "/api/sessions", { title, cwd, agentId });
+    const cwd = options?.cwd ?? view?.settings?.defaultCwd ?? null;
+    if (cwd === null || cwd.trim() === "") throw new Error("该 Agent 未配置默认工作目录，请先在设置中配置");
+    const body: Record<string, unknown> = { title, cwd, agentId };
+    if (options?.toolMode !== undefined) body["toolMode"] = options.toolMode;
+    if (options?.thinkingLevel !== undefined) body["thinkingLevel"] = options.thinkingLevel;
+    // workspaceConfirmed 如实转发调用方（表单勾选）的状态；不允许按 toolMode 自动置真——
+    // 未确认的 all 模式由服务端 fail-safe 降级只读，并走横幅确认流程
+    if (options?.workspaceConfirmed !== undefined) body["workspaceConfirmed"] = options.workspaceConfirmed;
+    const session = await this.request<SessionViewWire>("POST", "/api/sessions", body);
     return this.threadFromSession(session);
   }
 
