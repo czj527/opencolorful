@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Hono } from "hono";
@@ -25,6 +26,11 @@ import {
   isValidRetentionThresholds,
   type MemoryAgentSettings,
 } from "../../contracts/memory.js";
+import type { PinnedMemoryInput } from "../../storage/memory/pinned-store.js";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 function parseTags(value: string | undefined): string[] {
   return value === undefined || value.trim() === ""
@@ -101,6 +107,37 @@ export function registerMemoryRoutes(
     const agentId = context.req.param("id");
     const missing = ensureAgent(agentStore, agentId); if (missing) return missing;
     return context.json({ agentId, pinned: pinned.listByAgent(agentId) });
+  });
+
+  app.post("/api/agents/:id/memory/pinned", async (context) => {
+    const agentId = context.req.param("id");
+    const missing = ensureAgent(agentStore, agentId); if (missing) return missing;
+    const body = await context.req.json() as unknown;
+    if (!isRecord(body) || typeof body.content !== "string") {
+      return context.json(createApiError("INVALID_INPUT", "content 必须是字符串"), 400);
+    }
+    const content = body.content.trim();
+    if (content === "") {
+      return context.json(createApiError("INVALID_INPUT", "content 不能为空"), 400);
+    }
+    if (content.length > 500) {
+      return context.json(createApiError("INVALID_INPUT", "content 不能超过 500 个字符"), 400);
+    }
+    const input: PinnedMemoryInput = { id: crypto.randomUUID(), agentId, content };
+    const item = pinned.add(input);
+    return context.json({ agentId, pinned: item }, 201);
+  });
+
+  app.delete("/api/agents/:id/memory/pinned/:pinnedId", (context) => {
+    const agentId = context.req.param("id");
+    const pinnedId = context.req.param("pinnedId");
+    const missing = ensureAgent(agentStore, agentId); if (missing) return missing;
+    const existing = pinned.get(pinnedId);
+    if (existing === undefined || existing.agentId !== agentId) {
+      return context.json(createApiError("NOT_FOUND", "置顶记忆不存在"), 404);
+    }
+    pinned.remove(pinnedId);
+    return context.json({ agentId, removed: true });
   });
 
   app.post("/api/agents/:id/memory/flush", (context) => {

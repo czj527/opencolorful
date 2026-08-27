@@ -1,0 +1,18 @@
+.memory-pinned-list .plain-list-item {
+  position: relative;
+  padding-right: 32px;
+}
+.memory-pinned-delete {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  color: var(--text-3);
+}
+.memory-pinned-delete:hover { color: var(--err); }
+.memory-add-pinned {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+.memory-add-pinned input {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.memory-add-pinned input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }

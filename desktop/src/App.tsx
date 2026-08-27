@@ -608,7 +608,7 @@ export function App() {
           )}
           {page === "logs" && <div className="page-scroll"><LogsPage source={source} /></div>}
           {page === "profile" && activeAgent !== undefined && (
-            <div className="page-scroll"><AgentProfilePage agent={activeAgent} /></div>
+            <div className="page-scroll"><AgentProfilePage agent={activeAgent} source={source} /></div>
           )}
         </main>
         {page === "chat" && dock !== null && (

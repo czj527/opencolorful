@@ -1,11 +1,71 @@
-/* AgentProfilePage — T0 stub 样式。T5 拥有本文件（lane E）。 */
-
-.profile-stub-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px; border: 1px solid var(--border); border-radius: 10px;
+.profile-id-card {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 22px; padding: 18px;
+  border: 1px solid var(--border); border-radius: 12px;
   background: var(--bg-subtle);
 }
-.profile-stub-dot { width: 40px; height: 40px; font-size: 18px; }
-.profile-stub-copy { min-width: 0; display: grid; gap: 2px; }
-.profile-stub-copy strong { font-size: 14px; }
-.profile-stub-copy small { color: var(--text-3); font-size: 11px; }
+.profile-avatar {
+  width: 64px; height: 64px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: 50%; color: #fff; font-size: 28px; font-weight: 650;
+}
+.profile-id-copy {
+  min-width: 0; display: grid; gap: 4px;
+}
+.profile-id-copy strong { font-size: 16px; font-weight: 650; }
+.profile-id-copy span { color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.profile-id-copy small { color: var(--text-3); font-size: 11px; }
+
+.profile-form { display: grid; gap: 12px; }
+.profile-field { display: grid; gap: 5px; }
+.profile-field span { color: var(--text-2); font-size: 11.5px; }
+.profile-field input,
+.profile-field textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.profile-field textarea { resize: vertical; line-height: 1.55; }
+.profile-field input:disabled,
+.profile-field textarea:disabled { background: var(--bg-subtle); color: var(--text-3); }
+.profile-actions { display: flex; align-items: center; gap: 10px; }
+.profile-readonly-hint { color: var(--text-3); font-size: 11.5px; }
+
+.profile-persona { display: grid; gap: 12px; }
+.profile-persona-row { display: grid; gap: 5px; }
+.profile-persona-row span { color: var(--text-3); font-size: 11px; }
+.profile-persona-row p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
+.profile-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.profile-pinned-row { padding-right: 32px; }
+.plain-list-item { position: relative; }
+.profile-delete-pin {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  color: var(--text-3); font-size: 16px;
+}
+.profile-delete-pin:hover { color: var(--err); }
+
+.profile-add-pinned {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+.profile-add-pinned input {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.profile-add-pinned input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.profile-settings { display: grid; gap: 2px; }
+.profile-setting-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 2px; border-bottom: 1px solid var(--border);
+}
+.profile-setting-copy { min-width: 0; display: grid; gap: 2px; }
+.profile-setting-copy strong { font-size: 12.5px; font-weight: 550; }
+.profile-setting-copy small { color: var(--text-3); font-size: 11px; }
+.profile-setting-row input[type="time"],
+.profile-setting-row input[type="number"] {
+  width: 100px; padding: 5px 7px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12px;
+}
