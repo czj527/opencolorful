@@ -121,3 +121,7 @@ supervisor.json 无记录 → false），而"当前行为是期望态=stopped �
 **修复（主 agent）**：三处 helper 改为幂等 `POST /api/supervisor/start` + `expect(...).toPass` 轮询 online。workspace.spec 中先 stop 再点按钮的 3 处属"显式停止→按钮出现"路径，不受 T11 影响，未动。
 
 **教训**：子 agent lane log 已明确建议主 agent 复核时跑 `cd web; npx playwright test`，主 agent 只跑了 tsc+supervisor 套件——复核门禁遗漏，记入流程教训：后端行为面变更必须跑 web E2E。
+
+## 补记 2（2026-08-27 主 agent）：workspace.spec 生命周期用例适配
+
+首屏用例原断言"初始已停止+启动按钮可见"——正是 T11 修复的行为本身，改为断言状态指示收敛"已连接"。"通过页面启动 Agent Server"用例保留原始验收意图：先 `ensureAgentServerViaApi` + POST stop 显式停止，按钮出现后再点击启动。"通过 Web 表单配置 Provider"内联的同款点击竞态改调已有的 `ensureAgentServerViaApi`（本就已幂等）。"Agent 停止后页面仍可访问"用例自带双态分支，T11 兼容未动。

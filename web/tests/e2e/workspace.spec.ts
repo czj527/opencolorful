@@ -215,13 +215,17 @@ test.describe("web workspace 真实浏览器验收", () => {
   test("首屏加载工作台，显示 Supervisor 状态", async ({ page }) => {
     await page.goto(baseUrl());
     await expect(page.getByTestId("connection-status")).toBeVisible({ timeout: 10_000 });
-    // Agent 未启动 → 显示已停止 + 启动按钮
-    await expect(page.getByTestId("connection-status")).toHaveText("已停止");
-    await expect(page.getByRole("button", { name: "启动 Server" })).toBeVisible();
+    // T11 起 agent server 随 supervisor 自动拉起：首屏可能短暂"启动中"，最终收敛"已连接"
+    await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
   });
 
   test("通过页面启动 Agent Server，状态变为已连接", async ({ page }) => {
     await page.goto(baseUrl());
+    // T11 起 server 已自动拉起；先经 API 显式停止，再验收"页面按钮可启动"的原始意图
+    await ensureAgentServerViaApi(page);
+    const stopResponse = await page.request.post(`${baseUrl()}/api/supervisor/stop`);
+    expect(stopResponse.ok()).toBe(true);
+    await expect(page.getByRole("button", { name: "启动 Server" })).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "启动 Server" }).click();
     await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
     await expect(page.getByTestId("agent-port")).toHaveText(`:${agentPort}`);
@@ -414,11 +418,7 @@ test.describe("web workspace 真实浏览器验收", () => {
     test.setTimeout(60_000);
     await page.goto(baseUrl());
 
-    const status = await (await page.request.get(`${baseUrl()}/api/supervisor/status`)).json();
-    if (status.agentServer.status !== "online") {
-      await page.getByRole("button", { name: "启动 Server" }).click();
-      await expect(page.getByTestId("connection-status")).toHaveText("已连接", { timeout: 30_000 });
-    }
+    await ensureAgentServerViaApi(page);
 
     // 直接导航到设置页面
     await page.goto(`${baseUrl()}/settings`);
