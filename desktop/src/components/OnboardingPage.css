@@ -1,4 +1,4 @@
-/* OnboardingPage — T0 骨架样式。T1 向导表单样式追加在本文件（lane A 拥有）。
+/* OnboardingPage — T0 骨架 + T1 四步向导（lane A 拥有本文件）。
    约定：新增页面/组件使用同名单文件 CSS 并由组件自行 import，
    避免并行任务同时改 styles.css 产生冲突。 */
 
@@ -16,19 +16,89 @@
   padding: 8px 10px; border-radius: var(--radius); color: var(--text-3);
 }
 .onboarding-steps li.is-current { background: var(--bg-active); color: var(--text); }
+.onboarding-steps li.is-done { color: var(--text-2); }
 .onboarding-step-no {
   width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center;
   border: 1px solid var(--border-strong); border-radius: 50%;
   font-family: var(--mono); font-size: 10.5px;
 }
 .onboarding-steps li.is-current .onboarding-step-no { border-color: var(--accent); color: var(--accent); }
+.onboarding-steps li.is-done .onboarding-step-no { border-color: var(--ok); color: var(--ok); }
 .onboarding-step-copy { min-width: 0; display: grid; gap: 1px; }
 .onboarding-step-copy strong { font-size: 12.5px; font-weight: 600; }
 .onboarding-step-copy small { color: var(--text-3); font-size: 10.5px; }
 
-.onboarding-main { flex: 1; min-width: 0; display: grid; place-items: center; padding: 32px; }
-.onboarding-card { max-width: 460px; display: grid; gap: 10px; }
+.onboarding-main { flex: 1; min-width: 0; overflow: auto; scrollbar-width: thin; display: grid; place-items: center; padding: 32px; }
+.onboarding-card { width: min(520px, 100%); display: grid; gap: 12px; }
 .onboarding-card h1 { margin: 0; font-size: 18px; font-weight: 650; }
-.onboarding-card p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.7; }
+.onboarding-card > p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.7; }
 .onboarding-card .onboarding-note { color: var(--text-3); font-size: 11.5px; }
-.onboarding-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* 表单字段 */
+.onboarding-field { display: grid; gap: 5px; }
+.onboarding-field > span { color: var(--text-2); font-size: 11.5px; }
+.onboarding-field input {
+  height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12.5px;
+}
+.onboarding-field input:focus { border-color: var(--accent); outline: none; }
+
+/* 底色模板卡 */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.template-card {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 9px; row-gap: 1px; align-items: center;
+  padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+  text-align: left; background: var(--bg);
+}
+.template-card:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
+.template-card.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.template-swatch { grid-row: span 2; width: 18px; height: 18px; border-radius: 50%; }
+.template-card strong { font-size: 12.5px; font-weight: 600; }
+.template-card small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10.5px; }
+
+/* Provider 预设卡 */
+.preset-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.preset-card {
+  display: grid; gap: 2px; padding: 9px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  text-align: left; background: var(--bg);
+}
+.preset-card:hover { border-color: var(--border-strong); background: var(--bg-subtle); }
+.preset-card.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.preset-card strong { font-size: 12.5px; font-weight: 600; }
+.preset-card small { color: var(--text-3); font-size: 10.5px; }
+
+/* 高级设置（默认收起） */
+.onboarding-advanced {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 12px;
+}
+.onboarding-advanced[open] { display: grid; gap: 10px; padding-bottom: 12px; }
+.onboarding-advanced summary {
+  cursor: pointer; user-select: none;
+  color: var(--text-2); font-size: 11.5px;
+}
+.onboarding-advanced summary:hover { color: var(--text); }
+
+/* 工作目录 */
+.directory-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.directory-row input {
+  height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font-size: 12.5px; font-family: var(--mono);
+}
+.directory-row input:focus { border-color: var(--accent); outline: none; }
+
+/* 权限说明 */
+.permission-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.permission-list li {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-subtle); color: var(--text-2); font-size: 12px; line-height: 1.65;
+}
+.permission-list strong { color: var(--text); font-weight: 600; }
+
+/* 底部操作条 */
+.onboarding-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.onboarding-footer-gap { flex: 1; }

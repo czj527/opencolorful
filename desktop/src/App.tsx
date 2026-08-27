@@ -91,7 +91,8 @@ export function App() {
     return source.subscribeConnection(setConnection);
   }, [source]);
 
-  // Agent 列表
+  // Agent 列表（onboarding 创建新助理后通过 agentsRefresh 重拉）
+  const [agentsRefresh, setAgentsRefresh] = useState(0);
   useEffect(() => {
     if (source === null) return;
     let cancelled = false;
@@ -105,7 +106,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [source, agentsRefresh]);
 
   const activeAgent = agents.find((agent) => agent.id === agentId) ?? agents[0];
 
@@ -444,6 +445,16 @@ export function App() {
     setPage("chat");
   }
 
+  // T1 向导完成：重拉 Agent 列表、选中新助理、进入新会话草稿；首启状态随真实数据自然消失
+  function completeOnboarding(newAgentId: string) {
+    setOnboardingDismissed(true);
+    firstRun.refresh();
+    setAgentsRefresh((value) => value + 1);
+    setAgentId(newAgentId);
+    setThreadId(NEW_THREAD);
+    setPage("chat");
+  }
+
   const activeThread = threads.find((thread) => thread.id === threadId);
   const isNewThread = threadId === NEW_THREAD;
   const chatTitle = isNewThread ? "新会话" : activeThread?.title ?? "会话";
@@ -476,7 +487,7 @@ export function App() {
         connection={connection ?? source.info}
       />
       {showOnboarding ? (
-        <OnboardingPage onExit={exitOnboarding} />
+        <OnboardingPage source={source} onExit={exitOnboarding} onComplete={completeOnboarding} />
       ) : (
       <div className="app-body">
         {sidebarCollapsed ? (

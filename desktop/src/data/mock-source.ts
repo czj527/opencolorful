@@ -29,7 +29,7 @@ import {
   type ProjectorState,
 } from "./projector.js";
 import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
-import type { AgentProfileView } from "./source.js";
+import type { AgentProfileView, AgentTemplateView, CreateAgentInput } from "./source.js";
 
 interface MockSession {
   readonly projector: ProjectorState;
@@ -38,6 +38,16 @@ interface MockSession {
   streamSeq: number;
   replyIndex: number;
 }
+
+/** T1：onboarding 模板 fixture（镜像服务端 BASE_COLOR_TEMPLATES 的形状与色系） */
+const mockAgentTemplates: readonly AgentTemplateView[] = [
+  { key: "blank", label: "空白", description: "从零开始自定义底色", color: "#888888", baseColor: { persona: "", personality: [], replyStyle: "", innerSetting: "" } },
+  { key: "blue", label: "蓝色", description: "冷静理性", color: "#378ADD", baseColor: { persona: "我是一个冷静理性的助手，重视事实与逻辑，回答直接而不带情绪。", personality: ["理性", "客观", "严谨"], replyStyle: "简洁直接", innerSetting: "重视事实与逻辑，避免情绪化表达；不确定时明确说明。" } },
+  { key: "orange", label: "橙色", description: "温柔知性", color: "#EF9F27", baseColor: { persona: "我是一个温柔知性的伙伴，善于倾听，愿意花时间陪伴。", personality: ["温和", "耐心", "善解人意"], replyStyle: "亲切详细", innerSetting: "注重陪伴感，关心对方情绪；不催促，不敷衍。" } },
+  { key: "green", label: "绿色", description: "稳定包容", color: "#639922", baseColor: { persona: "我是一个稳定包容的对话者，遇事不躁，给你一个可以停靠的空间。", personality: ["稳重", "包容", "可靠"], replyStyle: "稳健平和", innerSetting: "尊重差异，不急于给结论；允许犹豫与反复。" } },
+];
+
+const MOCK_AGENT_COLORS = ["#5b8def", "#3aa96c", "#e87561", "#e8b128", "#8c72bf", "#d07fa8"] as const;
 
 /** Mock 数据源：fixture + 模拟事件流（与真实数据源走同一份 projector） */
 export class MockDataSource implements DesktopDataSource {
@@ -62,6 +72,8 @@ export class MockDataSource implements DesktopDataSource {
     injectBudgetChars: 2500,
   };
   private mockPinned: import("../mock-data.js").PinnedMemory[] = [...memoryPinned];
+  // T1：可变 agents 列表（onboarding createAgent 会追加；静态 fixture 保持不变）
+  private mockAgents: Agent[] = [...agents];
   private mockProfile: AgentProfileView = {
     id: "yuan",
     name: "原",
@@ -114,7 +126,27 @@ export class MockDataSource implements DesktopDataSource {
   }
 
   listAgents(): Promise<readonly Agent[]> {
-    return Promise.resolve(agents);
+    return Promise.resolve(this.mockAgents);
+  }
+
+  /* ---- T1：onboarding 创建助理（mock） ---- */
+
+  listAgentTemplates(): Promise<readonly AgentTemplateView[]> {
+    return Promise.resolve(mockAgentTemplates);
+  }
+
+  createAgent(input: CreateAgentInput): Promise<Agent> {
+    this.pinnedIdCounter += 1;
+    const agent: Agent = {
+      id: `agent-mock-${this.pinnedIdCounter}`,
+      name: input.name.trim(),
+      initial: input.name.trim().slice(0, 1) || "A",
+      color: MOCK_AGENT_COLORS[this.mockAgents.length % MOCK_AGENT_COLORS.length] ?? "#5b8def",
+      description: (input.baseColor.persona || "").split(/[。！？\n]/)[0]?.slice(0, 26) ?? "",
+      ...(input.defaultCwd ? { workspace: input.defaultCwd } : {}),
+    };
+    this.mockAgents.push(agent);
+    return Promise.resolve(agent);
   }
 
   listThreads(): Promise<readonly Thread[]> {
