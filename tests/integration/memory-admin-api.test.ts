@@ -253,3 +253,76 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe("pinned memory 写端点", () => {
+  it("POST 创建 → GET 可见 → DELETE 删除 → GET 消失", async () => {
+    const ctx = createApp();
+    const base = `http://x/api/agents/a1/memory/pinned`;
+
+    const post = await ctx.app.request(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "  这是一条置顶记忆  " }),
+    });
+    expect(post.status).toBe(201);
+    const postBody = await post.json() as { pinned: { id: string; content: string } };
+    expect(postBody.pinned.content).toBe("这是一条置顶记忆");
+    const pinnedId = postBody.pinned.id;
+
+    const get1 = await ctx.app.request(base);
+    expect(get1.status).toBe(200);
+    const get1Body = await get1.json() as { pinned: Array<{ id: string; content: string }> };
+    expect(get1Body.pinned.some((item) => item.id === pinnedId && item.content === "这是一条置顶记忆")).toBe(true);
+
+    const del = await ctx.app.request(`${base}/${pinnedId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    const delBody = await del.json() as { removed: boolean };
+    expect(delBody.removed).toBe(true);
+
+    const get2 = await ctx.app.request(base);
+    const get2Body = await get2.json() as { pinned: Array<{ id: string }> };
+    expect(get2Body.pinned.some((item) => item.id === pinnedId)).toBe(false);
+  });
+
+  it("POST content 为空或超长 → 400", async () => {
+    const ctx = createApp();
+    const base = `http://x/api/agents/a1/memory/pinned`;
+
+    const empty = await ctx.app.request(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "   " }),
+    });
+    expect(empty.status).toBe(400);
+    expect((await empty.json() as { message: string }).message).toContain("content 不能为空");
+
+    const long = await ctx.app.request(base, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "x".repeat(501) }),
+    });
+    expect(long.status).toBe(400);
+    expect((await long.json() as { message: string }).message).toContain("content 不能超过 500");
+  });
+
+  it("DELETE 不存在或不属于当前 Agent → 404", async () => {
+    const ctx = createApp();
+    // 先创建一条属于 a1 的 pinned，再用另一个不存在的 Agent 删除
+    const post = await ctx.app.request(`http://x/api/agents/a1/memory/pinned`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content: "归属校验" }),
+    });
+    const postBody = await post.json() as { pinned: { id: string } };
+    const pinnedId = postBody.pinned.id;
+
+    const missingAgent = await ctx.app.request(`http://x/api/agents/no-such-agent/memory/pinned/${pinnedId}`, { method: "DELETE" });
+    expect(missingAgent.status).toBe(404);
+
+    const missingPin = await ctx.app.request(`http://x/api/agents/a1/memory/pinned/not-exist`, { method: "DELETE" });
+    expect(missingPin.status).toBe(404);
+
+    // 清理
+    await ctx.app.request(`http://x/api/agents/a1/memory/pinned/${pinnedId}`, { method: "DELETE" });
+  });
+});

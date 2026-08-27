@@ -22,9 +22,11 @@ import {
 import type {
   ActivityFilter,
   ActivityPageResult,
+  AgentProfileView,
   ConnectionInfo,
   DesktopDataSource,
   LogsPageData,
+  MemoryAgentSettingsView,
   MemoryPageData,
   ModelOption,
   ModelRef,
@@ -40,8 +42,8 @@ import type {
 /* ---- 服务端响应的最小契约形状（对齐 web/src/lib/types.ts 与 contracts） ---- */
 
 interface AgentViewWire {
-  readonly identity: { readonly id: string; readonly name: string };
-  readonly baseColor?: { readonly persona?: string };
+  readonly identity: { readonly id: string; readonly name: string; readonly createdAt?: string };
+  readonly baseColor?: { readonly persona?: string; readonly personality?: readonly string[]; readonly replyStyle?: string };
   readonly settings?: { readonly defaultCwd?: string | null };
   readonly sessionCount?: number;
   readonly decorColor?: string;
@@ -532,6 +534,62 @@ export class IpcDataSource implements DesktopDataSource {
       `/api/agents/${encodeURIComponent(agentId)}/memory/runs/${encodeURIComponent(runId)}`,
     );
     return typeof data["report"] === "string" ? data["report"] : "（无报告内容）";
+  }
+
+  /* ---- T5：助理档案与记忆日用写操作 ---- */
+
+  async getAgentProfile(agentId: string): Promise<AgentProfileView> {
+    const view = await this.request<AgentViewWire>("GET", `/api/agents/${encodeURIComponent(agentId)}`);
+    const identity = view.identity ?? { id: agentId, name: "Agent" };
+    const baseColor = view.baseColor ?? {};
+    const settings = view.settings ?? {};
+    return {
+      id: identity.id,
+      name: identity.name,
+      createdAt: identity.createdAt ?? null,
+      persona: baseColor.persona ?? "",
+      personality: baseColor.personality ?? [],
+      replyStyle: baseColor.replyStyle ?? "",
+      workspace: settings.defaultCwd ?? null,
+      sessionCount: view.sessionCount ?? 0,
+      decorColor: view.decorColor ?? "blue",
+    };
+  }
+
+  async updateAgentProfile(agentId: string, patch: { readonly name?: string; readonly description?: string }): Promise<void> {
+    if (patch.name !== undefined) {
+      await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}`, { name: patch.name });
+    }
+    if (patch.description !== undefined) {
+      await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/base-color`, { persona: patch.description });
+    }
+  }
+
+  async getMemorySettings(agentId: string): Promise<MemoryAgentSettingsView> {
+    const data = await this.request<Record<string, unknown>>("GET", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`);
+    const settings = (data["settings"] ?? {}) as Record<string, unknown>;
+    return {
+      enabled: settings["enabled"] === true,
+      dailyRunTime: typeof settings["dailyRunTime"] === "string" ? settings["dailyRunTime"] : "03:00",
+      minIdleMinutes: typeof settings["minIdleMinutes"] === "number" ? settings["minIdleMinutes"] : 30,
+      injectBudgetChars: typeof settings["injectBudgetChars"] === "number" ? settings["injectBudgetChars"] : 2500,
+    };
+  }
+
+  async updateMemorySettings(agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void> {
+    const current = await this.request<Record<string, unknown>>("GET", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`);
+    const settings = (current["settings"] ?? {}) as Record<string, unknown>;
+    const next = { ...settings, ...patch };
+    await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`, next);
+  }
+
+  async addPinnedMemory(agentId: string, content: string): Promise<import("../mock-data.js").PinnedMemory> {
+    const data = await this.request<Record<string, unknown>>("POST", `/api/agents/${encodeURIComponent(agentId)}/memory/pinned`, { content });
+    return data["pinned"] as import("../mock-data.js").PinnedMemory;
+  }
+
+  async removePinnedMemory(agentId: string, pinnedId: string): Promise<void> {
+    await this.request("DELETE", `/api/agents/${encodeURIComponent(agentId)}/memory/pinned/${encodeURIComponent(pinnedId)}`);
   }
 
   /* ---- 日志服务端查询 / 实时跟随 ---- */

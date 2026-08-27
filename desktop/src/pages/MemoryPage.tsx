@@ -1,8 +1,10 @@
-import { RefreshCw, Search, WandSparkles } from "lucide-react";
+import { RefreshCw, Search, WandSparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { DesktopDataSource, MemoryPageData } from "../data/source.js";
 import { maintenanceLabel, type Agent, type MemoryMaintenance } from "../mock-data.js";
+
+import "./MemoryPage.local.css";
 
 const compiledSections = [
   ["today", "今天"],
@@ -39,6 +41,8 @@ export function MemoryPage({ source, agent }: MemoryPageProps) {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [maintenance, setMaintenance] = useState<MemoryMaintenance | null>(null);
   const [report, setReport] = useState<string | null>(null);
+  const [newPinned, setNewPinned] = useState("");
+  const [pinnedBusy, setPinnedBusy] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query), 400);
@@ -98,6 +102,44 @@ export function MemoryPage({ source, agent }: MemoryPageProps) {
     source.getMemoryRunReport(agent.id, maintenance.runId)
       .then(setReport)
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "报告加载失败"));
+  };
+
+  const refreshPinned = async () => {
+    const next = await source.getMemoryData(agent.id);
+    setData((current) => (current === null ? current : { ...current, pinned: next.pinned }));
+  };
+
+  const addPinned = async () => {
+    const content = newPinned.trim();
+    if (content === "") return;
+    if (content.length > 500) {
+      setError("置顶记忆不能超过 500 个字符");
+      return;
+    }
+    setPinnedBusy(true);
+    setError(null);
+    try {
+      await source.addPinnedMemory(agent.id, content);
+      await refreshPinned();
+      setNewPinned("");
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "置顶添加失败");
+    } finally {
+      setPinnedBusy(false);
+    }
+  };
+
+  const removePinned = async (pinnedId: string) => {
+    setPinnedBusy(true);
+    setError(null);
+    try {
+      await source.removePinnedMemory(agent.id, pinnedId);
+      await refreshPinned();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "置顶删除失败");
+    } finally {
+      setPinnedBusy(false);
+    }
   };
 
   return (
@@ -177,13 +219,37 @@ export function MemoryPage({ source, agent }: MemoryPageProps) {
           <div className="two-col">
             <section className="page-section">
               <h2>置顶记忆<small>{data.pinned.length}</small></h2>
-              <div className="plain-list">
+              <div className="plain-list memory-pinned-list">
                 {data.pinned.map((item) => (
-                  <div className="plain-list-item" key={item.id}>
+                  <div className="plain-list-item memory-pinned-item" key={item.id}>
                     <div className="static-row"><span>{item.content}</span><small>{formatTime(item.createdAt)}</small></div>
+                    <button
+                      type="button"
+                      className="icon-btn memory-pinned-delete"
+                      aria-label="删除置顶"
+                      title="删除置顶"
+                      disabled={pinnedBusy}
+                      onClick={() => void removePinned(item.id)}
+                    >
+                      <X size={13} />
+                    </button>
                   </div>
                 ))}
                 {data.pinned.length === 0 && <p className="page-empty">暂无置顶记忆</p>}
+              </div>
+              <div className="memory-add-pinned">
+                <input
+                  type="text"
+                  placeholder="添加一条置顶记忆…"
+                  value={newPinned}
+                  onChange={(event) => setNewPinned(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") void addPinned(); }}
+                  disabled={pinnedBusy}
+                  maxLength={500}
+                />
+                <button type="button" className="btn" disabled={pinnedBusy || newPinned.trim() === ""} onClick={() => void addPinned()}>
+                  添加
+                </button>
               </div>
             </section>
             <section className="page-section">

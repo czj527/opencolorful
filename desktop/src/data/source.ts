@@ -16,6 +16,27 @@ import type {
 } from "../mock-data.js";
 import type { ChatSnapshot } from "./projector.js";
 
+/** T5：助理档案页聚合视图 */
+export interface AgentProfileView {
+  readonly id: string;
+  readonly name: string;
+  readonly createdAt: string | null;
+  readonly persona: string;
+  readonly personality: readonly string[];
+  readonly replyStyle: string;
+  readonly workspace: string | null;
+  readonly sessionCount: number;
+  readonly decorColor: string;
+}
+
+/** T5：记忆设置入口只暴露最常用的字段（完整对象在 IPC 实现中与远端合并） */
+export interface MemoryAgentSettingsView {
+  readonly enabled: boolean;
+  readonly dailyRunTime: string;
+  readonly minIdleMinutes: number;
+  readonly injectBudgetChars: number;
+}
+
 export interface ConnectionInfo {
   readonly mode: "ipc" | "mock";
   readonly connected: boolean;
@@ -220,6 +241,14 @@ export interface DesktopDataSource {
   subscribeMemoryMaintenance(agentId: string, handler: (maintenance: MemoryMaintenance) => void): () => void;
   deepDiveMemory(agentId: string): Promise<void>;
   getMemoryRunReport(agentId: string, runId: string): Promise<string>;
+
+  /* T5：助理档案与记忆日用写操作 */
+  getAgentProfile(agentId: string): Promise<AgentProfileView>;
+  updateAgentProfile(agentId: string, patch: { readonly name?: string; readonly description?: string }): Promise<void>;
+  getMemorySettings(agentId: string): Promise<MemoryAgentSettingsView>;
+  updateMemorySettings(agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void>;
+  addPinnedMemory(agentId: string, content: string): Promise<PinnedMemory>;
+  removePinnedMemory(agentId: string, pinnedId: string): Promise<void>;
 
   /* 日志 */
   getLogsData(): Promise<LogsPageData>;

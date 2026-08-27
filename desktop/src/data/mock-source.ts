@@ -28,7 +28,8 @@ import {
   type LiveEnvelope,
   type ProjectorState,
 } from "./projector.js";
-import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryPageData, ModelOption, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
+import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
+import type { AgentProfileView } from "./source.js";
 
 interface MockSession {
   readonly projector: ProjectorState;
@@ -54,6 +55,25 @@ export class MockDataSource implements DesktopDataSource {
   private currentAgentName = agents[0]?.name ?? "Agent";
   private mockConfirmed = false;
   private mockToolMode = "all";
+  private mockMemorySettings: MemoryAgentSettingsView = {
+    enabled: true,
+    dailyRunTime: "03:00",
+    minIdleMinutes: 30,
+    injectBudgetChars: 2500,
+  };
+  private mockPinned: import("../mock-data.js").PinnedMemory[] = [...memoryPinned];
+  private mockProfile: AgentProfileView = {
+    id: "yuan",
+    name: "原",
+    createdAt: "2026-07-20T10:00:00+08:00",
+    persona: "在代码、记忆与长期计划之间保持连续性。",
+    personality: ["沉稳", "连续", "克制"],
+    replyStyle: "简洁、直接，先理解再动手。",
+    workspace: "D:\\PI-study\\opencolorful",
+    sessionCount: 12,
+    decorColor: "green",
+  };
+  private pinnedIdCounter = 0;
 
   setActiveAgentName(name: string) {
     this.currentAgentName = name;
@@ -204,7 +224,7 @@ export class MockDataSource implements DesktopDataSource {
       compiled: memoryCompiled,
       facts: memoryFacts,
       events: memoryEvents,
-      pinned: memoryPinned,
+      pinned: this.mockPinned,
       health: memoryHealth,
       timelineFacts: memoryTimelineFacts,
       timelineEvents: memoryTimelineEvents,
@@ -338,6 +358,43 @@ export class MockDataSource implements DesktopDataSource {
 
   getMemoryRunReport(): Promise<string> {
     return Promise.resolve("## 后台整理报告（mock）\n\n- 核对事实 3 条，无冲突\n- 合并相近记忆 1 组\n- 强度提案 0 条待审批");
+  }
+
+  /* ---- T5：助理档案与记忆日用写操作（mock） ---- */
+
+  getAgentProfile(): Promise<AgentProfileView> {
+    return Promise.resolve(this.mockProfile);
+  }
+
+  async updateAgentProfile(_agentId: string, patch: { readonly name?: string; readonly description?: string }): Promise<void> {
+    this.mockProfile = {
+      ...this.mockProfile,
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.description !== undefined ? { persona: patch.description } : {}),
+    };
+  }
+
+  getMemorySettings(): Promise<MemoryAgentSettingsView> {
+    return Promise.resolve(this.mockMemorySettings);
+  }
+
+  async updateMemorySettings(_agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void> {
+    this.mockMemorySettings = { ...this.mockMemorySettings, ...patch };
+  }
+
+  async addPinnedMemory(_agentId: string, content: string): Promise<import("../mock-data.js").PinnedMemory> {
+    this.pinnedIdCounter += 1;
+    const item: import("../mock-data.js").PinnedMemory = {
+      id: `pin-mock-${this.pinnedIdCounter}`,
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    this.mockPinned.unshift(item);
+    return item;
+  }
+
+  async removePinnedMemory(_agentId: string, pinnedId: string): Promise<void> {
+    this.mockPinned = this.mockPinned.filter((item) => item.id !== pinnedId);
   }
 
   /* ---- 日志服务端查询 / 实时跟随（mock） ---- */
