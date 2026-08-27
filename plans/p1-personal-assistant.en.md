@@ -23,8 +23,24 @@ Missing pieces this slice must build:
 
 - Native directory picker for Electron (`dialog.showOpenDialog` via preload), replacing the web-oriented `/api/directories/pick` flow in desktop UX
 - Onboarding wizard shell + step pages (all UI, consuming the endpoints above)
-- Assistant identity surfaces (sidebar card, session header) — data already available, presentation only
+- Assistant ID-card identity surface (sidebar card → profile page) + sidebar session grouping — data already available, presentation + edit affordances (design input §2a)
 - Error-recovery copy pass across onboarding/chat/memory/settings paths
+
+## 2a. Design Input (2026-08-27, author)
+
+Absorbed from the author's Kimi Code web / openhanako usage experience; spec §二补 is authoritative for product wording. Absorb decisions, do not copy.
+
+In this slice:
+
+- **Assistant ID card**: sidebar card (name, base color, real-time status) → click opens profile page (identity / persona / memory). Card form = human-fixed (author-specified); profile-page information architecture = agent-recommends, PR review.
+- **Sidebar session grouping**: inspired by Kimi Code's 进行中/已完成, group threads by active (streaming) / recent / archived = agent-recommends.
+- **Real-state honesty constraint**: card status is driven only by real runtime state (idle / thinking / tool-running / offline). No fabricated "mood". Aliveness comes from real state and real memory, not performance = human-fixed.
+
+Slice-2 backlog (recorded, not committed):
+
+- Background-task / progress visibility near composer (background bash, background subagents, compaction progress) — needs event-projection design;
+- openhanako-style mood / surfing persona states — pending honesty review against the real-state constraint;
+- Compaction visibility in the timeline (`/compact` command exists; projection missing).
 
 ## 3. Tasks & Dependency Graph
 
@@ -34,12 +50,12 @@ T0 (main agent, serial)  →  T2 (lane B)  →  T1 (lane A) ┐
 pg-2: T4 (lane D) ∥ T5 (lane E) ∥ T6 (lane F)  — independent of T0/T2, disjoint files
 ```
 
-- **T0 — Shared scaffolding (main agent, serial).** `serial_reason`: T1 and T3 both register UI entry points in `desktop/src/App.tsx` / sidebar; the route/state skeleton must land first to keep lanes disjoint. Scope: onboarding route + first-run detection hook (`useFirstRun`: no agents or no credential-configured provider), empty-state entry points.
+- **T0 — Shared scaffolding (main agent, serial).** `serial_reason`: T1, T3, T4 and T5 all register UI entry points in `desktop/src/App.tsx` / sidebar; the route/state skeleton must land first to keep lanes disjoint. Scope: onboarding route + first-run detection hook (`useFirstRun`: no agents or no credential-configured provider), empty-state entry points, agent-profile page route stub.
 - **T1 — Onboarding wizard (lane A).** Depends on T0, T2. Four steps: create assistant (name + base-color template) → configure provider → pick working directory → plain-language permission explainer; lands in first conversation. Onboarding UX and interaction details owned by main agent (UI aesthetics per division of labor); mechanical form wiring may be delegated.
 - **T2 — Native directory picker (lane B).** Depends on nothing. `dialog.showOpenDialog` in Electron main, exposed through preload on `desktopApi`; fallback to manual path input outside Electron. IPC path validation stays within existing main-process rules.
 - **T3 — D1b full new-session form (lane C).** Depends on T0, T2. Align with web session-new: title / cwd / agent / toolMode / thinking / model / workspace.
-- **T4 — Assistant identity surfaces (lane D).** Independent. Sidebar assistant card + session header: name, base-color summary, runtime state. Presentation only.
-- **T5 — Memory daily-use surfaces (lane E).** Independent. Memory page: pinned list with add/remove, memory settings entry. Read paths already wired in desktop; this adds the write affordances.
+- **T4 — Assistant ID card + sidebar grouping (lane D).** Independent. Sidebar: ID-card style assistant card (name, base-color summary, real runtime status per §2a honesty constraint) + thread grouping (active / recent / archived). Owns `Sidebar.tsx` and the new `AgentCard` component; exposes an `onOpenAssistantProfile` entry consumed by T5's profile page (T0 registers the route).
+- **T5 — Agent profile page + memory daily-use (lane E).** Independent. New `AgentProfilePage`: identity / base-color display + memory pinned add/remove + memory settings entry (openhanako-style direct editing against real endpoints). Owns the new page and `MemoryPage.tsx` pinned affordances; reached via T4's card entry and T0's route stub.
 - **T6 — Error-recovery copy pass (lane F).** Independent. Audit provider-unconfigured, credential-invalid, 409 session-busy, offline/disconnect paths across onboarding/chat/memory/settings; every failure state gets a readable Chinese message + next action. No raw provider error text.
 
 ### Briefs
@@ -52,6 +68,8 @@ Each task brief follows `docs/development.md` §4 (role / read_first / owns / fo
 - Memory pin/correct affordance UX: **agent-recommends**
 - Error copy wording (Chinese, no raw provider errors): **agent-recommends**
 - Visual direction (minimal, dual light/dark theme, established 2026-08-21 desktop redesign): **human-fixed**
+- ID-card form; real-state-only status, no fabricated mood: **human-fixed** (design input §2a)
+- Sidebar session grouping; profile-page information architecture: **agent-recommends**
 - New dependencies: none allowed without spec amendment (**human-fixed**, spec §四)
 
 ## 4. Quality Gates
@@ -72,5 +90,7 @@ Per `AGENTS.md` — every gate run separately before merge. Risk-driven matrix (
 - [ ] `npm run check` green; desktop real-backend manual acceptance recorded in `plans/desktop-e2e-test-plan.md`
 
 ## Implementation Log
+
+- 2026-08-27: Author design input absorbed (Kimi Code sidebar grouping, openhanako profile/mood, ID-card assistant surface) → spec §二补 + plan §2a; T0/T4/T5 rescoped; slice-2 backlog recorded, not committed.
 
 (filled during execution: dispatches, commits, verification evidence, deviations)
