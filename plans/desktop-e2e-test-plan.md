@@ -150,6 +150,7 @@
 | 五 | 2026-08-21 | #11 看门狗实现 + G1b 回归 | coder 实现退避看门狗（主会话复核后补收养期望态初始化盲区）→ 主会话复核 diff、质量门重跑（tsc 0 / PI 边界 0 / supervisor 24/24）→ 重启 supervisor 加载新代码 → G1b：taskkill agent server 后 ~12s 自动恢复 online（收养慢路径），watchdog 字段透出 consecutiveFailures=1，无人工干预 | #11 关闭 |
 | 六 | 2026-08-22 | P1a 实施（#1/#2/#4 + unarchive//compact）+ 全链路回归 | 后端包（agent-36）+ 桌面包 A（agent-37）均因子智能体模型配额 403 中断，主会话接手核实落盘、修 `session-rename.test.ts` 类型错误（PiSessionHandle 无 title getter，改读 JSONL 文件断言）；质量门全绿（tsc 0 / PI 边界 0 / vitest 2093 通过，1 个插件并行时序 flake 隔离复跑通过、与本 diff 无关）；desktop build 绿；API 回归 17/17（`.tmp/p1a/regression.py`）；Electron 真实链路 11/11（`.tmp/e2e/p1a/run.mjs`：横幅出现→确认解锁写工具、行内改名双写 JSONL+索引、/compact 409 友好提示且不作消息发出、归档折叠区+UI 恢复回活跃列表） | #1 关闭（按设计）；#2 关闭；#4 关闭 |
 | 七 | 待执行（随 P1 切片 1 验收） | I 组（T0-T6：onboarding/身份证卡/档案页/错误文案） | 用例已建档（I1-I14），待作者真实后端执行 | — |
+| 八 | 待执行（随 P1 切片 1.5 落地后） | I 组回归（I7 按会话中心 IA 改写）+ 切片 1.5 验证（流畅度/零死控件/IA 自洽/环境坑消除） | 切片 1.5 规格 `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md` 已立项待批准 | — |
 
 **总计：50 PASS / 5 FAIL / 4 SKIP（BLOCKED-ENV 已全部消除）**
 **FAIL 处置：A2→#1（按设计关闭：维持首发消息才落库+草稿文案）、A7→#2（已修复回归通过）、G1b→#11（已修复回归通过）、H3/H7→#13（已修复回归通过）；B4→#4（已修复回归通过，横幅转正）**
@@ -196,6 +197,10 @@
 | 14 | **高** | 工具执行环境未就绪：子代理文件工具报 "executor not ready"；根因=`subagent-tools-context.ts` 的 abilityExecutors 模块私有 Map 未跨 jiti/native 加载器共享（同文件 state 已锚定 globalThis，它漏了）。附：父会话 bash 报 "OS sandbox not yet available"（sandbox-extension.ts:223）是 OS 沙箱未实现的既定限制，非本缺陷 | H 组首轮 + 主会话 probe | **已修复并回归通过（2026-08-21）**：abilityExecutors 迁入 globalThis Symbol.for 锚定（含旧状态兼容补齐）。回归：子代理持 read+[find,ls] 能力真实列目录（枚举出 components/data/pages），mailbox delivered，主 Agent 报对数字 2 |
 | 15 | ~~中~~ | **误报，已撤回（2026-08-21 主会话复核）**：H 组自己的截图 H1-01/H1-03 清晰显示实时工具卡片"27/10 个工具已完成"（meta"完成"=实时投影，非历史）；主会话实验证实服务端 tool.* 事件流正常（started/delta/completed 同 streamId）、历史卡片渲染正常、SSE 路由与桌面投影链路无过滤 | H1 NOTE | 无需修复；desktop 工具卡片投影链路（实时+历史）确认健康 |
 | 16 | 低 | 主 Agent 不检查 wait 返回的 status 便自行编造结果（报 64 vs 真值 2）——wait_subagent 文档明确要求检查 status | H3 | 系统提示/模型行为风险，随 #13 修复后观察是否缓解 |
+| 17 | **高** | 设置页死控件 25 个（设置页 24 + 侧栏 1）：9 个后端端点已存在但未接线、3 个本地显示偏好误当后端功能、13 个概念错位或功能不存在 | 作者真实初测 2026-08-27 | **切片 1.5 T8 处置**：设置页极简重构为四类目（外观/模型与 Provider/对话显示/关于），Agent 与记忆编辑归档案页，无后端支撑的不保留尸体；审计清单见 `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md` §一 |
+| 18 | **高** | SSE 流式渲染卡顿：每 token = 1 SSE → 1 IPC → projector O(n) 全量重建 → App 顶层 setState → 整树重渲染，无节流/memo/虚拟化 | 作者真实初测 2026-08-27 | **切片 1.5 T7 处置**：事件合批节流 + projector O(1) 索引 + 组件 memo + 聊天状态下沉；根因链路与代码证据见切片 1.5 规格 §一 |
+| 19 | 中 | IA 混乱：左上角助理卡片语义不明（侧栏切换助理只过滤列表，新建会话却要再选一次），"当前助理"是半个概念 | 作者真实初测 2026-08-27 | **切片 1.5 T9 处置（作者拍板 D1）**：去全局助理概念，会话中心 IA——会话行 badge 标识所属助理、卡片移至会话头部、新建默认最近使用助理（参考 openhanako） |
+| 20 | 中 | 后端未连接时桌面端静默回退 mock，无醒目提示（以为在测真链路实际在点假数据）；`supervisor start` 不自动拉起 agent server（期望态 stopped，须手动 POST /api/supervisor/start） | 2026-08-27 排查作者"后端起不来"时发现 | **切片 1.5 处置**：T9 加 mock 醒目横幅；T11 supervisor start 期望态改为拉起 agent server |
 
 ## 6. 遗留与后续
 
