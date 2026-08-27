@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Timeline } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
+import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
 import { Sidebar, SidebarRail } from "./components/Sidebar.js";
 import { Titlebar, type PageId } from "./components/Titlebar.js";
@@ -19,9 +20,11 @@ import {
   type SessionUsageView,
 } from "./data/source.js";
 import type { Agent, Thread, TimelineItem } from "./mock-data.js";
+import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
 import { LogsPage } from "./pages/LogsPage.js";
 import { useTheme } from "./theme.js";
+import { useFirstRun } from "./use-first-run.js";
 
 const NEW_THREAD = "new";
 
@@ -63,6 +66,9 @@ export function App() {
   const touchedToolMode = useRef(false);
   // 连接状态（台账 #12）：数据源探活/请求结果驱动，断线时 Titlebar 离线指示
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+  // T0 首启检测：无 Agent 或无已配置凭据的 Provider → 自动进入引导（可退出；状态派生自后端，不落库）
+  const firstRun = useFirstRun(source);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
   // 启动：探测真实后端（IPC 桥），不可达回退 mock
   useEffect(() => {
@@ -385,6 +391,19 @@ export function App() {
     );
   }
 
+  // 显式进入（空态入口）或首启自动进入；退出后本次运行内不再自动弹出
+  const showOnboarding = page === "onboarding" || (firstRun.status === "first-run" && !onboardingDismissed);
+
+  function enterOnboarding() {
+    setOnboardingDismissed(false);
+    setPage("onboarding");
+  }
+
+  function exitOnboarding() {
+    setOnboardingDismissed(true);
+    setPage("chat");
+  }
+
   const activeThread = threads.find((thread) => thread.id === threadId);
   const isNewThread = threadId === NEW_THREAD;
   const chatTitle = isNewThread ? "新会话" : activeThread?.title ?? "会话";
@@ -416,6 +435,9 @@ export function App() {
         streaming={streaming}
         connection={connection ?? source.info}
       />
+      {showOnboarding ? (
+        <OnboardingPage onExit={exitOnboarding} />
+      ) : (
       <div className="app-body">
         {sidebarCollapsed ? (
           <SidebarRail
@@ -440,6 +462,7 @@ export function App() {
             onUnarchiveThread={unarchiveThread}
             onCollapse={() => setSidebarCollapsed(true)}
             onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAssistantProfile={() => setPage("profile")}
           />
         )}
         <main className="main">
@@ -469,7 +492,8 @@ export function App() {
                     {activeAgent === undefined ? (
                       <>
                         <h1>还没有可用的 Agent</h1>
-                        <p className="page-empty">请先在 Web 运维面（4311）创建 Agent，再回到桌面端。</p>
+                        <p className="page-empty">跟随引导创建你的第一个助理并接入模型，两分钟即可开始对话。</p>
+                        <button type="button" className="btn btn-primary" onClick={enterOnboarding}>开始引导</button>
                       </>
                     ) : (
                       <>
@@ -542,6 +566,9 @@ export function App() {
             <div className="page-scroll"><MemoryPage source={source} agent={activeAgent} /></div>
           )}
           {page === "logs" && <div className="page-scroll"><LogsPage source={source} /></div>}
+          {page === "profile" && activeAgent !== undefined && (
+            <div className="page-scroll"><AgentProfilePage agent={activeAgent} /></div>
+          )}
         </main>
         {page === "chat" && dock !== null && (
           <Dock
@@ -556,6 +583,7 @@ export function App() {
           />
         )}
       </div>
+      )}
       {settingsOpen && (
         <SettingsModal
           category={settingsCategory}
