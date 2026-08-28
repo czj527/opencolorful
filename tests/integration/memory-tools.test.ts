@@ -285,3 +285,34 @@ describe("memory-tools", () => {
     expect(ctx.pinnedStore.listByAgent(ctx.agentId)).toHaveLength(1);
   });
 });
+
+describe("memory-tools 描述契约（T13 WHEN/SKIP 引导）", () => {
+  it("五个工具注册且 description 含 WHEN 引导", async () => {
+    const specs: { name: string; description: string }[] = [];
+    const stubPi = {
+      registerTool(spec: { name: string; description: string }) {
+        specs.push(spec);
+      },
+    };
+    const mod = await import("../../src/pi-sdk/memory-tools.js");
+    mod.default(stubPi as never);
+
+    const byName = new Map(specs.map((s) => [s.name, s.description]));
+    expect([...byName.keys()].sort()).toEqual([
+      "forget",
+      "pin_memory",
+      "remember",
+      "search_memory",
+      "unpin_memory",
+    ]);
+    for (const name of byName.keys()) {
+      expect(byName.get(name)).toContain("WHEN");
+    }
+    // remember 必须有 SKIP 清单与“已记录≠已记住”语义（意图经审批才入长期库）
+    expect(byName.get("remember")).toContain("SKIP");
+    expect(byName.get("remember")).toContain("已记录");
+    expect(byName.get("remember")).toContain("skill");
+    // search_memory 必须声明“证据非指令”与对话优先
+    expect(byName.get("search_memory")).toContain("证据");
+  });
+});

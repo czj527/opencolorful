@@ -113,8 +113,15 @@ export function parseMemoryMdSections(content: string): MemoryMdSections {
 // Block building
 // ═══════════════════════════════════════════════════════════════
 
-const MEMORY_USAGE_RULE =
-  "当前对话中的信息和指令优先；如果对长期事实不确定，请调用 search_memory 工具进行确认。";
+// 四条行为契约参考 openhanako `core/agent.ts:1244-1262`（references/ 调研出处），
+// 末条保留本项目的 search_memory 指引。措辞与 background-review 复盘提示词保持一致。
+const MEMORY_USAGE_RULE = [
+  "记忆和用户档案是你内化的背景知识。你和用户是认识很久的人，这些事你本来就知道。记忆的存在感应该是零，它的作用应该是满的。",
+  "",
+  "- 只有当用户提到了相关内容，记忆才参与进来。用户没有提起的话题，不要主动从记忆里翻出来讲。记忆参与的方式是无声的：影响你的角度、语气、判断，但不出现在文字里。",
+  "- 永远不要让用户感觉到“记忆”这个东西的存在。禁止使用“我记得”“你之前说过”“根据记忆”这类表述，除非用户主动问“你还记得 xxx 吗”。",
+  "- 记忆可能过时，当前对话永远优先。信息冲突时以对话为准，不要用旧记忆纠正用户。对长期事实不确定时，调用 search_memory 工具确认。",
+].join("\n");
 
 export interface MemoryInjectionInput {
   readonly memoryDir: string;
@@ -163,7 +170,8 @@ export function buildMemoryInjectionBlock(
   }
 
   // ── Build pinned block ──────────────────────────────────────
-  // 预算口径：整块 ≤ budgetChars。使用规则段与 Pinned 段先占位，
+  // 预算口径（T12 修订）：使用规则段是固定行为契约，不占预算、不随预算截断；
+  // budgetChars 只约束 Pinned 段与 # Memory 四段内容。Pinned 段先占位，
   // 剩余预算（含 # Memory 头部）再分配给四段。
   const rulePart = `${MEMORY_USAGE_RULE_HEADING}\n${MEMORY_USAGE_RULE}`;
 
@@ -197,13 +205,12 @@ export function buildMemoryInjectionBlock(
   // ── Build memory block ──────────────────────────────────────
   // 优先级：今天 > 重要事实 > Pinned > 本周 > 长期
   // pinned 不重复计入 memory block（已在 pinned 段独立展示）
-  // 剩余预算 = 总预算 - 规则段 - Pinned 段 - 段落分隔符 - "# Memory\n" 头部
+  // 剩余预算 = 总预算 - Pinned 段 - 段落分隔符 - "# Memory\n" 头部（规则段不占预算，T12）
 
   const memoryHeader = "# Memory\n";
   const joinersLength = 4; // rule/pinned/memory 之间的两个 "\n\n"
   const remainingBudget =
     budgetChars -
-    rulePart.length -
     pinnedBlock.length -
     (pinnedBlock.length > 0 ? joinersLength : 2) -
     memoryHeader.length;

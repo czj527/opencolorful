@@ -67,6 +67,25 @@ describe("buildMemoryInjectionBlock", () => {
     expect(result!.revision).toHaveLength(12);
   });
 
+  it("injects the four-clause memory usage contract (T12)", () => {
+    const memoryDir = createMemoryDir();
+    const md = [
+      `## ${MEMORY_MD_SECTION_TITLES.today}`,
+      "今天讨论了部署方案。",
+    ].join("\n");
+    fs.writeFileSync(path.join(memoryDir, "memory.md"), md, "utf8");
+
+    const result = buildMemoryInjectionBlock({ memoryDir, pinned: [] });
+    expect(result).toBeDefined();
+    const block = result!.block;
+    // 四条契约：内化背景知识 / 不提不翻 / 禁止“我记得”类表述 / 当前对话优先
+    expect(block).toContain("内化的背景知识");
+    expect(block).toContain("不要主动从记忆里翻出来讲");
+    expect(block).toContain("禁止使用“我记得”");
+    expect(block).toContain("当前对话永远优先");
+    expect(block).toContain("search_memory");
+  });
+
   it("includes pinned memories with independent budget", () => {
     const memoryDir = createMemoryDir();
     const pinned = [
