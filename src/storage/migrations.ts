@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -882,6 +882,35 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
 
       database.prepare("UPDATE schema_version SET version = 12").run();
     })();
+  }
+
+  if (current < 13) {
+    // T14：memory_journal.actor 放开 'background_review'（后台复盘产出的意图）。
+    // SQLite CHECK 约束不可 ALTER，走标准表重建：建新表 → 拷贝 → 换名 → 重建索引。
+    database.exec(`
+      CREATE TABLE memory_journal_v13 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        actor TEXT NOT NULL CHECK (actor IN ('user','main_agent','memory_agent','system','background_review')),
+        intent_type TEXT NOT NULL CHECK (intent_type IN ('remember','forget','pin','unpin','supersede','merge','suppress','restore')),
+        target_type TEXT NOT NULL CHECK (target_type IN ('fact','event','session','memory')),
+        target_id TEXT,
+        payload TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending','approved','rejected','applied','revoked')),
+        created_at TEXT NOT NULL,
+        applied_at TEXT,
+        priority INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO memory_journal_v13
+        SELECT id, agent_id, actor, intent_type, target_type, target_id, payload, status, created_at, applied_at, priority
+        FROM memory_journal;
+      DROP TABLE memory_journal;
+      ALTER TABLE memory_journal_v13 RENAME TO memory_journal;
+      CREATE INDEX IF NOT EXISTS idx_memory_journal_agent_status ON memory_journal(agent_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_journal_agent_priority ON memory_journal(agent_id, priority, status, created_at);
+    `);
+    database.prepare("UPDATE schema_version SET version = 13").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

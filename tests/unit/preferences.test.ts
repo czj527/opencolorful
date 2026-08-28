@@ -346,11 +346,24 @@ describe("preferences memory section (Phase 10.5)", () => {
       defaults: defaultPreferences().defaults,
       layout: defaultPreferences().layout,
       appearance: defaultPreferences().appearance,
-      memory: { enabled: true, utilityProviderId: "openai", utilityModel: "gpt-4o-mini", deepDiveMode: "script", dailyRunTime: "04:00", minIdleMinutes: 45, weeklyReviewDay: 1, weeklyReviewTime: "04:30", turnsPerSummary: 12, injectBudgetChars: 3000, retentionThresholds: { mediumUp: 50, mediumDown: 40, permanentUp: 90 } },
+      memory: { enabled: true, utilityProviderId: "openai", utilityModel: "gpt-4o-mini", deepDiveMode: "script", dailyRunTime: "04:00", minIdleMinutes: 45, weeklyReviewDay: 1, weeklyReviewTime: "04:30", turnsPerSummary: 12, injectBudgetChars: 3000, reviewEnabled: true, retentionThresholds: { mediumUp: 50, mediumDown: 40, permanentUp: 90 } },
     });
     expect(prefs.memory?.dailyRunTime).toBe("04:00");
     expect(prefs.memory?.utilityProviderId).toBe("openai");
     expect(prefs.memory?.retentionThresholds.permanentUp).toBe(90);
+  });
+
+  it("legacy memory section without reviewEnabled migrates with default true (T14)", () => {
+    const prefs = normalizePreferences({
+      version: 1,
+      defaults: defaultPreferences().defaults,
+      layout: defaultPreferences().layout,
+      appearance: defaultPreferences().appearance,
+      memory: { enabled: true, utilityProviderId: "openai", utilityModel: null, deepDiveMode: "script", dailyRunTime: "04:00", minIdleMinutes: 45, weeklyReviewDay: 1, weeklyReviewTime: "04:30", turnsPerSummary: 12, injectBudgetChars: 3000, retentionThresholds: { mediumUp: 50, mediumDown: 40, permanentUp: 90 } },
+    });
+    // 缺 reviewEnabled 的旧段落不应整段回退：保留用户定制，只补新字段默认值
+    expect(prefs.memory?.dailyRunTime).toBe("04:00");
+    expect(prefs.memory?.reviewEnabled).toBe(true);
   });
 
   it("invalid memory section falls back to global defaults", () => {

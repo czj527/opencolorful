@@ -79,6 +79,7 @@ export class MockDataSource implements DesktopDataSource {
     dailyRunTime: "03:00",
     minIdleMinutes: 30,
     injectBudgetChars: 2500,
+    reviewEnabled: true,
   };
   private mockPinned: import("../mock-data.js").PinnedMemory[] = [...memoryPinned];
   // T1：可变 agents 列表（onboarding createAgent 会追加；静态 fixture 保持不变）
