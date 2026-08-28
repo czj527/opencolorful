@@ -12,9 +12,10 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import type { ChatEvent, ChatMessage, EventKind, TimelineItem } from "../mock-data.js";
+import { useLocalPrefs } from "../data/local-prefs.js";
 import type { DesktopDataSource } from "../data/source.js";
 
 const eventIcons: Record<EventKind, LucideIcon> = {
@@ -202,6 +203,7 @@ interface ChatViewProps {
  */
 export function ChatView({ source, threadId, onOpenDiff, onStreamingChange }: ChatViewProps) {
   const [items, setItems] = useState<readonly TimelineItem[]>([]);
+  const prefs = useLocalPrefs();
 
   useEffect(() => {
     if (threadId === NEW_THREAD) {
@@ -215,5 +217,13 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange }: Ch
     });
   }, [source, threadId, onStreamingChange]);
 
-  return <Timeline items={items} onOpenDiff={onOpenDiff} />;
+  // 设置 → 对话显示：仅过滤本地渲染，不影响事件流与回放数据
+  const visible = useMemo(() => items.filter((item) => {
+    if (item.type !== "event") return true;
+    if (!prefs.showThinking && item.kind === "thinking") return false;
+    if (!prefs.showToolCalls && item.kind === "tool") return false;
+    return true;
+  }), [items, prefs.showThinking, prefs.showToolCalls]);
+
+  return <Timeline items={visible} onOpenDiff={onOpenDiff} />;
 }

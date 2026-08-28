@@ -546,6 +546,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .segmented button { height: 22px; padding: 0 10px; border-radius: 4px; color: var(--text-2); font-size: 11.5px; }
 .segmented button:hover { color: var(--text); }
 .segmented button.is-active { background: var(--bg); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.setting-select { height: 26px; max-width: 240px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text-2); font-size: 11.5px; }
+.setting-select:focus { outline: none; border-color: var(--accent); }
+.setting-select:disabled { opacity: 0.6; }
+.setting-note { margin: 6px 2px 0; color: var(--text-3); font-size: 11px; }
+.setting-note.is-error { color: var(--err); }
 
 /* ---------- motion & misc ---------- */
 .boot-screen { height: 100%; display: grid; place-items: center; color: var(--text-3); font-size: 12px; }
@@ -577,4 +582,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+/* 设置 → 外观 → 减少动效（T8）：与系统级 media query 等价的应用内开关 */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }

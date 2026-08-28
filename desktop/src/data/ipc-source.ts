@@ -548,6 +548,10 @@ export class IpcDataSource implements DesktopDataSource {
     };
   }
 
+  async updatePreferences(patch: { defaults: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string } }): Promise<void> {
+    await this.request("PUT", "/api/settings/preferences", patch);
+  }
+
   async getSessionUsage(sessionId: string): Promise<SessionUsageView> {
     const data = await this.request<Record<string, unknown>>("GET", `/api/sessions/${encodeURIComponent(sessionId)}/usage`);
     const totals = (data["totals"] ?? {}) as Record<string, unknown>;
