@@ -27,6 +27,7 @@
 | `plans/g1-repo-convergence.md` | G1 仓库收敛与 Desktop 优先计划 | 涉及前端归属、文档结构、编号时读 |
 | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md` | P1 切片 1 规格（个人助理首个垂直切片） | 做 P1 功能时必读 |
 | `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md` | P1 切片 1.5 规格（可用性攻坚：会话中心 IA/设置页极简/SSE 性能） | 做 P1 功能时必读 |
+| `docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md` | P1 切片 1.75 规格（记忆激活：行为契约/工具引导/后台复盘/闭环实证） | 做记忆功能时必读 |
 | `plans/desktop-parity.md` | 桌面全能力对齐（D 波次，已并入 P1） | 做桌面功能时读 |
 | `docs/ci-cd.md` | GitHub Actions、分支保护和发布流程 | 修改 CI/CD 或准备发布时读 |
 | `plans/README.md` | 计划生命周期、状态词和完成标准 | 创建或接续计划时读 |
