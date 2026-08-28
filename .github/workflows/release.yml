@@ -1,0 +1,62 @@
+name: Release
+
+# G2 T3：桌面端发布。tag v* 触发 → 构建 Windows NSIS → draft GitHub Release（含 latest.yml
+# 更新元数据，electron-updater 的 feed）。workflow_dispatch 用于不发版的打包验证（产物传 artifacts）。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Use Node.js 22.19.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      # tag 版本必须与 desktop/package.json 一致（发布版本唯一来源），不一致 fail fast
+      - name: Guard tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./desktop/package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag 与 desktop/package.json 版本 $pkg 不一致，先运行 scripts/bump-desktop-version.mjs"
+            exit 1
+          fi
+      - name: Pack desktop (build → stage → native rebuild → NSIS)
+        run: npm run desktop:pack
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          ls desktop/release/bundles/
+          test -f desktop/release/bundles/latest.yml || { echo "latest.yml 缺失，更新 feed 不可用"; exit 1; }
+          ls desktop/release/bundles/*.exe > /dev/null || { echo "NSIS 安装器缺失"; exit 1; }
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencolorful-windows-installer
+          path: |
+            desktop/release/bundles/*.exe
+            desktop/release/bundles/latest.yml
+          retention-days: 14
+      # 仅 tag 构建发布：复用已 staging 的 release/app（npmRebuild:false 不会重复 rebuild），
+      # GitHub provider 默认创建 draft release 并上传安装器 + latest.yml
+      - name: Publish draft GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --config electron-builder.yml --win --x64 --publish always

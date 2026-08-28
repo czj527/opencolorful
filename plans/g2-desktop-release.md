@@ -84,3 +84,12 @@ openhanako 方案中**不照搬**的部分（超出现阶段需求）：
 - 依赖：`desktop/package.json` dependencies 新增 `electron-updater@^6.8.3`（解析到 6.8.9），lane 根 `npm install --legacy-peer-deps` 同步 package-lock.json；仅在主进程 require，renderer 不 import。
 - 验证结果（2026-08-28，lane 根）：`npm run desktop:build`（tsc --noEmit + vite build）通过；`npm run check:docs` 通过；`npx tsc --noEmit -p tsconfig.json`（根，不含 desktop）通过。未运行 electron-builder（与 CI 重复）；全量 vitest 由主 Agent 复核时跑。
 - 已知限制：真实更新链路（GitHub Release 元数据 → 检查 → 下载 → 重启安装）待首个 tag 版本对（v0.1.0→v0.1.1）实机验证；dev 模式与浏览器无桥场景状态固定 unsupported/"dev"，属预期。
+
+### T3 发布自动化与文档收口（lane：g2-desktop-release-t3）
+
+- 2026-08-28 实现要点：
+  - `.github/workflows/release.yml`（新）：tag `v*` 推送 + `workflow_dispatch`（不发版验证）双触发；windows-latest 单 job：tag 与 desktop/package.json 版本一致性守卫（fail fast）→ `npm run desktop:pack`（与本地同链）→ 产物校验（NSIS + `latest.yml` 缺一即 fail）→ workflow artifacts 上传（14 天保留）→ 仅 tag 构建执行 `electron-builder --publish always`（复用已 staging 的 release/app，GitHub provider 默认 draft release）。`permissions: contents: write`，`GH_TOKEN` 用自动注入的 `GITHUB_TOKEN`，无需额外 secrets。
+  - `scripts/bump-desktop-version.mjs`（新）：版本号同步（desktop/package.json 为唯一来源 → 根 package.json + package-lock.json），打印 CHANGELOG/合并/打 tag 的后续步骤。
+  - `docs/release.md` 重写为真实发布流程（bump → CHANGELOG → PR → tag → workflow → draft release 人工确认发布）+ 应用内更新说明 + 已知限制（未签名 SmartScreen/默认图标/仅 Windows/单源 feed）+ 回滚。
+  - `docs/ci-cd.md`："Main 和发布"更新为 G2 现状；后续增强第 5 项（tag release workflow）标记已落地。
+  - `CHANGELOG.md` Unreleased 补 G2 三条用户可见变化（安装器/应用内更新/发布自动化）。

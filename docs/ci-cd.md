@@ -40,9 +40,9 @@ PR 描述必须说明：目标、非目标、变更影响表面、文档收口�
 ## Main 和发布
 
 - `main` 是可集成分支，不直接承载未通过质量门的实验代码。
-- 每次合并到 `main` 会重复 CI；当前不会自动发布 npm 包或桌面安装器。
-- 发布前按 [release.md](release.md) 创建版本 tag，重新运行所有门禁，并在明确分发渠道后再增加制品上传和 GitHub Release 自动化。
-- 桌面端分发前需要单独补充 Windows、macOS、Linux 的打包矩阵、签名、公证、更新通道和回滚策略。
+- 每次合并到 `main` 会重复 CI；不会自动发布 npm 包。
+- **桌面安装器发布（G2 起）**：`.github/workflows/release.yml` 在推送 `v*` tag 时于 windows-latest 打包（与本地 `npm run desktop:pack` 同一条链），校验产物后创建 draft GitHub Release（含 `latest.yml` 更新 feed）；`workflow_dispatch` 可不发版干跑打包。完整发布步骤、版本号同步脚本和应用内更新验收见 [release.md](release.md)。
+- 打包链路只覆盖 Windows x64 NSIS（未签名）；macOS/Linux、签名公证为后续增强。
 
 ## 后续增强顺序
 
@@ -50,4 +50,4 @@ PR 描述必须说明：目标、非目标、变更影响表面、文档收口�
 2. 增加锁文件、Secrets、依赖漏洞和许可证审计。
 3. 为浏览器 E2E 上传失败截图、trace 和视频制品。
 4. 增加 nightly 的真实服务/恢复/长会话测试，不阻塞普通 PR。
-5. 明确桌面发布渠道后，再添加 tag release workflow、安装包签名和制品保留策略。
+5. ~~tag release workflow~~（G2 已落地 `release.yml`）。后续：安装包签名、macOS/Linux 打包矩阵、制品保留策略细化。

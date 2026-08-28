@@ -1,25 +1,40 @@
 # OpenColorful 发布流程
 
-当前项目是私有 npm workspace 应用，发布重点是可复现构建、GitHub Release 和桌面制品；在明确分发渠道前，不自动发布 npm 包或桌面安装器。
+发布物是 **desktop 桌面端安装器**（G2 起）：Windows x64 NSIS，内嵌后端，安装即用。版本号唯一来源是 `desktop/package.json`，tag `vX.Y.Z` 必须与之相等（release workflow 会校验，不一致直接失败）。
 
 ## 发布前
 
-1. 更新 `CHANGELOG.md` 的 `Unreleased`。
-2. 确认 `docs/project-status.md`、路线图和活动计划一致。
-3. 在干净环境运行 `npm ci --legacy-peer-deps`。
-4. 运行 `npm run check` 和 Browser E2E。
-5. 进行一次真实浏览器验收，并保留截图或录屏证据。
-6. 检查 `git diff --check`、凭据扫描和待迁移事项。
+1. 确认 `docs/project-status.md`、路线图和活动计划一致。
+2. 在干净环境运行 `npm ci --legacy-peer-deps`。
+3. 运行 `npm run check` 和 Browser E2E（CI 在 PR 上已跑过一轮，发布前确认 main 最新一轮全绿即可）。
+4. 检查 `git diff --check`、凭据扫描和待迁移事项。
 
 ## 发布操作
 
-1. 合并到 `main`，确认所有 required checks 通过。
-2. 创建版本 tag，例如 `v0.1.0`。
-3. GitHub Actions 在 tag 上重复质量门，并生成经过验证的构建目录或压缩包。
-4. 创建 GitHub Release，复制 Changelog 的用户可见内容和已知限制。
+1. `node scripts/bump-desktop-version.mjs <新版本号>`（同步 desktop/根 package.json 与锁文件）。
+2. 更新 `CHANGELOG.md`：`Unreleased` 收口为 `[<版本号>]`，复制用户可见内容和已知限制备用。
+3. 提交并经 PR 合并到 `main`，确认 required checks 通过。
+4. `git tag v<版本号> && git push origin v<版本号>`。
+5. `.github/workflows/release.yml` 自动执行：打包（同 `npm run desktop:pack`）→ 校验产物（安装器 + `latest.yml`）→ 创建 **draft** GitHub Release 并上传产物。
+6. 在 GitHub 上检查 draft Release：粘贴 CHANGELOG 内容，确认后手动发布。
+
+非发布验证：手动触发 release.yml（workflow_dispatch）只打包并上传 workflow artifacts，不创建 Release。
+
+## 应用内更新（electron-updater）
+
+- 正式发布的 Release 中的 `latest.yml` 是更新 feed；打包版应用启动 10 秒后、之后每 4 小时自动检查，用户也可在 设置 → 关于 → 版本更新 手动检查。
+- 更新不会自动下载：发现新版本后由用户点击"下载更新"，下载完成经横幅/"重启安装"按钮触发 `quitAndInstall`。
+- 新版本的更新链路验收：安装上一版本的安装器，启动后应能在"关于"页看到新版本提示。
+
+## 已知限制
+
+- **未签名**：Windows SmartScreen 会警告"未知发布者"（无代码签名证书，G2 非目标）。
+- 默认 Electron 图标（品牌图标未做）。
+- 仅 Windows x64；macOS/Linux 打包矩阵与签名公证为后续增强。
+- 更新 feed 只有 GitHub Releases 单源（无国内镜像）。
 
 ## 回滚
 
-- 应用回滚以 GitHub Release / tag 为单位，不直接重写 `main`。
+- 应用回滚以 GitHub Release / tag 为单位：删除有问题的 Release（用户端更新检查随之不可见），修复后发布新版本号，不直接重写 `main`。
 - 数据库迁移必须在对应计划中说明向前修复和备份恢复路径。
 - 若发现凭据泄露或审计失效，优先按 `SECURITY.md` 和 Runbook 处理，不等待普通版本发布。
