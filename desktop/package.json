@@ -8,7 +8,10 @@
     "dev": "node scripts/dev.mjs",
     "dev:renderer": "vite --host 127.0.0.1 --port 5174 --strictPort",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
-    "start": "electron electron/main.cjs"
+    "start": "electron electron/main.cjs",
+    "stage": "node scripts/stage-release.mjs",
+    "rebuild:native": "node scripts/rebuild-native.mjs",
+    "pack": "npm run build && npm run stage && npm run rebuild:native && electron-builder --config electron-builder.yml --win --x64 --publish never"
   },
   "dependencies": {
     "lucide-react": "^1.33.0",
@@ -16,10 +19,12 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.6.0",
-    "electron": "^37.2.6",
+    "electron": "37.10.3",
+    "electron-builder": "^26.8.1",
     "typescript": "~5.9.3",
     "vite": "^7.1.0"
   }

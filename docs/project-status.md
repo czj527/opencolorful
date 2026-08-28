@@ -13,6 +13,7 @@
 - **P1 切片 1.5 可用性攻坚已全部合并（2026-08-28，PR #26-#29）**：T11 `supervisor start` 自动拉起 agent server；T7 SSE 渲染性能四件套（合批节流 + projector O(1) + memo + 状态下沉）；T9 会话中心 IA（去全局助理、会话行 badge、会话头 chip、空态身份证卡、新建助理入口、档案页人设编辑、mock 横幅）；T8 设置页四类目全接线（外观/模型与 Provider 含默认模型/对话显示/关于，删除 8 个死类目）。规格 `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`，lane log 见 `plans/p1-t7/t8/t9/t11-*.md`。**待作者执行波次八验收**：I 组回归（I7 按会话中心 IA 改写）+ 切片 1.5 验证项（流畅度/零死控件/IA 自洽/环境坑消除），通过后继续 5 天日用。
 - **P1 切片 1.75 记忆激活已全部合并（2026-08-28，PR #31-#33）**：T12 记忆使用规则四条契约（openhanako 模式，规则段移出注入预算）；T13 五工具 WHEN/SKIP 引导（hermes schema 模式）；T14 后台复盘服务（每轮 turn.completed 一次 utility LLM 调用 → journal 意图 actor=background_review，审批仍归记忆 Agent；`reviewEnabled` 设置 + 档案页开关；schema v13 迁移）；T15 行为级闭环测试（复盘意图→审批→search_memory 召回全链路，逐步断言中间态）。规格 `docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`，lane log 见 `plans/p1-t12-t13/t14/t15-*.md`。**待作者真实日用观察** remember/复盘触发率与记忆质量，作为切片 2 记忆方向（衰减/有效性窗口/复盘意图强度分档）立项依据。
 - 主分支必须保持可安装、可构建、可测试；所有变更走 PR，不直推 `main`。
+- **G2 桌面发布分发与版本更新进行中（2026-08-28）**：学习 openhanako 发布体系的简化版——electron-builder Windows x64 NSIS（未签名）+ 内嵌后端 + electron-updater 应用内更新 + tag 触发 draft Release；自研 OTA 列车/多平台/签名为非目标。计划见 `plans/g2-desktop-release.md`。
 
 ## 阶段状态
 
@@ -20,6 +21,7 @@
 |---|---|---|---|
 | Governance G0 | CI/CD 和公开协作 | 已完成（2026-08-26） | `plans/g0-ci-linux-fixes.md`、`docs/ci-cd.md`、`docs/document-governance.md` |
 | Governance G1 | 仓库收敛与 Desktop 优先 | 已完成（2026-08-26） | `plans/g1-repo-convergence.md` |
+| Governance G2 | 桌面发布分发与版本更新 | 进行中（2026-08-28 起） | `plans/g2-desktop-release.md` |
 | Product P1 | 个人助理基础体验 | 进行中（切片 1/1.5/1.75 代码已合并，待作者波次八验收+真实日用观察） | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`、`docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`、`docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`、`plans/desktop-parity.md`、`plans/p1-t1~t15-*.md` |
 | Product P2 | 个人效率工作台 | 未排期 | `docs/positioning-and-roadmap.md` |
 | Product P3 | 扩展生态与连接能力 | 未排期 | `docs/positioning-and-roadmap.md` |
@@ -28,8 +30,9 @@
 ## 当前优先级
 
 1. **P1 真实日用与波次八验收（均待作者执行）**：切片 1.5（PR #26-#29）与切片 1.75（PR #31-#33）已全部合并。作者按 `plans/desktop-e2e-test-plan.md` 执行波次八（I 组回归 + 切片 1.5 验证项），并在真实日用中观察记忆触发率与质量（切片 1.75 验证项）。
-2. 冻结平台扩张：不新增平台层抽象，Phase 15+、Bridge、DAG、Cordis 化继续冻结（G1.5）。
-3. 保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建。
+2. **G2 桌面发布分发与版本更新（进行中）**：T1→T3 任务拆分与验收标准见 `plans/g2-desktop-release.md`；首个发布 tag 由作者决定何时切。
+3. 冻结平台扩张：不新增平台层抽象，Phase 15+、Bridge、DAG、Cordis 化继续冻结（G1.5）。
+4. 保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建。
 
 ## 状态更新规则
 

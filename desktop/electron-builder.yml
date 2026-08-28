@@ -1,0 +1,27 @@
+# G2 T1：electron-builder 配置。staging 目录由 desktop/scripts/stage-release.mjs 生成。
+# 当前仅 Windows x64 NSIS（未签名——SmartScreen 警告为已知限制，见 docs/release.md）；
+# 产物内的 app-update.yml（GitHub provider 元数据）供 electron-updater 使用（T2）。
+appId: com.opencolorful.desktop
+productName: OpenColorful
+directories:
+  app: release/app
+  output: release/bundles
+files:
+  - "**/*"
+asarUnpack:
+  - "node_modules/**/*.node"
+win:
+  target: nsis
+  artifactName: ${productName}-${version}-Windows-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: OpenColorful
+publish:
+  provider: github
+  owner: czj527
+  repo: opencolorful
+# false：由 desktop/scripts/rebuild-native.mjs 定向 rebuild staging——
+# 否则 workspace-aware rebuild 会打坏根 node_modules 的 Node ABI 副本
+npmRebuild: false
