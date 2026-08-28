@@ -1,7 +1,7 @@
 # P1 Slice 1.75 Implementation Plan — Memory Activation
 
 **Date:** 2026-08-28
-**Status:** Approved by author (2026-08-28), in progress
+**Status:** All tasks merged (2026-08-28 — PR #31 T12+T13 / #32 T14 / #33 T15); awaiting author daily-use observation of memory trigger rates
 **Spec (authoritative, Chinese):** `docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`
 **Extends:** slice 1 (`plans/p1-personal-assistant.en.md`) and slice 1.5 (`plans/p1-slice-1.5-usability.en.md`), both merged.
 
