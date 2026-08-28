@@ -25,3 +25,18 @@ contextBridge.exposeInMainWorld("desktopApi", {
     };
   },
 });
+
+// 更新桥：应用内版本更新（electron-updater 状态机，仅 packaged 真实工作）
+contextBridge.exposeInMainWorld("desktopUpdate", {
+  getState: () => ipcRenderer.invoke("update:get-state"),
+  check: () => ipcRenderer.invoke("update:check"),
+  download: () => ipcRenderer.invoke("update:download"),
+  install: () => ipcRenderer.send("update:install"),
+  onStateChanged: (handler) => {
+    const listener = (_event, state) => handler(state);
+    ipcRenderer.on("update:state-changed", listener);
+    return () => {
+      ipcRenderer.removeListener("update:state-changed", listener);
+    };
+  },
+});

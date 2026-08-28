@@ -68,7 +68,8 @@ fs.writeFileSync(path.join(appDir, "package.json"), `${JSON.stringify({
   description: "OpenColorful 桌面端（内嵌后端）",
   author: "czj527",
   main: "electron/main.cjs",
-  dependencies: rootPkg.dependencies,
+  // 生产依赖 = 根清单（内嵌后端）+ desktop 清单（桌面运行时依赖，如 electron-updater）
+  dependencies: { ...rootPkg.dependencies, ...desktopPkg.dependencies },
 }, null, 2)}\n`);
 
 // 2. 主进程文件

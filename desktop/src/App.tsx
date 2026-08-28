@@ -12,6 +12,7 @@ import { OnboardingPage } from "./components/OnboardingPage.js";
 import { SettingsModal, type SettingsCategory } from "./components/SettingsModal.js";
 import { Sidebar, SidebarRail } from "./components/Sidebar.js";
 import { Titlebar, type PageId } from "./components/Titlebar.js";
+import { UpdateBanner } from "./components/UpdateBanner.js";
 import { UsageBadge } from "./components/UsageBadge.js";
 import { WorkspaceBanner } from "./components/WorkspaceBanner.js";
 import {
@@ -103,6 +104,8 @@ export function App() {
   // T0 首启检测：无 Agent 或无已配置凭据的 Provider → 自动进入引导（可退出；状态派生自后端，不落库）
   const firstRun = useFirstRun(source);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  // G2 T2：应用内更新状态（驱动 UpdateBanner；设置页 about 另行自订阅）
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
 
   // 启动：探测真实后端（IPC 桥），不可达回退 mock
   useEffect(() => {
@@ -287,6 +290,16 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [settingsOpen]);
+
+  // G2 T2：更新状态订阅（App 级，驱动 UpdateBanner；无桥=浏览器 dev 不订阅）
+  useEffect(() => {
+    const bridge = window.desktopUpdate;
+    if (bridge === undefined) return;
+    let cancelled = false;
+    void bridge.getState().then((next) => { if (!cancelled) setUpdateState(next); }).catch(() => undefined);
+    const unsubscribe = bridge.onStateChanged((next) => setUpdateState(next));
+    return () => { cancelled = true; unsubscribe(); };
+  }, []);
 
   const activeThread = threads.find((thread) => thread.id === threadId);
   // 已落库会话的助理由 thread.agentId 决定（历史 null → undefined，不显示 chip）
@@ -573,8 +586,15 @@ export function App() {
     && sessionSettings.toolMode === "all"
     && !sessionSettings.workspaceConfirmed;
 
+  // G2 T2：下载完成横幅可见性（驱动 has-update-banner 栅格行 + 挂载）
+  const showUpdateBanner = updateState !== null && updateState.status === "downloaded" && updateState.newVersion !== null;
+
   return (
-    <div className={source.info.mode === "mock" ? "app has-mock-banner" : "app"}>
+    <div className={[
+      "app",
+      source.info.mode === "mock" ? "has-mock-banner" : "",
+      showUpdateBanner ? "has-update-banner" : "",
+    ].filter(Boolean).join(" ")}>
       <Titlebar
         page={page}
         onPage={setPage}
@@ -583,6 +603,9 @@ export function App() {
         connection={connection ?? source.info}
       />
       {source.info.mode === "mock" && <MockBanner />}
+      {showUpdateBanner && updateState !== null && updateState.newVersion !== null && (
+        <UpdateBanner version={updateState.newVersion} />
+      )}
       {showOnboarding ? (
         <OnboardingPage source={source} onExit={exitOnboarding} onComplete={completeOnboarding} />
       ) : (

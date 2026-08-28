@@ -1,0 +1,37 @@
+/* G2 T2 下载完成横幅：成功色调整条提示，可关闭（同版本按 localStorage 记忆不再显示） */
+.update-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 32px 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #fff;
+  background: var(--ok);
+}
+
+.update-banner-install {
+  padding: 2px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius);
+  font-size: 11px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+}
+.update-banner-install:hover { background: rgba(255, 255, 255, 0.3); }
+
+.update-banner-close {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  opacity: 0.8;
+}
+.update-banner-close:hover { opacity: 1; }

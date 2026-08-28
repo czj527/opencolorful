@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { updateLocalPrefs, useLocalPrefs } from "../data/local-prefs.js";
 import type { DesktopDataSource, ModelOption, ModelRef, PreferencesView } from "../data/source.js";
@@ -124,8 +124,109 @@ interface SettingsModalProps {
   readonly onPreferencesChanged: () => void;
 }
 
+/** ISO 时间 → 本地 HH:mm；解析失败返回空串（调用方自定降级文案） */
+function formatCheckTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  } catch {
+    return "";
+  }
+}
+
+/** G2 T2：设置页"版本更新"区——检查/下载/重启安装三态操作 */
+function UpdateSection({ state }: { readonly state: DesktopUpdateState }) {
+  let title: string;
+  let note: string | null = null;
+  let action: ReactNode = null;
+  let progress: ReactNode = null;
+
+  switch (state.status) {
+    case "unsupported":
+      title = "开发模式不提供更新检查";
+      note = "打包安装的正式版本支持应用内更新";
+      break;
+    case "idle":
+      title = "检查更新";
+      note = `当前版本 v${state.currentVersion}`;
+      action = <button type="button" className="btn" onClick={() => void window.desktopUpdate?.check()}>检查更新</button>;
+      break;
+    case "checking":
+      title = "检查更新";
+      note = `当前版本 v${state.currentVersion}`;
+      action = <button type="button" className="btn" disabled>检查中…</button>;
+      break;
+    case "none": {
+      title = "已是最新版本";
+      const checkedAtText = state.checkedAt === null ? "" : formatCheckTime(state.checkedAt);
+      note = checkedAtText === "" ? null : `上次检查 ${checkedAtText}`;
+      action = <button type="button" className="btn" onClick={() => void window.desktopUpdate?.check()}>重新检查</button>;
+      break;
+    }
+    case "available":
+      title = `发现新版本 v${state.newVersion ?? ""}`;
+      note = `当前版本 v${state.currentVersion}`;
+      action = <button type="button" className="btn btn-primary" onClick={() => void window.desktopUpdate?.download()}>下载更新</button>;
+      break;
+    case "downloading":
+      title = `正在下载 v${state.newVersion ?? ""}`;
+      action = <button type="button" className="btn" disabled>下载中…</button>;
+      progress = (
+        <div className="setting-note update-progress">
+          <div
+            className="update-progress-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={state.progressPercent ?? 0}
+            aria-label="更新下载进度"
+          >
+            <div className="update-progress-fill" style={{ width: `${state.progressPercent ?? 0}%` }} />
+          </div>
+          <span>{state.progressPercent ?? 0}%</span>
+        </div>
+      );
+      break;
+    case "downloaded":
+      title = `v${state.newVersion ?? ""} 已就绪`;
+      note = "重启应用完成安装";
+      action = <button type="button" className="btn btn-primary" onClick={() => window.desktopUpdate?.install()}>重启安装</button>;
+      break;
+    case "error":
+      title = "检查更新失败";
+      note = state.message;
+      action = <button type="button" className="btn" onClick={() => void window.desktopUpdate?.check()}>重试</button>;
+      break;
+  }
+
+  return (
+    <section className="setting-section">
+      <h3>版本更新</h3>
+      <div className="setting-row">
+        <span className="setting-copy">
+          <strong>{title}</strong>
+          {note !== null && <small>{note}</small>}
+        </span>
+        <span className="setting-control">{action}</span>
+      </div>
+      {progress}
+    </section>
+  );
+}
+
 export function SettingsModal({ category, onCategory, onClose, themeMode, onThemeMode, source, models, preferences, onProvidersChanged, onPreferencesChanged }: SettingsModalProps) {
   const prefs = useLocalPrefs();
+  // G2 T2：更新状态（无桥=浏览器 dev，保持 null → 版本区显示 dev、不渲染更新区）
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
+
+  // 进入"关于"类目时拉取一次状态并订阅变化；卸载/切类目时取消订阅
+  useEffect(() => {
+    const bridge = window.desktopUpdate;
+    if (bridge === undefined || category !== "about") return;
+    let cancelled = false;
+    void bridge.getState().then((next) => { if (!cancelled) setUpdateState(next); }).catch(() => undefined);
+    const unsubscribe = bridge.onStateChanged((next) => setUpdateState(next));
+    return () => { cancelled = true; unsubscribe(); };
+  }, [category]);
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -203,16 +304,23 @@ export function SettingsModal({ category, onCategory, onClose, themeMode, onThem
               </section>
             )}
             {category === "about" && (
-              <section className="setting-section">
-                <h3>版本</h3>
-                <div className="setting-row">
-                  <span className="setting-copy"><strong>桌面端</strong><small>0.1.0 · Electron · React · Vite</small></span>
-                </div>
-                <div className="setting-row">
-                  <span className="setting-copy"><strong>数据源</strong><small>{source.info.label}</small></span>
-                  <span className="setting-control"><em>{source.info.connected ? "已连接" : "未连接"}</em></span>
-                </div>
-              </section>
+              <>
+                <section className="setting-section">
+                  <h3>版本</h3>
+                  <div className="setting-row">
+                    <span className="setting-copy">
+                      <strong>桌面端</strong>
+                      {/* 无桥（浏览器 dev）显示 dev；有桥显示主进程上报的真实版本 */}
+                      <small>{window.desktopUpdate === undefined ? "dev" : `${updateState?.currentVersion ?? "dev"} · Electron · React · Vite`}</small>
+                    </span>
+                  </div>
+                  <div className="setting-row">
+                    <span className="setting-copy"><strong>数据源</strong><small>{source.info.label}</small></span>
+                    <span className="setting-control"><em>{source.info.connected ? "已连接" : "未连接"}</em></span>
+                  </div>
+                </section>
+                {window.desktopUpdate !== undefined && updateState !== null && <UpdateSection state={updateState} />}
+              </>
             )}
           </div>
         </div>
