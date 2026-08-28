@@ -93,3 +93,4 @@ openhanako 方案中**不照搬**的部分（超出现阶段需求）：
   - `docs/release.md` 重写为真实发布流程（bump → CHANGELOG → PR → tag → workflow → draft release 人工确认发布）+ 应用内更新说明 + 已知限制（未签名 SmartScreen/默认图标/仅 Windows/单源 feed）+ 回滚。
   - `docs/ci-cd.md`："Main 和发布"更新为 G2 现状；后续增强第 5 项（tag release workflow）标记已落地。
   - `CHANGELOG.md` Unreleased 补 G2 三条用户可见变化（安装器/应用内更新/发布自动化）。
+- **dispatch 干跑首败与修复（T3b）**：`desktop:pack` 原顺序 `build → build:protocol` 在干净环境（CI 全新 checkout）炸 TS2307——`src/contracts/plugin-protocol.ts` 经 exports 指向 workspace 包 dist，根 tsc 构建时 dist 尚不存在（本机 lane 因有历史构建产物而掩盖）。修复为 `build:protocol → build:sdk → build → pack`（与 `npm run check` 同序），并模拟干净环境（删 `dist/` 与 `packages/*/dist/`）重跑全链验证。教训：**凡涉及构建顺序的改动，必须在无 dist 的干净环境验证一次**。
