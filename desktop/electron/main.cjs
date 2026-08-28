@@ -5,6 +5,7 @@ const { pathToFileURL } = require("node:url");
 
 const { apiRequest, resolveBase } = require("./api-proxy.cjs");
 const { SseProxyManager } = require("./sse-proxy.cjs");
+const { initAutoUpdater } = require("./auto-update.cjs");
 
 const sseManager = new SseProxyManager(resolveBase);
 
@@ -131,6 +132,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // 内嵌后端先行（含 DB 迁移）；失败也继续开窗——UI 呈现"未连接"可重试态
     await maybeStartEmbeddedServer();
     createWindow();
+    initAutoUpdater({ getWindow: () => mainWindow, log: shellLog });
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

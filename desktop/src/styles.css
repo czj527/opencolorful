@@ -66,6 +66,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .app { height: 100%; display: grid; grid-template-rows: 40px minmax(0, 1fr); background: var(--bg); }
 /* T9 mock 横幅在场时加一行（仅 mock 模式渲染 MockBanner） */
 .app.has-mock-banner { grid-template-rows: 40px auto minmax(0, 1fr); }
+/* G2 T2：下载完成横幅与 mock 横幅可同时出现，两种组合都显式给出行高 */
+.app.has-update-banner { grid-template-rows: 40px auto minmax(0, 1fr); }
+.app.has-mock-banner.has-update-banner { grid-template-rows: 40px auto auto minmax(0, 1fr); }
 .app-body { min-height: 0; display: flex; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
 
@@ -551,6 +554,15 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .setting-select:disabled { opacity: 0.6; }
 .setting-note { margin: 6px 2px 0; color: var(--text-3); font-size: 11px; }
 .setting-note.is-error { color: var(--err); }
+/* G2 T2 更新下载进度条（沿用现有配色变量，不引入新色板） */
+.update-progress { display: flex; align-items: center; gap: 8px; }
+.update-progress-track {
+  flex: 1; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.2s ease;
+}
+.update-progress span { flex: 0 0 auto; font-size: 10.5px; font-family: var(--mono); color: var(--text-3); }
 
 /* ---------- motion & misc ---------- */
 .boot-screen { height: 100%; display: grid; place-items: center; color: var(--text-3); font-size: 12px; }

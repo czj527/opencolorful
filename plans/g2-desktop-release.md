@@ -70,3 +70,17 @@ openhanako 方案中**不照搬**的部分（超出现阶段需求）：
 - staging 冒烟（真实 Node，临时 OPENCOLORFUL_HOME）：`startForegroundServer` 从 staging 布局启动成功，`GET /api/health` 200，优雅停止正常。
 - **打包实测通过（2026-08-28，本机 Windows）**：`npm run desktop:pack` 全链（根 build → staging → 定向 rebuild → electron-builder）产出 `OpenColorful-0.1.0-Windows-x64.exe`（NSIS，未签名）；`win-unpacked/OpenColorful.exe` 以隔离 `OPENCOLORFUL_HOME` + 自定义端口启动——内嵌后端 online（shell.log 有记录），`/api/health`、`/api/settings/preferences`、`/api/agents` 全部 200；taskkill（WM_CLOSE）触发优雅退出，`server.json` 置 `stopped`、服务锁释放。定向 rebuild 双向验证：lane 根 `new Database` 正常（Node ABI 未受污染）、staging 副本在 Node 下 `ERR_DLOPEN_FAILED`（已是 Electron ABI）、打包应用内数据库正常工作。
 - 踩坑记录（续）：④ electron-builder 的 `npmRebuild` 是 workspace-aware——会把 better-sqlite3 rebuild 作用到根 node_modules 的提升副本，全量 DB 测试在 `new Database` 抛 `ERR_DLOPEN_FAILED`（注意：better-sqlite3 v12 懒加载 .node，`require` 探测查不出 ABI 损坏，必须 `new Database`）。修复：`npmRebuild:false` + `desktop/scripts/rebuild-native.mjs`（@electron/rebuild 只处理 staging）；本地根副本损坏时 `npm rebuild better-sqlite3` 恢复；⑤ 内嵌后端使用自定义端口时代理探测不到，内嵌启动成功后由 main.cjs 写入 `OPENCOLORFUL_SERVER_URL` 直连（见 main.cjs 注释）。
+
+### T2 应用内版本更新（lane：g2-desktop-release-t2）
+
+- 2026-08-28 实现要点：
+  - `desktop/electron/auto-update.cjs`（新）：electron-updater 状态机，导出 `initAutoUpdater({ getWindow, log })`，幂等（module 级 `initialized` 守卫）；state 变化经 `getWindow()?.webContents.send("update:state-changed", state)` 推送；`autoDownload=false` / `autoInstallOnAppQuit=false` / `disableDifferentialDownload=true` / `allowPrerelease=false`；仅 `app.isPackaged` 真实工作（非 packaged status 恒 "unsupported"，IPC 仍注册）；启动后 10s 首次检查 + 每 4h 定时；并发守卫 `checkInFlight` 防重复检查（覆盖 electron-updater 自身"检查进行中"抛错路径）；error 态 message 为中文（`更新失败：` + err.message 清理后截断 200 字符，剥离 URL 查询参数，不含堆栈）；logger 接 shellLog。
+  - IPC：`update:get-state` / `update:check` / `update:download`（仅 available 态）/ `update:install`（仅 downloaded 态 `quitAndInstall(false, true)`）。
+  - `desktop/electron/preload.cjs`：新增第三个桥 `desktopUpdate`（getState/check/download/install/onStateChanged，订阅返回取消函数）。
+  - `desktop/src/env.d.ts`：`DesktopUpdateStatus` / `DesktopUpdateState` / `DesktopUpdateApi` 类型 + Window 键（沿用 readonly 风格）。
+  - 设置页关于区（`SettingsModal.tsx`）：版本行 small 改为桥上报版本（无桥显示 `dev`）；新增"版本更新" setting-section，八态映射（unsupported/idle/checking/none/available/downloading/downloaded/error），downloading 在 setting-note 容器内放进度条（styles.css 新增 `.update-progress*`，仅用现有变量 `--border/--accent/--text-3/--mono`）；进入 about 类目时 `getState()` + `onStateChanged` 订阅，卸载/切类目取消。
+  - `desktop/src/components/UpdateBanner.tsx` + `.css`（新）：下载完成横幅（"新版本 v{newVersion} 已就绪" + 重启安装 + X 关闭），关闭按版本记忆（localStorage `oc-update-dismissed:<newVersion>`）；App.tsx 订阅状态驱动挂载（与 MockBanner 同层级），根节点按需加 `has-update-banner` grid 行（含与 mock 横幅并存的四行组合）。
+  - **交付前修正（超出 Brief 文件清单的 1 处，见下方偏离说明）**：`desktop/scripts/stage-release.mjs` 的 staging 应用依赖原只复刻根 `package.json`，electron-updater 不会进入打包产物（打包后主进程 require 即崩溃），改为 `{ ...rootPkg.dependencies, ...desktopPkg.dependencies }` 合并。
+- 依赖：`desktop/package.json` dependencies 新增 `electron-updater@^6.8.3`（解析到 6.8.9），lane 根 `npm install --legacy-peer-deps` 同步 package-lock.json；仅在主进程 require，renderer 不 import。
+- 验证结果（2026-08-28，lane 根）：`npm run desktop:build`（tsc --noEmit + vite build）通过；`npm run check:docs` 通过；`npx tsc --noEmit -p tsconfig.json`（根，不含 desktop）通过。未运行 electron-builder（与 CI 重复）；全量 vitest 由主 Agent 复核时跑。
+- 已知限制：真实更新链路（GitHub Release 元数据 → 检查 → 下载 → 重启安装）待首个 tag 版本对（v0.1.0→v0.1.1）实机验证；dev 模式与浏览器无桥场景状态固定 unsupported/"dev"，属预期。
