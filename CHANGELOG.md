@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-28
+
+### Fixed
+
+- **安装包内嵌后端启动失败（v0.1.0 严重回归）**：打包 staging 改用 `file:` 依赖 + npm 实拷装载 `@opencolorful/plugin-protocol` / `plugin-runtime`，修复已安装应用启动即 `ERR_MODULE_NOT_FOUND`、全部功能不可用的问题；新增 `verify:pack` 产物断言（asar 内容/原生模块/更新 feed），打包与 CI 发布流程强制执行，杜绝同类缺包流出。
+- **默认端口 4310 被无关程序占用时后端静默失败**：内嵌后端启动遇 `EADDRINUSE` 自动回退随机空闲端口；彻底失败时弹窗告知并附日志路径，不再静默降级。
+- **API 代理可能把请求发给外来进程**：后端探测增加响应身份校验，非 OpenColorful 服务占用端口时不再误连。
+- **发布资产上传兜底**：Release 工作流在 electron-builder 发布后逐项断言安装器/`latest.yml`，缺失自动补传，修复 draft 只有 blockmap 导致的更新检查失败。
+
 ### Added
 
 - 建立项目文档治理、变更影响矩阵和 GitHub Actions 质量门。

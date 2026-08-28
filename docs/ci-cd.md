@@ -41,7 +41,7 @@ PR 描述必须说明：目标、非目标、变更影响表面、文档收口�
 
 - `main` 是可集成分支，不直接承载未通过质量门的实验代码。
 - 每次合并到 `main` 会重复 CI；不会自动发布 npm 包。
-- **桌面安装器发布（G2 起）**：`.github/workflows/release.yml` 在推送 `v*` tag 时于 windows-latest 打包（与本地 `npm run desktop:pack` 同一条链），校验产物后创建 draft GitHub Release（含 `latest.yml` 更新 feed）；`workflow_dispatch` 可不发版干跑打包。完整发布步骤、版本号同步脚本和应用内更新验收见 [release.md](release.md)。
+- **桌面安装器发布（G2 起）**：`.github/workflows/release.yml` 在推送 `v*` tag 时于 windows-latest 打包（与本地 `npm run desktop:pack` 同一条链，pack 末尾自动执行 `verify:pack` asar 内容/原生模块/产物断言），创建 draft GitHub Release 并**逐资产断言**（安装器/`latest.yml`/blockmap 缺失自动 `gh release upload` 补传，仍缺则 fail）；`workflow_dispatch` 可不发版干跑打包。完整发布步骤、版本号同步脚本和应用内更新验收见 [release.md](release.md)。
 - 打包链路只覆盖 Windows x64 NSIS（未签名）；macOS/Linux、签名公证为后续增强。
 
 ## 后续增强顺序
