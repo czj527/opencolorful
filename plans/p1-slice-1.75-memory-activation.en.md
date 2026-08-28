@@ -59,7 +59,7 @@ New `tests/integration/memory-activation.test.ts` with scripted `completeText` (
 
 1. Simulate a turn → reviewer appends a `background_review` intent (assert journal row + actor).
 2. Run the maintenance/approval path (existing memory-agent runner with scripted LLM, or direct policy application of the intent — whichever the codebase already tests in `memory-agent.test.ts`) → assert fact becomes active in `memory_facts`.
-3. Rebuild injection → assert the fact appears in the injected block of a subsequent session.
+3. `search_memory` recall → assert the fact is retrievable by a related query, with `provenance` / `confidence` present on the hit. Long-term facts are never auto-injected into the system prompt; injection covers only the `memory.md` sections + pinned, so recall goes through `search_memory` only.
 
 Assert intermediate state at each step, not just the final one.
 
