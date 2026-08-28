@@ -1,122 +1,27 @@
-import { ChevronRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 
-import type { DesktopDataSource } from "../data/source.js";
+import { updateLocalPrefs, useLocalPrefs } from "../data/local-prefs.js";
+import type { DesktopDataSource, ModelOption, ModelRef, PreferencesView } from "../data/source.js";
+import { formatErrorAdvice, toUserError } from "../errors.js";
 import type { ThemeMode } from "../theme.js";
 import { ProvidersSettings } from "./ProvidersSettings.js";
 
-export type SettingsCategory =
-  | "general" | "models" | "agent" | "session" | "memory"
-  | "subagent" | "diagnostics" | "plugins" | "security" | "about";
+/** 切片 1.5 T8：设置页只保留有真实后端/本地接线的类目，无功能的占位类目不留尸体 */
+export type SettingsCategory = "appearance" | "models" | "chatDisplay" | "about";
 
-interface SettingRow {
-  readonly label: string;
-  readonly value: string;
-  readonly meta?: string;
-  readonly control?: "toggle" | "select" | "action";
-  readonly enabled?: boolean;
-}
-
-interface SettingSection {
-  readonly title: string;
-  readonly rows: readonly SettingRow[];
-}
-
-const categories: readonly { id: SettingsCategory; label: string; group: string }[] = [
-  { id: "general", label: "通用", group: "应用" },
-  { id: "models", label: "模型与 Provider", group: "运行" },
-  { id: "agent", label: "Agent", group: "运行" },
-  { id: "session", label: "会话与工作区", group: "运行" },
-  { id: "memory", label: "记忆", group: "能力" },
-  { id: "subagent", label: "Subagent", group: "能力" },
-  { id: "diagnostics", label: "日志与诊断", group: "能力" },
-  { id: "plugins", label: "插件与 Skills", group: "扩展" },
-  { id: "security", label: "权限与安全", group: "扩展" },
-  { id: "about", label: "关于", group: "其他" },
+const categories: readonly { id: SettingsCategory; label: string }[] = [
+  { id: "appearance", label: "外观" },
+  { id: "models", label: "模型与 Provider" },
+  { id: "chatDisplay", label: "对话显示" },
+  { id: "about", label: "关于" },
 ];
 
 const descriptions: Record<SettingsCategory, string> = {
-  general: "外观、主题与界面偏好。",
-  models: "Provider 配置与凭据。凭据只写入主进程 AuthStorage，不在 renderer 回显。",
-  agent: "身份、人格底色和默认工作目录属于 Agent，而不是某一条会话。",
-  session: "每个会话可以覆盖默认模型、工具模式和工作目录。",
-  memory: "记忆整理与检索偏好；召回过程会以事件形式回到会话。",
-  subagent: "临时 Subagent 的默认模型与运行上限。",
-  diagnostics: "结构化日志的级别、保留与磁盘预算。",
-  plugins: "插件只能贡献页面、工作台面板或设置分区，不会接管宿主导航。",
-  security: "权限是会话执行的前置条件，敏感操作都会在事件中留下决定。",
-  about: "当前桌面端使用本地 mock adapter，后续通过 DesktopDataSource 接入服务端。",
-};
-
-const sections: Record<SettingsCategory, readonly SettingSection[]> = {
-  general: [
-    { title: "显示", rows: [
-      { label: "减少动效", value: "跟随系统", control: "toggle", enabled: false },
-      { label: "显示思考事件", value: "开启", control: "toggle", enabled: true },
-      { label: "显示工具调用", value: "开启", control: "toggle", enabled: true },
-    ] },
-  ],
-  models: [],
-  agent: [
-    { title: "当前 Agent", rows: [
-      { label: "身份", value: "原 · yuan", meta: "3 个会话", control: "action" },
-      { label: "人格底色", value: "代码、记忆、长期计划", control: "action" },
-      { label: "默认工作目录", value: "D:\\PI-study\\opencolorful", control: "action" },
-    ] },
-    { title: "沙箱", rows: [
-      { label: "工作区访问", value: "rw", control: "select" },
-      { label: "保护路径", value: "2 条", control: "action" },
-    ] },
-  ],
-  session: [
-    { title: "当前会话", rows: [
-      { label: "工具模式", value: "all", meta: "需要 workspaceConfirmed", control: "select" },
-      { label: "工作目录", value: "D:\\PI-study\\opencolorful", control: "action" },
-      { label: "上下文用量", value: "38.4k / 128k", meta: "30%", control: "action" },
-    ] },
-  ],
-  memory: [
-    { title: "全局默认", rows: [
-      { label: "记忆整理", value: "每周日 21:00", control: "toggle", enabled: true },
-      { label: "检索层级", value: "摘要 → 事实 → 原文", control: "select" },
-      { label: "清除当前 Agent 记忆", value: "需要再次确认", control: "action" },
-    ] },
-  ],
-  subagent: [
-    { title: "默认值", rows: [
-      { label: "默认模型", value: "继承父 Agent", control: "select" },
-      { label: "运行上限", value: "12 min · 40 tool calls", control: "action" },
-      { label: "运行记录", value: "4 个 thread · 9 个 artifact", control: "action" },
-    ] },
-  ],
-  diagnostics: [
-    { title: "可观测性", rows: [
-      { label: "诊断级别", value: "info", meta: "debug / info / warn / error", control: "select" },
-      { label: "活动保留", value: "180 天", control: "select" },
-      { label: "日志磁盘预算", value: "500 MB", control: "select" },
-    ] },
-  ],
-  plugins: [
-    { title: "已启用", rows: [
-      { label: "Memory Studio", value: "workspace.page", control: "toggle", enabled: true },
-      { label: "Desktop Workbench", value: "workbench.panel", control: "toggle", enabled: true },
-      { label: "本地 Skills", value: "6 个 bundle", control: "action" },
-    ] },
-  ],
-  security: [
-    { title: "当前策略", rows: [
-      { label: "工具权限", value: "all", meta: "read / write / bash", control: "select" },
-      { label: "工作区确认", value: "已确认", control: "toggle", enabled: true },
-      { label: "敏感凭据", value: "主进程托管", control: "action" },
-    ] },
-  ],
-  about: [
-    { title: "版本", rows: [
-      { label: "桌面端", value: "0.1.0", meta: "Electron · React · Vite", control: "action" },
-      { label: "协议边界", value: "renderer / backend isolated", control: "action" },
-      { label: "连接状态", value: "本地 mock adapter", control: "action" },
-    ] },
-  ],
+  appearance: "主题与界面动效，只影响本机显示。",
+  models: "Provider 配置、凭据与全局默认模型。凭据只写入主进程 AuthStorage，不在 renderer 回显。",
+  chatDisplay: "会话时间线中事件类型的显示开关，即时生效。",
+  about: "版本与连接信息。",
 };
 
 const themeOptions: readonly { id: ThemeMode; label: string }[] = [
@@ -125,18 +30,84 @@ const themeOptions: readonly { id: ThemeMode; label: string }[] = [
   { id: "system", label: "跟随系统" },
 ];
 
-function Toggle({ initial }: { readonly initial: boolean }) {
-  const [on, setOn] = useState(initial);
+function Toggle({ checked, onChange, label }: { readonly checked: boolean; readonly onChange: (next: boolean) => void; readonly label: string }) {
   return (
     <button
       type="button"
-      className={`toggle${on ? " is-on" : ""}`}
+      className={`toggle${checked ? " is-on" : ""}`}
       role="switch"
-      aria-checked={on}
-      onClick={(event) => { event.stopPropagation(); setOn((v) => !v); }}
+      aria-checked={checked}
+      aria-label={label}
+      onClick={(event) => { event.stopPropagation(); onChange(!checked); }}
     >
       <i />
     </button>
+  );
+}
+
+/** 全局默认模型选择：数据源为 App 已加载的 models/preferences，保存走 PUT /api/settings/preferences */
+function DefaultModelRow({ source, models, preferences, onChanged }: {
+  readonly source: DesktopDataSource;
+  readonly models: readonly ModelOption[];
+  readonly preferences: PreferencesView | null;
+  readonly onChanged: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const available = models.filter((option) => option.credentialConfigured);
+  const current = preferences?.defaults.model ?? null;
+  const currentKey = current === null ? "" : JSON.stringify({ providerId: current.providerId, modelId: current.modelId });
+  const disabled = saving || source.updatePreferences === undefined;
+
+  async function change(raw: string) {
+    if (source.updatePreferences === undefined) return;
+    const model: ModelRef | null = raw === "" ? null : JSON.parse(raw) as ModelRef;
+    setSaving(true);
+    setError(null);
+    try {
+      await source.updatePreferences({ defaults: { model } });
+      onChanged();
+    } catch (cause) {
+      setError(formatErrorAdvice(toUserError(cause, "saveProvider")));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="setting-section">
+      <h3>默认模型</h3>
+      <div className="setting-row">
+        <span className="setting-copy">
+          <strong>全局默认模型</strong>
+          <small>新会话缺省使用的模型；会话内仍可单独切换</small>
+        </span>
+        <span className="setting-control">
+          {available.length === 0 ? (
+            <em>暂无可选模型，先在下方配置 Provider 凭据</em>
+          ) : (
+            <select
+              className="setting-select"
+              aria-label="全局默认模型"
+              value={currentKey}
+              disabled={disabled}
+              onChange={(event) => void change(event.target.value)}
+            >
+              <option value="">未设置</option>
+              {available.map((option) => {
+                const key = JSON.stringify({ providerId: option.providerId, modelId: option.modelId });
+                return <option key={key} value={key}>{option.name}（{option.providerId}）</option>;
+              })}
+            </select>
+          )}
+        </span>
+      </div>
+      {current !== null && available.length > 0
+        && !available.some((option) => option.providerId === current.providerId && option.modelId === current.modelId) && (
+        <p className="setting-note">当前默认模型 {current.providerId}/{current.modelId} 未配置凭据或已不在列表中。</p>
+      )}
+      {error !== null && <p className="setting-note is-error" role="alert">{error}</p>}
+    </section>
   );
 }
 
@@ -146,13 +117,15 @@ interface SettingsModalProps {
   readonly onClose: () => void;
   readonly themeMode: ThemeMode;
   readonly onThemeMode: (mode: ThemeMode) => void;
-  readonly dataSourceLabel: string;
   readonly source: DesktopDataSource;
+  readonly models: readonly ModelOption[];
+  readonly preferences: PreferencesView | null;
   readonly onProvidersChanged: () => void;
+  readonly onPreferencesChanged: () => void;
 }
 
-export function SettingsModal({ category, onCategory, onClose, themeMode, onThemeMode, dataSourceLabel, source, onProvidersChanged }: SettingsModalProps) {
-  let lastGroup = "";
+export function SettingsModal({ category, onCategory, onClose, themeMode, onThemeMode, source, models, preferences, onProvidersChanged, onPreferencesChanged }: SettingsModalProps) {
+  const prefs = useLocalPrefs();
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -162,68 +135,85 @@ export function SettingsModal({ category, onCategory, onClose, themeMode, onThem
         </header>
         <div className="modal-body">
           <nav className="modal-nav" aria-label="设置分类">
-            {categories.map(({ id, label, group }) => {
-              const showGroup = group !== lastGroup;
-              lastGroup = group;
-              return (
-                <span key={id} className="modal-nav-item">
-                  {showGroup && <small>{group}</small>}
-                  <button type="button" className={category === id ? "is-active" : ""} onClick={() => onCategory(id)}>
-                    {label}
-                  </button>
-                </span>
-              );
-            })}
+            {categories.map(({ id, label }) => (
+              <span key={id} className="modal-nav-item">
+                <button type="button" className={category === id ? "is-active" : ""} onClick={() => onCategory(id)}>
+                  {label}
+                </button>
+              </span>
+            ))}
           </nav>
           <div className="modal-content">
             <header className="modal-content-head">
               <h2>{categories.find((item) => item.id === category)?.label}</h2>
               <p>{descriptions[category]}</p>
             </header>
-            {category === "general" && (
+            {category === "appearance" && (
+              <>
+                <section className="setting-section">
+                  <h3>主题</h3>
+                  <div className="setting-row">
+                    <span className="setting-copy"><strong>外观</strong><small>亮 / 暗两种主题，可跟随系统</small></span>
+                    <span className="segmented" role="group" aria-label="主题">
+                      {themeOptions.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={themeMode === option.id ? "is-active" : ""}
+                          onClick={() => onThemeMode(option.id)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                </section>
+                <section className="setting-section">
+                  <h3>动效</h3>
+                  <div className="setting-row">
+                    <span className="setting-copy"><strong>减少动效</strong><small>关闭界面过渡与闪烁动画；系统级减少动效设置始终生效</small></span>
+                    <span className="setting-control">
+                      <Toggle checked={prefs.reduceMotion} onChange={(next) => updateLocalPrefs({ reduceMotion: next })} label="减少动效" />
+                    </span>
+                  </div>
+                </section>
+              </>
+            )}
+            {category === "models" && (
+              <>
+                <DefaultModelRow source={source} models={models} preferences={preferences} onChanged={onPreferencesChanged} />
+                <ProvidersSettings source={source} onChanged={onProvidersChanged} />
+              </>
+            )}
+            {category === "chatDisplay" && (
               <section className="setting-section">
-                <h3>主题</h3>
+                <h3>事件显示</h3>
                 <div className="setting-row">
-                  <span className="setting-copy"><strong>外观</strong><small>亮 / 暗两种主题，可跟随系统</small></span>
-                  <span className="segmented" role="group" aria-label="主题">
-                    {themeOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={themeMode === option.id ? "is-active" : ""}
-                        onClick={() => onThemeMode(option.id)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                  <span className="setting-copy"><strong>显示思考事件</strong><small>关闭后时间线不再展示思考过程</small></span>
+                  <span className="setting-control">
+                    <Toggle checked={prefs.showThinking} onChange={(next) => updateLocalPrefs({ showThinking: next })} label="显示思考事件" />
+                  </span>
+                </div>
+                <div className="setting-row">
+                  <span className="setting-copy"><strong>显示工具调用</strong><small>关闭后时间线不再展示工具调用事件</small></span>
+                  <span className="setting-control">
+                    <Toggle checked={prefs.showToolCalls} onChange={(next) => updateLocalPrefs({ showToolCalls: next })} label="显示工具调用" />
                   </span>
                 </div>
               </section>
             )}
-            {category === "models" && (
-              <ProvidersSettings source={source} onChanged={onProvidersChanged} />
-            )}
-            {category !== "models" && sections[category].map((section) => (
-              <section className="setting-section" key={section.title}>
-                <h3>{section.title}</h3>
-                {category === "about" && section.title === "版本" && (
-                  <div className="setting-row">
-                    <span className="setting-copy"><strong>数据源</strong><small>{dataSourceLabel}</small></span>
-                  </div>
-                )}
-                {section.rows.map((row) => (
-                  <div className="setting-row" key={row.label}>
-                    <span className="setting-copy"><strong>{row.label}</strong><small>{row.value}</small></span>
-                    <span className="setting-control">
-                      {row.meta && <em>{row.meta}</em>}
-                      {row.control === "toggle" && <Toggle initial={row.enabled ?? false} />}
-                      {row.control === "select" && <ChevronRight size={14} className="chev-down" />}
-                      {row.control === "action" && <ChevronRight size={14} />}
-                    </span>
-                  </div>
-                ))}
+            {category === "about" && (
+              <section className="setting-section">
+                <h3>版本</h3>
+                <div className="setting-row">
+                  <span className="setting-copy"><strong>桌面端</strong><small>0.1.0 · Electron · React · Vite</small></span>
+                </div>
+                <div className="setting-row">
+                  <span className="setting-copy"><strong>数据源</strong><small>{source.info.label}</small></span>
+                  <span className="setting-control"><em>{source.info.connected ? "已连接" : "未连接"}</em></span>
+                </div>
               </section>
-            ))}
+            )}
           </div>
         </div>
       </section>

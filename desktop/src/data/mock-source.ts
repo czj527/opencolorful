@@ -28,7 +28,7 @@ import {
   type LiveEnvelope,
   type ProjectorState,
 } from "./projector.js";
-import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
+import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, ModelRef, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
 import type { AgentProfileView, AgentTemplateView, CreateAgentInput } from "./source.js";
 
 interface MockSession {
@@ -65,6 +65,15 @@ export class MockDataSource implements DesktopDataSource {
   private currentAgentName = agents[0]?.name ?? "Agent";
   private mockConfirmed = false;
   private mockToolMode = "all";
+  // 偏好默认模型指向 moonshot（列表首个可用是 deepseek-local），
+  // 验证桌面端按偏好选中而非“首个已配置”、且草稿运行设置随偏好（read-only / medium）
+  private mockPreferences: PreferencesView = {
+    defaults: {
+      model: { providerId: "moonshot", modelId: "kimi-k3" },
+      thinkingLevel: "medium",
+      toolMode: "read-only",
+    },
+  };
   private mockMemorySettings: MemoryAgentSettingsView = {
     enabled: true,
     dailyRunTime: "03:00",
@@ -347,15 +356,18 @@ export class MockDataSource implements DesktopDataSource {
   }
 
   getPreferences(): Promise<PreferencesView> {
-    // 偏好默认模型指向 moonshot（列表首个可用是 deepseek-local），
-    // 验证桌面端按偏好选中而非“首个已配置”、且草稿运行设置随偏好（read-only / medium）
-    return Promise.resolve({
+    return Promise.resolve(this.mockPreferences);
+  }
+
+  updatePreferences(patch: { defaults: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string } }): Promise<void> {
+    this.mockPreferences = {
       defaults: {
-        model: { providerId: "moonshot", modelId: "kimi-k3" },
-        thinkingLevel: "medium",
-        toolMode: "read-only",
+        model: patch.defaults.model === undefined ? this.mockPreferences.defaults.model : patch.defaults.model,
+        thinkingLevel: patch.defaults.thinkingLevel ?? this.mockPreferences.defaults.thinkingLevel,
+        toolMode: patch.defaults.toolMode ?? this.mockPreferences.defaults.toolMode,
       },
-    });
+    };
+    return Promise.resolve();
   }
 
   getSessionSettings(): Promise<SessionSettingsView> {

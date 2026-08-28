@@ -25,6 +25,7 @@ import {
   type SessionUsageView,
 } from "./data/source.js";
 import type { Agent, Thread } from "./mock-data.js";
+import { useLocalPrefs } from "./data/local-prefs.js";
 import { toUserError, type ErrorContext } from "./errors.js";
 import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
@@ -48,6 +49,17 @@ const FALLBACK_PREFERENCES: PreferencesView = {
  */
 export function App() {
   const theme = useTheme();
+  const localPrefs = useLocalPrefs();
+
+  // 减少动效（T8）：html data 属性驱动 CSS gate；系统级 prefers-reduced-motion 由 media query 独立兜底
+  useEffect(() => {
+    if (localPrefs.reduceMotion) {
+      document.documentElement.dataset["reduceMotion"] = "true";
+    } else {
+      delete document.documentElement.dataset["reduceMotion"];
+    }
+  }, [localPrefs.reduceMotion]);
+
   const [source, setSource] = useState<DesktopDataSource | null>(null);
   const [page, setPage] = useState<PageId>("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -62,9 +74,11 @@ export function App() {
   const [chatError, setChatError] = useState<React.ReactNode | null>(null);
   const [dock, setDock] = useState<DockTool | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("general");
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>("appearance");
   const [models, setModels] = useState<readonly ModelOption[]>([]);
   const [modelsRefresh, setModelsRefresh] = useState(0);
+  // 设置页保存全局偏好后 +1，驱动 preferences 重拉（草稿运行设置与默认模型联动）
+  const [prefsRefresh, setPrefsRefresh] = useState(0);
   const [sessionSettings, setSessionSettings] = useState<SessionSettingsView | null>(null);
   const [sessionUsage, setSessionUsage] = useState<SessionUsageView | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -159,7 +173,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [source]);
+  }, [source, prefsRefresh]);
 
   // 可用模型（真实数据源下来自已配置凭据的 Provider；Provider 变更后重拉）
   useEffect(() => {
@@ -747,9 +761,11 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           themeMode={theme.mode}
           onThemeMode={theme.setMode}
-          dataSourceLabel={source.info.label}
           source={source}
+          models={models}
+          preferences={preferences}
           onProvidersChanged={() => setModelsRefresh((value) => value + 1)}
+          onPreferencesChanged={() => setPrefsRefresh((value) => value + 1)}
         />
       )}
       {newSessionOpen && draftAgent !== undefined && (

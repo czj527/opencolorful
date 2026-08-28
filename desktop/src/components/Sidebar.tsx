@@ -141,11 +141,18 @@ function ThreadRow({
   }
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={`thread-row${isActive ? " is-active" : ""}`}
       onClick={onClick}
       onDoubleClick={startEdit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
     >
       <span className="thread-row-top">
         <strong>{thread.title}</strong>
@@ -167,7 +174,7 @@ function ThreadRow({
         <i className={`status-dot status-${thread.status}`} aria-hidden="true" />
         {thread.preview}
       </small>
-    </button>
+    </div>
   );
 }
 
