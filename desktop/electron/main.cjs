@@ -25,7 +25,7 @@ function shellLog(level, message) {
 }
 
 // G2 T1：packaged 且无显式外部后端时，进程内启动内嵌 Agent Server；
-// 端口占用/服务锁冲突/环境异常 → 降级为纯代理模式（与 dev 行为一致）
+// 服务锁冲突/环境异常 → 降级为纯代理模式（与 dev 行为一致）
 async function maybeStartEmbeddedServer() {
   if (!app.isPackaged || process.env.OPENCOLORFUL_SERVER_URL) return;
   try {
@@ -38,19 +38,40 @@ async function maybeStartEmbeddedServer() {
       importFrom(path.join("config", "environment.js")),
     ]);
     const environment = loadEnvironment();
-    embeddedServer = await startForegroundServer({
+    const startOptions = (port) => ({
       host: environment.host,
-      port: environment.port,
+      port,
       paths: getRuntimePaths(),
       version: app.getVersion(),
     });
+    try {
+      embeddedServer = await startForegroundServer(startOptions(environment.port));
+    } catch (error) {
+      // 默认端口被无关进程占用（真实事故：QQ squatting 4310）→ 回退随机空闲端口。
+      // startForegroundServer 把实际端口写入 server.json，代理也经下方
+      // OPENCOLORFUL_SERVER_URL 直连实际端口，无需固定端口。
+      if (error && typeof error === "object" && error.code === "EADDRINUSE") {
+        shellLog("warn", `端口 ${environment.port} 被占用，回退随机端口启动内嵌后端`);
+        embeddedServer = await startForegroundServer(startOptions(0));
+      } else {
+        throw error;
+      }
+    }
     // 让 api/sse 代理直连内嵌实例（自定义端口时默认探测 4311/4310 找不到它）；
     // 内嵌启动失败则不设置，代理维持既有探测/降级行为
     process.env.OPENCOLORFUL_SERVER_URL = `http://${embeddedServer.host}:${embeddedServer.port}`;
     shellLog("info", `embedded server online: http://${embeddedServer.host}:${embeddedServer.port}`);
   } catch (error) {
     embeddedServer = null;
-    shellLog("error", `embedded server start failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    shellLog("error", `embedded server start failed: ${message}`);
+    // packaged 下后端不可用 = 全功能不可用；明确告知而不是静默降级为
+    // "每个操作都莫名其妙失败"（v0.1.0 事故：缺包 + 端口被占时用户无任何线索）
+    dialog.showErrorBox(
+      "OpenColorful 后端启动失败",
+      `内嵌服务未能启动，应用功能不可用。\n\n${error instanceof Error ? error.message : String(error)}\n\n` +
+      `日志位置：${path.join(app.getPath("userData"), "logs", "shell.log")}`,
+    );
   }
 }
 

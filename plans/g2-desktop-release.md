@@ -20,7 +20,7 @@ openhanako 方案中**不照搬**的部分（超出现阶段需求）：
 
 1. **内嵌后端**：直接携带根 `npm run build` 的 tsc 产物（staging 为 `server-dist/`）+ 完整生产 `node_modules`，Electron 主进程在 packaged 模式下动态 `import()` `startForegroundServer` 并启动，监听 `127.0.0.1:4310`（`OPENCOLORFUL_PORT` 可覆盖）。**不用 esbuild 单文件化**：PI 扩展机制（jiti 从磁盘加载 sandbox/memory/skill/subagent-tools 四个扩展）与 `import.meta` 路径解析都按"文件在磁盘上"设计，单文件 bundle 要对抗这套机制，脆弱且收益小。启动失败（端口占用/锁冲突/环境异常）降级为现有纯代理模式，dev 工作流完全不变。
 2. **数据目录**：沿用 `~/.opencolorful`（`OPENCOLORFUL_HOME` 可覆盖），packaged 与 CLI/dev 共享同一数据约定。
-3. **打包 staging**：`desktop/scripts/stage-release.mjs` 生成 `desktop/release/app/`（gitignored）：精简 package.json（`type:module`，版本取自 `desktop/package.json`，dependencies 复刻根清单）+ `electron/*.cjs` + renderer `dist/` + `server-dist/` + `npm install --omit=dev --omit=optional`（better-sqlite3 由 electron-builder rebuild 到 Electron ABI）+ 手工拷贝 `@opencolorful/plugin-protocol`（workspace 私包未发布）。
+3. **打包 staging**：`desktop/scripts/stage-release.mjs` 生成 `desktop/release/app/`（gitignored）：精简 package.json（`type:module`，版本取自 `desktop/package.json`，dependencies 复刻根清单）+ `electron/*.cjs` + renderer `dist/` + `server-dist/` + `npm install --omit=dev --omit=optional`（better-sqlite3 由 `rebuild-native.mjs` 定向 rebuild 到 Electron ABI）+ workspace 插件包（`@opencolorful/plugin-protocol`/`plugin-runtime`）以 `file:` 依赖声明 + `.npmrc install-links=true` 实拷进 node_modules 并记入 lockfile（T4 修正：事后手工拷贝会被 electron-builder 依赖收集器当未声明包剪掉，见 T4 实施记录）。
 4. **版本更新**：electron-updater GitHub provider（`czj527/opencolorful`），仅 packaged 生效；启动时 + 每 4h + 手动三处检查；`autoDownload=false`（遵循 openhanako 的用户可控决策）；状态机经 IPC `update:state` 推送渲染层；UI 入口为设置页"关于"区 + 下载完成后 App 级横幅。
 5. **版本号唯一来源**：`desktop/package.json`；tag `vX.Y.Z` 与之对应；root `package.json` 由脚本同步（T3）。
 
@@ -94,3 +94,24 @@ openhanako 方案中**不照搬**的部分（超出现阶段需求）：
   - `docs/ci-cd.md`："Main 和发布"更新为 G2 现状；后续增强第 5 项（tag release workflow）标记已落地。
   - `CHANGELOG.md` Unreleased 补 G2 三条用户可见变化（安装器/应用内更新/发布自动化）。
 - **dispatch 干跑首败与修复（T3b）**：`desktop:pack` 原顺序 `build → build:protocol` 在干净环境（CI 全新 checkout）炸 TS2307——`src/contracts/plugin-protocol.ts` 经 exports 指向 workspace 包 dist，根 tsc 构建时 dist 尚不存在（本机 lane 因有历史构建产物而掩盖）。修复为 `build:protocol → build:sdk → build → pack`（与 `npm run check` 同序），并模拟干净环境（删 `dist/` 与 `packages/*/dist/`）重跑全链验证。教训：**凡涉及构建顺序的改动，必须在无 dist 的干净环境验证一次**。
+
+### T4 v0.1.0 安装版全功能失效热修（lane：fix/desktop-release-hardening）
+
+- 2026-08-28 事故：作者安装 CI 产出的 v0.1.0 后，Provider 保存/日志/全部 API 均失败。三个叠加根因：
+  1. **asar 缺 workspace 包（致命）**：staging 对 `@opencolorful/plugin-protocol`/`plugin-runtime` 采用 npm install 后手工拷贝——两者不在 staging 清单/lockfile 里，electron-builder 的生产依赖收集器（`searching for node modules`）把未声明包当游离包**剪掉**，asar 内缺失 → 安装版启动内嵌后端即 `ERR_MODULE_NOT_FOUND`。**此前 T1 的"win-unpacked 实测通过"是假阳性**：win-unpacked 位于仓库树内，asar 缺失的 import 沿父目录静默解析到仓库自身 node_modules。教训：**打包验收必须在仓库树之外运行**（或至少做 asar 内容断言），仓库内运行无效。
+  2. **端口 4310 被 QQ 占用**：QQ 在本机监听 `127.0.0.1:4310` 且对 `/api/health` 返回 200 二进制。内嵌启动 EADDRINUSE 后代理降级探测，`probe()` 只查 `response.ok` → 误把 QQ 当后端锁住，所有 API 收到乱码（表现为"保存失败"而非"连接失败"）。
+  3. **发布资产不完整**：tag 运行的 publish 步骤日志在 `creating GitHub release` 后无任何上传完成记录却退出码 0，draft 里只有 `.blockmap`（缺安装器与 `latest.yml`）→ 应用内更新检查必败。
+- 修复（本 lane）：
+  - `stage-release.mjs`：两个 workspace 包改为 staging 清单的 `file:../../../packages/*` 依赖 + staging `.npmrc` `install-links=true`（npm 语义与字面相反，**true 才是实拷**，已实测），进入 lockfile 成为一等生产依赖；删除手工拷贝；新增 staging 后断言（实拷存在 + 非软链，fail-fast）。
+  - `desktop/scripts/verify-pack.mjs`（新）：asar 内容断言（plugin-protocol/plugin-runtime/electron-updater/better-sqlite3/server-dist/renderer/主进程入口）+ `app.asar.unpacked` 原生模块存在性 + `latest.yml`/安装器存在性；接入 `pack` 脚本末尾（本地与 CI 同门槛）。
+  - `api-proxy.cjs`：`probe()` 增加响应身份校验——agent server 要求 `{status:"ok", version:string, pid:int}`，supervisor 要求 `{supervisor:{pid,port}, agentServer:{status}}` 形状；外来进程（QQ 二进制 200）一律拒绝。
+  - `main.cjs`：内嵌启动 `EADDRINUSE` 回退随机端口（`startForegroundServer` 本就回写实际端口到 server.json，代理经 `OPENCOLORFUL_SERVER_URL` 直连）；彻底失败时 `dialog.showErrorBox` 告知并附 shell.log 路径（不再静默）。
+  - `release.yml`：verify 步骤改调 `verify:pack`；publish 后新增资产断言步骤——缺失资产用 `gh release upload --clobber` 补传，仍缺则 fail。
+  - 版本 0.1.0 → 0.1.1（`bump-desktop-version.mjs`）；v0.1.0 标记为不可用版本（crash 级缺陷），其 tag/draft 由作者清理。
+- 验证（2026-08-28，本机）：
+  - staging：`file:` + `install-links=true` 后 `node_modules/@opencolorful/*` 为实拷目录（非软链），lockfile 有两包真实条目；断言脚本当场抓住过 npm 默认软链行为（fail-fast 生效）。
+  - `npm run pack --workspace=@opencolorful/desktop` 全链绿，`verify:pack` 14 项断言全过（两 workspace 包/electron-updater/better-sqlite3 入 asar，原生模块已 unpack，`latest.yml` + NSIS 俱在）。
+  - **仓库外启动冒烟**：win-unpacked 拷到 `%TEMP%`（脱离仓库树）+ 隔离 `OPENCOLORFUL_HOME` 启动——内嵌后端 online，`/api/health` 200（`{"status":"ok","version":"0.1.1",...}`）、`/api/settings/preferences` 200、`/api/agents` 200、`PUT /api/settings/providers` 空体返回 400 `INVALID_INPUT` 中文结构化错误；WM_CLOSE 优雅停止（server.json `stopped`）。
+  - **EADDRINUSE 回退**：先用 dummy 进程占住 4310 再启动——shell.log 记录 warn 回退，内嵌后端在随机端口 53938 online，server.json 记录实际端口；二次优雅停止正常。
+  - **probe 身份校验活体验证**：本机 QQ 占用 4310 期间 `resolveBase()` 返回 `null`（修复前会锁住 QQ）。
+  - 根 `npm run check` 与 `check:docs` 结果见 PR 描述。

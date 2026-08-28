@@ -1,6 +1,6 @@
 {
   "name": "@opencolorful/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -11,7 +11,8 @@
     "start": "electron electron/main.cjs",
     "stage": "node scripts/stage-release.mjs",
     "rebuild:native": "node scripts/rebuild-native.mjs",
-    "pack": "npm run build && npm run stage && npm run rebuild:native && electron-builder --config electron-builder.yml --win --x64 --publish never"
+    "verify:pack": "node scripts/verify-pack.mjs",
+    "pack": "npm run build && npm run stage && npm run rebuild:native && electron-builder --config electron-builder.yml --win --x64 --publish never && npm run verify:pack"
   },
   "dependencies": {
     "electron-updater": "^6.8.3",

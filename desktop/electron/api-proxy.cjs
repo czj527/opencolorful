@@ -11,10 +11,21 @@ const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
 let activeBase = null;
 
 async function probe(base) {
-  const path = base.endsWith("4311") ? "/api/supervisor/status" : "/api/health";
+  const isSupervisor = base.endsWith("4311");
+  const path = isSupervisor ? "/api/supervisor/status" : "/api/health";
   try {
     const response = await fetch(base + path, { signal: AbortSignal.timeout(1500) });
-    return response.ok;
+    if (!response.ok) return false;
+    // 身份校验：端口可能被无关进程占用（真实事故：QQ 占用 4310 并对 /api/health
+    // 返回 200 二进制，代理把请求发给了 QQ），只认 OpenColorful 服务的响应形状
+    const data = await response.json().catch(() => null);
+    if (data === null || typeof data !== "object") return false;
+    if (isSupervisor) {
+      const sup = data.supervisor;
+      const agent = data.agentServer;
+      return typeof sup?.pid === "number" && typeof sup?.port === "number" && typeof agent?.status === "string";
+    }
+    return data.status === "ok" && typeof data.version === "string" && Number.isInteger(data.pid);
   } catch {
     return false;
   }

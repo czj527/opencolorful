@@ -40,10 +40,9 @@ jobs:
         run: npm run desktop:pack
       - name: Verify artifacts
         shell: bash
-        run: |
-          ls desktop/release/bundles/
-          test -f desktop/release/bundles/latest.yml || { echo "latest.yml 缺失，更新 feed 不可用"; exit 1; }
-          ls desktop/release/bundles/*.exe > /dev/null || { echo "NSIS 安装器缺失"; exit 1; }
+        # pack 脚本末尾已自动执行 verify:pack（asar 内容 + 原生模块 + 产物断言），
+        # 此处显式重跑一次，让 CI 日志里该门槛清晰可见
+        run: npm run verify:pack --workspace=@opencolorful/desktop
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -60,3 +59,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --config electron-builder.yml --win --x64 --publish always
+      # v0.1.0 事故：electron-builder 上传静默失败，draft 里只有 blockmap。
+      # 发布后逐资产断言，缺失用 gh 补传，仍缺则 fail。
+      - name: Verify published assets
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          assets=$(gh release view "$tag" --json assets --jq '[.assets[].name]')
+          echo "已上传资产: $assets"
+          for f in desktop/release/bundles/*.exe desktop/release/bundles/latest.yml desktop/release/bundles/*.exe.blockmap; do
+            name=$(basename "$f")
+            if ! echo "$assets" | grep -q "\"$name\""; then
+              echo "::warning::资产 $name 缺失，使用 gh 补传"
+              gh release upload "$tag" "$f" --clobber
+            fi
+          done
+          final=$(gh release view "$tag" --json assets --jq '[.assets[].name]')
+          echo "$final" | grep -q "latest\.yml" || { echo "latest.yml 未发布，更新 feed 不可用"; exit 1; }
+          echo "$final" | grep -q "\.exe\"" || { echo "安装器未发布"; exit 1; }
