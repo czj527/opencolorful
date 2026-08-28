@@ -43,6 +43,8 @@ export interface MemoryAgentSettingsView {
   readonly dailyRunTime: string;
   readonly minIdleMinutes: number;
   readonly injectBudgetChars: number;
+  /** T14：每轮结束后的后台复盘开关 */
+  readonly reviewEnabled: boolean;
 }
 
 export interface ConnectionInfo {

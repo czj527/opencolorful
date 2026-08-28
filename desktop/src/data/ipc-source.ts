@@ -627,6 +627,7 @@ export class IpcDataSource implements DesktopDataSource {
       dailyRunTime: typeof settings["dailyRunTime"] === "string" ? settings["dailyRunTime"] : "03:00",
       minIdleMinutes: typeof settings["minIdleMinutes"] === "number" ? settings["minIdleMinutes"] : 30,
       injectBudgetChars: typeof settings["injectBudgetChars"] === "number" ? settings["injectBudgetChars"] : 2500,
+      reviewEnabled: settings["reviewEnabled"] !== false,
     };
   }
 

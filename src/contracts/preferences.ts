@@ -297,6 +297,11 @@ function normalizeObservabilitySettings(value: unknown): ObservabilityPreference
 /** 记忆设置：严格按 schema 校验（忽略未知字段/非法值），缺失回退全局默认 */
 function normalizeMemorySettings(value: unknown): MemoryAgentSettings | undefined {
   if (value === undefined) return undefined;
+  // T14 迁移：旧偏好文件的 memory 段没有 reviewEnabled，补默认后再校验，
+  // 避免整段回退丢用户配置（与 agent-store 的 settings.json 迁移同策略）
+  if (isObject(value) && value["reviewEnabled"] === undefined) {
+    value = { ...value, reviewEnabled: true };
+  }
   return Value.Check(MemoryAgentSettingsSchema, value)
     ? (value as MemoryAgentSettings)
     : { ...defaultMemoryAgentSettings() };

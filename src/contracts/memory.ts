@@ -163,7 +163,7 @@ export interface SessionSummary {
 
 // ─── 记忆意志（memory_journal，追加式权威） ─────────────────────
 
-export const MEMORY_JOURNAL_ACTORS = ["user", "main_agent", "memory_agent", "system"] as const;
+export const MEMORY_JOURNAL_ACTORS = ["user", "main_agent", "memory_agent", "system", "background_review"] as const;
 export type MemoryJournalActor = (typeof MEMORY_JOURNAL_ACTORS)[number];
 
 export const MEMORY_JOURNAL_INTENT_TYPES = [
@@ -550,6 +550,8 @@ export const MemoryAgentSettingsSchema = Type.Object(
     weeklyReviewTime: Type.String({ pattern: "^([01]\\d|2[0-3]):[0-5]\\d$" }),
     turnsPerSummary: Type.Integer({ minimum: 1, maximum: 100 }),
     injectBudgetChars: Type.Integer({ minimum: 200, maximum: 8000 }),
+    /** T14：每轮结束后的后台复盘开关（hermes background_review 轻量版） */
+    reviewEnabled: Type.Boolean(),
     retentionThresholds: Type.Object({
       mediumUp: Type.Integer({ minimum: 1, maximum: 99 }),
       mediumDown: Type.Integer({ minimum: 1, maximum: 99 }),
@@ -573,6 +575,7 @@ export function defaultMemoryAgentSettings(): MemoryAgentSettings {
     weeklyReviewTime: "03:30",
     turnsPerSummary: 10,
     injectBudgetChars: 2500,
+    reviewEnabled: true,
     retentionThresholds: { ...MEMORY_RETENTION_THRESHOLD_DEFAULTS },
   };
 }

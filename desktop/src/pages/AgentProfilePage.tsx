@@ -357,6 +357,21 @@ export function AgentProfilePage({ agent, source }: AgentProfilePageProps) {
                     <i />
                   </button>
                 </div>
+                <div className="profile-setting-row">
+                  <div className="profile-setting-copy">
+                    <strong>后台复盘</strong>
+                    <small>每轮对话结束后自动判断有没有值得记住的内容，候选经每日整理审批后生效</small>
+                  </div>
+                  <button
+                    type="button"
+                    className={`toggle${settings.reviewEnabled ? " is-on" : ""}`}
+                    disabled={readonly || saving}
+                    onClick={() => void saveSettings({ reviewEnabled: !settings.reviewEnabled })}
+                    aria-pressed={settings.reviewEnabled}
+                  >
+                    <i />
+                  </button>
+                </div>
                 <label className="profile-setting-row">
                   <div className="profile-setting-copy">
                     <strong>每日整理时间</strong>

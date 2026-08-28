@@ -14,10 +14,12 @@ import { SessionIndex } from "../storage/session-index.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
+import { BackgroundReviewService } from "../runtime/memory/background-review.js";
 import { MemoryAgentResolver } from "../runtime/memory/resolver.js";
 import { MemoryAgentScheduler } from "../runtime/memory/scheduler.js";
 import { MemoryProposalStore } from "../storage/memory/proposal-store.js";
 import { MemoryJournalStore } from "../storage/memory/journal-store.js";
+import { PinnedMemoryStore } from "../storage/memory/pinned-store.js";
 import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../runtime/memory/proposal-application.js";
 import { defaultMemoryAgentSettings } from "../contracts/memory.js";
@@ -469,6 +471,22 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     });
     memoryAgentScheduler.start();
 
+    // ── 切片 1.75 T14：每轮后台复盘（只产出 journal intent，审批归记忆 Agent）──
+    const backgroundReviewer = new BackgroundReviewService({
+      replayStore,
+      sessionService,
+      journalStore: new MemoryJournalStore(database),
+      pinnedStore: new PinnedMemoryStore(database),
+      agentsDir: paths.agents,
+      sessionPathResolver: (sessionId) => {
+        const meta = sessionIndex.get(sessionId);
+        if (!meta) throw new Error(`Session 不存在: ${sessionId}`);
+        return meta.sessionPath;
+      },
+      completeText: async (agentId, req) => completeText(agentId, req),
+      settingsResolver: resolveMemorySettings,
+    });
+
     // Phase 14 T6：Subagent 运行时组合根（T2-T7 服务接线 + 启动恢复 §16.5）
     let subagentComposition: SubagentRuntimeComposition | undefined;
     let subagentRecoveryReport: SubagentStartupRecoveryReport | undefined;
@@ -540,6 +558,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         disposed = true;
         memoryTicker.stop();
         memoryAgentScheduler.stop();
+        backgroundReviewer.stop();
         subagentComposition?.dispose();
         usageRecorder.dispose();
         promptService.dispose();

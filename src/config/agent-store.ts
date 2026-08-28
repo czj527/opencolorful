@@ -361,6 +361,15 @@ export class AgentStore {
     if (!fs.existsSync(p)) return null;
     try {
       const raw = this.readRawJson(p);
+      // T14 迁移：旧 settings.json 的 memory 子树没有 reviewEnabled，补默认值后重新校验
+      // （memory 是完整对象校验，缺字段会整体校验失败退默认，丢失用户其他定制）
+      const memory = raw["memory"];
+      const needsReviewFill =
+        typeof memory === "object" && memory !== null && !Array.isArray(memory)
+        && (memory as Record<string, unknown>)["reviewEnabled"] === undefined;
+      if (needsReviewFill) {
+        (memory as Record<string, unknown>)["reviewEnabled"] = true;
+      }
       if (!Value.Check(AgentSettingsSchema, raw)) return null;
       const settings = raw as AgentSettings;
       // v1 → v2 自动迁移：补 sandbox 默认值，升级 version，写回磁盘
@@ -374,7 +383,9 @@ export class AgentStore {
         this.writeSettings(agentId, migrated);
         return migrated;
       }
-      return settings as AgentSettingsV2;
+      const v2 = settings as AgentSettingsV2;
+      if (needsReviewFill) this.writeSettings(agentId, v2);
+      return v2;
     } catch {
       return null;
     }

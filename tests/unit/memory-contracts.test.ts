@@ -72,8 +72,8 @@ describe("memory contract enums", () => {
     expect(MEMORY_FACT_SOURCES).toEqual(["agent_proposed", "agent_approved", "user_intent"]);
   });
 
-  it("journal enums match migration v6 CHECK constraints", () => {
-    expect(MEMORY_JOURNAL_ACTORS).toEqual(["user", "main_agent", "memory_agent", "system"]);
+  it("journal enums match migration v13 CHECK constraints", () => {
+    expect(MEMORY_JOURNAL_ACTORS).toEqual(["user", "main_agent", "memory_agent", "system", "background_review"]);
     expect(MEMORY_JOURNAL_INTENT_TYPES).toEqual([
       "remember",
       "forget",
