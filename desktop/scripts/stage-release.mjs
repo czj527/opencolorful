@@ -11,10 +11,12 @@
  *   release/app/node_modules/    生产依赖 + 手工拷贝的 @opencolorful/plugin-protocol
  *                               （workspace 私包未发布，npm install 无法获取）
  *
- * 前置条件（由根 npm run desktop:pack 串起）：
- *   1. npm run build（后端 dist）
- *   2. npm run build:protocol（plugin-protocol dist）
- *   3. npm run build --workspace=@opencolorful/desktop（renderer dist）
+ * 前置条件（由根 npm run desktop:pack 串起；workspace 包 dist 必须先于根 tsc 构建——
+ * src/contracts/plugin-protocol.ts 的类型经 exports 指向 dist，干净环境顺序颠倒会 TS2307）：
+ *   1. npm run build:protocol（plugin-protocol dist）
+ *   2. npm run build:sdk（plugin-sdk/runtime/components dist）
+ *   3. npm run build（后端 dist）
+ *   4. npm run build --workspace=@opencolorful/desktop（renderer dist）
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
