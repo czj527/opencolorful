@@ -1,7 +1,7 @@
 # P1 Slice 1.5 Implementation Plan — Usability Hardening
 
 **Date:** 2026-08-27
-**Status:** Draft (awaiting author sign-off)
+**Status:** All tasks merged (2026-08-28 — PR #26 T11 / #27 T7 / #28 T9 / #29 T8); awaiting author wave-8 acceptance
 **Spec (authoritative product decisions, Chinese):** `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`
 **Supersedes/extends:** `plans/p1-personal-assistant.en.md` (slice 1, merged PR #16-#23)
 
