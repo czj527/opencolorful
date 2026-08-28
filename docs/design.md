@@ -41,12 +41,25 @@ color values. Structure (spacing, radius, typography) is theme-independent.
 
 ```text
 titlebar:  brand · page tabs (对话/记忆/日志) · runtime state · theme · window controls
-sidebar:   agent switcher · session list · scheduled work · settings entry
-center:    chat header · scrollable timeline (max 740px) · composer
+mock bar:  full-width amber strip, rendered only while the data source is mock
+           (backend unreachable); never dismissible, disappears on real connection
+sidebar:   new-thread button · session list (cross-agent; per-row agent badge
+           when ≥2 agents) · archived section · settings entry
+center:    chat header (agent chip = the session's own agent, opens its profile)
+           · scrollable timeline (max 740px) · composer
+empty:     agent ID card (photo-left avatar + field rows, opens profile) ·
+           agent chips (≥2 agents) · composer · 高级新建 / 新建助理 entries
 right:     dock (变更审查 / 终端), hidden until opened
 settings:  centered modal with grouped category nav
 ```
 
+- **Session-centric agent model (T9).** There is no global "current agent".
+  A thread belongs to exactly one agent, fixed when the first message lands;
+  the session list is cross-agent and each row self-identifies its owner
+  (badge shown only when ≥2 agents exist — with a single agent it is noise).
+  The agent for a *new* conversation is chosen on the empty state (chips) or
+  in the advanced-new dialog; the default follows the most recent thread's
+  agent, then the first agent — never a separate global switcher.
 - The sidebar collapses to zero width; restore lives in the titlebar.
 - The dock keeps exactly one tool active; opening it never replaces the
   conversation.
@@ -68,9 +81,13 @@ actions and record the decision in place.
 - The composer exposes model / thinking level / tool mode as clickable chips
   (cycle on click) and a workspace chip; send becomes stop while streaming.
 - Replies stream in; stopping marks the message 已停止 instead of deleting it.
-- New conversations start from a sparse state: agent picker + composer only; the
-  first message creates the thread (mirrors the server rule: no session row
-  before the first prompt).
+- New conversations start from a sparse state: the agent ID card of the
+  would-be assistant (tap to open its profile), agent chips when several
+  exist, and the composer; the first message creates the thread (mirrors the
+  server rule: no session row before the first prompt).
+- Agent identity is per-session: the chat header chip shows the owning agent
+  and opens its profile page (基础信息 / 人设 / 置顶记忆 / 记忆设置编辑).
+  New agents are created from the empty state or the new-session dialog.
 - `prefers-reduced-motion` disables animation; every icon-only control has an
   accessible label.
 

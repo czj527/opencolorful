@@ -157,9 +157,9 @@ export class MockDataSource implements DesktopDataSource {
     return Promise.resolve(this.threads.filter((thread) => Boolean(thread.archivedAt)));
   }
 
-  createThread(_agentId: string, title: string, _options?: import("./source.js").CreateThreadOptions): Promise<Thread> {
+  createThread(agentId: string, title: string, _options?: import("./source.js").CreateThreadOptions): Promise<Thread> {
     this.idCounter += 1;
-    const thread: Thread = { id: `t${this.idCounter}`, title, preview: "刚刚创建", time: "刚刚", status: "active" };
+    const thread: Thread = { id: `t${this.idCounter}`, title, preview: "刚刚创建", time: "刚刚", status: "active", agentId };
     this.threads.unshift(thread);
     return Promise.resolve(thread);
   }
@@ -403,6 +403,15 @@ export class MockDataSource implements DesktopDataSource {
       ...this.mockProfile,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { persona: patch.description } : {}),
+    };
+  }
+
+  async updateAgentBaseColor(_agentId: string, patch: import("./source.js").AgentBaseColorPatch): Promise<void> {
+    this.mockProfile = {
+      ...this.mockProfile,
+      ...(patch.persona !== undefined ? { persona: patch.persona } : {}),
+      ...(patch.personality !== undefined ? { personality: [...patch.personality] } : {}),
+      ...(patch.replyStyle !== undefined ? { replyStyle: patch.replyStyle } : {}),
     };
   }
 

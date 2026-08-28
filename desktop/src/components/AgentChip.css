@@ -1,0 +1,38 @@
+/* T9 会话头助理 chip */
+.agent-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.agent-chip-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.agent-chip-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.agent-chip-status.is-ok { background: var(--ok); }
+.agent-chip-status.is-busy { background: var(--accent); }
+.agent-chip-status.is-offline { background: var(--err); }

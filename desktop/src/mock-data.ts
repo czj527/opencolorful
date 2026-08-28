@@ -16,6 +16,8 @@ export interface Thread {
   readonly preview: string;
   readonly time: string;
   readonly status: ThreadStatus;
+  /** 所属助理 id（T9 会话中心 IA）；历史遗留会话可能为 null（不显示 badge） */
+  readonly agentId: string | null;
   /** 归档时间（ISO 字符串）；存在且非空表示已归档 */
   readonly archivedAt?: string;
 }
@@ -244,11 +246,11 @@ export const agents: readonly Agent[] = [
 ];
 
 export const initialThreads: readonly Thread[] = [
-  { id: "desktop", title: "极简桌面原型", preview: "事件层、工作台与亮暗主题", time: "刚刚", status: "active" },
-  { id: "memory", title: "记忆整理策略", preview: "本周摘要与三条待确认事实", time: "09:42", status: "waiting" },
-  { id: "plugin", title: "插件运行时复盘", preview: "权限快照与失败恢复的边界", time: "昨天", status: "quiet" },
-  { id: "github", title: "GitHub 发布准备", preview: "README、仓库结构与安全清单", time: "周日", status: "quiet" },
-  { id: "archived-demo", title: "已归档会话演示", preview: "用于验证归档区恢复", time: "08-15", status: "quiet", archivedAt: "2026-08-15T21:00:00+08:00" },
+  { id: "desktop", title: "极简桌面原型", preview: "事件层、工作台与亮暗主题", time: "刚刚", status: "active", agentId: "yuan" },
+  { id: "memory", title: "记忆整理策略", preview: "本周摘要与三条待确认事实", time: "09:42", status: "waiting", agentId: "yuan" },
+  { id: "plugin", title: "插件运行时复盘", preview: "权限快照与失败恢复的边界", time: "昨天", status: "quiet", agentId: "lin" },
+  { id: "github", title: "GitHub 发布准备", preview: "README、仓库结构与安全清单", time: "周日", status: "quiet", agentId: "zi" },
+  { id: "archived-demo", title: "已归档会话演示", preview: "用于验证归档区恢复", time: "08-15", status: "quiet", agentId: "lin", archivedAt: "2026-08-15T21:00:00+08:00" },
 ];
 
 export const initialTimeline: readonly TimelineItem[] = [

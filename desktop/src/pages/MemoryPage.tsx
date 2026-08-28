@@ -31,9 +31,12 @@ function StrengthBar({ label, value, className }: { readonly label: string; read
 interface MemoryPageProps {
   readonly source: DesktopDataSource;
   readonly agent: Agent;
+  /** T9：会话中心 IA 后无全局当前助理；多助理时页内切换（≥2 才显示） */
+  readonly agents?: readonly Agent[];
+  readonly onAgent?: (id: string) => void;
 }
 
-export function MemoryPage({ source, agent }: MemoryPageProps) {
+export function MemoryPage({ source, agent, agents, onAgent }: MemoryPageProps) {
   const [data, setData] = useState<MemoryPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -147,6 +150,16 @@ export function MemoryPage({ source, agent }: MemoryPageProps) {
       <header className="page-head">
         <h1>记忆</h1>
         <p>{agent.name} 的只读记忆视图：四段上下文制品、已审批事实、回想健康与后台整理状态。</p>
+        {agents !== undefined && agents.length >= 2 && onAgent !== undefined && (
+          <label className="page-agent-select">
+            <span>助理</span>
+            <select value={agent.id} onChange={(event) => onAgent(event.target.value)}>
+              {agents.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="log-filters">
           <label className="filter-box">
             <Search size={13} />

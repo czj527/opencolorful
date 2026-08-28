@@ -245,6 +245,7 @@ export class IpcDataSource implements DesktopDataSource {
       preview,
       time: formatThreadTime(session.updatedAt),
       status: isToday ? "active" : "quiet",
+      agentId: session.agentId,
       archivedAt: session.archivedAt,
     };
   }
@@ -276,8 +277,8 @@ export class IpcDataSource implements DesktopDataSource {
     return mapAgentView(view, 0);
   }
 
-  async listThreads(agentId: string): Promise<readonly Thread[]> {
-    const data = await this.request<unknown>("GET", `/api/agents/${encodeURIComponent(agentId)}/sessions`);
+  async listThreads(): Promise<readonly Thread[]> {
+    const data = await this.request<unknown>("GET", "/api/sessions");
     const sessions = asArray<SessionViewWire>(unwrap(data, "sessions"));
     return sessions.filter((session) => !session.archived).map((session) => this.threadFromSession(session));
   }
@@ -296,11 +297,11 @@ export class IpcDataSource implements DesktopDataSource {
     return this.threadFromSession(session);
   }
 
-  async listArchivedThreads(agentId: string): Promise<readonly Thread[]> {
+  async listArchivedThreads(): Promise<readonly Thread[]> {
     const data = await this.request<unknown>("GET", "/api/sessions?includeArchived=true");
     const sessions = asArray<SessionViewWire>(unwrap(data, "sessions"));
     return sessions
-      .filter((session) => session.archived && session.agentId === agentId)
+      .filter((session) => session.archived)
       .map((session) => this.archivedThreadFromSession(session));
   }
 
@@ -601,6 +602,17 @@ export class IpcDataSource implements DesktopDataSource {
     if (patch.description !== undefined) {
       await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/base-color`, { persona: patch.description });
     }
+  }
+
+  async updateAgentBaseColor(agentId: string, patch: import("./source.js").AgentBaseColorPatch): Promise<void> {
+    // 服务端按键过滤，未提供的字段不改动；空 patch 直接跳过（避免无意义写）
+    const body: Record<string, unknown> = {};
+    if (patch.persona !== undefined) body["persona"] = patch.persona;
+    if (patch.personality !== undefined) body["personality"] = [...patch.personality];
+    if (patch.replyStyle !== undefined) body["replyStyle"] = patch.replyStyle;
+    if (patch.innerSetting !== undefined) body["innerSetting"] = patch.innerSetting;
+    if (Object.keys(body).length === 0) return;
+    await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/base-color`, body);
   }
 
   async getMemorySettings(agentId: string): Promise<MemoryAgentSettingsView> {

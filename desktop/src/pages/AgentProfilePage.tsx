@@ -39,6 +39,10 @@ export function AgentProfilePage({ agent, source }: AgentProfilePageProps) {
 
   const [editName, setEditName] = useState(agent.name);
   const [editDescription, setEditDescription] = useState(agent.description);
+  // T9：人设（底色）编辑——replyStyle / personality 走 updateAgentBaseColor
+  // （innerSetting 不在 AgentProfileView 视图内，无法初始化，故不提供编辑）
+  const [editReplyStyle, setEditReplyStyle] = useState("");
+  const [editPersonality, setEditPersonality] = useState("");
 
   const [newPinned, setNewPinned] = useState("");
 
@@ -62,6 +66,8 @@ export function AgentProfilePage({ agent, source }: AgentProfilePageProps) {
       setPinned([...pinnedData]);
       setEditName(profileData.name);
       setEditDescription(profileData.persona || agent.description);
+      setEditReplyStyle(profileData.replyStyle);
+      setEditPersonality(profileData.personality.join("，"));
     } catch (cause) {
       handle(cause, "档案加载失败");
     } finally {
@@ -107,6 +113,27 @@ export function AgentProfilePage({ agent, source }: AgentProfilePageProps) {
       setSettings(next);
     } catch (cause) {
       handle(cause, "设置保存失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savePersona = async () => {
+    if (source === undefined || profile === null) return;
+    clear();
+    setSaving(true);
+    try {
+      // 人格标签：按中英文逗号/顿号分隔，去空白去重
+      const personality = [...new Set(
+        editPersonality.split(/[,，、]/).map((tag) => tag.trim()).filter((tag) => tag !== ""),
+      )];
+      await source.updateAgentBaseColor(agent.id, {
+        replyStyle: editReplyStyle.trim(),
+        personality,
+      });
+      await loadAll();
+    } catch (cause) {
+      handle(cause, "人设保存失败");
     } finally {
       setSaving(false);
     }
@@ -231,18 +258,37 @@ export function AgentProfilePage({ agent, source }: AgentProfilePageProps) {
 
           <section className="page-section">
             <h2>人设</h2>
-            <div className="profile-persona">
-              <div className="profile-persona-row">
+            <div className="profile-form">
+              <label className="profile-field">
                 <span>回复风格</span>
-                <p>{displayProfile.replyStyle || "（未设置）"}</p>
-              </div>
-              <div className="profile-persona-row">
-                <span>人格标签</span>
-                <div className="profile-tags">
-                  {displayProfile.personality.length > 0
-                    ? displayProfile.personality.map((tag) => <span className="chip" key={tag}>{tag}</span>)
-                    : <p>（未设置）</p>}
-                </div>
+                <input
+                  type="text"
+                  value={editReplyStyle}
+                  onChange={(event) => setEditReplyStyle(event.target.value)}
+                  placeholder="比如：温和简洁、先给结论"
+                  disabled={readonly || saving}
+                  maxLength={200}
+                />
+              </label>
+              <label className="profile-field">
+                <span>人格标签（逗号分隔）</span>
+                <input
+                  type="text"
+                  value={editPersonality}
+                  onChange={(event) => setEditPersonality(event.target.value)}
+                  placeholder="比如：严谨，好奇，节制"
+                  disabled={readonly || saving}
+                  maxLength={300}
+                />
+              </label>
+              <div className="profile-actions">
+                {readonly ? (
+                  <small className="profile-readonly-hint">数据源未接入，仅可查看。</small>
+                ) : (
+                  <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void savePersona()}>
+                    {saving ? "保存中…" : "保存人设"}
+                  </button>
+                )}
               </div>
             </div>
           </section>

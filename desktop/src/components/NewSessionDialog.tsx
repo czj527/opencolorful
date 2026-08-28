@@ -17,6 +17,8 @@ interface NewSessionDialogProps {
   readonly draftThinking: string;
   readonly draftModel: ModelRef | null;
   readonly onCreated: (thread: Thread, selectedAgentId: string) => void;
+  /** T9：助理选择器底部的"新建助理…"入口（关闭本弹窗并打开新建助理弹窗） */
+  readonly onCreateAgent: () => void;
   readonly onClose: () => void;
 }
 
@@ -50,6 +52,7 @@ export function NewSessionDialog({
   draftThinking,
   draftModel,
   onCreated,
+  onCreateAgent,
   onClose,
 }: NewSessionDialogProps) {
   const [selectedAgentId, setSelectedAgentId] = useState(agentId);
@@ -162,6 +165,14 @@ export function NewSessionDialog({
                 <option key={agent.id} value={agent.id}>{agent.name}</option>
               ))}
             </select>
+            <button
+              type="button"
+              className="inline-action new-session-create-agent"
+              onClick={onCreateAgent}
+              disabled={busy}
+            >
+              新建助理…
+            </button>
           </label>
 
           <div className="new-session-field">
