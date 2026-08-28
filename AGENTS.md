@@ -25,6 +25,7 @@
 | `docs/document-governance.md` | **文档治理与变更影响权威**（单人+AI agent 护栏定位、事实归属、CI 门禁） | 每次新增功能或跨边界修改时读 |
 | `docs/infrastructure-decisions.md` | **基础设施边界与开发决策**（记忆命名体系/沙箱定位/subagent 特化/Electron 定位） | 必读，理解边界与选型 |
 | `plans/g1-repo-convergence.md` | G1 仓库收敛与 Desktop 优先计划 | 涉及前端归属、文档结构、编号时读 |
+| `plans/g2-desktop-release.md` | G2 桌面发布分发与版本更新计划 | 涉及桌面打包、发布流程、版本更新时读 |
 | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md` | P1 切片 1 规格（个人助理首个垂直切片） | 做 P1 功能时必读 |
 | `docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md` | P1 切片 1.5 规格（可用性攻坚：会话中心 IA/设置页极简/SSE 性能） | 做 P1 功能时必读 |
 | `docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md` | P1 切片 1.75 规格（记忆激活：行为契约/工具引导/后台复盘/闭环实证） | 做记忆功能时必读 |
