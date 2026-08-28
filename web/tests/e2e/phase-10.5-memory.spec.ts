@@ -55,6 +55,7 @@ const defaultSettings = {
   weeklyReviewTime: "03:30",
   turnsPerSummary: 10,
   injectBudgetChars: 2500,
+  reviewEnabled: true,
   retentionThresholds: { mediumUp: 45, mediumDown: 35, permanentUp: 85 },
 };
 
