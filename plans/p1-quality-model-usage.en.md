@@ -250,6 +250,52 @@ Deviation and follow-up: matrix and conventions doc written in Chinese to match 
 Main-Agent review: rows cross-checked against src/server/app.ts route registry, desktop/src/data/source.ts contract, electron IPC channels (desktop:api, desktop:pick-directory, update:*), desktop/package.json (no test infra yet) and the root/web test file inventory; no child agents involved
 ```
 
+```text
+Date: 2026-09-01
+Task: A2 — Desktop Mock UI harness (parallel_group: wave-a-desktop-harness)
+Commit(s): 7a5330c (A2 lane), e5601ff (shared test deps by main agent, pre-commit to keep lanes disjoint)
+Commands and exit codes:
+  - npm run test --workspace=@opencolorful/desktop → 11 files / 24 tests passed, exit 0 (rerun for repeatability, exit 0)
+  - npx tsc -p tsconfig.json --noEmit (desktop) → exit 0
+  - Main agent independently re-ran both commands after the A2 report; identical results
+Evidence paths: desktop/vitest.config.ts; desktop/src/test/setup.ts; desktop/tests/fixtures/** (9 Page Objects, override-source, SSE replay); desktop/src/*.mock.test.tsx (11 files)
+Observed result: 24 cases mapped to 18 L5 matrix rows; real clicks/typing with role+name locators, per-case no-console-error assertions; parity gaps recorded rather than papered over
+Unverified: rows whose target layer includes L6/L7; rows the matrix marks "Mock 不支持" (断线语义、多助理隔离等) not faked
+Deviation and follow-up (Mock/IPC parity gaps, from child report + main-agent confirmation):
+  1. MockDataSource.getMemoryData ignores agentId/query (tsc-proven); MEM-02 q-filter simulated in fixture
+  2. Mock createThread drops CreateThreadOptions (cwd/toolMode/thinkingLevel/workspaceConfirmed) — those semantics only L6
+  3. subscribeMemoryMaintenance/subscribeActivityStream are no-ops; subagent source ignores agentId/sessionId
+  4. Machine shell carries NODE_ENV=production → vitest config pins NODE_ENV=test
+  5. data-testid 缺口清单（oc-composer-send 等 8 项）记录于报告，待后续补齐后收敛定位策略
+Main-Agent review: diff reviewed directly; gates re-run independently; child report used as work record only
+```
+
+```text
+Date: 2026-09-01
+Task: A3 — Electron true-chain harness + CI smoke (parallel_group: wave-a-desktop-harness)
+Commit(s): a39cf2a (A3 lane), b99d8da (production hotfix uncovered by this lane, main agent)
+Commands and exit codes:
+  - npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @smoke → 1 passed (23.2s), exit 0; repeat run in progress at writeback time (background npm run check + smoke rerun, task s0hrnag2)
+  - npx tsc -p tsconfig.json --noEmit (desktop) → exit 0
+  - npx vitest run tests/unit/desktop-projector.test.ts → 14/14 passed (3 new terminal-state cases)
+  - Full npm run check running in background; result to be appended before merge (child reports NOT acceptance evidence; main agent re-ran key gates)
+Evidence paths: desktop/tests/e2e/** (config, harness/backend/app/server-bootstrap fixtures, 2 Page Objects, @smoke spec); .github/workflows/quality.yml (desktop-smoke job); docs/ci-cd.md; artifacts at desktop/test-artifacts/ (gitignored)
+Observed result: true-chain flow passes on Windows — onboarding → no-cwd session (cwd fallback anchor) → first message streaming → abort → second message → restart persistence; truth assertions over API/JSONL/providers.json/auth.json; credential red lines (key only in AuthStorage); isolation self-checks
+Fixture defects found and fixed during bring-up (child agent hit turn limit mid-debug; main agent took over per development.md §一):
+  1. REPO_ROOT resolved one level short → require(electron) looked in desktop/node_modules
+  2. fs.cpSync native crash (0xC0000409) during retain evidence copy on Windows → replaced with manual copy; had masked the real failure
+  3. stub Provider treated request-body consumption as client abort (request 'close') → abort detection moved to response 'close' with finished flag
+Isolation defect (user-visible impact): PI built-in catalog counts DEEPSEEK_API_KEY etc. as configured (source=environment, references/pi model-runtime.ts:424-425); the author's real (expired) key reached the real DeepSeek API during tests → fixtures now strip credential env vars for both the bootstrap and the Electron app
+Product defects uncovered and hotfixed in b99d8da (details in that commit + CHANGELOG):
+  1. completeOnboarding did not refresh models/preferences — on clean machines the first message is blocked by "还没有可用模型"; on machines with provider env credentials the draft model silently resolved to the built-in deepseek model (real external call)
+  2. Desktop projector lacked turn.cancelled/turn.interrupted/turn.failed cases — abort and model failures left the UI stuck streaming forever
+Deviation and follow-up:
+  - CI desktop-smoke job added but not yet exercised on GitHub runners (xvfb/electron deps to be confirmed on first CI run)
+  - Session default model can still fall through to environment-credential built-ins server-side when preferences carry no model — canonical primary/secondary policy (A6) is the structural fix; smoke now pins defaults.model via API to stay deterministic
+  - Failed turn renders an empty assistant bubble with "生成失败" meta (cosmetic; noted for A7 polish)
+Main-Agent review: diff reviewed directly; smoke re-run independently; child report used as work record only
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

@@ -14,8 +14,8 @@
 | L2 | 契约/适配 | `tests/contract/**`、`tests/contracts/**`、`verify-pi-sdk-imports`、`verify-plugin-imports` | 在跑 |
 | L3 | 服务端集成 | `tests/integration/**`、`tests/e2e/**`（faux provider + 临时 `OPENCOLORFUL_HOME`） | 在跑 |
 | L4 | Web 运维面 | `web/tests/e2e/`（Playwright，workers=1，串行） | 在跑（59 例） |
-| L5 | Desktop Mock | `desktop/` 渲染层回归（无后端，MockDataSource 注入状态） | **待建（A2）** |
-| L6 | Desktop Electron 真链 | Playwright `_electron` + 隔离 home/user-data-dir + faux provider | **待建（A3）** |
+| L5 | Desktop Mock | `desktop/` 渲染层回归（无后端，MockDataSource 注入状态；`npm run test --workspace=@opencolorful/desktop`） | **在跑（A2，2026-09-01：11 文件 24 例）** |
+| L6 | Desktop Electron 真链 | Playwright `_electron` + 隔离 home/user-data-dir + 本地 stub Provider（`npx playwright test --config desktop/tests/e2e/playwright.config.ts`） | **在跑（A3，2026-09-01：@smoke 真链合并链 1 例；CI Desktop smoke job 已接入）** |
 | L7 | 韧性/发布 | 故障注入、安装包冒烟、更新链路 | 待建（A3/A9 部分） |
 
 ## 二、状态词
@@ -51,18 +51,18 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| ONB-01 | 干净 home 启动 → 自动进四步引导 → 逐步填写（名字+底色模板 → Provider 预设+API Key → 工作目录 → 权限说明）→ 完成 | `POST /api/agents` 201 三文件落盘；`PUT /api/settings/providers` 凭据只入 AuthStorage | 四步逐步推进，完成后进对话页且助理已选中 | L6 | 无（desktop 无测试基建）；历史用例 I1-I5 未执行 | SKIP（未执行） | 首启派生依赖两端点，探测失败时放行 ready（不阻塞启动） |
-| ONB-02 | 完成引导后重启应用 | `GET /api/agents` 非空 | 不再自动进引导 | L6 | 无；历史 I6 未执行 | SKIP（未执行） | — |
-| ONB-03 | 引导中点「稍后再说」→ 空态再点「开始引导」 | — | 退出进空态，可重进 | L5/L6 | 无 | SKIP（未执行） | — |
-| ONB-04 | 第 1 步空名点下一步；第 2 步错 Key/非法 URL；模板接口失败兜底 | 校验失败不写后端 | 内联中文错误（`role=alert`）；模板失败渲染空白模板不崩 | L5 | 无 | SKIP（L5 未建） | Mock 需支持模板接口失败注入 |
+| ONB-01 | 干净 home 启动 → 自动进四步引导 → 逐步填写（名字+底色模板 → Provider 预设+API Key → 工作目录 → 权限说明）→ 完成 | `POST /api/agents` 201 三文件落盘；`PUT /api/settings/providers` 凭据只入 AuthStorage | 四步逐步推进，完成后进对话页且助理已选中 | L6 | A3 `smoke.truechain.spec.ts` @smoke 合并链（2026-09-01） | PASS（L6，2026-09-01） | 首启派生依赖两端点，探测失败时放行 ready（不阻塞启动） |
+| ONB-02 | 完成引导后重启应用 | `GET /api/agents` 非空 | 不再自动进引导 | L6 | A3 冒烟 Phase 2 重启段（2026-09-01） | PASS（L6，2026-09-01） | — |
+| ONB-03 | 引导中点「稍后再说」→ 空态再点「开始引导」 | — | 退出进空态，可重进 | L5/L6 | A2 `onboarding.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
+| ONB-04 | 第 1 步空名点下一步；第 2 步错 Key/非法 URL；模板接口失败兜底 | 校验失败不写后端 | 内联中文错误（`role=alert`）；模板失败渲染空白模板不崩 | L5 | A2 `onboarding.mock.test.tsx` ×3（2026-09-01） | PASS（L5，2026-09-01） | Mock 需支持模板接口失败注入（已具备） |
 | ONB-05 | 第 3 步点「浏览…」 | `POST /api/directories/pick` | 弹原生目录对话框；取消回退手输 | L6 | L3 `directory-picker.test.ts`（17 例） | SKIP（L6 未建） | 非 Windows 返回 501；无桥时静默 null 回退 |
 
 ### AGENT · Agent 身份与档案
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| AGENT-01 | 空态/新建会话对话框「新建助理…」→ 名字+模板+可选默认目录 → 创建 | `POST /api/agents`；`agents/<id>/identity.json`、`base-color.json`、`settings.json` 三文件 | 助理出现在空态 chips/会话对话框下拉 | L6 | L1 `agent-store.test.ts`（21）、L3 `agent-routes.test.ts`（19） | SKIP（L6 未建） | 默认目录可空（cwd 兜底链路见 SESS-01） |
-| AGENT-02 | 空态身份证卡展示名称/编号/底色；点「编号」复制；点卡进档案页 | `GET /api/agents/:id` | 卡片信息正确；剪贴板含编号；进档案页 | L5/L6 | 无 | SKIP（L5 未建） | — |
+| AGENT-01 | 空态/新建会话对话框「新建助理…」→ 名字+模板+可选默认目录 → 创建 | `POST /api/agents`；`agents/<id>/identity.json`、`base-color.json`、`settings.json` 三文件 | 助理出现在空态 chips/会话对话框下拉 | L6 | L1 `agent-store.test.ts`（21）、L3 `agent-routes.test.ts`（19）；A3 冒烟（2026-09-01） | PASS（L6，2026-09-01） | 默认目录可空（cwd 兜底链路见 SESS-01） |
+| AGENT-02 | 空态身份证卡展示名称/编号/底色；点「编号」复制；点卡进档案页 | `GET /api/agents/:id` | 卡片信息正确；剪贴板含编号；进档案页 | L5/L6 | A2 `agent.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
 | AGENT-03 | 档案页改名+改描述保存；侧栏 badge/会话头 chip 同步；重启保持 | `PUT /api/agents/:id`（仅 name 可变） | 三处同步；重启后保持 | L6 | L3 `agent-routes.test.ts` | SKIP（L6 未建） | — |
 | AGENT-04 | 档案页编辑人设（回复风格/人格标签）保存 | `PUT /api/agents/:id/base-color` | 保存成功提示；重进保持 | L6 | L3 `persona-injection.test.ts`（注入侧 5 例） | SKIP（L6 未建） | Mock `updateAgentBaseColor` 忽略 innerSetting，L5 不可验全字段 |
 | AGENT-05 | 档案页记忆设置（启用整理/后台复盘/每日时间/最小空闲）保存 | `PUT /api/agents/:id/memory/settings`（迟滞阈值排序校验） | 保存生效；重启保持 | L6 | L3 `memory-admin-api.test.ts`（11） | SKIP（L6 未建） | Mock 记忆设置不区分 agentId，多助理场景只能 L6 |
@@ -72,7 +72,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| WS-01 | 新建会话对话框填目录 → toolMode=all 且未勾确认 → 提交被拦 | `POST /api/sessions` 不发出 | 对话框内报错，不建会话 | L5/L6 | L3 `session-settings.test.ts`（16） | SKIP（L5 未建） | — |
+| WS-01 | 新建会话对话框填目录 → toolMode=all 且未勾确认 → 提交被拦 | `POST /api/sessions` 不发出 | 对话框内报错，不建会话 | L5/L6 | L3 `session-settings.test.ts`（16）；A2 `workspace.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
 | WS-02 | 会话 toolMode=all 且 workspaceConfirmed=false → WorkspaceBanner 出现 → 点「确认工作区」 | `PUT /api/sessions/:id/settings` confirmed=true | 横幅消失；写工具解锁 | L6 | 历史 B4 已修复回归（2026-08-22 手动）；L3 `session-settings.test.ts` | SKIP（L6 未建） | 历史回归为人工执行，需自动化固化 |
 | WS-03 | 横幅上点「切换为只读」 | `PUT /api/sessions/:id/settings` toolMode=read-only | 横幅消失；chip 变 read-only | L6 | 同上 | SKIP（L6 未建） | — |
 | WS-04 | Composer 工作目录 chip 展示 basename | `GET /api/sessions/:id` cwd | chip 显示目录名 | L5 | 无 | SKIP（L5 未建） | **chip 无 handler（占位展示控件）**，不可点击为已知事实 |
@@ -82,8 +82,8 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SESS-01 | 新建会话（助理无 defaultCwd）→ 发首条消息 | `POST /api/sessions` cwd 三级解析：显式 > agent defaultCwd > per-agent workspace 兜底（`ensureWorkspace` 建目录） | 会话创建成功进对话页 | L3/L6 | L3 `session-agent-binding.test.ts`（14 例，含兜底 3 例，2026-08-31） | PASS（L3）/SKIP（L6 未建） | 无 agentId 且无 cwd → 400 INVALID_INPUT（负例已覆盖） |
-| SESS-02 | 侧栏新建会话 → 草稿空态（不落库）→ 首条消息后出现 | 首发消息才 `POST /api/sessions`（产品决策 #1） | 草稿态文案「发送首条消息后才会出现在会话列表」 | L5/L6 | 无；历史 A2 按设计关闭 | SKIP（L5 未建） | — |
+| SESS-01 | 新建会话（助理无 defaultCwd）→ 发首条消息 | `POST /api/sessions` cwd 三级解析：显式 > agent defaultCwd > per-agent workspace 兜底（`ensureWorkspace` 建目录） | 会话创建成功进对话页 | L3/L6 | L3 `session-agent-binding.test.ts`（14 例，含兜底 3 例，2026-08-31）；A3 冒烟（2026-09-01） | PASS（L3/L6，2026-09-01） | 无 agentId 且无 cwd → 400 INVALID_INPUT（负例已覆盖） |
+| SESS-02 | 侧栏新建会话 → 草稿空态（不落库）→ 首条消息后出现 | 首发消息才 `POST /api/sessions`（产品决策 #1） | 草稿态文案「发送首条消息后才会出现在会话列表」 | L5/L6 | A2 `session.mock.test.tsx`（2026-09-01）；A3 冒烟（2026-09-01） | PASS（L5/L6，2026-09-01） | — |
 | SESS-03 | 行内重命名（铅笔/双击，Enter 保存 Esc 取消） | `PUT /api/sessions/:id/title` 双写 JSONL+SQLite 索引 | 侧栏与会话头同步 | L3/L5/L6 | L3 `session-rename.test.ts`（5） | PASS（L3）/SKIP（L5/L6 未建） | Mock 内存改写与真实双写的一致性只能 L6 验 |
 | SESS-04 | 归档（API）→ 归档区折叠展示 → 行内「恢复」 | `DELETE /api/sessions/:id`、`POST /api/sessions/:id/unarchive` | 归档区出现/恢复回活跃列表 | L3/L6 | L3 `session-lifecycle.test.ts`（6） | PASS（L3）/SKIP（L6 未建） | **已知限制 #7**：外部变更侧栏不感知，需 reload（无 SSE 失效刷新） |
 | SESS-05 | 会话设置 chips（toolMode/thinkingLevel/模型）切换 → reload 后保持 | `PUT /api/sessions/:id/settings`、`/model`（busy→409） | chips 显示与后端一致 | L6 | L3 `session-settings.test.ts`；历史 B2/B3/B5 PASS（人工） | SKIP（L6 未建） | Mock `updateSessionModel` 空操作、thinkingLevel 恒回 "high"，L5 不可验 |
@@ -95,10 +95,10 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| CHAT-01 | 空态输入首条消息 → 创建会话 → 下发模型/运行设置 → 发送 | `POST /api/sessions`（cwd 三级兜底）→ `PUT /api/sessions/:id/model`、`PUT /api/sessions/:id/settings` → `POST /api/sessions/:id/messages`；正文入 JSONL | 对话页出现用户消息并开始流式回复；会话进入侧栏 | L3/L6 | L3 `session-agent-binding.test.ts`（14，2026-08-31） | PASS（L3）/SKIP（L6 未建） | 设置下发失败静默，端到端一致性只能 L6 验 |
-| CHAT-02 | 切换会话 → 历史重建 | `GET /api/sessions/:id` messageEntries | 用户/思考/工具/助手按语义顺序渲染 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts` | PASS（L1/L3） | Mock 源直接覆写 items 时索引失效走自愈路径 |
-| CHAT-03 | 发送后流式：token 增量推进 → 消息定稿；事件行（思考/工具/文件/计划/子代理/记忆/审批）展开收起 | SSE `GET /api/sessions/:id/events`；Envelope sequence 严格递增；先 Replay 后广播 | 流式光标消失后定稿；事件行可展开详情 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts` | PASS（L1/L3）/SKIP（L5/L6 未建） | 合批窗口内中间帧不可断言，只能断言 flush 快照 |
-| CHAT-04 | 无已配置凭据模型时发送 | `GET /api/models` 全部 credentialConfigured=false，请求不发出 | 中文错误 +「去配置 Provider」入口按钮 | L5 | L3 `provider-settings.test.ts`（API 层） | SKIP（L5 未建） | 已知偏差（切片1 T6）：模型列表未加载完的瞬间有误中窗口 |
+| CHAT-01 | 空态输入首条消息 → 创建会话 → 下发模型/运行设置 → 发送 | `POST /api/sessions`（cwd 三级兜底）→ `PUT /api/sessions/:id/model`、`PUT /api/sessions/:id/settings` → `POST /api/sessions/:id/messages`；正文入 JSONL | 对话页出现用户消息并开始流式回复；会话进入侧栏 | L3/L6 | L3 `session-agent-binding.test.ts`（14，2026-08-31）；A3 冒烟（2026-09-01） | PASS（L3/L6，2026-09-01） | 模型/设置下发失败静默（catch 忽略），端到端一致性只能 L6 验 |
+| CHAT-02 | 切换会话 → 历史重建 | `GET /api/sessions/:id` messageEntries | 用户/思考/工具/助手按语义顺序渲染 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts`；A3 冒烟重启段（2026-09-01） | PASS（L1/L3/L6，2026-09-01） | Mock 源直接覆写 items 时索引失效走自愈路径 |
+| CHAT-03 | 发送后流式：token 增量推进 → 消息定稿；事件行（思考/工具/文件/计划/子代理/记忆/审批）展开收起 | SSE `GET /api/sessions/:id/events`；Envelope sequence 严格递增；先 Replay 后广播 | 流式光标消失后定稿；事件行可展开详情 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts`；A3 冒烟 + A2 SSE 回放（2026-09-01） | PASS（L1/L3/L6，2026-09-01）/SKIP（L5 回放底座） | 合批窗口内中间帧不可断言，只能断言 flush 快照 |
+| CHAT-04 | 无已配置凭据模型时发送 | `GET /api/models` 全部 credentialConfigured=false，请求不发出 | 中文错误 +「去配置 Provider」入口按钮 | L5 | L3 `provider-settings.test.ts`（API 层）；A2 `chat.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | 已知偏差（切片1 T6）：模型列表未加载完的瞬间有误中窗口；引导完成后模型列表不刷新已在热修修复（2026-09-01） |
 | CHAT-05 | IPC 断线时发送 | 无请求发出 | 明确 offline 中文错误，不静默 | L6 | 无 | SKIP（L6 未建） | Mock 无断线语义，只能 L6 |
 | CHAT-06 | Provider 错误（错 Key/限流/超时）渲染 | 稳定 `ApiError`；不回传凭据 | `role=alert` 中文错误 + 下一步动作按钮 | L3/L5 | L3 `real-runtime-errors.test.ts` | PASS（L3）/SKIP（L5） | `desktop/src/errors.ts` 映射无单测，属 L5 待建范围 |
 
@@ -117,14 +117,14 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| ABORT-01 | 流式中点停止按钮 → abort | `POST /api/sessions/:id/abort` | 退出流式态，可继续输入 | L3/L6 | L3 `abort.test.ts` | PASS（L3）/SKIP（L6 未建） | — |
+| ABORT-01 | 流式中点停止按钮 → abort | `POST /api/sessions/:id/abort` | 退出流式态，可继续输入 | L3/L6 | L3 `abort.test.ts`；A3 冒烟（2026-09-01） | PASS（L3/L6，2026-09-01） | 终态事件 turn.cancelled 未被 projector 处理导致卡死已在热修修复（2026-09-01） |
 | ABORT-02 | Abort 竞态：完成瞬间 abort；abort 后迟到事件不入投影 | ExecutionRegistry 中止语义 | UI 状态一致 | L3 | L3 `abort.test.ts` | PASS（L3） | 迟到事件经 Replay 的 UI 侧过滤仅 L6 可验 |
 
 ### COMPACT · 会话压缩
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| COMPACT-01 | Composer 输入 `/compact` → 触发压缩 | `POST /api/sessions/:id/compact`；JSONL 分支归档 | 摘要替换正文后时间线更新 | L3/L5 | L3 `compact-route.test.ts` | PASS（L3）/SKIP（L5） | 草稿会话输 `/compact` 前端拦截文案无测试 |
+| COMPACT-01 | Composer 输入 `/compact` → 触发压缩 | `POST /api/sessions/:id/compact`；JSONL 分支归档 | 摘要替换正文后时间线更新 | L3/L5 | L3 `compact-route.test.ts`；A2 `compact.mock.test.tsx`（2026-09-01） | PASS（L3/L5，2026-09-01） | L5 侧仅覆盖草稿会话 `/compact` 拦截文案 |
 | COMPACT-02 | 压缩后重启继续对话 | JSONL 分支历史事实源 | 上下文延续 | L3 | L3 `session-lifecycle.test.ts`、`tests/e2e/server-restart.test.ts` 部分 | PASS（L3）/SKIP（L6） | 压缩后 UI 时间线形状仅 L6 端到端 |
 
 ### PROV · Provider/Auth 凭据
@@ -142,9 +142,9 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SET-01 | 设置页四类目全接线（外观/模型与 Provider/对话显示/关于） | — | 无死类目 | L5 | 无（历史 T8 人工验收） | SKIP（L5 未建） | — |
-| SET-02 | 对话显示：事件类型显隐开关即时生效 | local-prefs 持久化 | 时间线即时过滤；重启保持 | L5 | 无 | SKIP（L5 未建） | — |
-| SET-03 | 外观：主题三态 + 减少动效 | local-prefs + html data 属性 | 即时切换；重启保持 | L5 | 无 | SKIP（L5 未建） | — |
+| SET-01 | 设置页四类目全接线（外观/模型与 Provider/对话显示/关于） | — | 无死类目 | L5 | A2 `settings.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
+| SET-02 | 对话显示：事件类型显隐开关即时生效 | local-prefs 持久化 | 时间线即时过滤；重启保持 | L5 | A2 `settings.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
+| SET-03 | 外观：主题三态 + 减少动效 | local-prefs + html data 属性 | 即时切换；重启保持 | L5 | A2 `settings.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
 | SET-04 | 偏好 route→file→reopen 幂等（含 `subagents` 段） | `GET/PUT /api/settings/preferences` | 与后端一致；subagents 不丢 | L3 | L3 `settings-routes.test.ts` + L1 `preferences.test.ts`（A0 RED→GREEN） | PASS（L3） | — |
 | SET-05 | 关于页：版本与连接信息 | `GET /api/health` | 显示版本/连接模式 | L5 | 无 | SKIP（L5 未建） | — |
 
@@ -154,9 +154,9 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| MEM-01 | 打开记忆页 | `GET /api/agents/:id/memory/compiled|facts|events|pinned|health` | 四段与列表渲染；加载/错误态 | L3/L5 | L3 `memory-admin-api.test.ts`（11） | PASS（L3）/SKIP（L5 未建） | — |
-| MEM-02 | 关键字搜索（400ms 防抖） | `GET facts/events?q=` | 过滤结果 | L3/L5 | L3 `memory-recall.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | UI 防抖行为无测试 |
-| MEM-03 | pinned 新增/删除 | `POST/DELETE /api/agents/:id/memory/pinned` | 列表即时更新 | L3/L5 | L3 `memory-admin-api.test.ts` | PASS（L3）/SKIP（L5） | — |
+| MEM-01 | 打开记忆页 | `GET /api/agents/:id/memory/compiled|facts|events|pinned|health` | 四段与列表渲染；加载/错误态 | L3/L5 | L3 `memory-admin-api.test.ts`（11）；A2 `memory.mock.test.tsx`（2026-09-01） | PASS（L3/L5，2026-09-01） | — |
+| MEM-02 | 关键字搜索（400ms 防抖） | `GET facts/events?q=` | 过滤结果 | L3/L5 | L3 `memory-recall.test.ts`、`memory-stores.test.ts`；A2 `memory.mock.test.tsx`（2026-09-01，fixture 注入服务端 q 行为） | PASS（L3/L5，2026-09-01） | 生产 Mock `getMemoryData` 忽略 q（parity 缺口，记 A2 报告） |
+| MEM-03 | pinned 新增/删除 | `POST/DELETE /api/agents/:id/memory/pinned` | 列表即时更新 | L3/L5 | L3 `memory-admin-api.test.ts`；A2 `memory.mock.test.tsx`（2026-09-01） | PASS（L3/L5，2026-09-01） | — |
 | MEM-04 | 手动 flush（封装+重建索引） | `POST /api/agents/:id/memory/flush` | 完成提示 | L3/L5 | L3 `memory-compile.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | — |
 | MEM-05 | maintenance 状态条实时更新 | SSE `GET /api/agents/:id/events` | 运行中/空闲标签切换 | L6 | 无 | SKIP（L6 未建） | Mock 不支持订阅，只能 L6 |
 | MEM-06 | 多助理切换数据隔离 | 各 API 按 agentId 隔离 | 数据随助理切换 | L3 | L3 `memory-isolation.test.ts`（12） | PASS（L3）/SKIP（L6） | — |
@@ -182,7 +182,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript|messages|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件） | PASS（L1/L3）/SKIP（L5 未建） | — |
+| SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript|messages|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件）；A2 `subagent.mock.test.tsx`（2026-09-01） | PASS（L1/L3/L5，2026-09-01） | — |
 | SUB-02 | transcript SSE 实时推进 | `GET /api/subagents/threads/:id/stream` | 详情随流更新 | L1/L6 | L1 `subagents-replay-store.test.ts` | PASS（L1）/SKIP（L6） | 真链转发仅 L6 |
 | SUB-03 | subagents.defaultModel 持久化 | preferences `subagents` 段 | route→file→reopen 保持 | L3 | L1 `preferences.test.ts` + L3 `settings-routes.test.ts`（A0 RED→GREEN） | PASS（L3） | Desktop 设置页无 subagents 模型入口（A7d 补齐） |
 | SUB-04 | subagent tokens 进统一用量查询 | `subagent_runs` 累计 tokens 不在 usage API | — | — | 无 | SKIP（A8 缺口，已立项） | A8 交付后补行 |
@@ -219,7 +219,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| OBS-01 | 日志页三 tab（活动/错误/安全审计）+ 健康 badge | `GET /api/observability/activity|audit|errors|health` | 三视图 + 健康 badge 渲染 | L3/L4/L5 | L3 `observability-api/server.test.ts`；L4 `logs.spec.ts` | PASS（L3/L4）/SKIP（L5 未建） | — |
+| OBS-01 | 日志页三 tab（活动/错误/安全审计）+ 健康 badge | `GET /api/observability/activity|audit|errors|health` | 三视图 + 健康 badge 渲染 | L3/L4/L5 | L3 `observability-api/server.test.ts`；L4 `logs.spec.ts`；A2 `observability.mock.test.tsx`（2026-09-01） | PASS（L3/L4/L5，2026-09-01） | — |
 | OBS-02 | 活动过滤（category/level/status/搜索）+ 分页 + SSE 实时追加 | `GET activity` 过滤参数、`{channel}/stream` | 过滤生效、新行追加 | L1/L5 | L1 `observability-query.test.ts` | PASS（L1）/SKIP（L5） | — |
 | OBS-03 | retention 预览/执行（与 Audit 同事务 fail-closed） | `POST /api/observability/retention/preview|run` | 删除生效、审计留痕 | L1/L3 | L1 `observability-retention.test.ts`；L3 `observability-server.test.ts` | PASS（L1/L3） | — |
 | OBS-04 | 客户端事件回传脱敏 | `POST /api/observability/client-events` | 落库无敏感值 | L3 | L3 `observability-api.test.ts` | PASS（L3） | — |
@@ -259,8 +259,8 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SHELL-01 | 数据源选择：桥存在→probe→IPC；失败→Mock 回退 + MockBanner | `createDataSource()` probe | Mock 模式显示横幅 | L5 | 无 | SKIP（L5 未建） | — |
+| SHELL-01 | 数据源选择：桥存在→probe→IPC；失败→Mock 回退 + MockBanner | `createDataSource()` probe | Mock 模式显示横幅 | L5 | A2 `shell.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
 | SHELL-02 | 连接状态指示（Titlebar 离线点/身份证卡离线态/chip 状态） | `subscribeConnection` 探活 | 离线标签出现 | L6 | 无 | SKIP（L6 未建） | 探活节律仅真实桥可验 |
-| SHELL-03 | 主题/减少动效 data 属性生效 | local-prefs | 样式即时切换 | L5 | 无 | SKIP（L5 未建） | — |
+| SHELL-03 | 主题/减少动效 data 属性生效 | local-prefs | 样式即时切换 | L5 | A2 `shell.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
 | SHELL-04 | 页面路由与空态守卫（无助理时 memory/profile 不渲染） | — | 空态引导入口 | L5 | 无 | SKIP（L5 未建） | — |
-| SHELL-05 | 侧栏折叠 SidebarRail 展开/收起 | — | 状态保持 | L5 | 无 | SKIP（L5 未建） | — |
+| SHELL-05 | 侧栏折叠 SidebarRail 展开/收起 | — | 状态保持 | L5 | A2 `shell.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
