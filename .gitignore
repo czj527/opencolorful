@@ -12,6 +12,9 @@ web/playwright-report/
 /output/
 desktop/out/
 desktop/release/
+desktop/test-artifacts/
+desktop/test-results/
+desktop/playwright-report/
 
 # Local runtime state, logs, and credentials.
 .env
