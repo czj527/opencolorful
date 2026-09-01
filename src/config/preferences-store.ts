@@ -72,6 +72,11 @@ export class PreferencesStore {
         : current.memory !== undefined
           ? { memory: current.memory }
           : {}),
+      ...(patch.subagents !== undefined
+        ? { subagents: patch.subagents }
+        : current.subagents !== undefined
+          ? { subagents: current.subagents }
+          : {}),
     };
     const normalized = normalizePreferences(next);
     this.write(normalized);
