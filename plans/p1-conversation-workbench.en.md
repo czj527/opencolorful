@@ -1,0 +1,201 @@
+# P1 Wave B: Conversation Workbench
+
+**Status:** 规划中  
+**Date:** 2026-08-31  
+**Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`](../docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md)  
+**Current status:** [`docs/project-status.md`](../docs/project-status.md)  
+**Related Wave A:** [`plans/p1-quality-model-usage.en.md`](p1-quality-model-usage.en.md)
+
+## 1. Scope and non-goals
+
+This is a P1 internal wave for a mature conversation workbench. It covers controlled Session branch/tree/fork operations, edit-and-regenerate and retry semantics, a linear current-branch timeline, readable Desktop compaction summaries, and durable session-owned plan/todo.
+
+It does not implement browser capability, web search/fetch, cron, a general project-management workbench, or arbitrary PI RPC exposure. Message bodies remain in PI JSONL; SQLite stores only metadata/index/state needed for navigation and recovery. The existing Web timeline is a reference and protocol client, not the product frontend.
+
+## 2. Existing capability and constraints
+
+PI SDK already exposes branch/tree/fork/reset/navigation primitives through SessionManager and related types. OpenColorful does not yet expose a product contract for them. The server has session/message/compact routes, and the Desktop projector handles compact lifecycle but currently omits the summary body. Web has a linear timeline derived from current-branch turns. `plan.updated` exists as an event projection, but there is no first-party durable todo writer/store/route.
+
+The implementation must preserve:
+
+- only `src/pi-sdk/` imports PI packages;
+- PI JSONL as message and branch-history fact source;
+- SQLite as metadata/index/event state, not message-body storage;
+- Replay Store before broadcast and strict per-stream sequence;
+- Server-first and Desktop-first product boundaries;
+- isolated faux-provider tests and independent quality-gate commands.
+
+## 3. Product contract to freeze
+
+- Edit-and-regenerate creates a new branch from a selected user message; old branch remains.
+- Retry creates a new result branch; old assistant output remains.
+- Fork creates a new Session identity with source metadata.
+- Running sessions either require abort first or return a stable 409; no ambiguous mutation.
+- Linear timeline navigates current branch entries; branch switcher/tree is a separate view.
+- Compact summary text is visible in Desktop for live and replayed completion events.
+- Todo is Session-owned, transactionally persisted, whole-list replaced, and published as `todo.updated`.
+
+Any change to these semantics requires a Feature Spec amendment before implementation. Button labels and small presentation details may be `agent-recommends` only where they do not change the underlying state transition.
+
+## 4. Dependency graph and integration barriers
+
+```text
+B0 (product/API semantics, serial)
+  -> B1 (PI adapter) || B2 (metadata/API/migration)
+      -> B3 (Desktop branch switcher + linear timeline)
+      -> B4 (Desktop compaction summary)
+      -> B5 (durable session todo)
+          -> B6 (cross-surface integration)
+              -> B7 (main-Agent acceptance and closeout)
+```
+
+B0 is serial because it fixes user-visible state transitions and stable identifiers. B1 and B2 can be parallel only after B0 and with disjoint ownership; migrations and route registry files must be assigned explicitly. B3/B4/B5 may be parallel after their APIs/events are stable and file ownership is disjoint. B6 is the integration barrier for replay, persistence, Desktop Mock/IPC parity and cross-client behavior. B7 is serial and cannot be delegated as final acceptance.
+
+## 5. File ownership map
+
+| Task | Planned ownership | Explicitly excluded |
+|---|---|---|
+| B0 | Feature Spec, contract notes, state-transition matrix | Production implementation |
+| B1 | `src/pi-sdk/` controlled adapter and adapter tests | Server routes, storage migration, Desktop UI |
+| B2 | Session metadata/store, migrations, routes, event contract and integration tests | PI adapter internals and Desktop components |
+| B3 | Desktop source/projector/timeline/branch components, styles and UI tests | Server branch semantics and persistence |
+| B4 | Desktop compact projector/detail components, fixtures and UI tests | Compact runtime defaults and event schema unless B0 assigns a compatibility change |
+| B5 | Todo contract/tool/store/route/event/projection/UI and focused tests by sub-lane | Browser, cron and unrelated plan concepts |
+| B6 | Integration fixtures/scripts/evidence only | New semantics and unreviewed schema changes |
+| B7 | Main-Agent quality gates, real Desktop acceptance, status and implementation log | Delegated acceptance claims |
+
+Exact paths must be re-read and assigned in the dispatch brief; no parallel task may touch a shared migration, schema, route registry or `DesktopDataSource` contract without an explicit barrier.
+
+## 6. Task briefs
+
+### B0 — Product semantics and Session-tree contract
+
+- **role:** Freeze user-visible state transitions before exposing PI primitives.
+- **read_first:** This spec, PI SessionManager/type definitions and reference implementation, `src/pi-sdk/agent-session.ts`, wrapper/types, session service/routes/messages, JSONL branch reader, Web timeline and Desktop projector.
+- **owns:** Product Feature Spec, API/event contract draft, stable entry/turn/branch/session identity definitions, error and concurrency matrix.
+- **forbidden:** No production code, no UI implementation, no direct PI RPC exposure.
+- **interface:** Define edit/retry/fork/rollback state transitions, branch retention, running-session behavior, summary rules and todo ownership. Define which identifiers are durable and which are ephemeral.
+- **requirements:** Keep product semantics separate from PI API names; specify 400/404/409 and stale-reference behavior; preserve JSONL/SQLite facts boundary.
+- **acceptance:** Every user action has a success, failure, persistence, replay and recovery definition; main Agent confirms no unresolved product decision blocks B1-B5.
+- **decision_mode:** `human-fixed` for the requested mature capabilities and Desktop-first boundary; `agent-recommends` for labels and minor presentation details.
+- **report:** Contract table, dependency review, open risks and approval state in the plan log.
+- **docs:** Update the Chinese Feature Spec before implementation; add an ADR only for a durable architecture choice.
+
+### B1 — Controlled PI Session adapter (`parallel_group: wave-b-session-contract`)
+
+- **role:** Expose only the approved branch/tree/fork/reset/navigation operations through the existing PI adapter boundary.
+- **read_first:** B0 contract, `src/pi-sdk/index.ts`, `agent-session.ts`, `types.ts`, session-manager registry and PI SessionManager source/types.
+- **owns:** PI adapter additions and adapter/unit/contract tests under the assigned `src/pi-sdk/` boundary.
+- **forbidden:** No duplicate SessionManager, no server route/storage edits, no UI changes, no raw PI package imports outside `src/pi-sdk/`.
+- **interface:** Adapter methods return platform-safe identifiers/results and stable typed errors; running-session and stale-reference refusal is explicit.
+- **requirements:** Map only the product-approved operations; preserve JSONL history and branch revision facts; support restart/open behavior required by B0.
+- **acceptance:** Import-boundary verification passes; adapter tests cover branch/tree/fork/reset/navigation, invalid references, running rejection and recovery; no raw PI types leak into unrelated modules.
+- **decision_mode:** `human-fixed` for the adapter boundary; `agent-recommends` for internal method names.
+- **report:** Fixed child report plus independent main-Agent diff review.
+- **docs:** Update the technical plan and architecture/adapter note if the public platform contract changes.
+
+### B2 — Session metadata, API, migration and Replay (`parallel_group: wave-b-session-contract`)
+
+- **role:** Persist branch/session relationships and expose HTTP/event contracts without copying message bodies.
+- **read_first:** B0 contract, session service/routes, migrations, SQLite stores, Replay Store, event contracts and integration tests.
+- **owns:** Assigned metadata schema/store/migration, routes, route tests, event mapping and integration tests.
+- **forbidden:** No PI adapter edits, no message-body duplication, no Desktop component changes, no silent migration data loss.
+- **interface:** Provide branch/fork/rollback/edit/retry endpoints and events as approved by B0; return stable 400/404/409 errors; write Replay before broadcast.
+- **requirements:** Forward-compatible migration, old-session read behavior, restart recovery, idempotent operation handling and explicit parent/source metadata for Fork.
+- **acceptance:** API contract and integration tests cover happy/negative/concurrent/restart cases; SQLite contains metadata only; JSONL remains the source of message and branch history; replay sequence is strict.
+- **decision_mode:** `human-fixed` for facts/storage/event boundaries; `agent-recommends` for endpoint naming within the approved contract.
+- **report:** Migration version, SQL evidence, endpoint results, replay evidence and unresolved compatibility concerns.
+- **docs:** Update the Feature Spec/plan and migration or architecture documentation as required by the impact matrix.
+
+### B3 — Desktop branch switcher and linear timeline
+
+- **role:** Make branch history and current-branch navigation usable in the product frontend.
+- **read_first:** B0-B2 contracts, Desktop source/projector/chat components, existing Web timeline derivation, styles and MockDataSource.
+- **owns:** Desktop source methods, projector/view model, branch switcher, linear timeline components/styles, fixtures and UI tests.
+- **forbidden:** No server semantics, no persistence schema, no self-authored branch mutations outside the approved source contract.
+- **interface:** Consume stable branch/entry/turn IDs; expose loading, empty, stale, error, current-node and running-session states.
+- **requirements:** Clicking a linear timeline item scrolls/highlights the current branch entry; branch switcher shows old branches and source relationships; refresh/restart/replay preserve selection where valid.
+- **acceptance:** Mock and Electron tests cover edit/retry/fork navigation, branch retention/switch, long conversation, narrow view, stale refs, error recovery and live/replayed events; API/JSONL truth is compared.
+- **decision_mode:** `human-fixed` for two-view responsibility; `agent-recommends` for visual details and labels.
+- **report:** UI evidence paths, selectors used, screenshot/trace results and parity gaps.
+- **docs:** Update plan implementation log and Desktop design/test documentation; no Web product expansion.
+
+### B4 — Desktop compaction summary body
+
+- **role:** Surface the actual generated summary in the product UI.
+- **read_first:** B0 contract, compact route/control stream, event contract, `src/pi-sdk/agent-session.ts`, Desktop projector/components, Web CompactionCard and fixtures.
+- **owns:** Desktop compact projection/detail components, state fixtures and Mock/Electron tests.
+- **forbidden:** No silent change to automatic compaction defaults; no event-schema fork; no raw sensitive summary logging.
+- **interface:** Consume existing `session.compacting/session.compacted` payload, including summary, token counts, aborted and error fields.
+- **requirements:** Render success summary body with expand/collapse; distinguish compacting, failed, cancelled, no-op and busy; define display length and redaction rules before coding.
+- **acceptance:** Live and replayed completion cards show identical summary body and token transition; all negative states have readable next actions; long summary and empty summary do not break layout.
+- **decision_mode:** `human-fixed` for visible summary requirement; `agent-recommends` for collapse default and typography.
+- **report:** State matrix, screenshots/traces, and evidence that the existing payload is reused.
+- **docs:** Update Feature Spec/plan if length or redaction policy becomes a durable rule; Changelog only for the user-visible Desktop change.
+
+### B5 — Durable session-owned plan/todo
+
+- **role:** Turn projected plan events into a real, persistent, controlled session tool.
+- **read_first:** B0 contract, existing `plan.updated` event/projector, OpenCode todo schema/store/tool, OpenHanako SessionTodoCard, Codex plan types, storage/migration/event conventions.
+- **owns:** Todo schema, first-party `todo_write`/equivalent tool, SQLite store/migration, route/event, Desktop projector/UI and assigned tests; shared migration ownership must be serially assigned.
+- **forbidden:** No UI-only fake state, no unbounded arbitrary task payloads, no browser/cron integration, no replacement of `subagent_runs` or plan event history.
+- **interface:** Session-owned whole-list replacement with `pending/in_progress/completed/cancelled`, priority, activeForm, validation, optimistic/version check, transaction, `todo.updated` Replay event and Desktop projection.
+- **requirements:** Define empty-list semantics, one-active-item policy if chosen, concurrent update behavior, retry/replay behavior, restart load and failure rollback. The tool result must tell the model whether the write was accepted.
+- **acceptance:** Tool → store → event/replay → Desktop → reload/restart works in Mock and Electron; invalid states, empty/replaced list, concurrent writers, disconnect, multi-client replay and failed transaction are tested.
+- **decision_mode:** `human-fixed` for session ownership and persistence; `agent-recommends` for active-item constraint and small UI details.
+- **report:** Schema/migration evidence, tool transcript, event sequence, UI screenshots and failure-path output.
+- **docs:** Update Feature Spec, plan, migration docs and Changelog for the visible Todo surface.
+
+### B6 — Cross-surface integration
+
+- **role:** Prove that branch, timeline, compaction and todo behavior remains coherent across runtime, API, Replay and Desktop.
+- **read_first:** B1-B5 reports/diffs, all contracts/migrations, Mock and Electron harnesses, Wave A test conventions.
+- **owns:** Integration fixtures/scripts, cross-feature tests and evidence index only.
+- **forbidden:** No new product semantics, no patching production behavior during acceptance without a new assigned task.
+- **interface:** Use isolated home, faux Provider, stable IDs and API/JSONL/SQLite truth comparisons; preserve Replay ordering.
+- **requirements:** Cover branch after compact, todo after reload, timeline after branch switch, replay after disconnect, and operation rejection while a turn runs.
+- **acceptance:** Cross-feature API and UI flows pass or have explicit bounded defects; no stale projector state after reload/restart; evidence links resolve.
+- **decision_mode:** `human-fixed` for integration scope; `agent-recommends` for fixture arrangement.
+- **report:** Main-Agent-reviewed integration report with commands, exit codes and artifacts.
+- **docs:** Append implementation evidence and deviations to this plan; update status only after B7 closeout.
+
+### B7 — Main-Agent acceptance and closeout
+
+- **role:** Independently decide whether Wave B is complete.
+- **read_first:** All B artifacts, `docs/development.md` quality gates, current project status, release/test docs and user-visible changelog requirements.
+- **owns:** Independent command runs, real Desktop walkthrough, screenshots/traces, final implementation log and status updates.
+- **forbidden:** No delegated acceptance, no aggregate “green” claim that hides skips or environment blocks, no five-day-use claim without all exit conditions.
+- **interface:** Run individual root, Web, Desktop, Replay, migration and Electron commands; compare visible behavior with API/JSONL/SQLite facts.
+- **requirements:** Record quality gates separately, use genuine user interactions, preserve known differences and keep unsupported behaviors explicit.
+- **acceptance:** All B exit criteria are evidenced; only then may the plan status change from Planning to Completed and may five-day daily-use be considered together with Wave A and release evidence.
+- **decision_mode:** `human-fixed` for completion evidence and status language.
+- **report:** Main-Agent final evidence index and deviation list.
+- **docs:** Update `docs/project-status.md`, Feature Spec and `CHANGELOG.md` for user-visible changes; do not rewrite historical plans.
+
+## 7. Quality gates
+
+Commands are run one at a time with exit codes and result artifacts. The exact base gates follow `docs/development.md` and Wave A. B-specific evidence includes API contract/integration tests, migration/reopen, Replay sequence assertions, Desktop Mock, Electron true-chain, screenshots/traces, and API/JSONL/SQLite comparisons. A child-agent report is not acceptance evidence.
+
+## 8. Implementation log template
+
+```text
+Date:
+Task:
+Commit(s):
+Commands and exit codes:
+Evidence paths:
+Observed result:
+Unverified:
+Deviation and follow-up:
+Main-Agent review:
+```
+
+## 9. Wave B exit conditions
+
+- Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
+- Running-session, stale-reference, invalid-node and missing-resource behavior is stable and visible.
+- Linear current-branch timeline and separate branch switcher are usable and non-conflicting.
+- Desktop shows compaction summary body from both live events and replayed history.
+- Durable session todo has a real writer, persistence, event/replay, projection and recovery path.
+- Migration, concurrency, multi-client and failure evidence is complete.
+- Plan remains Planning until the main Agent has independently verified all evidence; planning, code merge or CI success alone never marks the wave complete.
