@@ -693,6 +693,7 @@ export function App() {
                           </div>
                         )}
                         <div className="empty-composer">
+                          {chatError !== null && <div className="chat-error" role="alert">{chatError}</div>}
                           <Composer
                             agentName={draftAgent.name}
                             draft={draft}

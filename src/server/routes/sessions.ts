@@ -41,8 +41,8 @@ export function registerSessionRoutes(
       workspaceConfirmed?: unknown;
       thinkingLevel?: unknown;
     };
-    if (typeof body.title !== "string" || typeof body.cwd !== "string" || !body.cwd.trim()) {
-      return context.json(createApiError("INVALID_INPUT", "Session title 和 cwd 必须是字符串"), 400);
+    if (typeof body.title !== "string") {
+      return context.json(createApiError("INVALID_INPUT", "Session title 必须是字符串"), 400);
     }
     // 解析可选的 agentId，校验格式与存在性
     let agentId: string | undefined;
@@ -60,6 +60,20 @@ export function registerSessionRoutes(
         }
       }
       agentId = body.agentId;
+    }
+    // cwd 三级解析：请求显式 > Agent 默认工作目录 > Agent 数据子树 workspace 兜底。
+    // 工作目录是可选配置，缺省不能造成"无法对话"死路（P1 热修：新建 Agent 未填
+    // 工作目录时发送消息无反应）；无 agentId 的会话无可兜底归属，保持必填。
+    let cwd: string;
+    if (typeof body.cwd === "string" && body.cwd.trim() !== "") {
+      cwd = body.cwd;
+    } else if (agentId !== undefined && agentStore !== undefined) {
+      const agentDefault = agentStore.getSettings(agentId).defaultCwd;
+      cwd = typeof agentDefault === "string" && agentDefault.trim() !== ""
+        ? agentDefault
+        : agentStore.ensureWorkspace(agentId);
+    } else {
+      return context.json(createApiError("INVALID_INPUT", "Session title 和 cwd 必须是字符串"), 400);
     }
     let settings: ReturnType<typeof parseSessionSettings> | undefined;
     if (
@@ -116,8 +130,8 @@ export function registerSessionRoutes(
     }
     try {
       const session = agentId !== undefined
-        ? sessionService.create({ id: sessionId, title: body.title, cwd: body.cwd, agentId })
-        : sessionService.create({ id: sessionId, title: body.title, cwd: body.cwd });
+        ? sessionService.create({ id: sessionId, title: body.title, cwd, agentId })
+        : sessionService.create({ id: sessionId, title: body.title, cwd });
 
       // 合并设置：请求显式字段优先，缺失字段回退到全局偏好默认值。
       const preferences = preferencesStore?.get();

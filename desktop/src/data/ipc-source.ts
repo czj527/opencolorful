@@ -286,8 +286,10 @@ export class IpcDataSource implements DesktopDataSource {
   async createThread(agentId: string, title: string, options?: import("./source.js").CreateThreadOptions): Promise<Thread> {
     const view = this.agentViews.find((item) => item.identity.id === agentId);
     const cwd = options?.cwd ?? view?.settings?.defaultCwd ?? null;
-    if (cwd === null || cwd.trim() === "") throw new Error("该 Agent 未配置默认工作目录，请先在设置中配置");
-    const body: Record<string, unknown> = { title, cwd, agentId };
+    // cwd 为空不再前端拦截：服务端按 Agent defaultCwd → 数据子树 workspace 兜底解析
+    // （工作目录是可选配置，缺省不应造成"发送无反应"死路）
+    const body: Record<string, unknown> = { title, agentId };
+    if (cwd !== null && cwd.trim() !== "") body["cwd"] = cwd;
     if (options?.toolMode !== undefined) body["toolMode"] = options.toolMode;
     if (options?.thinkingLevel !== undefined) body["thinkingLevel"] = options.thinkingLevel;
     // workspaceConfirmed 如实转发调用方（表单勾选）的状态；不允许按 toolMode 自动置真——

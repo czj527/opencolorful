@@ -203,6 +203,17 @@ export class AgentStore {
     return this.readSettings(agentId) ?? defaultAgentSettings();
   }
 
+  /**
+   * 返回（并按需创建）Agent 的默认工作区目录 <agentsDir>/<id>/workspace/。
+   * 用于会话创建时 Agent 未配置 defaultCwd 的兜底（个人助理不该因
+   * 没填工作目录而无法对话）；目录在 Agent 数据子树内，路径归属本 Store。
+   */
+  ensureWorkspace(agentId: string): string {
+    const dir = path.join(this.agentDir(agentId), "workspace");
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   saveSettings(agentId: string, patch: AgentSettingsPatch): AgentSettingsV2 {
     this.readIdentity(agentId);
     const current = this.readSettings(agentId);

@@ -317,4 +317,69 @@ describe("Session-Agent binding", () => {
       ctx.dispose();
     }
   });
+
+  // P1 热修：cwd 三级兜底（显式 > Agent defaultCwd > per-agent workspace）——
+  // 新建 Agent 未填可选工作目录时，发送首条消息不能走进死路
+  it("creates session without cwd falling back to per-agent workspace", async () => {
+    const ctx = createTestContext();
+    try {
+      await ctx.app.request("http://local/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "no-cwd", name: "无目录助理", baseColor: blankBaseColor }),
+      });
+
+      const res = await ctx.app.request("http://local/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "兜底会话", agentId: "no-cwd" }),
+      });
+      expect(res.status).toBe(201);
+      const view = (await res.json()) as { workspaceCwd: string | null; agentId: string | null };
+      const expected = path.join(ctx.paths.agents, "no-cwd", "workspace");
+      expect(view.workspaceCwd).toBe(expected);
+      expect(fs.existsSync(expected)).toBe(true);
+    } finally {
+      ctx.dispose();
+    }
+  });
+
+  it("creates session without cwd using agent defaultCwd when configured", async () => {
+    const ctx = createTestContext();
+    try {
+      await ctx.app.request("http://local/api/agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "has-cwd", name: "有目录助理", baseColor: blankBaseColor }),
+      });
+      ctx.agentStore.saveSettings("has-cwd", { defaultCwd: process.cwd() });
+
+      const res = await ctx.app.request("http://local/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "默认目录会话", agentId: "has-cwd" }),
+      });
+      expect(res.status).toBe(201);
+      const view = (await res.json()) as { workspaceCwd: string | null };
+      expect(view.workspaceCwd).toBe(process.cwd());
+    } finally {
+      ctx.dispose();
+    }
+  });
+
+  it("returns 400 when cwd is missing and no agentId is bound", async () => {
+    const ctx = createTestContext();
+    try {
+      const res = await ctx.app.request("http://local/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "无目录无归属" }),
+      });
+      expect(res.status).toBe(400);
+      const error = (await res.json()) as { code: string };
+      expect(error.code).toBe("INVALID_INPUT");
+    } finally {
+      ctx.dispose();
+    }
+  });
 });
