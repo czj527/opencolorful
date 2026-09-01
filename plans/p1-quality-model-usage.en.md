@@ -4,7 +4,7 @@
 **Date:** 2026-08-31  
 **Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`](../docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md)  
 **Current status:** [`docs/project-status.md`](../docs/project-status.md)  
-**Baseline fact:** `main` at `3ae674d` when this plan was drafted; the cwd fallback changes in the working tree are not part of that baseline.
+**Baseline fact:** `main` at `084414c` after A0 closeout (PR #40/#41/#42); the cwd fallback and preferences persistence fix are now part of the baseline.
 
 ## 1. Scope and non-goals
 
@@ -14,9 +14,9 @@ It does not implement browser capability, web search/fetch, conversation branche
 
 The following are planning prerequisites, not completed work:
 
-- The uncommitted Agent workspace cwd fallback must be independently reviewed, tested, and merged through the normal PR path before it is treated as a baseline capability.
-- `PreferencesStore.update()` must be checked and repaired if it drops `subagents` on write; route-to-file-to-reopen regression evidence is required.
-- `docs/project-status.md` must remain consistent with the verified commit, tag, and draft-release facts.
+- ~~The uncommitted Agent workspace cwd fallback must be independently reviewed, tested, and merged through the normal PR path~~ **Done in A0 (PR #40).**
+- ~~`PreferencesStore.update()` must be checked and repaired if it drops `subagents` on write; route-to-file-to-reopen regression evidence is required.~~ **Confirmed defective and repaired in A0 (PR #42, RED→GREEN regression).**
+- ~~`docs/project-status.md` must remain consistent with the verified commit, tag, and draft-release facts.~~ **Corrected in A0 (PR #41).**
 
 ## 2. Verified starting point
 
@@ -214,6 +214,26 @@ Main-Agent review:
 ```
 
 The plan remains `Planning` until the real implementation and interaction evidence satisfy the exit conditions. Creating this plan does not mean any task is implemented.
+
+## 7.1 Implementation log
+
+```text
+Date: 2026-08-31
+Task: A0 — Baseline and existing defect closeout
+Commit(s): fa20153 (PR #40, cwd fallback hotfix), 2efe828 (PR #41, planning docs + status facts), 084414c (PR #42, PreferencesStore subagents persistence)
+Commands and exit codes:
+  - npx vitest run tests/integration/session-agent-binding.test.ts → 11/11 pass
+  - npx vitest run tests/unit/preferences.test.ts tests/integration/settings-routes.test.ts → 29/29 pass
+  - RED proof: with the preferences-store fix stashed, the 3 new regression tests fail; restored, all pass
+  - npx tsc --noEmit -p tsconfig.json → 0; desktop npx tsc -p tsconfig.json --noEmit → 0
+  - npm run check (full chain, /tmp/oc-check2.log) → 2129 root tests + 426 web tests + desktop build all pass
+  - PR CI: #40 / #41 / #42 each Governance + Typecheck,tests and builds + Browser E2E all pass
+Evidence paths: plans/p1-hotfix-session-cwd-fallback.md; CHANGELOG.md Unreleased (two Fixed entries); PR #40/#41/#42 descriptions
+Observed result: cwd fallback merged (explicit > agent default > per-agent workspace); POST /api/sessions without agentId/cwd still 400; draft-state chat errors render; subagents.defaultModel persists through route → file → reopen and survives unrelated preference writes; docs/project-status.md baseline and G2 draft-release facts corrected
+Unverified: real installed-app (Electron packaged) exercise of the cwd fallback — covered by Wave A A3 true-chain harness, not re-verified manually here
+Deviation and follow-up: PR #42 required a branch update after #41 merged (squash sequencing); no code conflicts. A1+ not started
+Main-Agent review: diffs reviewed directly; RED→GREEN reproduced locally; child reports not used as evidence
+```
 
 ## 8. Wave A exit conditions
 
