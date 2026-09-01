@@ -275,10 +275,18 @@ Date: 2026-09-01
 Task: A3 — Electron true-chain harness + CI smoke (parallel_group: wave-a-desktop-harness)
 Commit(s): a39cf2a (A3 lane), b99d8da (production hotfix uncovered by this lane, main agent)
 Commands and exit codes:
-  - npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @smoke → 1 passed (23.2s), exit 0; repeat run in progress at writeback time (background npm run check + smoke rerun, task s0hrnag2)
+  - npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @smoke → 1 passed (23.2s), exit 0; repeat run also passed
   - npx tsc -p tsconfig.json --noEmit (desktop) → exit 0
   - npx vitest run tests/unit/desktop-projector.test.ts → 14/14 passed (3 new terminal-state cases)
-  - Full npm run check running in background; result to be appended before merge (child reports NOT acceptance evidence; main agent re-ran key gates)
+  - npm run check full chain → executed 2026-09-01 in two passes; first pass caught two machine-environment issues, second pass green on every gate (details below)
+Environment repairs made during the gate run (main agent, both test-infra only):
+  1. better-sqlite3 had been rebuilt for Electron's ABI (137) by the A3 debugging session → root vitest (2135 tests) all failed with NODE_MODULE_VERSION mismatch; `npm rebuild better-sqlite3` restored Node 22 ABI (127); the desktop pack chain re-rebuilds for Electron at pack time (G2 T3b ordering), so root ABI is the correct resting state
+  2. Author's shell carries NODE_ENV=production → React 19 production build has no `act` → web vitest (134 cases) failed; fixed by pinning NODE_ENV=test in web/vitest.config.ts (same fix A2 applied to desktop/vitest.config.ts)
+Gate evidence (all separate commands, exit codes read):
+  - check:docs / check:pi-imports / check:plugin-imports / build:protocol / build:sdk / typecheck → exit 0
+  - npx vitest run (root) → 180 files / 2135 tests passed
+  - npm run web:test → 34 files / 426 tests passed (after NODE_ENV pin)
+  - npm run web:build → exit 0; npm run desktop:build → exit 0
 Evidence paths: desktop/tests/e2e/** (config, harness/backend/app/server-bootstrap fixtures, 2 Page Objects, @smoke spec); .github/workflows/quality.yml (desktop-smoke job); docs/ci-cd.md; artifacts at desktop/test-artifacts/ (gitignored)
 Observed result: true-chain flow passes on Windows — onboarding → no-cwd session (cwd fallback anchor) → first message streaming → abort → second message → restart persistence; truth assertions over API/JSONL/providers.json/auth.json; credential red lines (key only in AuthStorage); isolation self-checks
 Fixture defects found and fixed during bring-up (child agent hit turn limit mid-debug; main agent took over per development.md §一):
