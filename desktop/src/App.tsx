@@ -562,10 +562,15 @@ export function App() {
   }
 
   // T1 向导完成：重拉 Agent 列表、设为新会话归属、进入新会话草稿；首启状态随真实数据自然消失
+  // 同时刷新模型与偏好列表：引导第 2 步新建的 Provider 在 App 启动时还不存在，
+  // 不刷新会让草稿模型停留在旧列表（干净环境下为空 → 首条消息被"还没有可用模型"拦截，
+  // 有环境凭据时更会静默选中环境凭据的内置模型外呼真实 Provider）。
   function completeOnboarding(newAgentId: string) {
     setOnboardingDismissed(true);
     firstRun.refresh();
     setAgentsRefresh((value) => value + 1);
+    setModelsRefresh((value) => value + 1);
+    setPrefsRefresh((value) => value + 1);
     setDraftAgentId(newAgentId);
     setThreadId(NEW_THREAD);
     setPage("chat");

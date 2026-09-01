@@ -76,6 +76,45 @@ describe("projector O(1)：合批窗口内就地累积，快照（flush）时才
     expect(snapshotOf(p).streaming).toBe(false);
   });
 
+  // Abort/失败终态（2026-09-01 真链发现：缺这三个分支时 abort 与模型失败都会卡死流式态）
+  function streamTurnToMid(p: ProjectorState): void {
+    markPromptSent(p, "s1");
+    applyEvent(p, env("turn.started", {}));
+    applyEvent(p, env("message.started", {}));
+    applyEvent(p, env("message.delta", { delta: "部分" }));
+  }
+
+  it("turn.cancelled：清 streaming，助手消息收尾为「已停止」", () => {
+    const p = createProjector("原");
+    streamTurnToMid(p);
+    applyEvent(p, env("turn.cancelled", { reason: "aborted" }));
+    expect(snapshotOf(p).streaming).toBe(false);
+    const msg = asMessage(lastItem(p));
+    expect(msg.streaming).toBe(false);
+    expect(msg.meta).toBe("已停止");
+    expect(msg.body).toBe("部分");
+  });
+
+  it("turn.failed：清 streaming，收尾为「生成失败」并推运行错误行", () => {
+    const p = createProjector("原");
+    streamTurnToMid(p);
+    applyEvent(p, env("turn.failed", { errorMessage: "401: invalid key" }));
+    expect(snapshotOf(p).streaming).toBe(false);
+    const messageItem = p.items.find((item) => item.type === "message");
+    expect(messageItem).toBeDefined();
+    expect(asMessage(messageItem!).meta).toBe("生成失败");
+    const err = asEvent(p.items.find((item) => item.type === "event"));
+    expect(err?.title).toBe("运行错误");
+    expect(err?.summary).toBe("401: invalid key");
+  });
+
+  it("turn.interrupted：清 streaming", () => {
+    const p = createProjector("原");
+    streamTurnToMid(p);
+    applyEvent(p, env("turn.interrupted", {}));
+    expect(snapshotOf(p).streaming).toBe(false);
+  });
+
   it("事件顺序与快照形状不变：多轮混合事件按到达顺序落位", () => {
     const p = createProjector("原");
     markPromptSent(p, "s1");
