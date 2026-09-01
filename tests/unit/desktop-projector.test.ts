@@ -103,7 +103,9 @@ describe("projector O(1)：合批窗口内就地累积，快照（flush）时才
     const messageItem = p.items.find((item) => item.type === "message");
     expect(messageItem).toBeDefined();
     expect(asMessage(messageItem!).meta).toBe("生成失败");
-    const err = asEvent(p.items.find((item) => item.type === "event"));
+    const eventItem = p.items.find((item) => item.type === "event");
+    expect(eventItem).toBeDefined();
+    const err = asEvent(eventItem!);
     expect(err?.title).toBe("运行错误");
     expect(err?.summary).toBe("401: invalid key");
   });
