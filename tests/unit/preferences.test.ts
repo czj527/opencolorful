@@ -309,6 +309,42 @@ describe("preferences store persistence", () => {
     expect(reopened.get().defaults.thinkingLevel).toBe("high");
   });
 
+  it("persists subagents.defaultModel and re-reads it", () => {
+    const paths = tempPaths(home);
+    const store = new PreferencesStore(paths.preferences);
+
+    const updated = store.update({
+      subagents: { defaultModel: { providerId: "local-openai", modelId: "local-model" } },
+    });
+    expect(updated.subagents?.defaultModel).toEqual({
+      providerId: "local-openai",
+      modelId: "local-model",
+    });
+
+    const reopened = new PreferencesStore(paths.preferences);
+    expect(reopened.get().subagents?.defaultModel).toEqual({
+      providerId: "local-openai",
+      modelId: "local-model",
+    });
+  });
+
+  it("preserves subagents when updating an unrelated section", () => {
+    const paths = tempPaths(home);
+    const store = new PreferencesStore(paths.preferences);
+
+    store.update({
+      subagents: { defaultModel: { providerId: "local-openai", modelId: "local-model" } },
+    });
+    store.update({ layout: { leftSidebarWidth: 320 } as never });
+
+    const reopened = new PreferencesStore(paths.preferences);
+    expect(reopened.get().layout.leftSidebarWidth).toBe(320);
+    expect(reopened.get().subagents?.defaultModel).toEqual({
+      providerId: "local-openai",
+      modelId: "local-model",
+    });
+  });
+
   it("migrates a legacy all global default to read-only", () => {
     const paths = tempPaths(home);
     fs.mkdirSync(path.dirname(paths.preferences), { recursive: true });
