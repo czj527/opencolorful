@@ -155,11 +155,11 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | MEM-01 | 打开记忆页 | `GET /api/agents/:id/memory/compiled|facts|events|pinned|health` | 四段与列表渲染；加载/错误态 | L3/L5 | L3 `memory-admin-api.test.ts`（11）；A2 `memory.mock.test.tsx`（2026-09-01） | PASS（L3/L5，2026-09-01） | — |
-| MEM-02 | 关键字搜索（400ms 防抖） | `GET facts/events?q=` | 过滤结果 | L3/L5 | L3 `memory-recall.test.ts`、`memory-stores.test.ts`；A2 `memory.mock.test.tsx`（2026-09-01，fixture 注入服务端 q 行为） | PASS（L3/L5，2026-09-01） | 生产 Mock `getMemoryData` 忽略 q（parity 缺口，记 A2 报告） |
+| MEM-02 | 关键字搜索（400ms 防抖） | `GET facts/events?q=` | 过滤结果 | L3/L5 | L3 `memory-recall.test.ts`、`memory-stores.test.ts`；A2 `memory.mock.test.tsx`（fixture 注入）；A4d 生产 Mock q 过滤 parity 修复 + 用例（2026-09-02） | PASS（L3/L5，2026-09-02） | Mock 过滤为大小写折叠子串近似（非完整 FTS5 语义），静态 fixture 下无差异 |
 | MEM-03 | pinned 新增/删除 | `POST/DELETE /api/agents/:id/memory/pinned` | 列表即时更新 | L3/L5 | L3 `memory-admin-api.test.ts`；A2 `memory.mock.test.tsx`（2026-09-01） | PASS（L3/L5，2026-09-01） | — |
-| MEM-04 | 手动 flush（封装+重建索引） | `POST /api/agents/:id/memory/flush` | 完成提示 | L3/L5 | L3 `memory-compile.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | — |
-| MEM-05 | maintenance 状态条实时更新 | SSE `GET /api/agents/:id/events` | 运行中/空闲标签切换 | L6 | 无 | SKIP（L6 未建） | Mock 不支持订阅，只能 L6 |
-| MEM-06 | 多助理切换数据隔离 | 各 API 按 agentId 隔离 | 数据随助理切换 | L3 | L3 `memory-isolation.test.ts`（12） | PASS（L3）/SKIP（L6） | — |
+| MEM-04 | 手动 flush（封装+重建索引） | `POST /api/agents/:id/memory/flush` | 完成提示 | L3/L5 | L3 `memory-compile.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | Desktop 无 flush UI（「立即整理」= deep-dive，MAGENT-01）——A4d 已核实，无 L5 目标面 |
+| MEM-05 | maintenance 状态条实时更新 | SSE `GET /api/agents/:id/events` | 运行中/空闲标签切换 | L6 | A4d `lane-a4d-memory`（2026-09-02：SSE wire 级按序 + 维护条实时收敛 + 报告真值对照） | PASS（L6，2026-09-02） | script 模式毫秒级整轮，UI 中间态可能跳变——wire 级证据补足 |
+| MEM-06 | 多助理切换数据隔离 | 各 API 按 agentId 隔离 | 数据随助理切换 | L3 | L3 `memory-isolation.test.ts`（12）；A4a `lane-a4a-agent` AGENT-06（记忆页/档案页切换，2026-09-02） | PASS（L3/L6，2026-09-02） | — |
 
 ### TICK · MemoryTicker / 滚动摘要
 
@@ -172,8 +172,8 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| MAGENT-01 | deep-dive 运行与 run 报告查看 | `POST deep-dive`、`GET memory/runs/:runId` | 报告文本可查 | L3/L5 | L3 `memory-agent.test.ts`、`memory-admin-api.test.ts` | PASS（L3）/SKIP（L5） | — |
-| MAGENT-02 | 后台复盘闭环：turn.completed → utility 调用 → journal 意图（actor=background_review）→ 审批 → search_memory 召回 | `reviewEnabled` 设置；schema v13 | 逐步断言中间态（行为级） | L3/L5 | L3 `memory-background-review.test.ts`、`memory-activation.test.ts`（T15 闭环） | PASS（L3）/SKIP（L5） | 档案页开关交互无测试 |
+| MAGENT-01 | deep-dive 运行与 run 报告查看 | `POST deep-dive`、`GET memory/runs/:runId` | 报告文本可查 | L3/L5 | L3 `memory-agent.test.ts`、`memory-admin-api.test.ts`；A4d L5 脚本化维护链 + L6 真链（2026-09-02） | PASS（L3/L5/L6，2026-09-02） | — |
+| MAGENT-02 | 后台复盘闭环：turn.completed → utility 调用 → journal 意图（actor=background_review）→ 审批 → search_memory 召回 | `reviewEnabled` 设置；schema v13 | 逐步断言中间态（行为级） | L3/L5 | L3 `memory-background-review.test.ts`、`memory-activation.test.ts`（T15 闭环）；档案页开关交互由 A4a AGENT-05 覆盖（2026-09-02） | PASS（L3/L6，2026-09-02） | — |
 | MAGENT-03 | deep-dive 回滚 | `POST deep-dive/rollback` | 回滚成功 | L3 | L3 `memory-admin-api.test.ts` | PASS（L3） | — |
 
 ### SUB · Subagent 子代理
@@ -183,7 +183,7 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript|messages|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件）；A2 `subagent.mock.test.tsx`（2026-09-01） | PASS（L1/L3/L5，2026-09-01） | — |
-| SUB-02 | transcript SSE 实时推进 | `GET /api/subagents/threads/:id/stream` | 详情随流更新 | L1/L6 | L1 `subagents-replay-store.test.ts` | PASS（L1）/SKIP（L6） | 真链转发仅 L6 |
+| SUB-02 | transcript SSE 实时推进 | `GET /api/subagents/threads/:id/stream` | 详情随流更新 | L1/L6 | L1 `subagents-replay-store.test.ts`；A4e `lane-a4e-subagent`（2026-09-02：真实 spawn tool_calls → dock 列表/详情/运行中/终态 → SSE seq 严格递增 + progress→run→result 顺序） | PASS（L1/L6，2026-09-02） | 真链 spawn 依赖 stub 流式 tool_calls（lane 本地 fixture 已建） |
 | SUB-03 | subagents.defaultModel 持久化 | preferences `subagents` 段 | route→file→reopen 保持 | L3 | L1 `preferences.test.ts` + L3 `settings-routes.test.ts`（A0 RED→GREEN） | PASS（L3） | Desktop 设置页无 subagents 模型入口（A7d 补齐） |
 | SUB-04 | subagent tokens 进统一用量查询 | `subagent_runs` 累计 tokens 不在 usage API | — | — | 无 | SKIP（A8 缺口，已立项） | A8 交付后补行 |
 
@@ -220,7 +220,7 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | OBS-01 | 日志页三 tab（活动/错误/安全审计）+ 健康 badge | `GET /api/observability/activity|audit|errors|health` | 三视图 + 健康 badge 渲染 | L3/L4/L5 | L3 `observability-api/server.test.ts`；L4 `logs.spec.ts`；A2 `observability.mock.test.tsx`（2026-09-01） | PASS（L3/L4/L5，2026-09-01） | — |
-| OBS-02 | 活动过滤（category/level/status/搜索）+ 分页 + SSE 实时追加 | `GET activity` 过滤参数、`{channel}/stream` | 过滤生效、新行追加 | L1/L5 | L1 `observability-query.test.ts` | PASS（L1）/SKIP（L5） | — |
+| OBS-02 | 活动过滤（category/level/status/搜索）+ 分页 + SSE 实时追加 | `GET activity` 过滤参数、`{channel}/stream` | 过滤生效、新行追加 | L1/L5 | L1 `observability-query.test.ts`；A4f `observability.mock.test.tsx`（2026-09-02：过滤/分页 cursor/实时跟随开关） | PASS（L1/L5，2026-09-02） | 生产 mock queryActivity 忽略 cursor（恒 null）——分页用例经注入源验证客户端链 |
 | OBS-03 | retention 预览/执行（与 Audit 同事务 fail-closed） | `POST /api/observability/retention/preview|run` | 删除生效、审计留痕 | L1/L3 | L1 `observability-retention.test.ts`；L3 `observability-server.test.ts` | PASS（L1/L3） | — |
 | OBS-04 | 客户端事件回传脱敏 | `POST /api/observability/client-events` | 落库无敏感值 | L3 | L3 `observability-api.test.ts` | PASS（L3） | — |
 | OBS-05 | 诊断 tail 与 trace 关联查询 | `GET diagnostic/tail`、`GET traces/:traceId` | 可定位记录 | L3 | L3 `observability-api.test.ts` | PASS（L3）/SKIP（A5） | Desktop UI→日志关联（A5）未建 |
@@ -231,7 +231,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| USAGE-01 | 会话头 UsageBadge：tokens/turns/context% | `GET /api/sessions/:id/usage` | badge 渲染；一轮结束后刷新 | L3/L5 | L3 `usage-api.test.ts`、`usage-recorder.test.ts` | PASS（L3）/SKIP（L5 未建） | — |
+| USAGE-01 | 会话头 UsageBadge：tokens/turns/context% | `GET /api/sessions/:id/usage` | badge 渲染；一轮结束后刷新 | L3/L5 | L3 `usage-api.test.ts`、`usage-recorder.test.ts`；A4f `chat.mock.test.tsx`（2026-09-02：渲染 + streaming 翻转刷新链） | PASS（L3/L5，2026-09-02） | mock 无 usage recorder，第 2 次返回值为脚本化（服务端记账由 L1/L3 覆盖） |
 | USAGE-02 | 全局用量摘要 | `GET /api/usage/summary` | Web 运维面展示 | L3/L4 | L3 `usage-api.test.ts`；web `usage-section.test.tsx` | PASS（L3/L4 组件） | Desktop 无全局入口（A8 交付） |
 | USAGE-03 | 幂等不重复计数 | `(session_id, turn_id)` 去重 | 重复事件不双计 | L1/L3 | L3 `usage-recorder.test.ts` | PASS（L3） | — |
 | USAGE-04 | 非成功终态的部分用量 | — | — | — | 无 | SKIP（A8） | A8 交付后补行 |
@@ -243,7 +243,7 @@
 | SEC-01 | toolMode=all 未确认 fail-safe 降级只读 + 横幅（见 WS-02/03） | `workspaceConfirmed` 服务端 fail-safe | 横幅出现、写工具锁定 | L3 | L3 `session-settings.test.ts`（16） | PASS（L3） | — |
 | SEC-02 | PathGuard 路径越权拒绝 | PathGuard 规则 | 工具调用失败 | L1 | L1 `path-guard.test.ts`（17） | PASS（L1） | — |
 | SEC-03 | sandbox 状态/规则 API 脱敏 | `GET /api/sandbox/status`、`/api/sandbox/rules/:agentId` | —（无产品 UI，矩阵仅记录 API 面） | L1/L3 | L1 `sandbox-service/policy/preflight/sandbox-contracts` | PASS（L1/L3） | — |
-| SEC-04 | 聊天内审批（允许一次/拒绝）→ 工具放行/拒绝 | 审批事件走平台事件协议 | 按钮状态机切换 | L3/L5 | L3 `builtin-tools.test.ts`、`sandbox-tools.test.ts` | PASS（L3）/SKIP（L5） | Desktop 审批按钮为本地 state（待 A2 对齐真实协议语义） |
+| SEC-04 | 聊天内审批（允许一次/拒绝）→ 工具放行/拒绝 | 审批事件走平台事件协议 | 按钮状态机切换 | L3/L5 | L3 `builtin-tools.test.ts`、`sandbox-tools.test.ts`；A4f `chat.mock.test.tsx`（2026-09-02：approved/denied 两分支回归锚点） | PASS（L3/L5，2026-09-02） | Desktop 审批按钮为本地 state（现行语义锚点）；A2 对齐真实协议后需同步修订 |
 | SEC-05 | fail-closed 审计（高风险修改入 Audit） | audit 与删除同事务 | 高风险修改留痕 | L3 | L3 `observability-failclosed.test.ts` | PASS（L3） | — |
 
 ### REL · 发布/安装/恢复

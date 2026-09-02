@@ -332,6 +332,29 @@ Known deviations recorded: 档案页改名不触发 agents 列表刷新（A7 打
 Main-Agent review: all lane diffs reviewed directly; every lane suite re-run independently by the main agent after fixes; child reports (incomplete) used as work records only
 ```
 
+```text
+Date: 2026-09-02
+Task: A4 wave 2 — regression lanes A4d/A4e/A4f (serial dispatch per wave-1 lesson)
+Branch: p1-wave-a-a4-regression
+Commits: daa24d2 (A4d), 09f5001 (A4e), 2406b22 (A4f)
+Dispatch: three lanes dispatched SEQUENTIALLY (one child at a time) per the wave-1 cross-lane interference record. Briefs pre-verified all UI anchors, interface methods and route facts before dispatch.
+Child outcomes:
+  - A4d Memory: DONE (44 tool uses) — brief-compliant, no boundary violations; report flagged a duplicate MEM-02 coverage question (adjudicated: keep both, extend-not-rewrite).
+  - A4e Subagent: hit turn limit (95 turns) after fixtures/PO/spec were written but before any test run; rescued by main agent per development.md §一. Only fix needed: ownerAgentId ownership resolution (spec left it empty → HTTP 400 from routes/subagents.ts §22.1; resolved from session detail agentId). Passed first try after the fix.
+  - A4f OBS/USAGE/SEC: DONE (30 turns) — clean report; mock-source untouched (injection via overrideSource instead; approved as the minimal-change reading of the brief).
+Verification (all re-run independently by main agent):
+  - A4d: desktop vitest 44/44; desktop:build pass; @a4d 1/1 ×3 reruns (4.7-5.0s)
+  - A4e: @a4e 1/1 (9.9s)
+  - A4f: desktop vitest 50/50 (44→50)
+  - Full @a4 sweep: 22/22 across all five lanes in one sequential run (4.5m)
+  - Flakiness note: one full desktop-vitest run showed 7 transient waitFor timeouts under heavy parallel load (including wave-1 tests); single-file and full reruns green twice — pre-existing load sensitivity, not introduced by wave 2 (recorded for A7 hardening)
+New coverage: MEM-02 mock parity fix (production mock honors q), MEM-05 L6 (deep-dive SSE maintenance bar + report truth), MAGENT-01 L5+L6, SUB-02 L6 (real spawn via stub streaming tool_calls — first lane to drive the real tool-call loop), OBS-02 L5 (filters/pagination/live-follow), USAGE-01 L5 (badge + refresh chain), SEC-04 L5 (approval state machine anchors)
+Matrix rows updated: MEM-02/04/05/06, MAGENT-01/02, SUB-02, OBS-02, USAGE-01, SEC-04
+Conclusion records (no automatable gap): PLUG/SKILL rows PASS at L1/L3/L4 (no Desktop UI by product design); SUPV-01/02 PASS L3; SUPV-03 pending CI first run; REL-01..04 G2/A3/A9 scope; TICK-02 pending A6
+Known deviations recorded: MEM-04 has no Desktop flush UI (立即整理=deep-dive); SEC-04 tests pin the current local-state semantics pending A2 protocol alignment; OBS-02 pagination verified via injected source (production mock ignores cursor)
+Main-Agent review: diffs of all three lanes reviewed; A4e rescue fix applied by main agent; all suites re-run independently
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.
