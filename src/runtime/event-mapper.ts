@@ -7,11 +7,25 @@ import { sanitizeSensitiveText, sanitizeToolResult } from "./sanitize.js";
 export class PlatformEventMapper {
   private sequence = 0;
   private turnId = "";
+  private assistantError: string | undefined;
 
   constructor(
     private readonly sessionId: string,
     private readonly streamId: string,
   ) {}
+
+  /** 最近一条 assistant 消息的 stopReason="error" 原因（PI 模型失败不抛出，见 A4 CHAT-06） */
+  get lastAssistantError(): string | undefined {
+    return this.assistantError;
+  }
+
+  /** turn 终态信封（turn.failed/cancelled/interrupted 进会话 SSE，驱动 Desktop 终态投影） */
+  terminal(
+    type: "turn.failed" | "turn.cancelled" | "turn.interrupted",
+    payload: Record<string, unknown>,
+  ): PlatformEventEnvelope {
+    return this.envelope(type, payload);
+  }
 
   sessionStatus(status: "running" | "idle" | "error"): PlatformEventEnvelope {
     return this.envelope("session.status", { status });
@@ -25,6 +39,7 @@ export class PlatformEventMapper {
     if (event.type === "agent_start" || event.type === "agent_end") return [];
     if (event.type === "turn_start") {
       this.turnId = `turn-${crypto.randomUUID()}`;
+      this.assistantError = undefined;
       return [this.envelope("turn.started", { turnId: this.turnId })];
     }
     if (event.type === "turn_end") {
@@ -65,14 +80,18 @@ export class PlatformEventMapper {
       return [this.envelope("thinking.delta", { delta: event.delta })];
     }
     if (event.type === "message_end") {
-      return event.role === "assistant"
-        ? [
-            this.envelope("message.completed", {
-              role: event.role,
-              content: event.content,
-            }),
-          ]
-        : [];
+      if (event.role === "assistant") {
+        if (event.stopReason === "error") {
+          this.assistantError = sanitizeSensitiveText(event.errorMessage ?? "模型调用失败", 200);
+        }
+        return [
+          this.envelope("message.completed", {
+            role: event.role,
+            content: event.content,
+          }),
+        ];
+      }
+      return [];
     }
     if (event.type === "tool_start") {
       return [

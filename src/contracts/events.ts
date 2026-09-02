@@ -19,6 +19,9 @@ export const EVENT_TYPES = [
   "tool.completed",
   "turn.started",
   "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+  "turn.interrupted",
   "plan.updated",
   "attachment.available",
   "session.compacting",
@@ -81,6 +84,8 @@ const EventPayloadSchema = Type.Union([
     mimeType: Type.Optional(Type.String()),
   }),
   Type.Object({ reason: Type.String() }),
+  // turn.failed 终态负载（turn.cancelled 复用上面的 { reason }；A4 CHAT-06）
+  Type.Object({ errorMessage: Type.String() }),
   Type.Object({
     reason: Type.String(),
     tokensBefore: Type.Optional(Type.Integer({ minimum: 0 })),

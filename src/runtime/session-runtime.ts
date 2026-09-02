@@ -477,12 +477,23 @@ export class SessionRuntime {
   ): Promise<void> {
     try {
       await this.agent.prompt(text);
-      this.turn?.complete();
+      // PI 的模型调用失败不抛出：错误以 stopReason="error" 附在 assistant 消息上
+      // （2026-09-01 A4 CHAT-06 真链发现）。不判定会把失败 turn 记成 completed 且 UI 无失败终态。
+      const assistantError = mapper.lastAssistantError;
+      if (assistantError !== undefined) {
+        this.turn?.fail(assistantError);
+        this.emit(mapper.terminal("turn.failed", { errorMessage: assistantError }));
+      } else {
+        this.turn?.complete();
+      }
     } catch (error) {
       if (controller.signal.aborted) {
         this.turn?.cancel("aborted");
+        this.emit(mapper.terminal("turn.cancelled", { reason: "aborted" }));
       } else {
-        this.turn?.fail(error instanceof Error ? error : String(error));
+        const cause = error instanceof Error ? error.message : String(error);
+        this.turn?.fail(cause);
+        this.emit(mapper.terminal("turn.failed", { errorMessage: mapProviderError(error).message }));
       }
       const apiError = mapProviderError(error);
       this.emit(mapper.error(apiError.message, apiError.code, apiError.retryable));
