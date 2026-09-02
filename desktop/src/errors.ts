@@ -22,7 +22,7 @@ export type ErrorContext =
   | "queryActivity"
   | "loadMoreActivity";
 
-/** 面向用户的错误建议：提示 + 可选下一步动作 */
+/** 面向用户的错误建议：提示 + 可选下一步动作 + 可选诊断关联引用 */
 export interface ErrorAdvice {
   /** 中文可读提示，不出现英文原文或堆栈 */
   readonly message: string;
@@ -31,6 +31,50 @@ export interface ErrorAdvice {
     readonly label: string;
     readonly category: SettingsCategory;
   };
+  /**
+   * A5 诊断关联引用（存在时）：安全字符串，仅含 id 与时间戳，
+   * 不含任何请求/响应载荷或敏感值；可人工复制，也可跳转日志页预填定位。
+   */
+  readonly correlation?: ErrorCorrelation;
+}
+
+/**
+ * A5 诊断关联引用。
+ * - origin="server"：traceId 是服务端记录可查的真值（会话路由以 sessionId 作为
+ *   traceId 盖章，routes/sessions.ts 的 trace 三元组；turn 失败记录另有 per-turn
+ *   traceId，由 ChatView 从最新 failed 记录解析）；
+ * - origin="local"：纯 IPC/启动失败没有服务端 traceId，用主进程签发的短 id
+ *   （同步落 shell.log）或 renderer 本地生成的短 id。
+ */
+export interface ErrorCorrelation {
+  readonly traceId: string;
+  readonly origin: "server" | "local";
+  /** 引用生成时间（ISO 8601），用于在日志/诊断记录中定位时间窗 */
+  readonly at: string;
+}
+
+/** 短引用展示形态：来源前缀 + id 前 8 位；完整 id 经 title/跳转参数传递。
+ * 对已带 tr-/ipc- 前缀的 id 幂等（mock fixture 与本地短 id 直接复用原前缀）。 */
+export function correlationShortRef(correlation: ErrorCorrelation): string {
+  const prefix = correlation.origin === "server" ? "tr-" : "ipc-";
+  const raw = correlation.traceId.replace(/^(tr-|ipc-)/, "");
+  return `${prefix}${raw.slice(0, 8)}`;
+}
+
+/** renderer 本地诊断 id 兜底（主进程 diagRef 不可用时；不含任何用户输入） */
+export function localCorrelation(at = new Date()): ErrorCorrelation {
+  return { traceId: crypto.randomUUID(), origin: "local", at: at.toISOString() };
+}
+
+/** 携带诊断引用的错误：ipc-source 失败点抛出；文案仍按场景映射，correlation 原样透传 */
+export class CorrelatedError extends Error {
+  readonly correlation: ErrorCorrelation;
+
+  constructor(message: string, correlation: ErrorCorrelation) {
+    super(message);
+    this.name = "CorrelatedError";
+    this.correlation = correlation;
+  }
 }
 
 /** 场景兜底文案表 */
@@ -157,7 +201,11 @@ function classify(raw: string, context: ErrorContext): ErrorAdvice {
  */
 export function toUserError(cause: unknown, context: ErrorContext): ErrorAdvice {
   const raw = cause instanceof Error ? cause.message : String(cause ?? "");
-  return classify(raw, context);
+  const advice = classify(raw, context);
+  // A5：CorrelatedError（ipc-source 失败点抛出）把诊断引用透传给 UI，
+  // 文案映射不受影响（CorrelatedError 继承 Error，message 分类逻辑一致）
+  if (cause instanceof CorrelatedError) return { ...advice, correlation: cause.correlation };
+  return advice;
 }
 
 /** 将 ErrorAdvice 展平为纯字符串（用于只需要文案、不需要动作按钮的场景） */

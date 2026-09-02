@@ -223,7 +223,7 @@
 | OBS-02 | 活动过滤（category/level/status/搜索）+ 分页 + SSE 实时追加 | `GET activity` 过滤参数、`{channel}/stream` | 过滤生效、新行追加 | L1/L5 | L1 `observability-query.test.ts`；A4f `observability.mock.test.tsx`（2026-09-02：过滤/分页 cursor/实时跟随开关） | PASS（L1/L5，2026-09-02） | 生产 mock queryActivity 忽略 cursor（恒 null）——分页用例经注入源验证客户端链 |
 | OBS-03 | retention 预览/执行（与 Audit 同事务 fail-closed） | `POST /api/observability/retention/preview|run` | 删除生效、审计留痕 | L1/L3 | L1 `observability-retention.test.ts`；L3 `observability-server.test.ts` | PASS（L1/L3） | — |
 | OBS-04 | 客户端事件回传脱敏 | `POST /api/observability/client-events` | 落库无敏感值 | L3 | L3 `observability-api.test.ts` | PASS（L3） | — |
-| OBS-05 | 诊断 tail 与 trace 关联查询 | `GET diagnostic/tail`、`GET traces/:traceId` | 可定位记录 | L3 | L3 `observability-api.test.ts` | PASS（L3）/SKIP（A5） | Desktop UI→日志关联（A5）未建 |
+| OBS-05 | 诊断 tail 与 trace 关联查询 | `GET diagnostic/tail`、`GET traces/:traceId` | 可定位记录 | L3 | L3 `observability-api.test.ts`；A5 Desktop 关联链路（2026-09-02：UI 错误行诊断引用 → 日志页 traceId 预填 → activity/traces 命中，`lane-a5-diagnostics`） | PASS（L3/L6，2026-09-02） | 引用只含 id 与时间戳（脱敏红线）；通道边界 diagnostic/activity/audit 不混用 |
 
 ### USAGE · Usage 用量
 

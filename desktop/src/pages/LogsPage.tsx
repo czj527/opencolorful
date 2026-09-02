@@ -1,7 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 
-import { formatErrorAdvice, toUserError } from "../errors.js";
+import { formatErrorAdvice, toUserError, correlationShortRef, type ErrorCorrelation } from "../errors.js";
 import type { ActivityFilter, DesktopDataSource, LogsPageData } from "../data/source.js";
 import {
   activityCategories,
@@ -67,12 +67,16 @@ function matchesFilter(row: ActivityLogRow, filter: {
   readonly level: string;
   readonly status: string;
   readonly search: string;
+  readonly traceId: string;
 }): boolean {
   if (filter.category !== "" && row.category !== filter.category) return false;
   if (filter.level !== "" && row.level !== filter.level) return false;
   if (filter.status !== "" && row.status !== filter.status) return false;
   const kw = filter.search.trim();
   if (kw !== "" && !row.eventName.includes(kw) && !row.producerComponent.includes(kw)) return false;
+  // A5：traceId 精确过滤（与服务端 activity?traceId= 语义一致）
+  const trace = filter.traceId.trim();
+  if (trace !== "" && row.traceId !== trace) return false;
   return true;
 }
 
@@ -87,15 +91,20 @@ function dedupeById(rows: readonly ActivityLogRow[]): ActivityLogRow[] {
   return out;
 }
 
-function ActivityView({ source, refreshKey }: {
+function ActivityView({ source, refreshKey, focus }: {
   readonly source: DesktopDataSource;
   readonly refreshKey: number;
+  /** A5：错误行「在日志中查看」带入的诊断引用（活动 tab 按其 traceId 预填过滤） */
+  readonly focus: ErrorCorrelation | null;
 }) {
   const [category, setCategory] = useState("");
   const [level, setLevel] = useState("");
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // A5：预填 traceId 过滤（初值即生效，无需等防抖窗口）
+  const [traceId, setTraceId] = useState(focus?.traceId ?? "");
+  const [debouncedTraceId, setDebouncedTraceId] = useState(traceId);
   const [rows, setRows] = useState<readonly ActivityLogRow[]>([]);
   const [liveRows, setLiveRows] = useState<readonly ActivityLogRow[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -112,16 +121,23 @@ function ActivityView({ source, refreshKey }: {
   }, [search]);
 
   useEffect(() => {
+    const timer = setTimeout(() => setDebouncedTraceId(traceId), 300);
+    return () => clearTimeout(timer);
+  }, [traceId]);
+
+  const buildFilter = (): ActivityFilter => ({
+    ...(category !== "" ? { category } : {}),
+    ...(level !== "" ? { level } : {}),
+    ...(status !== "" ? { status } : {}),
+    ...(debouncedSearch.trim() !== "" ? { search: debouncedSearch.trim() } : {}),
+    ...(debouncedTraceId.trim() !== "" ? { traceId: debouncedTraceId.trim() } : {}),
+  });
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const filter: ActivityFilter = {
-      ...(category !== "" ? { category } : {}),
-      ...(level !== "" ? { level } : {}),
-      ...(status !== "" ? { status } : {}),
-      ...(debouncedSearch.trim() !== "" ? { search: debouncedSearch.trim() } : {}),
-    };
-    source.queryActivity(filter)
+    source.queryActivity(buildFilter())
       .then((result) => {
         if (cancelled) return;
         setRows(result.rows);
@@ -136,16 +152,17 @@ function ActivityView({ source, refreshKey }: {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [source, category, level, status, debouncedSearch, refreshKey, retryCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, category, level, status, debouncedSearch, debouncedTraceId, refreshKey, retryCount]);
 
   useEffect(() => {
     if (!liveFollow) return undefined;
     return source.subscribeActivityStream((row) => {
-      if (!matchesFilter(row, { category, level, status, search })) return;
+      if (!matchesFilter(row, { category, level, status, search, traceId })) return;
       setRows((prev) => dedupeById([row, ...prev]));
       setLiveRows((prev) => dedupeById([row, ...prev]));
     });
-  }, [source, liveFollow, category, level, status, search]);
+  }, [source, liveFollow, category, level, status, search, traceId]);
 
   const displayRows = useMemo(() => dedupeById([...liveRows, ...rows]), [liveRows, rows]);
 
@@ -153,13 +170,7 @@ function ActivityView({ source, refreshKey }: {
     if (nextCursor === null || loadingMore) return;
     setLoadingMore(true);
     setError(null);
-    const filter: ActivityFilter = {
-      ...(category !== "" ? { category } : {}),
-      ...(level !== "" ? { level } : {}),
-      ...(status !== "" ? { status } : {}),
-      ...(debouncedSearch.trim() !== "" ? { search: debouncedSearch.trim() } : {}),
-    };
-    source.queryActivity(filter, nextCursor)
+    source.queryActivity(buildFilter(), nextCursor)
       .then((result) => {
         setRows((prev) => dedupeById([...prev, ...result.rows]));
         setNextCursor(result.nextCursor);
@@ -186,6 +197,9 @@ function ActivityView({ source, refreshKey }: {
         <label className="filter-box">
           <input type="search" placeholder="事件名 / 组件" value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
+        <label className="filter-box">
+          <input type="search" placeholder="traceId" aria-label="traceId 过滤" title="按 traceId 精确过滤（诊断关联跳转预填）" value={traceId} onChange={(e) => setTraceId(e.target.value)} />
+        </label>
         <label className="live-follow">
           <span>实时跟随</span>
           <button
@@ -199,6 +213,12 @@ function ActivityView({ source, refreshKey }: {
           {liveRows.length > 0 && <span className="badge badge-ok">+{liveRows.length}</span>}
         </label>
       </div>
+      {focus !== null && (
+        <p className="page-empty">
+          已按诊断引用预填 traceId 过滤（{correlationShortRef(focus)} · {focus.at}）。
+          {focus.origin === "local" ? "本地引用同时记录在桌面进程 shell.log。" : "对应服务端 trace/activity 记录。"}
+        </p>
+      )}
       {error !== null && (
         <div className="chat-error" role="alert">
           {error}
@@ -366,9 +386,11 @@ function AuditRow({ row, open, onToggle }: { readonly row: AuditLogRow; readonly
 
 interface LogsPageProps {
   readonly source: DesktopDataSource;
+  /** A5：错误行「在日志中查看」跳转带入的诊断引用（活动 tab 预填 traceId 过滤；可清空） */
+  readonly focus?: ErrorCorrelation | null;
 }
 
-export function LogsPage({ source }: LogsPageProps) {
+export function LogsPage({ source, focus = null }: LogsPageProps) {
   const [tab, setTab] = useState<LogTab>("activity");
   const [data, setData] = useState<LogsPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -425,7 +447,7 @@ export function LogsPage({ source }: LogsPageProps) {
               </button>
             ))}
           </nav>
-          {tab === "activity" && <ActivityView source={source} refreshKey={activityRefresh} />}
+          {tab === "activity" && <ActivityView source={source} refreshKey={activityRefresh} focus={focus} />}
           {tab === "errors" && <ErrorsView data={data} />}
           {tab === "audit" && <AuditView rows={data.audit} auditEpoch={data.health?.auditEpoch ?? 0} />}
         </>
