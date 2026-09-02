@@ -18,7 +18,7 @@ import {
   type LiveEnvelope,
 } from "./data/projector.js";
 import type { Thread } from "./mock-data.js";
-import type { DesktopDataSource } from "./data/source.js";
+import type { DesktopDataSource, SessionUsageView } from "./data/source.js";
 import { renderApp } from "../tests/fixtures/app-harness.js";
 import { overrideSource } from "../tests/fixtures/override-source.js";
 import { replayChatSource } from "../tests/fixtures/replay-chat-source.js";
@@ -402,6 +402,126 @@ it("CHAT-03: L5 回放底座（事件行）——工具/计划/记忆事件行�
     const memoryRow = screen.getByRole("button", { name: /记忆回想/ });
     expect(within(memoryRow).getByText("命中 2 条相关记忆")).toBeTruthy();
     expect(within(memoryRow).getByText("search_memory · long")).toBeTruthy();
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+/* ---------------------------------------------------------------------------
+ * A4f lane（USAGE-01 / SEC-04）：
+ * - USAGE-01 复用本文件 stepwiseReplaySource（分批 flush 让 App 壳的 streaming
+ *   布尔产生 true→false 翻转，turn.completed 触发 getSessionUsage 刷新链；
+ *   一次性回放源在同一个 notify 里收敛，App 壳观测不到翻转，不适用）；
+ *   getSessionUsage 按「同一 sessionId 的调用序」脚本化：第 1 次 = 会话头初始
+ *   加载，第 2 次 = 轮后刷新，返回更大 usage 值。
+ * - SEC-04 用桌面 mock 首会话（desktop）自带的审批事件行（mock-data e6），
+ *   断言 EventRow 本地审批状态机（现行产品语义：本地 state，无协议回传——
+ *   矩阵 SEC-04 风险注记一致）。
+ * ------------------------------------------------------------------------- */
+
+it("USAGE-01: 会话头 UsageBadge 渲染（tokens/turns/context%）+ 一轮结束后刷新链更新 badge", async () => {
+  const base = new MockDataSource();
+  const usageInitial: SessionUsageView = { totalTokens: 39200, turns: 6, contextTokens: 38400, contextWindow: 128000, contextPercent: 30 };
+  const usageAfterTurn: SessionUsageView = { totalTokens: 41200, turns: 7, contextTokens: 40100, contextWindow: 128000, contextPercent: 31 };
+  const usageCalls = new Map<string, number>();
+  const envelope = makeEnvelopeFactory();
+  const userMessage = "用量刷新回放：观察 badge 初始值与轮后刷新";
+  const partial = "用量刷新回放的前半句，";
+  const full = "用量刷新回放的前半句，后半句到达后定稿。";
+  injected.current = overrideSource(stepwiseReplaySource(base, {
+    threadId: "lane-a4f-usage",
+    userMessage,
+    batches: [
+      {
+        atMs: 60,
+        mark: true,
+        events: [
+          envelope("turn.started", { turnId: "turn-lane-a4f-usage" }),
+          envelope("thinking.delta", { delta: "用量刷新回放：先推进增量。" }),
+          envelope("message.started", { role: "assistant" }),
+          envelope("message.delta", { role: "assistant", delta: partial }),
+        ],
+      },
+      {
+        atMs: 600,
+        events: [
+          envelope("message.delta", { role: "assistant", delta: "后半句到达后定稿。" }),
+          envelope("message.completed", { role: "assistant", content: full }),
+          envelope("turn.completed", { turnId: "turn-lane-a4f-usage", usage: { input: 12, output: 12, cacheRead: 0, cacheWrite: 0, totalTokens: 24 } }),
+        ],
+      },
+    ],
+  }), {
+    getSessionUsage: (sessionId: string) => {
+      const calls = (usageCalls.get(sessionId) ?? 0) + 1;
+      usageCalls.set(sessionId, calls);
+      return Promise.resolve(calls >= 2 ? usageAfterTurn : usageInitial);
+    },
+  });
+  const app = await renderApp();
+  try {
+    // 初始渲染：桌面 mock 首会话 badge 与 mock 值一致（chip 文本 + title 提示）
+    const desktopBadge = await screen.findByText("上下文 38.4k/128k · 30%");
+    expect(desktopBadge.getAttribute("title")).toBe("本会话总用量 39200 tokens · 6 轮");
+
+    await makeSidebarPO(app.user).newThread();
+    const composer = makeComposerPO(app.user);
+    await composer.type(userMessage);
+    await composer.pressEnter();
+
+    // 新会话初始加载（该 sessionId 第 1 次调用）→ badge 以初始值出现
+    const badge = await screen.findByText("上下文 38.4k/128k · 30%", undefined, { timeout: 5_000 });
+    expect(badge.getAttribute("title")).toBe("本会话总用量 39200 tokens · 6 轮");
+
+    // turn 完成 → streaming false 翻转 → 刷新链（第 2 次调用）→ badge 更新为更大值
+    await screen.findByText(full, undefined, { timeout: 5_000 });
+    const refreshed = await screen.findByText("上下文 40.1k/128k · 31%", undefined, { timeout: 5_000 });
+    expect(refreshed.getAttribute("title")).toBe("本会话总用量 41200 tokens · 7 轮");
+    expect(usageCalls.get("lane-a4f-usage")).toBe(2);
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("SEC-04: 聊天内审批「允许一次」→ 状态机切 approved（按钮消失 + 已允许反馈）", async () => {
+  injected.current = new MockDataSource();
+  const app = await renderApp();
+  try {
+    // 桌面 mock 首会话（desktop）自带审批事件行（mock-data e6：工作区写入）
+    await screen.findByText("需要确认");
+    expect(screen.getByText("等待你的决定")).toBeTruthy();
+    expect(screen.getByText(/工作区写入 · D:\\PI-study\\opencolorful/)).toBeTruthy();
+
+    await app.user.click(screen.getByRole("button", { name: "允许一次" }));
+
+    const result = screen.getByText(/已允许 · 工作区写入/);
+    expect(result.className).toContain("s-succeeded");
+    expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拒绝" })).toBeNull();
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("SEC-04: 聊天内审批「拒绝」→ 状态机切 denied（按钮消失 + 已拒绝反馈）", async () => {
+  injected.current = new MockDataSource();
+  const app = await renderApp();
+  try {
+    await screen.findByText("需要确认");
+    expect(screen.getByText(/工作区写入 · D:\\PI-study\\opencolorful/)).toBeTruthy();
+
+    await app.user.click(screen.getByRole("button", { name: "拒绝" }));
+
+    const result = screen.getByText(/已拒绝 · 工作区写入/);
+    expect(result.className).toContain("s-failed");
+    expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "拒绝" })).toBeNull();
   } finally {
     app.consoleTracker.restore();
     injected.current = null;
