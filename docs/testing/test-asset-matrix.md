@@ -55,7 +55,7 @@
 | ONB-02 | 完成引导后重启应用 | `GET /api/agents` 非空 | 不再自动进引导 | L6 | A3 冒烟 Phase 2 重启段（2026-09-01） | PASS（L6，2026-09-01） | — |
 | ONB-03 | 引导中点「稍后再说」→ 空态再点「开始引导」 | — | 退出进空态，可重进 | L5/L6 | A2 `onboarding.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
 | ONB-04 | 第 1 步空名点下一步；第 2 步错 Key/非法 URL；模板接口失败兜底 | 校验失败不写后端 | 内联中文错误（`role=alert`）；模板失败渲染空白模板不崩 | L5 | A2 `onboarding.mock.test.tsx` ×3（2026-09-01） | PASS（L5，2026-09-01） | Mock 需支持模板接口失败注入（已具备） |
-| ONB-05 | 第 3 步点「浏览…」 | `POST /api/directories/pick` | 弹原生目录对话框；取消回退手输 | L6 | L3 `directory-picker.test.ts`（17 例） | SKIP（L6 未建） | 非 Windows 返回 501；无桥时静默 null 回退 |
+| ONB-05 | 第 3 步点「浏览…」 | `POST /api/directories/pick` | 弹原生目录对话框；取消回退手输 | L6 | L3 `directory-picker.test.ts`（17 例）；A4a `lane-a4a-onboarding`（stub dialog 真链全链，2026-09-02） | PASS（L6，2026-09-02） | 非 Windows 返回 501；无桥时静默 null 回退 |
 
 ### AGENT · Agent 身份与档案
 
@@ -63,18 +63,18 @@
 |---|---|---|---|---|---|---|---|
 | AGENT-01 | 空态/新建会话对话框「新建助理…」→ 名字+模板+可选默认目录 → 创建 | `POST /api/agents`；`agents/<id>/identity.json`、`base-color.json`、`settings.json` 三文件 | 助理出现在空态 chips/会话对话框下拉 | L6 | L1 `agent-store.test.ts`（21）、L3 `agent-routes.test.ts`（19）；A3 冒烟（2026-09-01） | PASS（L6，2026-09-01） | 默认目录可空（cwd 兜底链路见 SESS-01） |
 | AGENT-02 | 空态身份证卡展示名称/编号/底色；点「编号」复制；点卡进档案页 | `GET /api/agents/:id` | 卡片信息正确；剪贴板含编号；进档案页 | L5/L6 | A2 `agent.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
-| AGENT-03 | 档案页改名+改描述保存；侧栏 badge/会话头 chip 同步；重启保持 | `PUT /api/agents/:id`（仅 name 可变） | 三处同步；重启后保持 | L6 | L3 `agent-routes.test.ts` | SKIP（L6 未建） | — |
-| AGENT-04 | 档案页编辑人设（回复风格/人格标签）保存 | `PUT /api/agents/:id/base-color` | 保存成功提示；重进保持 | L6 | L3 `persona-injection.test.ts`（注入侧 5 例） | SKIP（L6 未建） | Mock `updateAgentBaseColor` 忽略 innerSetting，L5 不可验全字段 |
-| AGENT-05 | 档案页记忆设置（启用整理/后台复盘/每日时间/最小空闲）保存 | `PUT /api/agents/:id/memory/settings`（迟滞阈值排序校验） | 保存生效；重启保持 | L6 | L3 `memory-admin-api.test.ts`（11） | SKIP（L6 未建） | Mock 记忆设置不区分 agentId，多助理场景只能 L6 |
-| AGENT-06 | 多助理：空态助理 chips 切换归属；记忆页/档案页助理切换 | 各 API 按 agentId 隔离 | 切换后数据为对应助理 | L6 | L3 `memory-isolation.test.ts`（12） | SKIP（L6 未建） | 同上，Mock 单份档案不支持多助理区分 |
+| AGENT-03 | 档案页改名+改描述保存；侧栏 badge/会话头 chip 同步；重启保持 | `PUT /api/agents/:id`（仅 name 可变） | 三处同步；重启后保持 | L6 | L3 `agent-routes.test.ts`；A4a `lane-a4a-agent`（2026-09-02） | PASS（L6，2026-09-02） | 档案页改名不触发 agents 列表刷新（agentsRefresh 仅建/删助理触发），badge/chip 同步依赖重启——已记 A7 打磨 |
+| AGENT-04 | 档案页编辑人设（回复风格/人格标签）保存 | `PUT /api/agents/:id/base-color` | 保存成功提示；重进保持 | L6 | L3 `persona-injection.test.ts`（注入侧 5 例）；A4a `lane-a4a-agent`（2026-09-02） | PASS（L6，2026-09-02） | Mock `updateAgentBaseColor` 忽略 innerSetting，L5 不可验全字段 |
+| AGENT-05 | 档案页记忆设置（启用整理/后台复盘/每日时间/最小空闲）保存 | `PUT /api/agents/:id/memory/settings`（迟滞阈值排序校验） | 保存生效；重启保持 | L6 | L3 `memory-admin-api.test.ts`（11）；A4a `lane-a4a-agent`（2026-09-02） | PASS（L6，2026-09-02） | 连续快速保存的读改写竞态已在热修修复（2026-09-02） |
+| AGENT-06 | 多助理：空态助理 chips 切换归属；记忆页/档案页助理切换 | 各 API 按 agentId 隔离 | 切换后数据为对应助理 | L6 | L3 `memory-isolation.test.ts`（12）；A4a `lane-a4a-agent`（2026-09-02） | PASS（L6，2026-09-02） | Mock 单份档案不支持多助理区分 |
 
 ### WS · Workspace 工作区
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | WS-01 | 新建会话对话框填目录 → toolMode=all 且未勾确认 → 提交被拦 | `POST /api/sessions` 不发出 | 对话框内报错，不建会话 | L5/L6 | L3 `session-settings.test.ts`（16）；A2 `workspace.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01）/SKIP（L6 未执行） | — |
-| WS-02 | 会话 toolMode=all 且 workspaceConfirmed=false → WorkspaceBanner 出现 → 点「确认工作区」 | `PUT /api/sessions/:id/settings` confirmed=true | 横幅消失；写工具解锁 | L6 | 历史 B4 已修复回归（2026-08-22 手动）；L3 `session-settings.test.ts` | SKIP（L6 未建） | 历史回归为人工执行，需自动化固化 |
-| WS-03 | 横幅上点「切换为只读」 | `PUT /api/sessions/:id/settings` toolMode=read-only | 横幅消失；chip 变 read-only | L6 | 同上 | SKIP（L6 未建） | — |
+| WS-02 | 会话 toolMode=all 且 workspaceConfirmed=false → WorkspaceBanner 出现 → 点「确认工作区」 | `PUT /api/sessions/:id/settings` confirmed=true | 横幅消失；写工具解锁 | L6 | 历史 B4 已修复回归（2026-08-22 手动）；L3 `session-settings.test.ts`；A4a `lane-a4a-workspace`（2026-09-02） | PASS（L6，2026-09-02） | 历史人工回归已由 A4a 自动化固化 |
+| WS-03 | 横幅上点「切换为只读」 | `PUT /api/sessions/:id/settings` toolMode=read-only | 横幅消失；chip 变 read-only | L6 | A4a `lane-a4a-workspace`（2026-09-02） | PASS（L6，2026-09-02） | — |
 | WS-04 | Composer 工作目录 chip 展示 basename | `GET /api/sessions/:id` cwd | chip 显示目录名 | L5 | 无 | SKIP（L5 未建） | **chip 无 handler（占位展示控件）**，不可点击为已知事实 |
 | WS-05 | 沙箱规则查看：`GET /api/sandbox/status`、`/api/sandbox/rules/:agentId` | PathGuard 规则（脱敏） | —（无 UI 入口） | L3 | L1 `path-guard.test.ts`（17）、`sandbox-*.test.ts` 等 6 文件 | PASS（L1/L3） | 无产品 UI，矩阵仅记录 API 面 |
 
@@ -84,9 +84,9 @@
 |---|---|---|---|---|---|---|---|
 | SESS-01 | 新建会话（助理无 defaultCwd）→ 发首条消息 | `POST /api/sessions` cwd 三级解析：显式 > agent defaultCwd > per-agent workspace 兜底（`ensureWorkspace` 建目录） | 会话创建成功进对话页 | L3/L6 | L3 `session-agent-binding.test.ts`（14 例，含兜底 3 例，2026-08-31）；A3 冒烟（2026-09-01） | PASS（L3/L6，2026-09-01） | 无 agentId 且无 cwd → 400 INVALID_INPUT（负例已覆盖） |
 | SESS-02 | 侧栏新建会话 → 草稿空态（不落库）→ 首条消息后出现 | 首发消息才 `POST /api/sessions`（产品决策 #1） | 草稿态文案「发送首条消息后才会出现在会话列表」 | L5/L6 | A2 `session.mock.test.tsx`（2026-09-01）；A3 冒烟（2026-09-01） | PASS（L5/L6，2026-09-01） | — |
-| SESS-03 | 行内重命名（铅笔/双击，Enter 保存 Esc 取消） | `PUT /api/sessions/:id/title` 双写 JSONL+SQLite 索引 | 侧栏与会话头同步 | L3/L5/L6 | L3 `session-rename.test.ts`（5） | PASS（L3）/SKIP（L5/L6 未建） | Mock 内存改写与真实双写的一致性只能 L6 验 |
-| SESS-04 | 归档（API）→ 归档区折叠展示 → 行内「恢复」 | `DELETE /api/sessions/:id`、`POST /api/sessions/:id/unarchive` | 归档区出现/恢复回活跃列表 | L3/L6 | L3 `session-lifecycle.test.ts`（6） | PASS（L3）/SKIP（L6 未建） | **已知限制 #7**：外部变更侧栏不感知，需 reload（无 SSE 失效刷新） |
-| SESS-05 | 会话设置 chips（toolMode/thinkingLevel/模型）切换 → reload 后保持 | `PUT /api/sessions/:id/settings`、`/model`（busy→409） | chips 显示与后端一致 | L6 | L3 `session-settings.test.ts`；历史 B2/B3/B5 PASS（人工） | SKIP（L6 未建） | Mock `updateSessionModel` 空操作、thinkingLevel 恒回 "high"，L5 不可验 |
+| SESS-03 | 行内重命名（铅笔/双击，Enter 保存 Esc 取消） | `PUT /api/sessions/:id/title` 双写 JSONL+SQLite 索引 | 侧栏与会话头同步 | L3/L5/L6 | L3 `session-rename.test.ts`（5）；A4a `lane-a4a-session`（2026-09-02） | PASS（L3/L6，2026-09-02）/SKIP（L5 未建） | Mock 内存改写与真实双写的一致性已由 L6 验 |
+| SESS-04 | 归档（API）→ 归档区折叠展示 → 行内「恢复」 | `DELETE /api/sessions/:id`、`POST /api/sessions/:id/unarchive` | 归档区出现/恢复回活跃列表 | L3/L6 | L3 `session-lifecycle.test.ts`（6）；A4a `lane-a4a-session`（2026-09-02） | PASS（L3/L6，2026-09-02） | **已知限制 #7**：外部变更侧栏不感知，经重启加载验证（无 SSE 失效刷新） |
+| SESS-05 | 会话设置 chips（toolMode/thinkingLevel/模型）切换 → reload 后保持 | `PUT /api/sessions/:id/settings`、`/model`（busy→409） | chips 显示与后端一致 | L6 | L3 `session-settings.test.ts`；历史 B2/B3/B5 PASS（人工）；A4a `lane-a4a-session`（2026-09-02） | PASS（L6，2026-09-02） | Mock `updateSessionModel` 空操作、thinkingLevel 恒回 "high"，L5 不可验 |
 | SESS-06 | 运行中切模型 → 409 | 服务端 SESSION_BUSY | 中文错误提示不静默 | L3/L6 | L3 `session-settings.test.ts` | PASS（L3）/SKIP（L6 未建） | — |
 
 ### CHAT · 首条消息与聊天流
@@ -99,8 +99,8 @@
 | CHAT-02 | 切换会话 → 历史重建 | `GET /api/sessions/:id` messageEntries | 用户/思考/工具/助手按语义顺序渲染 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts`；A3 冒烟重启段（2026-09-01） | PASS（L1/L3/L6，2026-09-01） | Mock 源直接覆写 items 时索引失效走自愈路径 |
 | CHAT-03 | 发送后流式：token 增量推进 → 消息定稿；事件行（思考/工具/文件/计划/子代理/记忆/审批）展开收起 | SSE `GET /api/sessions/:id/events`；Envelope sequence 严格递增；先 Replay 后广播 | 流式光标消失后定稿；事件行可展开详情 | L1/L3 | L1 `desktop-projector.test.ts`；L3 `prompt-events.test.ts`；A3 冒烟 + A2 SSE 回放（2026-09-01） | PASS（L1/L3/L6，2026-09-01）/SKIP（L5 回放底座） | 合批窗口内中间帧不可断言，只能断言 flush 快照 |
 | CHAT-04 | 无已配置凭据模型时发送 | `GET /api/models` 全部 credentialConfigured=false，请求不发出 | 中文错误 +「去配置 Provider」入口按钮 | L5 | L3 `provider-settings.test.ts`（API 层）；A2 `chat.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | 已知偏差（切片1 T6）：模型列表未加载完的瞬间有误中窗口；引导完成后模型列表不刷新已在热修修复（2026-09-01） |
-| CHAT-05 | IPC 断线时发送 | 无请求发出 | 明确 offline 中文错误，不静默 | L6 | 无 | SKIP（L6 未建） | Mock 无断线语义，只能 L6 |
-| CHAT-06 | Provider 错误（错 Key/限流/超时）渲染 | 稳定 `ApiError`；不回传凭据 | `role=alert` 中文错误 + 下一步动作按钮 | L3/L5 | L3 `real-runtime-errors.test.ts` | PASS（L3）/SKIP（L5） | `desktop/src/errors.ts` 映射无单测，属 L5 待建范围 |
+| CHAT-05 | IPC 断线时发送 | 无请求发出 | 明确 offline 中文错误，不静默 | L6 | A4b `lane-a4b-chat`（circuit 断开，2026-09-02） | PASS（L6，2026-09-02） | 断线期发送不创建会话、恢复后重连可发送均已验证 |
+| CHAT-06 | Provider 错误（错 Key/限流/超时）渲染 | 稳定 `ApiError`；不回传凭据 | `role=alert` 中文错误 + 下一步动作按钮 | L3/L5 | L3 `real-runtime-errors.test.ts`；A4b `lane-a4b-chat`（2026-09-02，三种错误各一行运行错误并收敛） | PASS（L3/L6，2026-09-02）/SKIP（L5 未建） | 模型调用失败曾因 stopReason=error 被吞——已在热修补 turn.failed 终态（2026-09-02） |
 
 ### SSE · SSE/WS/Replay 事件通道
 
@@ -117,8 +117,8 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| ABORT-01 | 流式中点停止按钮 → abort | `POST /api/sessions/:id/abort` | 退出流式态，可继续输入 | L3/L6 | L3 `abort.test.ts`；A3 冒烟（2026-09-01） | PASS（L3/L6，2026-09-01） | 终态事件 turn.cancelled 未被 projector 处理导致卡死已在热修修复（2026-09-01） |
-| ABORT-02 | Abort 竞态：完成瞬间 abort；abort 后迟到事件不入投影 | ExecutionRegistry 中止语义 | UI 状态一致 | L3 | L3 `abort.test.ts` | PASS（L3） | 迟到事件经 Replay 的 UI 侧过滤仅 L6 可验 |
+| ABORT-01 | 流式中点停止按钮 → abort | `POST /api/sessions/:id/abort` | 退出流式态，可继续输入 | L3/L6 | L3 `abort.test.ts`；A3 冒烟（2026-09-01）；A4b 竞态视角（2026-09-02） | PASS（L3/L6，2026-09-02） | 终态事件 turn.cancelled 未被 projector 处理导致卡死已在热修修复（2026-09-01）；终态信封现由运行时显式发出（2026-09-02） |
+| ABORT-02 | Abort 竞态：完成瞬间 abort；abort 后迟到事件不入投影 | ExecutionRegistry 中止语义 | UI 状态一致 | L3 | L3 `abort.test.ts`；A4b `lane-a4b-abort`（迟到事件观察窗 + 立刻重发收养新 stream，2026-09-02） | PASS（L3/L6，2026-09-02） | — |
 
 ### COMPACT · 会话压缩
 
@@ -133,10 +133,10 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| PROV-01 | 设置→模型与 Provider→新增/编辑 Provider→保存 | `GET/PUT /api/settings/providers`；凭据入 AuthStorage | 列表出现新 Provider；Key 不回显 | L3/L5 | L3 `provider-settings.test.ts` | PASS（L3）/SKIP（L5 未建） | — |
-| PROV-02 | 凭据缺失的模型不进入可用列表 | `GET /api/models` credentialConfigured 标记 | 模型选择器不出现该项 | L1/L3 | L3 `provider-settings.test.ts` | PASS（L3） | — |
-| PROV-03 | 错 Key/非法 URL 负例 | 稳定 `ApiError`，不拼敏感输入 | 中文错误 | L3 | L3 `provider-settings.test.ts`、`real-runtime-errors.test.ts` | PASS（L3） | — |
-| PROV-04 | 设置页切全局默认模型 | `PUT /api/settings/preferences` defaults.model | 新会话草稿缺省采用 | L3/L5 | L3 `settings-routes.test.ts`、`unit/preferences.test.ts`（A0 回归 29/29） | PASS（L3）/SKIP（L5） | 默认模型指向未配置凭据模型时 UI 有提示（无测试） |
+| PROV-01 | 设置→模型与 Provider→新增/编辑 Provider→保存 | `GET/PUT /api/settings/providers`；凭据入 AuthStorage | 列表出现新 Provider；Key 不回显 | L3/L5 | L3 `provider-settings.test.ts`；A4c `lane-a4c-provider-settings`（2026-09-02） | PASS（L3/L6，2026-09-02）/SKIP（L5 未建） | 引导自定义预设的模型显示名残留缺陷已在热修修复（2026-09-02） |
+| PROV-02 | 凭据缺失的模型不进入可用列表 | `GET /api/models` credentialConfigured 标记 | 模型选择器不出现该项 | L1/L3 | L3 `provider-settings.test.ts`；A4c 凭据翻转 → chips 菜单一致性（2026-09-02） | PASS（L1/L3/L6，2026-09-02） | — |
+| PROV-03 | 错 Key/非法 URL 负例 | 稳定 `ApiError`，不拼敏感输入 | 中文错误 | L3 | L3 `provider-settings.test.ts`、`real-runtime-errors.test.ts`；A4c `lane-a4c-provider-settings`（客户端拦截 + 服务端 400 不泄露秘密，2026-09-02） | PASS（L3/L6，2026-09-02） | — |
+| PROV-04 | 设置页切全局默认模型 | `PUT /api/settings/preferences` defaults.model | 新会话草稿缺省采用 | L3/L5 | L3 `settings-routes.test.ts`、`unit/preferences.test.ts`（A0 回归 29/29）；A4c 重启采用 + 失效引用漂移提示（2026-09-02） | PASS（L3/L6，2026-09-02）/SKIP（L5） | 草稿模型解析优先级/内置目录兜底语义待 A6 两档模型策略收口 |
 
 ### SET · Settings/preferences 设置
 
@@ -146,7 +146,7 @@
 | SET-02 | 对话显示：事件类型显隐开关即时生效 | local-prefs 持久化 | 时间线即时过滤；重启保持 | L5 | A2 `settings.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
 | SET-03 | 外观：主题三态 + 减少动效 | local-prefs + html data 属性 | 即时切换；重启保持 | L5 | A2 `settings.mock.test.tsx`（2026-09-01） | PASS（L5，2026-09-01） | — |
 | SET-04 | 偏好 route→file→reopen 幂等（含 `subagents` 段） | `GET/PUT /api/settings/preferences` | 与后端一致；subagents 不丢 | L3 | L3 `settings-routes.test.ts` + L1 `preferences.test.ts`（A0 RED→GREEN） | PASS（L3） | — |
-| SET-05 | 关于页：版本与连接信息 | `GET /api/health` | 显示版本/连接模式 | L5 | 无 | SKIP（L5 未建） | — |
+| SET-05 | 关于页：版本与连接信息 | `GET /api/health` | 显示版本/连接模式 | L5 | A4c `lane-a4c-provider-settings`（版本=主进程桥上报，dev 版本对齐修复；连接信息与 serverUrl 真值一致，2026-09-02） | PASS（L6，2026-09-02） | dev 下 app.getVersion() 曾返回 Electron 运行时版本，已修复（2026-09-02） |
 
 ### MEM · Memory 记忆页与查询
 
