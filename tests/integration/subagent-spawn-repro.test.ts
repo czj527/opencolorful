@@ -11,6 +11,7 @@ import {
   type SubagentRunId,
   type SubagentThreadId,
 } from "../../src/contracts/subagents.js";
+import { defaultPreferences } from "../../src/contracts/preferences.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import {
@@ -29,6 +30,7 @@ import { SubagentTranscriptView } from "../../src/runtime/subagents/transcript/t
 import { SubagentArtifactFileService } from "../../src/runtime/subagents/transcript/artifact-files.js";
 import { SubagentReplayStore } from "../../src/runtime/subagents/transcript/replay-store.js";
 import { SubagentToolActivityTracker } from "../../src/runtime/subagents/transcript/tool-summary.js";
+import { selectSecondary } from "../../src/runtime/model-policy.js";
 import {
   registerSubagentContext,
   type SubagentToolServices,
@@ -138,6 +140,17 @@ describe("subagent spawn repro (#13/#14)", () => {
 
     const services: SubagentToolServices = {
       preferences: () => ({ subagents: { defaultModel: null } }),
+      selectSecondary: (reason, explicit) => selectSecondary(reason, {
+        ...(explicit !== undefined && explicit !== null ? { explicit } : {}),
+        preferences: {
+          ...defaultPreferences(),
+          subagents: { defaultModel: { providerId: "faux", modelId: "faux-1" } },
+        },
+        modelService: {
+          listProviders: () => [{ providerId: "faux", credentialConfigured: true }],
+          resolveModel: () => ({}),
+        },
+      }),
       currentModel: () => ({ providerId: "faux", modelId: "faux-1" }),
       parentSnapshot: () => ({ toolIds: ["read"], pluginContributions: [], skillEntries: [] }),
       modelResolver: () => true,

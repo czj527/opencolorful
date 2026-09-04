@@ -218,6 +218,117 @@ The plan remains `Planning` until the real implementation and interaction eviden
 
 ## 7.1 Implementation log
 
+### 2026-09-04 review-repair execution briefs
+
+`parallel_group: review-repair-2026-09-04`. The production fixes are already isolated by
+review finding; the lanes below share no writable files or contracts. The integration barrier is
+main-Agent diff review followed by the repository quality gates. Initial Luna dispatches with
+`reasoning_effort=max` were rejected by the runtime because `gpt-5.6-luna` supports up to
+`xhigh`; retries therefore pin `model=gpt-5.6-luna`, `reasoning_effort=xhigh`, and
+`fork_turns=none` rather than inheriting the main model.
+
+**Lane RR-A7 (read-only caller audit):** role = verify the A7 primary/secondary caller wiring and
+identify missing tests or bypasses; read_first = `AGENTS.md`, `docs/development.md`, A6/A7 sections
+of this plan, `src/runtime/model-policy.ts`, `src/server/routes/sessions.ts`, `src/server/start.ts`,
+`desktop/src/App.tsx`, and their tests; owns = no files (read-only); forbidden = edits, commits,
+dependency changes, and `references/`; interface = A6 selectors are the sole automatic selection
+authority and environment/first-credentialed enumeration is forbidden; requirements = search all
+production callers, inspect per-Agent memory behavior and Desktop draft initialization, and propose
+the smallest missing coverage; acceptance = report exact paths/lines, bypass search terms, and
+commands; decision_mode = `human-fixed`; report = development.md section 5 structure; docs = none.
+
+**Lane RR-EXIT (exit-code regression):** role = cover the PR #49 Node exit-code compatibility fix;
+read_first = `AGENTS.md`, `docs/development.md`, `src/sandbox/local-backend.ts`, and existing sandbox
+tests; owns = `tests/unit/local-backend.test.ts` only (create if appropriate); forbidden = production
+edits, other tests, lockfiles, commits, and `references/`; interface = integer and integer-string
+exit codes are preserved, signal/non-numeric values normalize to `1`; requirements = test public
+`LocalBackend.execute()` behavior without weakening path/sandbox checks; acceptance = focused Vitest
+pass with real output; decision_mode = `agent-delegated`; report = development.md section 5 structure;
+docs = none.
+
+**Lane RR-DESKTOP (draft-model regression):** role = cover the A7 Desktop removal of silent
+first-credentialed fallback; read_first = `AGENTS.md`, `docs/development.md`, `desktop/src/App.tsx`,
+`desktop/src/chat.mock.test.tsx`, Desktop fixtures/source contracts, and A6/A7 plan sections; owns =
+`desktop/src/chat.mock.test.tsx` only; forbidden = production edits, other tests, lockfiles, commits,
+and `references/`; interface = a valid saved default initializes the draft, while missing/unavailable
+preference leaves it unselected even when another credentialed model exists; requirements = use
+existing Mock/UI conventions and visible behavior; acceptance = focused Desktop Vitest pass;
+decision_mode = `human-fixed`; report = development.md section 5 structure; docs = none.
+
+**Lane RR-SUBAGENT (canonical secondary wiring):** role = remove the production Subagent
+`parent_inherited` fallback and route spawn model selection through A6 `selectSecondary`; read_first =
+`AGENTS.md`, `docs/development.md`, A6/A7 in this plan, `src/runtime/model-policy.ts`,
+`src/pi-sdk/subagent-tools.ts`, `src/pi-sdk/subagent-tools-context.ts`,
+`src/runtime/subagents/composition.ts`, and Subagent core/security/repro tests; owns = those three
+production files plus `tests/unit/subagents-core-tools.test.ts`,
+`tests/unit/subagents-security-regression.test.ts`, and
+`tests/integration/subagent-spawn-repro.test.ts`; forbidden = policy contract changes, DB migrations,
+other tests, lockfiles, commits, and `references/`; interface = explicit spawn model >
+`subagents.defaultModel` > legacy memory utility mapping, never parent primary inheritance; historical
+`parent_inherited` rows remain readable; requirements = preserve stable Subagent error codes and map
+A6 failures without raw Provider errors; acceptance = focused Subagent suites pass and a regression
+proves primary-only configuration cannot create a Subagent thread; decision_mode = `human-fixed`;
+report = development.md section 5 structure; docs = none.
+
+**Lane RR-MESSAGES (production no-model fail-closed):** role = prevent the production messages
+route from silently constructing a faux runtime when a Session has no selected model; read_first =
+`AGENTS.md`, `docs/development.md`, A6/A7 in this plan, `src/server/routes/messages.ts`, Server app
+fixtures, and message/session integration tests; owns = `src/server/routes/messages.ts` and new
+`tests/integration/message-model-policy.test.ts`; forbidden = shared contracts, Session route edits,
+existing modified tests, lockfiles, commits, and `references/`; interface = faux remains available
+only for explicitly test-injected/no-production-model-service paths, while a production
+`modelService` plus `session.model=null` returns a stable actionable 409 before Runtime creation;
+requirements = do not expose Provider internals and prove PromptService receives no runtime/run;
+acceptance = focused new test passes plus relevant message integration tests; decision_mode =
+`human-fixed`; report = development.md section 5 structure; docs = none.
+
+`serial_reason`: the main Agent keeps `src/server/start.ts`, Session route integration, event-terminal
+integration, plan writeback, package-lock normalization, and full quality gates serial because they
+touch shared composition-root/runtime state or aggregate evidence across all lanes.
+
+### 2026-09-04 review-repair closeout
+
+Implementation (main Agent integration after independent Luna lane reports):
+
+- PR #51 terminal uniqueness: `PlatformEventMapper` now accepts one terminal per PI turn,
+  suppresses `turn.completed` after assistant `error`/`aborted`, and `SessionRuntime` closes
+  instrumentation exactly once; failed/aborted usage is not recorded as successful usage.
+- PR #52 diagnostic correlation: a non-empty main-process `diagRef` wins over the session-path
+  fallback, preserving shell-log-searchable references for network/502/server failures.
+- PR #49 exit-code compatibility: `LocalBackend` normalizes Node 26 signal/non-numeric exit codes
+  to `1` while preserving integer and integer-string codes; focused coverage is 13 tests.
+- A7 caller wiring: Session creation uses `selectPrimary`; memory/summary/background/compaction
+  utilities use `selectSecondary`; Subagent spawn uses the same selector and no longer inherits the
+  parent primary model; Desktop quick and advanced new-session flows never choose the first
+  credentialed model and require explicit selection.
+- Production fail-closed: messages route refuses to create a faux runtime when a real
+  `modelService` is present but the Session has no selected primary model. Dedicated regression
+  coverage asserts HTTP 409 and no Runtime creation.
+- Real E2E fixtures now explicitly persist `subagents.defaultModel` after configuring their fixture
+  Provider, matching the frozen A6 contract.
+
+Independent verification (all commands run separately by the main Agent):
+
+- `npm run check:docs` → exit 0; `node scripts/verify-pi-sdk-imports.mjs` → exit 0;
+  `npm run check:plugin-imports` → exit 0.
+- `npx tsc --noEmit -p tsconfig.json` → exit 0.
+- `npx vitest run` → 183 files / 2193 tests passed in the final full run; the sole failure was
+  `tests/integration/supervisor.test.ts` Agent Server health wait under concurrent Windows load.
+  The failing case passed independently with `--testTimeout=60000`; no business assertion failed.
+- Focused review suites → 8 files / 89 tests passed.
+- `npm run test --workspace=@opencolorful/desktop` → 12 files / 58 tests passed.
+- `npm run test --workspace=web` → 34 files / 426 tests passed (happy-dom iframe connection noise
+  remains expected and does not affect exit code).
+- `npm run build:protocol`, `npm run build:sdk`, `npm run build`, `npm run web:build`, and
+  `npm run desktop:build` → all exit 0.
+- `cd web; npx playwright test` → 59 tests passed; the two initial failures were fixed by explicit
+  secondary-model fixture setup, then the complete suite passed.
+
+Known non-blocking environment note: Supervisor and PATH-scan tests can exceed the default global
+Vitest timeout under concurrent Windows load; isolated reruns passed (`supervisor-watchdog` 6/6,
+`detect-path-bins` 5/5, `server-restart` 1/1 with a 60s test timeout, and the failing Supervisor
+logs case 1/1 with a 60s test timeout). No business assertion remains failing in final targeted runs.
+
 ```text
 Date: 2026-08-31
 Task: A0 — Baseline and existing defect closeout
@@ -363,7 +474,7 @@ Child dispatch: 1 child agent, hit turn limit (100 turns) after completing the i
 Implementation (all within brief owns):
   - errors.ts: ErrorCorrelation {traceId, origin: "server"|"local", at} + short-ref formatter + local fallback + CorrelatedError passthrough (message classification unchanged)
   - electron/main.cjs: per-failed-API diagRef issuance (`ipc-` + 8 hex, health probe excluded from noise), synced to shell.log; embedded-server startup failure dialog now shows the ref
-  - data/ipc-source.ts: failure points throw CorrelatedError — session-scoped paths reuse the server-stamped sessionId traceId (origin=server); other failures use the main-process diagRef or renderer-local id (origin=local); bridge break falls back to local
+  - data/ipc-source.ts: failure points throw CorrelatedError — an explicit main-process diagRef (including session-scoped network/502/server failures) wins because it is shell.log-searchable; only without diagRef do session paths reuse the server-stamped sessionId traceId (origin=server), while other failures use a renderer-local id (origin=local); bridge break falls back to local
   - ChatView.tsx: error status rows (运行错误/发送失败) resolve correlation once per error row from queryActivity({sessionId, status:"failed"}) — latest failed record's per-turn traceId, falling back to the session id; rows show 诊断引用 + 在日志中查看
   - App.tsx: error→logs navigation carrying the reference (logsFocus)
   - LogsPage.tsx: traceId filter input (300ms debounce, client matchesFilter + server query param), prefill focus banner, source.ts ActivityFilter.traceId
@@ -376,6 +487,32 @@ Verification (main agent, independent):
   - CHANGELOG Added entry; matrix OBS-05 → PASS（L3/L6，2026-09-02）
 Commands: npm run test --workspace=@opencolorful/desktop; npm run desktop:build; npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @a5
 Main-Agent review: full diff reviewed; L6 spec authored and verified by main agent; child's last-mile verification completed by main agent
+```
+
+```text
+Date: 2026-09-03
+Task: A5 review follow-up — preserve IPC diagnostic references on session-path failures
+Finding: correlationForPath() unconditionally selected /api/sessions/:id/... sessionId, which could hide the main-process diagRef for network/502/server failures and point the Logs page at a trace with no matching activity.
+Fix: correlationForPath() now prefers a non-empty diagRef; it falls back to sessionId (origin=server) only when no diagRef is available, and otherwise generates a renderer-local UUID. The server-trace lookup performed by ChatView remains unchanged and still wins when a concrete failed activity trace is found.
+Coverage: desktop/src/data/ipc-source.test.ts covers session-path diagRef precedence, sessionId fallback without diagRef, and non-session diagRef/local UUID fallbacks; targeted file run passed 3/3 and desktop build passed.
+```
+
+```text
+Date: 2026-09-02
+Task: A6 — canonical primary/secondary model policy and migration (contract freeze)
+Branch: p1-wave-a-a6-model-policy (stacked on p1-wave-a-a5-diagnostics)
+Child outcome: DONE_WITH_CONCERNS (51 turns) — complete implementation; concerns adjudicated by main agent (check:docs pending plan writeback = expected owns boundary; legacy normalize segment-drop is pre-existing store behavior, recorded for A7 adjudication; environment-credential built-ins remain resolvable as EXPLICIT user config — the contract only forbids selector-side enumeration/fallback).
+New assets:
+  - src/contracts/model-policy.ts: selection/result/source/conflict contract types + ModelAvailabilityPort (structural port: listModels unreachable at type level — environment catalog structurally unselectable)
+  - src/runtime/model-policy.ts: selectPrimary/selectSecondary/diagnoseModelConflicts + ModelPolicyError (stable codes: model_not_configured / model_no_credentials / model_unavailable / model_conflict_adjudicated; UNAUTHORIZED/NOT_FOUND normalized, raw PI messages never surfaced)
+  - Precedence (frozen, Feature Spec §2.1): primary = explicit(request) > explicit(session) > defaults.model; secondary = explicit(request) > explicit(session) > subagents.defaultModel > memory.utility* legacy mapping (per-Agent memory segment overrides global, consistent with resolveMemorySettings; shadowed/incomplete entries diagnosable)
+  - Hard guarantees: no environment/first_credentialed source (constructively asserted in tests); no silent fallback on any tier; conflicts adjudicated by field priority and attached to results/errors; pure functions with injected deps — A7 rewires call sites directly
+  - Tests: tests/unit/model-policy.test.ts (29) + tests/integration/model-policy-compat.test.ts (7, real PreferencesStore + ModelService, isolated OPENCOLORFUL_HOME) — precedence table, conflict adjudication, fresh/legacy consistency, no-credential and unavailable-secondary negatives stable, subagents write/reopen preserved
+Migration example: legacy preferences with only memory.utility* → selectSecondary source=legacy_memory_utility; conflicting subagents.defaultModel wins by precedence, ghost → model_unavailable with conflict record (no silent borrow of the old field)
+Verification (main agent, independent): new contract suites 36/36; child ran root suite 3× (2 full green passes; 1 transient detect-path-bins cleanup timeout under disk load, unrelated, single-file 5/5)
+Unresolved compatibility risks (recorded for A7): ① sessions.ts silent-skip on default application; ② start.ts completeText double fallback; ③ desktop App.tsx first-credentialed draft fallback; ④ store-level normalize drops invalid legacy segments (selector then stably reports model_not_configured); ⑤ listModels environment branch — A7 keeps explicit-user-config vs selector-enumeration distinction
+Commands: npx vitest run tests/unit/model-policy.test.ts tests/integration/model-policy-compat.test.ts; npm run test; npm run check:pi-imports
+Main-Agent review: boundary confirmed (5 files), selector implementation read, contract suites re-run independently; plan writeback + TICK-02 note by main agent (closes check:docs)
 ```
 
 ## 8. Wave A exit conditions

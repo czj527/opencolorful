@@ -214,6 +214,14 @@ async function ensureFixtureProvider(page: Page): Promise<void> {
     },
   });
   expect(providerResponse.ok()).toBe(true);
+  const secondaryModelResponse = await page.request.put(`${baseUrl()}/api/settings/preferences`, {
+    data: {
+      subagents: {
+        defaultModel: { providerId: "fixture-provider", modelId: "fixture-model" },
+      },
+    },
+  });
+  expect(secondaryModelResponse.ok()).toBe(true);
 }
 
 async function openSession(page: Page): Promise<void> {

@@ -36,7 +36,7 @@ import { useFirstRun } from "./use-first-run.js";
 
 const NEW_THREAD = "new";
 
-/** 偏好接口缺失/不可用时的兜底：与后端默认一致，模型选择退回“首个已配置” */
+/** 偏好接口缺失/不可用时的安全兜底；模型保持未选择，避免静默选模型。 */
 const FALLBACK_PREFERENCES: PreferencesView = {
   defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
 };
@@ -198,9 +198,8 @@ export function App() {
           const fromPref = list.find((option) => option.credentialConfigured && option.providerId === preferred.providerId && option.modelId === preferred.modelId);
           if (fromPref !== undefined) return { providerId: fromPref.providerId, modelId: fromPref.modelId };
         }
-        // ③ 偏好缺失/不可用 → 第一个已配置凭据的模型；④ 都没有 → null
-        const first = list.find((option) => option.credentialConfigured);
-        return first !== undefined ? { providerId: first.providerId, modelId: first.modelId } : null;
+        // ③ 偏好缺失/不可用时保持未选择，交给用户显式选择；禁止静默选首个模型。
+        return null;
       });
     }).catch(() => {
       if (!cancelled) setModels([]);
@@ -354,6 +353,12 @@ export function App() {
     const hasUsableModel = models.some((option) => option.credentialConfigured);
     if (!hasUsableModel) {
       setChatError(userErrorNode(new Error("未配置模型"), "send"));
+      return;
+    }
+    // 有可用模型不等于当前草稿已选择模型；禁止创建无模型 Session 后由服务端
+    // 静默落入 faux。用户可在 Composer 的模型菜单中显式选择。
+    if (isNew && draftModel === null) {
+      setChatError(userErrorNode(new Error("未选择模型"), "send"));
       return;
     }
 

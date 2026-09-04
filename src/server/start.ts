@@ -22,7 +22,7 @@ import { MemoryJournalStore } from "../storage/memory/journal-store.js";
 import { PinnedMemoryStore } from "../storage/memory/pinned-store.js";
 import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../runtime/memory/proposal-application.js";
-import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { defaultMemoryAgentSettings, type MemoryAgentSettings } from "../contracts/memory.js";
 import { defaultObservabilityPreferences } from "../contracts/preferences.js";
 import { MemoryRecallStore } from "../storage/memory/recall-store.js";
 import { ActivationUpdater } from "../runtime/memory/activation-updater.js";
@@ -51,6 +51,7 @@ import { buildSubagentComposition, type SubagentRuntimeComposition } from "../ru
 import type { SubagentStartupRecoveryReport } from "../runtime/subagents/recovery/startup-recovery.js";
 import { instrument } from "../observability/instrument.js";
 import { createBootId } from "../observability/trace-context.js";
+import { selectSecondary } from "../runtime/model-policy.js";
 
 export interface StartServerOptions {
   readonly host: string;
@@ -357,18 +358,24 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       } catch { /* 读取失败用全局默认 */ }
       return global;
     };
-    // 工具型 LLM：按记忆设置解析 Provider/模型（utilityProviderId/utilityModel），
-    // 未配置时回退第一个有凭据的 Provider 及其第一个模型；
-    // 无凭据/解析失败时抛错 → 各记忆组件走 degraded 路径（不阻塞对话）
+    // 工具型 LLM：统一走 secondary 模型策略；未配置/不可用时抛稳定策略错误，
+    // 各记忆组件转 degraded，不阻塞主对话，也不枚举环境模型或首个凭据 Provider。
     const completeText = async (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
-      const settings = resolveMemorySettings(agentId);
-      let provider = modelService.listProviders().find((p) => p.credentialConfigured && p.providerId === settings.utilityProviderId);
-      provider = provider ?? modelService.listProviders().find((p) => p.credentialConfigured);
-      if (provider === undefined) throw new Error("无可用 Provider 凭据");
-      let model = modelService.listModels().find((m) => m.providerId === provider.providerId && m.modelId === settings.utilityModel);
-      model = model ?? modelService.listModels().find((m) => m.providerId === provider.providerId);
-      if (model === undefined) throw new Error("Provider 未配置模型");
-      const resolved = modelService.resolveModel(provider.providerId, model.modelId);
+      const preferences = preferencesStore.get();
+      let perAgent: MemoryAgentSettings | undefined;
+      if (agentId.trim() !== "") {
+        try {
+          perAgent = agentStore.getSettings(agentId).memory;
+        } catch {
+          // 失效 Agent 标识沿用既有记忆设置回退链，不让后台整理反向打崩。
+        }
+      }
+      const selection = selectSecondary("memory", {
+        preferences,
+        modelService,
+        ...(perAgent !== undefined ? { perAgent } : {}),
+      });
+      const resolved = modelService.resolveModel(selection.providerId, selection.modelId);
       return completeUtilityTextForResolved(resolved, {
         systemPrompt: req.systemPrompt,
         prompt: req.prompt,

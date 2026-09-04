@@ -23,6 +23,7 @@ import type { SubagentReplayStore } from "../runtime/subagents/transcript/replay
 import type { SubagentTranscriptView } from "../runtime/subagents/transcript/transcript-view.js";
 import type { SubagentToolActivityTracker } from "../runtime/subagents/transcript/tool-summary.js";
 import type { SubagentDefaultModel } from "../contracts/subagents.js";
+import type { ModelSelection, ModelSelectionExplicit } from "../contracts/model-policy.js";
 import type { ResourceRef, TraceContext } from "../contracts/observability.js";
 
 // ═══════════════════════════════════════════════════════════════
@@ -43,7 +44,9 @@ import type { ResourceRef, TraceContext } from "../contracts/observability.js";
 export interface SubagentToolServices {
   /** 当前 Subagent 偏好（defaultModel 等；§10.1） */
   readonly preferences: () => { readonly subagents: { readonly defaultModel: SubagentDefaultModel | null } | undefined };
-  /** 主 Agent 当前模型（parent_inherited 来源；§10.2） */
+  /** A6 canonical secondary 选择器；spawn 不得自行 fallback 或继承父模型 */
+  readonly selectSecondary: (reason: string, explicit?: ModelSelectionExplicit | null) => ModelSelection;
+  /** 兼容旧注入方的父模型视图；新 Subagent 选择流程不会读取它 */
   readonly currentModel: () => { readonly providerId: string; readonly modelId: string } | null;
   /** 父 Agent 当前有效能力快照（§12.1 EffectiveSnapshot 输入） */
   readonly parentSnapshot: () => { readonly toolIds: readonly string[]; readonly pluginContributions: readonly ParentPluginContributionEntry[]; readonly skillEntries: readonly ParentSkillEntry[] };

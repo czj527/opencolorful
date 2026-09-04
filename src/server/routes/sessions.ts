@@ -12,6 +12,7 @@ import type { ModelService } from "../../runtime/model-service.js";
 import type { PromptService } from "../../runtime/prompt-service.js";
 import type { PreferencesStore } from "../../config/preferences-store.js";
 import type { AgentStore } from "../../config/agent-store.js";
+import { ModelPolicyError, selectPrimary } from "../../runtime/model-policy.js";
 import { assertDurableAudit, type AuditRecordInput } from "../../observability/audit-recorder.js";
 import { instrument } from "../../observability/instrument.js";
 
@@ -233,17 +234,30 @@ export function registerSessionRoutes(
       payload: { summaryCode: "session_workspace_bound" },
     });
 
-    // 应用全局默认模型：仅当请求未指定模型、全局默认可用且可 resolve 时。
+    // 应用全局默认模型：仅当请求未指定模型、全局默认存在且模型服务可用时。
     const preferences = preferencesStore?.get();
     const view = sessionService.getView(sessionId);
     if (preferences?.defaults.model && modelService !== undefined && view.model === null) {
-      const defaultModel = preferences.defaults.model;
       try {
-        modelService.resolveModel(defaultModel.providerId, defaultModel.modelId);
+        const selection = selectPrimary({ preferences, modelService });
         const opened = sessionService.open(sessionId);
-        opened.selectModel(defaultModel.providerId, defaultModel.modelId);
-      } catch {
-        // 默认模型不可用时不阻塞创建，留给后续显式选择。
+        opened.selectModel(selection.providerId, selection.modelId);
+      } catch (error) {
+        const diagnosis = error instanceof ModelPolicyError
+          ? { reasonCode: error.code, reason: error.message }
+          : { reasonCode: "model_selection_failed", reason: "主对话默认模型选择失败" };
+        // 默认模型不可用时不阻塞创建，保留无模型会话供后续显式选择；
+        // 稳定错误码/原因进入诊断，避免策略失败被静默吞掉。
+        instrument.warn(
+          "session.model.default_selection_failed",
+          "创建会话时未绑定主对话默认模型",
+          {
+            sessionId,
+            role: "primary",
+            source: "user_default",
+            ...diagnosis,
+          },
+        );
       }
     }
 

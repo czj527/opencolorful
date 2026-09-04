@@ -9,6 +9,11 @@ import { CURRENT_SCHEMA_VERSION } from "../../src/storage/migrations.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { startForegroundServer, type RunningServer } from "../../src/server/start.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
+import { SessionService } from "../../src/runtime/session-service.js";
+import { PromptService } from "../../src/runtime/prompt-service.js";
+import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
+import { ObservabilityContext } from "../../src/observability/observability-context.js";
 import { instrument } from "../../src/observability/instrument.js";
 
 // ═══════════════════════════════════════════════════════════════
@@ -99,17 +104,35 @@ describe("T4 server 启动/停止链路埋点", () => {
 describe("T4 一次 Turn 的 trace 还原", () => {
   it("POST 消息 → turn.started/turn.completed 同一 trace，model.call 核心链路可还原", async () => {
     const { paths } = makePaths("t4-turn-");
-    const server: RunningServer = await startForegroundServer({ host: "127.0.0.1", port: 0, paths, version: PLATFORM_VERSION });
+    const database = openMetadataDatabase(paths.database);
+    instrument.init(new ObservabilityContext({
+      database,
+      producer: {
+        component: "integration-test",
+        processType: "server",
+        processId: String(process.pid),
+        bootId: "boot-t4-turn",
+        appVersion: PLATFORM_VERSION,
+        hostPlatform: process.platform,
+      },
+      logsRoot: path.join(paths.logs, "runtime", "test"),
+      spoolRoot: path.join(paths.logs, "emergency"),
+    }));
+    const sessionService = new SessionService(paths, new SessionIndex(database));
+    const promptService = new PromptService();
+    const replayStore = new EventReplayStore();
+    const session = sessionService.create({ title: "T4 turn", cwd: process.cwd() });
+    session.selectModel("faux", "faux-1");
+    const server: RunningServer = await startForegroundServer({
+      host: "127.0.0.1",
+      port: 0,
+      paths,
+      version: PLATFORM_VERSION,
+      appOptions: { sessionService, promptService, replayStore, database },
+    });
     const baseUrl = `http://127.0.0.1:${server.port}`;
     try {
-      // 创建 Session（无 Provider → faux 模式，无网络）
-      const created = await fetch(`${baseUrl}/api/sessions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "T4 turn", cwd: process.cwd() }),
-      });
-      expect(created.status).toBe(201);
-      const sessionId = (await created.json() as { id: string }).id;
+      const sessionId = session.id;
 
       const accepted = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`, {
         method: "POST",
@@ -151,6 +174,9 @@ describe("T4 一次 Turn 的 trace 还原", () => {
       }
     } finally {
       await server.stop();
+      promptService.dispose();
+      sessionService.closeAll();
+      database.close();
     }
   });
 });

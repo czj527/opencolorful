@@ -18,13 +18,13 @@ import {
   type SubagentSnapshotId,
   type SubagentSteerV1,
   type SubagentThreadId,
+  type SubagentModelSource,
 } from "../contracts/subagents.js";
 import {
   computeEffectiveSnapshot,
   defaultCapabilityCeiling,
   normalizeCapabilityRequest,
   normalizeSubagentRunLimits,
-  resolveSubagentModel,
   sha256Hex,
   stableSerialize,
   summarizeEffectiveSnapshot,
@@ -32,6 +32,8 @@ import {
 } from "../runtime/subagents/delegation-policy.js";
 import { renderContextPacket, renderSteer, renderTaskBrief } from "../runtime/subagents/task-renderer.js";
 import { isSubagentRunTerminal } from "../contracts/subagents.js";
+import { ModelPolicyError } from "../runtime/model-policy.js";
+import type { ModelSelection, ModelSelectionSource } from "../contracts/model-policy.js";
 import type { ExecuteSubagentRunInput } from "../runtime/subagents/runtime/runtime-host.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -160,6 +162,29 @@ function okResult(payload: unknown): ReturnType<typeof textResult> {
 
 function errorResult(code: string, message: string): ReturnType<typeof textResult> {
   return textResult(JSON.stringify({ status: "error", code, message }));
+}
+
+/**
+ * A6 的 canonical source 需要落到既有 SQLite model_source CHECK 允许的三值；
+ * 旧值（尤其 parent_inherited）必须继续可读，但新建 Thread 不再写入它。
+ */
+function toStoredModelSource(source: ModelSelectionSource): SubagentModelSource {
+  return source === "explicit_request" || source === "caller_override"
+    ? "parent_request"
+    : "user_default";
+}
+
+/** A6 错误只在 Subagent 公共错误码边界归一，不透出 Provider/PI 原始错误。 */
+function modelPolicyErrorResult(error: unknown): ReturnType<typeof textResult> {
+  if (error instanceof ModelPolicyError) {
+    if (error.code === "model_not_configured") {
+      return errorResult("subagent_model_required", "未配置 Subagent 次档模型，且不能继承主对话模型；请设置 subagents.defaultModel 或显式指定模型");
+    }
+    if (error.code === "model_no_credentials" || error.code === "model_unavailable") {
+      return errorResult("subagent_model_unavailable", "Subagent 次档模型不可用（未配置凭据或模型不存在），不自动回退到主对话模型或其他 Provider");
+    }
+  }
+  return errorResult("subagent_model_unavailable", "Subagent 次档模型不可用，不自动回退到主对话模型或其他 Provider");
 }
 
 function json(value: unknown): string {
@@ -293,18 +318,16 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
   const ownership = { ownerAgentId: ctx.ownerAgentId, parentSessionId: ctx.sessionId };
   const now = new Date(services.now()).toISOString();
 
-  // 1. 模型解析（§10.2 三档优先级；失败不 fallback）
-  const model = resolveSubagentModel({
-    userDefault: services.preferences()?.subagents?.defaultModel ?? null,
-    ...(raw.model !== undefined
-      ? { parentRequest: { providerId: raw.model.providerId, modelId: raw.model.modelId } }
-      : {}),
-    parentInherited: services.currentModel(),
-    resolveModel: services.modelResolver,
-    now: services.now,
-  });
-  if (model.status !== "resolved") {
-    return errorResult(model.code, model.message);
+  // 1. A6 canonical secondary 选择（显式请求 > secondary 默认 > legacy memory utility）。
+  //    这里没有 parent_inherited 输入：主模型不能成为 Subagent 的隐式 fallback。
+  let model: ModelSelection;
+  try {
+    model = services.selectSecondary(
+      "spawn_subagent",
+      raw.model === undefined ? undefined : { ...raw.model, level: "request" },
+    );
+  } catch (error) {
+    return modelPolicyErrorResult(error);
   }
 
   // 2. CapabilityCeiling + limits 归一化（超限拒绝）
@@ -362,7 +385,9 @@ function spawnSubagent(ctx: SubagentToolContext, raw: SpawnSubagentArgs): Return
         title: raw.brief.title,
         modelProviderId: model.providerId,
         modelId: model.modelId,
-        modelSource: model.source,
+        // SQLite 的历史 CHECK 约束仍使用旧来源名；canonical source 只在新结果/API
+        // 中透出，旧 parent_inherited 行继续可读但不会被新建 Thread 写入。
+        modelSource: toStoredModelSource(model.source),
         thinkingLevel: raw.thinkingLevel ?? "normal",
         workspaceCwd: workspaceCwdOf(ctx),
         capabilityCeiling: capabilitySummary,

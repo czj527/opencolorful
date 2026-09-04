@@ -9,6 +9,7 @@ import type { AuditRecorder } from "../../observability/audit-recorder.js";
 import type { ActivityRecorder } from "../../observability/activity-recorder.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
+import { selectSecondary } from "../model-policy.js";
 import { ParentMailboxDeliveryCoordinator } from "./mailbox/parent-mailbox-delivery-coordinator.js";
 import { ProtocolDispatcher } from "./protocol/protocol-dispatcher.js";
 import { SubagentStartupRecovery, type SubagentStartupRecoveryReport } from "./recovery/startup-recovery.js";
@@ -274,6 +275,14 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
     projector,
     toolServices: {
       preferences: () => ({ subagents: preferencesStore.get().subagents }),
+      selectSecondary: (reason, explicit) => {
+        const preferences = preferencesStore.get();
+        return selectSecondary(reason, {
+          ...(explicit !== undefined && explicit !== null ? { explicit } : {}),
+          preferences,
+          modelService,
+        });
+      },
       modelResolver: (providerId, modelId) => {
         try {
           modelService.resolveModel(providerId, modelId);

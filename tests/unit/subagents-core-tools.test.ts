@@ -16,6 +16,7 @@ import {
   type SubagentThreadId,
 } from "../../src/contracts/subagents.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
+import { defaultPreferences } from "../../src/contracts/preferences.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import {
   ArtifactStore,
@@ -42,6 +43,7 @@ import { SubagentTranscriptView } from "../../src/runtime/subagents/transcript/t
 import { SubagentArtifactFileService } from "../../src/runtime/subagents/transcript/artifact-files.js";
 import { SubagentReplayStore } from "../../src/runtime/subagents/transcript/replay-store.js";
 import { SubagentToolActivityTracker } from "../../src/runtime/subagents/transcript/tool-summary.js";
+import { selectSecondary } from "../../src/runtime/model-policy.js";
 import { registerSubagentContext, type SubagentToolServices } from "../../src/pi-sdk/subagent-tools-context.js";
 import { SUBAGENT_FILE_TOOL_DEFS } from "../../src/server/routes/subagent-ability-tools.js";
 import subagentToolsExtension from "../../src/pi-sdk/subagent-tools.js";
@@ -197,7 +199,7 @@ function createStores(db: Database.Database) {
   return { threads, runs, messages, artifacts, mailbox, transactions };
 }
 
-function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
+function createHarness(options: { modelAvailable?: boolean; secondaryConfigured?: boolean } = {}): Harness {
   const { database, paths } = createContext();
   const stores = createStores(database);
   const factory = new FauxSessionFactory();
@@ -242,6 +244,17 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
   const projector = { projectRunQueued: () => undefined, projectThreadCreated: () => undefined, projectArtifactIntegrityFailed: () => undefined } as never;
 
   const modelAvailable = options.modelAvailable ?? true;
+  const basePreferences = defaultPreferences();
+  const preferences = {
+    ...basePreferences,
+    defaults: {
+      ...basePreferences.defaults,
+      model: { providerId: "faux", modelId: "faux-1" },
+    },
+    subagents: {
+      defaultModel: options.secondaryConfigured === false ? null : { providerId: "faux", modelId: "faux-1" },
+    },
+  };
   let seq = 0;
   const newId = (prefix: "sat_" | "sar_" | "sam_" | "saa_" | "smb_" | "sas_"): string => {
     seq += 1;
@@ -260,6 +273,17 @@ function createHarness(options: { modelAvailable?: boolean } = {}): Harness {
 
   const services: SubagentToolServices = {
     preferences: () => ({ subagents: { defaultModel: null } }),
+    selectSecondary: (reason, explicit) => selectSecondary(reason, {
+      ...(explicit !== undefined && explicit !== null ? { explicit } : {}),
+      preferences,
+      modelService: {
+        listProviders: () => [{ providerId: "faux", credentialConfigured: modelAvailable }],
+        resolveModel: () => {
+          if (!modelAvailable) throw new Error("model unavailable");
+          return {};
+        },
+      },
+    }),
     currentModel: () => ({ providerId: "faux", modelId: "faux-1" }),
     parentSnapshot: () => ({ toolIds: ["read", "write"], pluginContributions: [], skillEntries: [] }),
     modelResolver: () => modelAvailable,
@@ -425,6 +449,14 @@ describe("spawn_subagent", () => {
     const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
     expect(out.status).toBe("error");
     expect(out.code).toBe("subagent_model_unavailable");
+    expect(h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10)).toHaveLength(0);
+  });
+
+  it("只有 primary 配置时不继承父模型，→ subagent_model_required，不创建 Thread", async () => {
+    const h = createHarness({ secondaryConfigured: false });
+    const out = await callTool(h, "spawn_subagent", { brief: brief(), context: packet() });
+    expect(out.status).toBe("error");
+    expect(out.code).toBe("subagent_model_required");
     expect(h.stores.threads.listByOwner({ ownerAgentId: OWNER, parentSessionId: SESSION_ID }, 10)).toHaveLength(0);
   });
 

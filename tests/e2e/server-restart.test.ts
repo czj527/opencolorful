@@ -8,8 +8,21 @@ import { PLATFORM_VERSION } from "../../src/index.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 import { startForegroundServer } from "../../src/server/start.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
+import { SessionIndex } from "../../src/storage/session-index.js";
+import { SessionService } from "../../src/runtime/session-service.js";
+import { PromptService } from "../../src/runtime/prompt-service.js";
+import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 
 const temporaryDirectories: string[] = [];
+
+function makeTestResources(paths: ReturnType<typeof getRuntimePaths>) {
+  const database = openMetadataDatabase(paths.database);
+  const sessionService = new SessionService(paths, new SessionIndex(database));
+  const promptService = new PromptService();
+  const replayStore = new EventReplayStore();
+  return { database, sessionService, promptService, replayStore };
+}
 
 afterAll(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -112,26 +125,29 @@ async function sendPromptAndCollect(
 }
 
 describe("server restart recovery", () => {
-  it("rebuilds production services and continues persisted history", async () => {
+  it("rebuilds server wiring and continues persisted history with an explicit faux model", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-e2e-"));
     temporaryDirectories.push(directory);
     const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
 
+    const first = makeTestResources(paths);
+    const sessionHandle = first.sessionService.create({ title: "重启测试", cwd: process.cwd() });
+    sessionHandle.selectModel("faux", "faux-1");
     const server1 = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,
       paths,
       version: PLATFORM_VERSION,
+      appOptions: {
+        sessionService: first.sessionService,
+        promptService: first.promptService,
+        replayStore: first.replayStore,
+        database: first.database,
+      },
     });
     const base1 = `http://127.0.0.1:${server1.port}`;
 
-    const createResponse = await fetch(`${base1}/api/sessions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "重启测试", cwd: process.cwd() }),
-    });
-    expect(createResponse.status).toBe(201);
-    const session = (await createResponse.json()) as { id: string };
+    const session = { id: sessionHandle.id };
 
     try {
       await sendPromptAndCollect(base1, session.id, "第一条消息");
@@ -143,13 +159,23 @@ describe("server restart recovery", () => {
       expect(beforeRestart.model).toEqual({ providerId: "faux", modelId: "faux-1" });
     } finally {
       await server1.stop();
+      first.promptService.dispose();
+      first.sessionService.closeAll();
+      first.database.close();
     }
 
+    const second = makeTestResources(paths);
     const server2 = await startForegroundServer({
       host: "127.0.0.1",
       port: 0,
       paths,
       version: PLATFORM_VERSION,
+      appOptions: {
+        sessionService: second.sessionService,
+        promptService: second.promptService,
+        replayStore: second.replayStore,
+        database: second.database,
+      },
     });
     const base2 = `http://127.0.0.1:${server2.port}`;
 
@@ -187,6 +213,9 @@ describe("server restart recovery", () => {
       }
     } finally {
       await server2.stop();
+      second.promptService.dispose();
+      second.sessionService.closeAll();
+      second.database.close();
     }
   }, 20_000);
 });

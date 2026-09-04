@@ -151,6 +151,11 @@ function isNoModel(raw: string): boolean {
   ].some((marker) => text.includes(marker));
 }
 
+function isModelSelectionMissing(raw: string): boolean {
+  const text = normalize(raw);
+  return ["未选择模型", "请选择模型"].some((marker) => text.includes(marker));
+}
+
 function modelsAction(): ErrorAdvice["action"] {
   return { label: "去设置 → 模型与 Provider", category: "models" };
 }
@@ -178,7 +183,12 @@ function classify(raw: string, context: ErrorContext): ErrorAdvice {
     };
   }
 
-  // 4. Provider / 模型未配置
+  // 4. 当前草稿尚未显式选择模型（与“没有任何可用模型”区分）
+  if (isModelSelectionMissing(raw)) {
+    return { message: "请先选择模型，再发送消息。" };
+  }
+
+  // 5. Provider / 模型未配置
   if (isNoModel(raw)) {
     return {
       message: "还没有可用模型，请先在设置中配置 Provider 与 API Key。",

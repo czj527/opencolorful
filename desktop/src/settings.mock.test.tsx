@@ -353,7 +353,7 @@ it("PROV-04: 设置页切全局默认模型——下拉反映新默认；新会�
   app.consoleTracker.expectNoErrors();
 });
 
-it("PROV-04: 默认模型指向未配置凭据模型——设置页出现中文提示，草稿回退首个已配置模型", async () => {
+it("PROV-04: 默认模型指向未配置凭据模型——设置页出现中文提示，草稿保持未选择", async () => {
   const base = new MockDataSource();
   injected.current = overrideSource(base, {
     getPreferences: () =>
@@ -365,8 +365,8 @@ it("PROV-04: 默认模型指向未配置凭据模型——设置页出现中文�
   try {
     await makeSidebarPO(app.user).newThread();
     await screen.findByText("新会话为草稿：发送首条消息后才会出现在会话列表");
-    // 偏好默认不可用（openai 未配置凭据）→ 草稿回退「首个已配置凭据」模型
-    await screen.findByRole("button", { name: "DeepSeek V3.2" });
+    // 偏好默认不可用（openai 未配置凭据）→ 不静默回退到首个已配置模型
+    await screen.findByRole("button", { name: "选择模型" });
 
     const settings = await openModelsSettings(app);
     const dialog = settings.dialog();
