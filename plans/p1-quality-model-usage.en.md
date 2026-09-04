@@ -515,6 +515,55 @@ Commands: npx vitest run tests/unit/model-policy.test.ts tests/integration/model
 Main-Agent review: boundary confirmed (5 files), selector implementation read, contract suites re-run independently; plan writeback + TICK-02 note by main agent (closes check:docs)
 ```
 
+```text
+Date: 2026-09-04
+Task: A6/A7 rebase integrity follow-up
+Finding: Rebase of the stacked A6/A7 branch accidentally dropped the four A6 implementation/test files
+  (the files were present in source commit 79be140 but absent from HEAD a22bdb6), while A7 callers still
+  imported them. This made the branch appear clean but fail typecheck with missing-module errors.
+Fix: Restored the four files byte-for-byte from 79be140 and staged them for the repair commit:
+  src/contracts/model-policy.ts, src/runtime/model-policy.ts,
+  tests/unit/model-policy.test.ts, tests/integration/model-policy-compat.test.ts.
+Verification: targeted A6 contract/compat suites 36/36 passed; npx tsc --noEmit -p tsconfig.json passed.
+Full npm run check is rerun after this governance record is included.
+```
+
+```text
+Date: 2026-09-04
+Task: A6 onboarding true-chain follow-up
+Finding: After A6 removed the Desktop first-credentialed fallback, the onboarding flow still only
+  persisted the Provider. A fresh Electron run therefore reached the chat draft with model=null and
+  blocked the first message with "请先选择模型"; the @smoke test failed before streaming.
+Fix: Onboarding now persists the explicitly configured Provider/model as preferences.defaults.model.
+  The true-chain smoke no longer mutates preferences behind the UI; it reads and asserts the persisted
+  primary default instead. Added a Mock regression assertion for the same contract.
+Verification: rerun desktop Mock and Electron @smoke after this fix; results are recorded with the
+  final candidate commit.
+```
+
+```text
+Date: 2026-09-04
+Task: A6/A7 fail-closed closeout (main agent)
+Finding: Four residual defects surfaced while closing out the A6/A7 rebase repair:
+  (1) PUT /api/settings/preferences normalized the candidate from a hardcoded `version: 1` base without
+      carrying memory/observability, so any section patch silently reset those sections (settings.ts
+      route bug; route->file->reopen regression added in settings-routes.test.ts);
+  (2) Desktop swallowed updateSessionModel failures (`catch(() => undefined)`), so a model-binding
+      failure surfaced later as an opaque send failure instead of its real cause — now fails closed in
+      App.tsx and NewSessionDialog.tsx with the error handed to the user;
+  (3) onboarding retry after a failed custom-provider save left duplicate `custom-*` providers —
+      provider id is now stable per onboarding run; updatePreferences promoted to a required
+      DesktopDataSource member (Mock already implemented it);
+  (4) Web ops client NewSessionPage silently failed without a default model — added Chinese guidance
+      with a "设置默认模型" action (web remains ops/protocol client; no product-feature expansion).
+Verification (main agent, independent): root tsc (tsconfig + tsconfig.build) pass; targeted suites
+  46/46 (model-policy 29, model-policy-compat 7, message-model-policy 1, settings-routes 9); full root
+  vitest 2195/2195 (184 files); desktop tsc+build and vitest 58/58; web vitest 428/428 (34 files);
+  Electron true-chain @smoke 1 passed (16.0s). verify-pi-sdk-imports and web:build run at commit time.
+Matrix: TICK-02 flipped to PASS (ticker/summary now assemble through selectSecondary in start.ts;
+  session-settings.test.ts asserts the real selectSecondary wiring).
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

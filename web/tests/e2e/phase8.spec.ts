@@ -270,6 +270,41 @@ test.describe("Phase 8：底色模板创建 Agent 与 NewSessionPage", () => {
     await expect(page.getByTestId("tool-call-call-read")).toBeVisible({ timeout: 30_000 });
   });
 
+  test("b2. 无默认模型时首条消息不创建无模型 Session，并提供设置入口", async ({ page }) => {
+    test.setTimeout(60_000);
+    await ensureAgentServerViaApi(page);
+
+    const clearDefaultResponse = await page.request.put(`${baseUrl()}/api/settings/preferences`, {
+      data: { defaults: { model: null } },
+    });
+    expect(clearDefaultResponse.ok()).toBe(true);
+
+    const agentId = await createAgentViaApi(page, `P8-NoDefault-${Date.now()}`, workspace);
+    const before = await (await page.request.get(`${baseUrl()}/api/sessions`)).json();
+    const countBefore = Array.isArray(before) ? before.length : 0;
+
+    const preferencesLoaded = page.waitForResponse((response) =>
+      response.request().method() === "GET" && response.url().endsWith("/api/settings/preferences"),
+    );
+    await page.goto(`${baseUrl()}/new`);
+    await preferencesLoaded;
+    await expect(page.getByText("新建会话").first()).toBeVisible({ timeout: 10_000 });
+
+    await page.getByTestId(`new-session-agent-${agentId}`).click();
+    await expect(page.getByTestId("directory-picker-value")).toHaveText(workspace, { timeout: 5_000 });
+    await page.getByLabel("消息输入").fill("无默认模型时不应创建会话");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    await expect(page.getByTestId("new-session-error")).toContainText("默认模型", { timeout: 5_000 });
+    await expect(page.getByTestId("new-session-model-settings")).toBeVisible();
+    const after = await (await page.request.get(`${baseUrl()}/api/sessions`)).json();
+    const countAfter = Array.isArray(after) ? after.length : 0;
+    expect(countAfter).toBe(countBefore);
+
+    await page.getByTestId("new-session-model-settings").click();
+    await expect(page).toHaveURL(/\/settings\?section=defaults/);
+  });
+
   test("c. 原生目录选择：点击调 /api/directories/pick（mock 响应，避免真实 PowerShell 弹窗）", async ({ page }) => {
     test.setTimeout(60_000);
     await ensureAgentServerViaApi(page);

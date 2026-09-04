@@ -120,11 +120,14 @@ it("ONB-04: 第 2 步空 Key / 非法 URL 被拦，校验失败期间不调用 u
     expect(t.po.errorText()).toBe("Base URL 需以 http(s):// 开头");
     expect(upsertCalls).toEqual([]); // 校验失败不写后端
 
-    // 修正后放行到第 3 步，且 Provider 恰好保存一次
+    // 修正后放行到第 3 步，Provider 恰好保存一次，且明确配置的模型成为 primary 默认
     await t.po.fillBaseUrl("https://api.example.com/v1");
     await t.po.next();
     expect(screen.getByRole("heading", { name: "选一个工作目录" })).toBeTruthy();
     expect(upsertCalls).toEqual(["deepseek"]);
+    await expect(base.getPreferences()).resolves.toMatchObject({
+      defaults: { model: { providerId: "deepseek", modelId: "deepseek-chat" } },
+    });
   } finally {
     t.consoleTracker.restore();
   }

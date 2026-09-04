@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { ProviderStore } from "../../src/config/provider-store.js";
+import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
+import { defaultObservabilityPreferences } from "../../src/contracts/preferences.js";
 import { ModelService } from "../../src/runtime/model-service.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
@@ -116,6 +118,55 @@ describe("preferences routes", () => {
       const reopened = new PreferencesStore(ctx.paths.preferences);
       expect(reopened.get().layout.leftSidebarWidth).toBe(360);
       expect(reopened.get().layout.focusMode).toBe(true);
+    } finally {
+      ctx.sessionService.closeAll();
+      ctx.database.close();
+    }
+  });
+
+  it("preserves memory and observability when patching unrelated sections", async () => {
+    const ctx = await createContext();
+    try {
+      const { app } = createServerApp({
+        modelService: ctx.modelService,
+        sessionService: ctx.sessionService,
+        preferencesStore: ctx.preferencesStore,
+      });
+      const memory = {
+        ...defaultMemoryAgentSettings(),
+        dailyRunTime: "04:15",
+        reviewEnabled: false,
+      };
+      const observability = {
+        ...defaultObservabilityPreferences(),
+        diagnosticLevel: "debug" as const,
+        diagnosticRetentionDays: { debug: 11, main: 90 },
+      };
+      ctx.preferencesStore.update({ memory, observability });
+
+      const resp = await app.request("http://local/api/settings/preferences", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          defaults: { thinkingLevel: "high" },
+          layout: { focusMode: true },
+        }),
+      });
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as {
+        memory?: typeof memory;
+        observability?: typeof observability;
+        defaults: { thinkingLevel: string };
+        layout: { focusMode: boolean };
+      };
+      expect(body.defaults.thinkingLevel).toBe("high");
+      expect(body.layout.focusMode).toBe(true);
+      expect(body.memory).toEqual(memory);
+      expect(body.observability).toEqual(observability);
+
+      const reopened = new PreferencesStore(ctx.paths.preferences).get();
+      expect(reopened.memory).toEqual(memory);
+      expect(reopened.observability).toEqual(observability);
     } finally {
       ctx.sessionService.closeAll();
       ctx.database.close();

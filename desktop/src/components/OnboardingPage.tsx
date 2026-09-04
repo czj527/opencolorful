@@ -1,5 +1,5 @@
 import { Check, ChevronLeft, FolderOpen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { pickDirectory } from "../data/pick-directory.js";
 import type { AgentTemplateView, DesktopDataSource, ProviderInput } from "../data/source.js";
@@ -87,6 +87,8 @@ export function OnboardingPage({ source, onExit, onComplete }: OnboardingPagePro
   const [baseUrl, setBaseUrl] = useState(PROVIDER_PRESETS[0]?.baseUrl ?? "");
   const [modelId, setModelId] = useState(PROVIDER_PRESETS[0]?.modelId ?? "");
   const [modelName, setModelName] = useState(PROVIDER_PRESETS[0]?.modelName ?? "");
+  // 自定义 Provider 的 ID 在本次引导内保持稳定，避免偏好写入失败后重试留下重复 Provider。
+  const customProviderId = useRef<string | null>(null);
 
   // 第 3 步：工作目录
   const [directory, setDirectory] = useState("");
@@ -111,6 +113,7 @@ export function OnboardingPage({ source, onExit, onComplete }: OnboardingPagePro
 
   function applyPreset(key: string) {
     setPresetKey(key);
+    if (key !== "custom") customProviderId.current = null;
     const preset = PROVIDER_PRESETS.find((p) => p.key === key);
     if (preset !== undefined) {
       if (preset.key !== "custom") {
@@ -140,8 +143,12 @@ export function OnboardingPage({ source, onExit, onComplete }: OnboardingPagePro
     setError(null);
     try {
       const isCustom = activePreset.key === "custom";
+      const providerId = isCustom
+        ? (customProviderId.current ?? `custom-${Date.now().toString(36)}`)
+        : activePreset.providerId;
+      if (isCustom) customProviderId.current = providerId;
       const input: ProviderInput = {
-        providerId: isCustom ? `custom-${Date.now().toString(36)}` : activePreset.providerId,
+        providerId,
         name: isCustom ? (modelName.trim() || "自定义 Provider") : activePreset.label,
         protocol: "openai-completions",
         baseUrl: url,
@@ -157,6 +164,10 @@ export function OnboardingPage({ source, onExit, onComplete }: OnboardingPagePro
         }],
       };
       await source.upsertProvider(input, key);
+      // The model the user just configured is an explicit onboarding choice.
+      // Persist it as the primary default so "完成，开始对话" remains a closed loop
+      // now that the Desktop no longer guesses the first credentialed model.
+      await source.updatePreferences({ defaults: { model: { providerId, modelId: model } } });
       setStep(2);
     } catch (cause) {
       setError(toUserError(cause, "saveProvider").message);

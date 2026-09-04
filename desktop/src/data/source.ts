@@ -276,7 +276,7 @@ export interface DesktopDataSource {
   /** 全局偏好（IPC 实现由主会话按 GET /api/settings/preferences 补齐；缺失时桌面端退回兜底默认） */
   getPreferences?(): Promise<PreferencesView>;
   /** 更新全局偏好 defaults 子树（对齐 PUT /api/settings/preferences；服务端 merge 后归一化校验） */
-  updatePreferences?(patch: {
+  updatePreferences(patch: {
     readonly defaults: {
       readonly model?: ModelRef | null;
       readonly toolMode?: string;

@@ -166,7 +166,7 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | TICK-01 | 长会话触发 ticker → rolling summary 更新与注入预算 | utility LLM 调用；预算阈值 | 注入内容受预算约束 | L3 | L3 `memory-ticker.test.ts`、`memory-summary.test.ts` | PASS（L3） | — |
-| TICK-02 | ticker/摘要模型来源与角色标注 | 现状：独立 fallback 字段，未统一 | — | — | 无 | SKIP（A6 统一后转 PASS） | 波次 A6 范围，当前允许各自 fallback |
+| TICK-02 | ticker/摘要模型来源与角色标注 | selectSecondary("memory") 统一选择；旧字段仅作映射来源 | 次级模型来源/角色在用量与日志可辨 | L3 | L3 `session-settings.test.ts`（真实 selectSecondary 装配断言） | PASS（L3，2026-09-04） | 用量角色标注待 A8 交付 |
 
 ### MAGENT · Memory Agent / 后台复盘
 

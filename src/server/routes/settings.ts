@@ -53,8 +53,10 @@ export function registerSettingsRoutes(
     const mergedSubagents = rawSubagents !== undefined
       ? { ...(previous.subagents ?? { defaultModel: null }), ...rawSubagents }
       : previous.subagents;
+    // 以完整的既有文档为归一化基底：normalizePreferences 会为缺失的
+    // observability 段补默认值，不能让无关 section patch 触发覆盖。
     const candidate = normalizePreferences({
-      version: 1,
+      ...previous,
       defaults: mergedDefaults,
       layout: mergedLayout,
       appearance: mergedAppearance,

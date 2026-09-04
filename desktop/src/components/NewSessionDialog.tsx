@@ -124,7 +124,9 @@ export function NewSessionDialog({
         ...(toolMode === "all" ? { workspaceConfirmed } : {}),
       });
       if (selectedModel !== null) {
-        await source.updateSessionModel(thread.id, selectedModel).catch(() => undefined);
+        // 模型绑定失败时不要关闭弹窗或继续完成；A6 生产路由对无模型 Session
+        // fail-closed，必须把绑定错误直接交给用户处理。
+        await source.updateSessionModel(thread.id, selectedModel);
       }
       onCreated(thread, selectedAgentId);
     } catch (cause) {

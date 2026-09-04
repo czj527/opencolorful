@@ -246,6 +246,9 @@ test.describe("@a4c A4c Provider/settings/model 真链回归", () => {
         modelId: "oc-e2e-model-a",
       });
 
+      const providersBase = await harness.apiGet<ProviderWire[]>("/api/settings/providers");
+      expect(providersBase, "引导后应恰好一个自定义 Provider").toHaveLength(1);
+
       const settings = new SettingsPO(page);
       const providers = new ProvidersPO(page);
       await settings.open();
@@ -261,9 +264,10 @@ test.describe("@a4c A4c Provider/settings/model 真链回归", () => {
       await providers.save();
       await providers.expectCardVisible("oc-e2e-Provider-B", "已配置凭据");
 
-      // 全局默认模型：初始「未设置」→ 切到 Provider B 的模型
+      // 全局默认模型：onboarding 已将用户明确配置的 Provider A 写入默认 → 切到 Provider B
       const expectedRef = JSON.stringify({ providerId: "oc-e2e-prov-b", modelId: "oc-e2e-model-b" });
-      await expect(settings.defaultModelSelect()).toHaveValue("");
+      const onboardingRef = JSON.stringify({ providerId: providersBase[0]!.providerId, modelId: "oc-e2e-model-a" });
+      await expect(settings.defaultModelSelect()).toHaveValue(onboardingRef);
       await settings.selectDefaultModel("oc-e2e-model-b（oc-e2e-prov-b）");
       await expect(settings.defaultModelSelect()).toHaveValue(expectedRef);
 
@@ -273,8 +277,7 @@ test.describe("@a4c A4c Provider/settings/model 真链回归", () => {
       );
       expect(prefs.defaults.model).toEqual({ providerId: "oc-e2e-prov-b", modelId: "oc-e2e-model-b" });
 
-      // 现状语义（两档模型策略 A6 之前，仅记录）：偏好未设时草稿取首个已配置凭据模型，
-      // 且偏好切换不覆盖已有草稿解析
+      // 当前语义：已存在的草稿保留 onboarding 明确选择的 A，不因全局默认切换而隐式改写
       await expect(page.getByRole("button", { name: "oc-e2e-model-a" })).toBeVisible();
       await settings.close();
 
@@ -319,8 +322,8 @@ test.describe("@a4c A4c Provider/settings/model 真链回归", () => {
       const ghostRef = JSON.stringify({ providerId: "oc-e2e-ghost", modelId: "ghost-model" });
       await expect(settings3.defaultModelSelect()).not.toHaveValue(ghostRef);
       await settings3.close();
-      // 草稿回退到首个已配置凭据模型（A/B 之一），不使用失效引用
-      await expect(page.getByRole("button", { name: /oc-e2e-model-(a|b)/ })).toBeVisible({ timeout: 30_000 });
+      // 失效默认不得回退到首个凭据模型；草稿保持未选择，要求用户显式选择
+      await expect(page.getByRole("button", { name: "选择模型", exact: true })).toBeVisible({ timeout: 30_000 });
     } finally {
       if (currentApp !== null) {
         await closeApp(currentApp).catch(() => undefined);

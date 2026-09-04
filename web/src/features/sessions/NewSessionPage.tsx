@@ -9,8 +9,11 @@ import type {
 import { MessageComposer } from "../chat/MessageComposer.js";
 import { AgentAvatar } from "../agents/AgentAvatar.js";
 import { DirectoryPicker } from "../agents/DirectoryPicker.js";
-import { navigateToWorkspace } from "../../app/page-router.js";
+import { navigateToSettingsSection, navigateToWorkspace } from "../../app/page-router.js";
 import styles from "./NewSessionPage.module.css";
+
+const DEFAULT_MODEL_REQUIRED_ERROR = "请先在设置的“默认对话”中选择默认模型";
+const DEFAULT_MODEL_LOADING_ERROR = "默认模型仍在加载，请稍后重试";
 
 export interface NewSessionPageProps {
   readonly agents: readonly AgentView[];
@@ -67,12 +70,27 @@ export function NewSessionPage({
   const hasCwd = cwd !== null && cwd.trim().length > 0;
   const canSend = !submitting && hasCwd;
 
+  // 全局默认值（NewSessionPage 不暴露模型/思考/工具控件修改入口）
+  const defaultToolMode = preferences?.defaults.toolMode ?? "off";
+  const defaultThinkingLevel = preferences?.defaults.thinkingLevel ?? "off";
+  const defaultModel = preferences?.defaults.model ?? null;
+
   const handleSend = useCallback(
     async (content: string) => {
       // 防重复：submitting 状态锁，连续点击/快捷键不重复
       if (submitting) return;
       if (!hasCwd) {
         setError("请先选择工作目录");
+        return;
+      }
+      // 只有创建新 Session 时需要主对话默认模型；已有 Session 的 prompt 重试
+      // 继续使用已持久化的 Session 模型，不受当前设置变化影响。
+      if (createdSessionId === null && preferences === null) {
+        setError(DEFAULT_MODEL_LOADING_ERROR);
+        return;
+      }
+      if (createdSessionId === null && defaultModel === null) {
+        setError(DEFAULT_MODEL_REQUIRED_ERROR);
         return;
       }
       setSubmitting(true);
@@ -106,7 +124,18 @@ export function NewSessionPage({
         return;
       }
     },
-    [submitting, hasCwd, createdSessionId, title, agentId, cwd, api, onSessionCreated],
+    [
+      submitting,
+      hasCwd,
+      createdSessionId,
+      preferences,
+      defaultModel,
+      title,
+      agentId,
+      cwd,
+      api,
+      onSessionCreated,
+    ],
   );
 
   // 草稿状态下命令不可用：依赖已有 Session 的命令（/compact /new /abort）安全禁用
@@ -119,13 +148,9 @@ export function NewSessionPage({
     navigateToWorkspace();
   }, []);
 
-  // 全局默认值（NewSessionPage 不暴露模型/思考/工具控件修改入口）
-  const defaultToolMode = preferences?.defaults.toolMode ?? "off";
-  const defaultThinkingLevel = preferences?.defaults.thinkingLevel ?? "off";
-  const defaultModel = preferences?.defaults.model ?? null;
-
   const agentChipClass = styles.agentChip ?? "";
   const agentChipActiveClass = styles.agentChipActive ?? "";
+  const showModelSettingsAction = error === DEFAULT_MODEL_REQUIRED_ERROR;
 
   return (
     <div className={styles.page ?? ""} data-page="session-new">
@@ -203,7 +228,17 @@ export function NewSessionPage({
             role="alert"
             data-testid="new-session-error"
           >
-            {error}
+            <span className={styles.errorMessage ?? ""}>{error}</span>
+            {showModelSettingsAction && (
+              <button
+                type="button"
+                className={styles.settingsAction ?? ""}
+                onClick={() => navigateToSettingsSection("defaults")}
+                data-testid="new-session-model-settings"
+              >
+                设置默认模型
+              </button>
+            )}
           </div>
         )}
 

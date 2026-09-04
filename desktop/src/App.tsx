@@ -374,8 +374,9 @@ export function App() {
         const thread = await source.createThread(draftAgent.id, title);
         setThreads((current) => [thread, ...current]);
         target = thread.id;
-        // 新会话创建后下发本地选择的模型与运行设置（失败不阻塞首条消息）
-        if (draftModel !== null) await source.updateSessionModel(thread.id, draftModel).catch(() => undefined);
+        // 新会话创建后下发本地选择的模型与运行设置；模型绑定失败必须阻止首条消息，
+        // 否则生产路由会以无模型 Session 进入 409，而用户看不到真正原因。
+        if (draftModel !== null) await source.updateSessionModel(thread.id, draftModel);
         await source.updateSessionSettings(thread.id, { thinkingLevel: draftThinking, toolMode: draftToolMode }).catch(() => undefined);
         setThreadId(thread.id);
       }
