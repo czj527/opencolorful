@@ -121,6 +121,8 @@ export class SessionRuntime {
   private readonly modelId: string | undefined;
   /** 当前 turn 的埋点句柄（平台边界自动 started/terminal） */
   private turn: LifecycleHandle | undefined;
+  /** 当前 prompt 已提交的 instrumentation 终态，防止晚到 PI 事件重复收尾。 */
+  private turnTerminalStatus: "completed" | "failed" | "cancelled" | "interrupted" | undefined;
   /** 当前进行中的模型调用（同一会话串行，同时只有一个） */
   private activeModelCall: LifecycleHandle | undefined;
   private modelCallSeq = 0;
@@ -387,6 +389,7 @@ export class SessionRuntime {
 
     // Phase 11：turn 埋点（trace 贯穿模型/工具事件）+ started/terminal 平台自动产生
     const turnId = started.streamId;
+    this.turnTerminalStatus = undefined;
     const trace: TraceContext = {
       traceId: instrument.newTraceId(),
       spanId: instrument.newSpanId(),
@@ -480,20 +483,25 @@ export class SessionRuntime {
       // PI 的模型调用失败不抛出：错误以 stopReason="error" 附在 assistant 消息上
       // （2026-09-01 A4 CHAT-06 真链发现）。不判定会把失败 turn 记成 completed 且 UI 无失败终态。
       const assistantError = mapper.lastAssistantError;
-      if (assistantError !== undefined) {
-        this.turn?.fail(assistantError);
-        this.emit(mapper.terminal("turn.failed", { errorMessage: assistantError }));
+      if (controller.signal.aborted || mapper.isAssistantAborted) {
+        this.emitTerminal(mapper, "turn.cancelled", { reason: "aborted" }, "cancelled", "aborted");
+      } else if (assistantError !== undefined) {
+        this.emitTerminal(mapper, "turn.failed", { errorMessage: assistantError }, "failed", assistantError);
       } else {
-        this.turn?.complete();
+        this.settleTurn(mapper, "completed");
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        this.turn?.cancel("aborted");
-        this.emit(mapper.terminal("turn.cancelled", { reason: "aborted" }));
+        this.emitTerminal(mapper, "turn.cancelled", { reason: "aborted" }, "cancelled", "aborted");
       } else {
         const cause = error instanceof Error ? error.message : String(error);
-        this.turn?.fail(cause);
-        this.emit(mapper.terminal("turn.failed", { errorMessage: mapProviderError(error).message }));
+        this.emitTerminal(
+          mapper,
+          "turn.failed",
+          { errorMessage: mapProviderError(error).message },
+          "failed",
+          cause,
+        );
       }
       const apiError = mapProviderError(error);
       this.emit(mapper.error(apiError.message, apiError.code, apiError.retryable));
@@ -508,6 +516,53 @@ export class SessionRuntime {
       } catch {
         // best-effort
       }
+    }
+  }
+
+  /**
+   * 提交平台终态并同步 instrumentation。Mapper 可能已在 turn_end 接受
+   * turn.completed，也可能因为失败/取消已接受其他终态；两条路径都只允许
+   * 第一次终态关闭当前 prompt 的 lifecycle。
+   */
+  private emitTerminal(
+    mapper: PlatformEventMapper,
+    type: "turn.failed" | "turn.cancelled" | "turn.interrupted",
+    payload: Record<string, unknown>,
+    requestedStatus: "failed" | "cancelled" | "interrupted",
+    reason: Error | string,
+  ): void {
+    const event = mapper.terminal(type, payload);
+    this.settleTurn(mapper, requestedStatus, reason);
+    if (event !== undefined) this.emit(event);
+  }
+
+  private settleTurn(
+    mapper: PlatformEventMapper,
+    requestedStatus: "completed" | "failed" | "cancelled" | "interrupted",
+    reason?: Error | string,
+  ): void {
+    if (this.turnTerminalStatus !== undefined) return;
+
+    const mappedStatus = mapper.terminalType;
+    const status = mappedStatus === "turn.completed"
+      ? "completed"
+      : mappedStatus === "turn.failed"
+        ? "failed"
+        : mappedStatus === "turn.cancelled"
+          ? "cancelled"
+          : mappedStatus === "turn.interrupted"
+            ? "interrupted"
+            : requestedStatus;
+    this.turnTerminalStatus = status;
+
+    if (status === "completed") {
+      this.turn?.complete();
+    } else if (status === "failed") {
+      this.turn?.fail(reason ?? "turn failed");
+    } else if (status === "cancelled") {
+      this.turn?.cancel(typeof reason === "string" ? reason : reason?.message ?? "cancelled");
+    } else {
+      this.turn?.interrupt(typeof reason === "string" ? reason : reason?.message ?? "interrupted");
     }
   }
 
