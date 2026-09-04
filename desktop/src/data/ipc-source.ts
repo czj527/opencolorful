@@ -104,22 +104,25 @@ function asArray<T>(value: unknown): T[] {
 
 /* ---- A5 诊断关联：IPC 失败点签发/透传 correlation 引用 ----
  *
- * - 会话路由（/api/sessions/:id/...）：服务端对该会话操作以 sessionId 作为 traceId
- *   盖章（routes/sessions.ts 的 trace 三元组），直接复用其 id，origin="server"；
- * - 其余失败（非会话路径/离线/桥断）：没有可用的服务端 traceId，用主进程随失败
- *   响应签发的 diagRef（同步落 shell.log，见 electron/main.cjs）或 renderer 本地
- *   短 id 兜底，origin="local"。引用只含 id 与时间戳，不含任何请求/响应载荷。
+ * - 失败响应若带主进程 diagRef，优先复用它（同步落 shell.log，见 electron/main.cjs）；
+ *   这覆盖网络/502/服务端失败，即使路径带 sessionId 也不能被会话回退覆盖；
+ * - 没有 diagRef 时，会话路由才回退服务端以 sessionId 盖章的关联（routes/sessions.ts
+ *   的 trace 三元组）；其余失败回退 renderer 本地短 id。引用只含 id 与时间戳，
+ *   不含任何请求/响应载荷。
  */
 
 const SESSION_PATH_RE = /^\/api\/sessions\/([^/]+)(?:\/|$)/;
 
-function correlationForPath(path: string, diagRef: string | undefined): ErrorCorrelation {
+export function correlationForPath(path: string, diagRef: string | undefined): ErrorCorrelation {
   const at = new Date().toISOString();
+  if (diagRef !== undefined && diagRef !== "") {
+    return { traceId: diagRef, origin: "local", at };
+  }
   const sessionTrace = SESSION_PATH_RE.exec(path)?.[1];
   if (sessionTrace !== undefined && sessionTrace !== "") {
     return { traceId: sessionTrace, origin: "server", at };
   }
-  return { traceId: diagRef ?? crypto.randomUUID(), origin: "local", at };
+  return { traceId: crypto.randomUUID(), origin: "local", at };
 }
 
 function formatThreadTime(iso: string): string {
