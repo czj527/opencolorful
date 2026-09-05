@@ -1,6 +1,6 @@
 # P1 Wave B: Conversation Workbench
 
-**Status:** 规划中  
+**Status:** 进行中（B0 semantics frozen 2026-09-05; B1-B7 not started）  
 **Date:** 2026-08-31  
 **Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`](../docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md)  
 **Current status:** [`docs/project-status.md`](../docs/project-status.md)  
@@ -14,7 +14,7 @@ It does not implement browser capability, web search/fetch, cron, a general proj
 
 ## 2. Existing capability and constraints
 
-PI SDK already exposes branch/tree/fork/reset/navigation primitives through SessionManager and related types. OpenColorful does not yet expose a product contract for them. The server has session/message/compact routes, and the Desktop projector handles compact lifecycle but currently omits the summary body. Web has a linear timeline derived from current-branch turns. `plan.updated` exists as an event projection, but there is no first-party durable todo writer/store/route.
+PI SDK (0.80.10) exposes branch/tree/fork/reset primitives on `SessionManager`; turn navigation (`navigateTree`) lives on `AgentSession`, one layer up. OpenColorful's adapter currently exposes none of them: `wrapSessionManager.getEntries()` flattens the current branch to id-less `PiMessageEntry`, and `PiAgentSessionHandle` exposes only prompt/steer/followUp/isStreaming/abort/compact. The server has session/message/abort/compact routes (409 `SESSION_BUSY` convention already established) and no branch/fork/retry endpoints; the `sessions` table has no branch metadata. The Desktop projector handles compact lifecycle but renders it as a one-line status event and omits the summary body. Web has a linear timeline derived from current-branch turns with per-user-message anchors. `plan.updated` is a declared/projected contract with zero emitters; there is no first-party durable todo writer/store/route.
 
 The implementation must preserve:
 
@@ -25,17 +25,101 @@ The implementation must preserve:
 - Server-first and Desktop-first product boundaries;
 - isolated faux-provider tests and independent quality-gate commands.
 
-## 3. Product contract to freeze
+## 3. Product contract (FROZEN at B0, 2026-09-05)
 
-- Edit-and-regenerate creates a new branch from a selected user message; old branch remains.
-- Retry creates a new result branch; old assistant output remains.
-- Fork creates a new Session identity with source metadata.
-- Running sessions either require abort first or return a stable 409; no ambiguous mutation.
-- Linear timeline navigates current branch entries; branch switcher/tree is a separate view.
-- Compact summary text is visible in Desktop for live and replayed completion events.
-- Todo is Session-owned, transactionally persisted, whole-list replaced, and published as `todo.updated`.
+The semantics in this section are frozen. Any change requires a Feature Spec amendment before implementation. Button labels and small presentation details may be `agent-recommends` only where they do not change the underlying state transition. PI facts below were verified against the installed `@earendil-works/pi-coding-agent` 0.80.10 (`references/pi` source: `packages/coding-agent/src/core/session-manager.ts`, `agent-session.ts`).
 
-Any change to these semantics requires a Feature Spec amendment before implementation. Button labels and small presentation details may be `agent-recommends` only where they do not change the underlying state transition.
+### 3.1 Stable identifiers
+
+| Identifier | Definition | Durability |
+|---|---|---|
+| `sessionId` | existing SQLite `sessions.id` (unchanged this wave) | durable |
+| `entryId` | PI `SessionEntry.id` (8-hex, `parentId`-linked, immutable; JSONL is append-only) | durable |
+| `branchId` | the `entryId` of a branch's leaf entry; `"root"` for an empty session. Derived, never stored (except the branch head below) | derivable forever from JSONL |
+| `turnId` | `turn-<userEntryId>` where `userEntryId` is the user message entry that starts the turn | deterministic across restarts |
+| branch head | `sessions.branch_head_entry_id` (SQLite metadata; NULL = PI default, i.e. file-order last entry) | durable |
+
+A "turn" = one user message entry plus all following entries on the same branch path until the next user message entry; compaction/label entries on the path appear as turn-boundary items. Turn grouping is derived from entry order on the branch path, never stored.
+
+### 3.2 Frozen action semantics
+
+**Regenerate is one primitive shared by 回退并修改 and 重试.** Both branch at the same point and differ only in the appended text.
+
+1. **Regenerate (edit-and-regenerate / retry)**
+   - Trigger: user acts on a user message (edit: new text; retry: original text) or on an assistant result (retry; the server resolves it to that turn's user entry).
+   - Preconditions: session not archived (else 409); not busy — `isBusy` covers the active turn stream and compaction (else 409 `SESSION_BUSY`); target entry exists (else 404) and is a user message entry (else 400).
+   - Server steps, one runtime operation on the same SessionManager as the prompt flow: `branchTo(parentId(target))` — or `resetLeaf()` when the target is a root — then append the user message (new/original text) via the existing prompt flow; the turn runs on the normal session stream.
+   - Result: 202 `{status:"accepted", sessionId, streamId, branchId}`; a new sibling branch under the same parent; the old branch and its outputs are untouched.
+   - Persistence: JSONL append-only; branch head refreshed to the new leaf.
+   - Replay: identical to any prompt turn (per-stream sequence unchanged).
+   - Recovery: a crash mid-turn leaves the appended user entry plus partial assistant entries (same semantics as a crashed prompt today); reopen lands on the file-order last entry, which is the regenerated branch.
+
+2. **Fork**
+   - Trigger: user picks “Fork 成独立会话” for the session (optionally at a selected entry; default = current leaf).
+   - Preconditions: not busy, not archived; the source session has at least one entry (empty source → 400).
+   - Steps: on a DETACHED `SessionManager.open(sourcePath)` instance call `createBranchedSession(target)` — PI mints a new session id/file and writes a `parentSession` header — then create a new SQLite session row with source metadata (`sourceSessionId`, `sourceLeafEntryId`, title suffix).
+   - Result: 201 with the full new `SessionView`; the source session's runtime is untouched (PI replaces only the instance it is called on); the new session is fully independent (title/model/archive/archive-path).
+   - No event is emitted on the source stream; clients navigate to the new session from the response.
+
+3. **Branch switch**
+   - Trigger: user selects an existing branch in the switcher.
+   - Preconditions: not busy, not archived; `branchId` resolves to a leaf entry in the tree (else 404).
+   - Steps: `branchTo(targetLeafEntryId)`; persist `branch_head_entry_id`; emit `session.branch.switched {branchId}` on the session stream; also emit `session.branches.changed {reason:"switch"}`.
+   - Persistence rule (frozen): on runtime open, apply the stored head ONLY when the file-order last entry is NOT a descendant of it; if it is a descendant, an append happened after the switch and the file-order last entry wins. Prompt/regenerate refresh the stored head.
+   - Continuing the conversation after a switch appends on that branch, which thereby becomes the current branch.
+
+4. **Compaction display (no server behavior change)**
+   - Desktop consumes the existing `session.compacting`/`session.compacted` payloads, including `summary` (already server-sanitized to ≤500 chars), `tokensBefore`, `tokensAfter` (an estimate — UI labels it 约), `aborted`, `errorMessage`.
+   - Card states: compacting (in progress); completed (tokens before→after + summary body, expand/collapse, long summaries collapsed by default, no extra client-side truncation); not-completed distinguishing 已中止 (`aborted`) from 失败 (`errorMessage`); no-op and busy surface as the existing 409 composer errors (“当前会话无需压缩” / “会话正在生成，无法压缩”), not as cards.
+   - Summary text must not be written to logs.
+
+5. **Durable session todo**
+   - Ownership: todos belong to the session and are written ONLY by the first-party tool inside turn execution (session single-flight serializes writers). Desktop/Web UIs are read-only projections in this wave — no UI write path.
+   - Item: `{content, status: pending|in_progress|completed|cancelled, priority: high|medium|low, activeForm?}`; list order = array order.
+   - Write semantics: whole-list replacement in ONE SQLite transaction (`session_todos`, PK `(session_id, position)`); the empty list is a legal explicit clear; on success publish `todo.updated {items}` on the session stream (Replay Store first); the tool result tells the model whether the write was accepted.
+   - The store does not enforce one-in-progress; the tool description requests at most one `in_progress` (Codex pattern); the UI shows the first `in_progress` as the active item.
+   - Recovery: state loads from SQLite on session open/restart; replaying `todo.updated` re-projects the same list.
+
+6. **`plan.updated`**: contract unchanged (`{items: string[]}`); it remains a reserved projection type, is NOT the durable todo, and gains no emitters this wave. `todo.updated` is the durable surface.
+
+7. **Linear timeline vs branch switcher (two views, unchanged split)**: the linear timeline locates turns of the CURRENT branch (click scrolls/highlights, stable anchors from `entryId`/`turnId`); the branch switcher lists branches and parent/child relationships and performs switches. Neither view morphs into the other.
+
+### 3.3 API/event contract draft (B2 implements; the contract is frozen, exact paths are `agent-recommends`)
+
+- `GET /api/sessions/:id/tree` → `{currentBranchId, branches: [{branchId, leafEntryId, leafPreview, entryCount, updatedAt, isCurrent}]}` — metadata and short previews only, no message bodies.
+- `GET /api/sessions/:id/entries?branchId=` → ordered entries of the branch path root→leaf: `{entryId, parentId, turnId, type, role?, text, timestamp, toolCalls?}` — additive to the existing `PiMessageEntry` flattening (toolCall results keep the 500-char truncation); both frontends migrate to this. `SessionView.messageEntries` stays for compatibility this wave.
+- `POST /api/sessions/:id/regenerate` `{targetEntryId, text}` → 202 `{status:"accepted", sessionId, streamId, branchId}`.
+- `POST /api/sessions/:id/fork` `{targetEntryId?}` → 201 full new `SessionView`.
+- `POST /api/sessions/:id/branch/switch` `{branchId}` → 200 `{branchId}`.
+- Session-stream event additions (envelope `protocolVersion` stays 1; Replay Store write-before-broadcast unchanged): `session.branch.switched {branchId}`, `session.branches.changed {reason: "regenerate"|"fork"|"switch"}`, `todo.updated {items}`. Compaction events stay on the separate `ctrl-` control stream.
+- Desktop IPC parity: `*Wire` mappings for the new endpoints/events ship in the same changes that add them.
+
+### 3.4 Error and concurrency matrix
+
+| Condition | HTTP | Code | User-visible (Chinese) | Client next step |
+|---|---|---|---|---|
+| Regenerate/switch/fork while a turn streams or compaction runs | 409 | SESSION_BUSY | 会话正在运行，请先停止后再操作 | offer 停止; never auto-abort |
+| Target entry/branch not found (incl. stale references) | 404 | NOT_FOUND | 引用的会话节点不存在，请刷新后重试 | refresh tree |
+| Malformed body; empty text; regenerate target not a user message; fork of an empty session | 400 | INVALID_INPUT | specific Chinese message | fix input |
+| Session archived | 409 | CONFLICT | 会话已归档 | unarchive first |
+| Two clients switch branches concurrently | 200 | — | last write wins; both clients receive `session.branch.switched` | the other client reloads via the event |
+| Concurrent todo writes | — | — | impossible by construction (tool-only writes, serialized by session single-flight) | — |
+| Background memory review vs regenerate | — | — | the review snapshots its branch revision; a later regenerate may orphan it; review output is advisory only | none |
+
+### 3.5 Frozen architecture decisions (with rationale)
+
+1. Regenerate uses leaf primitives (`branch()` + next append), NOT `AgentSession.navigateTree()` — avoids extension-hook and branch-summary complexity and cannot leave a dangling leaf, because branch move and append happen in one server operation.
+2. Branch choice persists in SQLite (`sessions.branch_head_entry_id`), not JSONL markers: PI does not persist the leaf (reopen = file-order last entry, `_buildIndex`), and append-only JSONL must not be polluted with marker entries. SQLite metadata is the allowed boundary.
+3. Fork runs on a detached SessionManager instance so the source runtime is never replaced (PI `createBranchedSession` replaces its own instance in place).
+4. `branchId` = leaf entry id: PI has no branch entity; OpenHanako uses the same convention.
+5. Migration v15 is a SINGLE serial migration owned by B2 (sessions branch-head columns + `session_todos` DDL); B5 owns the store/DAO/tool/route/UI on top of it. No parallel task may add migration DDL.
+6. Web receives additive contract support only (types + e2e stability); it is not a product frontend in this wave.
+
+### 3.6 Left to `agent-recommends`
+
+Endpoint path spellings within the frozen contract; the todo tool's internal name (suggestion `todo_write`); button labels and icons; branch-switcher placement (chat-head popover recommended); summary collapse threshold; switcher visual design.
+
+Any change to these semantics requires a Feature Spec amendment before implementation.
 
 ## 4. Dependency graph and integration barriers
 
@@ -57,7 +141,7 @@ B0 is serial because it fixes user-visible state transitions and stable identifi
 |---|---|---|
 | B0 | Feature Spec, contract notes, state-transition matrix | Production implementation |
 | B1 | `src/pi-sdk/` controlled adapter and adapter tests | Server routes, storage migration, Desktop UI |
-| B2 | Session metadata/store, migrations, routes, event contract and integration tests | PI adapter internals and Desktop components |
+| B2 | Session metadata/store, migration v15 (serially includes `session_todos` DDL), routes, event contract and integration tests | PI adapter internals and Desktop components |
 | B3 | Desktop source/projector/timeline/branch components, styles and UI tests | Server branch semantics and persistence |
 | B4 | Desktop compact projector/detail components, fixtures and UI tests | Compact runtime defaults and event schema unless B0 assigns a compatibility change |
 | B5 | Todo contract/tool/store/route/event/projection/UI and focused tests by sub-lane | Browser, cron and unrelated plan concepts |
@@ -188,6 +272,31 @@ Observed result:
 Unverified:
 Deviation and follow-up:
 Main-Agent review:
+```
+
+### B0 implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B0 product semantics and Session-tree contract freeze (integration barrier for B1/B2)
+Commit(s): docs-only change on p1-wave-b-b0-contract; sha recorded in the merge commit.
+Commands and exit codes: no production code changed. Inputs: four read-only exploration
+  reports (PI session model 0.80.10; OpenColorful backend; Web/Desktop frontend; reference
+  repos opencode/openhanako/codex/hermes-agent), retained in the session transcript.
+Evidence paths: this plan §3 (frozen contract) and §2 (verified capability gaps);
+  docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md §三 (frozen product semantics).
+Observed result: semantics frozen for regenerate (edit+retry unified), fork, branch switch,
+  compaction display, durable todo; stable identifier table; API/event contract draft;
+  error/concurrency matrix; v15 single-serial-migration assignment (B2 owns DDL, B5 builds on it).
+Open risks: (1) the branch-head apply rule (§3.2.3) relies on PI rebuilding the leaf as the
+  file-order last entry — to be proven behaviorally by B1 adapter restart tests; (2) PI
+  tokensAfter is an estimate — UI must label it 约; (3) a regenerate may orphan an in-flight
+  background memory review (advisory only, accepted); (4) B2 codes against the frozen adapter
+  interface in §3.3 before B1 lands — integration is proven at merge and re-proven in B6.
+Unverified: none beyond the risks above.
+Deviation and follow-up: none.
+Main-Agent review: B0 accepted; B1/B2 parallel dispatch approved with disjoint ownership
+  (B1: src/pi-sdk only; B2: server/runtime/storage only; neither touches the other's files).
 ```
 
 ## 9. Wave B exit conditions
