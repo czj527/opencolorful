@@ -11,6 +11,7 @@ import { PromptService } from "../runtime/prompt-service.js";
 import { SessionService } from "../runtime/session-service.js";
 import { openMetadataDatabase } from "../storage/database.js";
 import { SessionIndex } from "../storage/session-index.js";
+import { SessionTodoStore } from "../storage/session-todos.js";
 import { UsageStore } from "../storage/usage-store.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
@@ -325,6 +326,8 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         memoryTicker?.onSessionArchived(sessionId);
         subagentCompositionRef?.handleParentSessionArchived(sessionId);
       },
+      // 波次 B5a：durable session todo 存储（SessionView.todos 恢复 + todo_write 工具数据面）
+      new SessionTodoStore(database),
     );
     // preferencesStore 已在可观测性初始化前创建（评审 P1-7）
     const agentStore = new AgentStore(paths.agents);

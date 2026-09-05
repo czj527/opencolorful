@@ -19,8 +19,10 @@ import { MemoryRecallStore } from "../../storage/memory/recall-store.js";
 import { MemoryJournalStore } from "../../storage/memory/journal-store.js";
 import { PinnedMemoryStore } from "../../storage/memory/pinned-store.js";
 import { SessionIndex } from "../../storage/session-index.js";
+import { SessionTodoStore } from "../../storage/session-todos.js";
 import { registerMemoryContext } from "../../pi-sdk/memory-tools.js";
 import { registerSkillContext } from "../../pi-sdk/skill-tools.js";
+import { buildTodoSessionTool, registerTodoContext } from "../../pi-sdk/todo-tools.js";
 import { MEMORY_TOOL_NAMES, SKILL_TOOL_NAMES, SUBAGENT_TOOL_NAMES } from "../../pi-sdk/agent-session.js";
 import { registerSubagentContext, type SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
 import { SessionRuntimeParentSessionPort } from "../../runtime/subagents/runtime/parent-session-adapter.js";
@@ -425,11 +427,34 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
         }
       };
 
+      // ── 波次 B5a：durable session todo 工具上下文 ──────────────────────
+      // todos 属于会话（不要求 Agent 绑定）；database 可用时始终注册。
+      // todo_write 经 customTools 通道注入 PI 工具注册表（first-party 工具），
+      // todo.updated 经 replayStore.publish 发布（Replay Store 先写再广播）。
+      const todoStore = database ? new SessionTodoStore(database) : undefined;
+      let unregisterTodo: (() => void) | undefined;
+      const setupTodoContext = () => {
+        if (todoStore === undefined) return;
+        try {
+          unregisterTodo = registerTodoContext(sessionId, {
+            sessionId,
+            store: todoStore,
+            publish: (env) => {
+              if (replayStore) replayStore.publish(env);
+            },
+          });
+        } catch {
+          // todo 上下文初始化失败不阻塞会话创建（工具调用时 fail-closed）
+        }
+      };
+
       // 插件工具（P0-1）：按 Agent 绑定过滤，注入主会话（生产接线 buildPluginSessionTools）
       const pluginTools =
         view.agentId !== undefined && view.agentId !== null && options.pluginFacade !== undefined
           ? buildPluginSessionTools(options.pluginFacade, view.agentId, sessionId)
           : [];
+      // 波次 B5a：durable todo 工具（first-party，database 可用即注册）
+      const todoTools = todoStore !== undefined ? [buildTodoSessionTool(sessionId)] : [];
 
       // T11（P0-2）：read 工具 Skill 受控读取端口（命中当前 turn 冻结快照的
       // 可见 Skill 根 → SkillContentService 校验读取；fail-closed）
@@ -693,7 +718,9 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
-          ...(pluginTools.length > 0 ? { pluginTools } : {}),
+          ...(pluginTools.length > 0 || todoTools.length > 0
+            ? { pluginTools: [...pluginTools, ...todoTools] }
+            : {}),
           ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
@@ -712,12 +739,14 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
             unregisterMemory?.();
             unregisterSkill?.();
             unregisterSubagent?.();
+            unregisterTodo?.();
             parentPort = undefined;
           },
         });
         setupMemoryContext(runtime);
         setupSkillContext(runtime);
         setupSubagentContext(runtime);
+        setupTodoContext();
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
@@ -736,7 +765,9 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
           ...(noTools ? { noTools } : {}),
           ...(tools ? { tools } : {}),
           ...(extraTools ? { extraTools } : {}),
-          ...(pluginTools.length > 0 ? { pluginTools } : {}),
+          ...(pluginTools.length > 0 || todoTools.length > 0
+            ? { pluginTools: [...pluginTools, ...todoTools] }
+            : {}),
           ...(snapshotFactory !== undefined ? { snapshotFactory } : {}),
           // T11：Skill 元数据冻结（beginTurn 内以真实 turnId 冻结，失败 fail-closed）
           ...(skillSnapshotFactory !== undefined ? { skillSnapshotFactory } : {}),
@@ -755,12 +786,14 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
             unregisterMemory?.();
             unregisterSkill?.();
             unregisterSubagent?.();
+            unregisterTodo?.();
             parentPort = undefined;
           },
         });
         setupMemoryContext(runtime);
         setupSkillContext(runtime);
         setupSubagentContext(runtime);
+        setupTodoContext();
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));

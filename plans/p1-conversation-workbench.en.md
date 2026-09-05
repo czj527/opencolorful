@@ -365,6 +365,36 @@ Main-Agent review: core accepted; ensureRuntime-lite defect fixed and re-verifie
   (2260/2260); B3/B5a may start from this surface.
 ```
 
+### B5a implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B5a durable session todo backend (worktree lane, branch p1-wave-b-b5a-todo-backend)
+Commit(s): 86f5ee3 (store + tool + bootstrap wiring + SessionView.todos + tests).
+Commands and exit codes: npx tsc --noEmit → 0; lane tests (session-todo-store 7, session-todo-tool
+  8, session-branch-bootstrap regression) → all pass; full npx vitest run → 193 files / 2275
+  tests passed; scripts/verify-pi-sdk-imports.mjs → 0. Main-Agent independently re-ran
+  tsc/targeted/boundary → same results. Full integration gates run by the main agent at merge/B6.
+Evidence paths: src/storage/session-todos.ts, src/pi-sdk/todo-tools.ts,
+  src/server/routes/runtime-bootstrap.ts (wiring), src/runtime/session-service.ts (todos view),
+  src/server/start.ts, tests/integration/session-todo-{store,tool}.test.ts.
+Observed result: todo_write tool (whole-list replacement; store-validated enums; bounded
+  payloads; structured accepted/rejected result in Chinese) → SessionTodoStore single-transaction
+  replace (empty list = legal clear, PK (session_id, position) from v15) → todo.updated on a
+  stable per-session stream todo:<sessionId> with monotonic sequence, published through
+  replayStore.publish (write-before-broadcast preserved) → SessionView.todos recovers state
+  on open/restart. Registered whenever database exists (session-owned, no Agent binding),
+  unregistered on runtime dispose (same wiring point as memory/skill).
+Interpretations recorded: tool args schema keeps status/priority as loose strings so the
+  STORE validates enums and the tool result reports Chinese rejections (PI would otherwise
+  pre-validate with English errors before invoke — contract requires the model-facing result
+  to carry the verdict); todo.updated payload still uses the frozen SessionTodoItemView schema.
+Unverified: none backend-side; B5b consumes the UI surface.
+Deviation and follow-up: the stale "no emitter" comment on todo.updated in events.ts remains
+  (contracts were outside lane ownership) — main agent to update in integration.
+Main-Agent review: accepted pending CI.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
