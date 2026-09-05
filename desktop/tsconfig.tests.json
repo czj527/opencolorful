@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // tests/e2e 的 bootstrap/backend fixture 是纯 Node 代码；lib/types 对齐根配置
+    // （ES2023 + node），避免 DOM lib 把 src/server/** 的 Buffer→BodyInit 判为
+    // 不兼容（desktop tsconfig.json 的 DOM lib 上下文不适用于 Node 侧检查）。
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
+  },
+  "include": ["tests/**/*.ts", "tests/unit/*.test.ts"],
+  "exclude": [
+    // DOM 世界（import src/data/** 或使用 closest/textContent 等 DOM API）：
+    // 在 Node lib 下无法通过类型检查；由主 tsconfig.json（DOM lib）或
+    // L5 vitest（happy-dom）覆盖。待 src/data 与进程环境类型解耦后收敛。
+    "tests/fixtures/override-source.ts",
+    "tests/fixtures/replay-chat-source.ts",
+    "tests/fixtures/sse/replay-sequence.ts",
+    "tests/fixtures/pages/**",
+    "tests/e2e/pages/**"
+  ]
+}

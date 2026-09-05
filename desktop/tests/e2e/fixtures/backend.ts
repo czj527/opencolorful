@@ -29,11 +29,23 @@ const EXIT_TIMEOUT_MS = 20_000;
  * PI 内置目录会把 DEEPSEEK_API_KEY 等环境凭据计为 "已配置"（model-runtime.ts
  * getProviderAuthStatus source=environment），不剥离时测试会拿作者机器上的真实
  * key 调真实 Provider（2026-09-01 实测：401 invalid key 尾号 50ba）。
+ *
+ * 两层防线（PR #45 评审要求）：
+ * - 后缀层：*_API_KEY / *_TOKEN / *_SECRET / *_KEY / *_AUTH_TOKEN 等命名约定，
+ *   覆盖未来新增 Provider 的常见凭据命名；
+ * - 精确层：不符合命名约定但 PI/broker 明确认识别的凭据变量（AWS 三件套、
+ *   GCP 应用凭据、HF/COPILOT token 等），防止命名漂移漏剥。
+ * 故意从宽（多剥无害，少剥即真实外呼）。
  */
+const CREDENTIAL_ENV_EXACT =
+  /^(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_CONTAINER_CREDENTIALS_RELATIVE_URI|AWS_CONTAINER_CREDENTIALS_FULL_URI|GOOGLE_APPLICATION_CREDENTIALS|GOOGLE_API_KEY|HF_TOKEN|HUGGING_FACE_HUB_TOKEN|COPILOT_GITHUB_TOKEN|GITHUB_TOKEN|AZURE_OPENAI_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENAI_API_KEY|DEEPSEEK_API_KEY|DASHSCOPE_API_KEY|MOONSHOT_API_KEY|ZHIPUAI_API_KEY)$/i;
+const CREDENTIAL_ENV_SUFFIX =
+  /(_API_KEY|_API_TOKEN|_ACCESS_TOKEN|_SECRET_KEY|_AUTH_TOKEN|AUTH_TOKEN|_SECRET|_TOKEN|_KEY|_CREDENTIALS|_CREDENTIAL)$/i;
+
 export function stripCredentialEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const cleaned: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(source)) {
-    if (/(_API_KEY|_API_TOKEN|_ACCESS_TOKEN|_SECRET_KEY|AUTH_TOKEN)$/i.test(key)) continue;
+    if (CREDENTIAL_ENV_EXACT.test(key) || CREDENTIAL_ENV_SUFFIX.test(key)) continue;
     cleaned[key] = value;
   }
   return cleaned;
@@ -104,8 +116,21 @@ export class BackendHarness {
         return;
       } catch (error) {
         lastError = error;
+        // PR #45 评审修复：失败尝试可能留下仍存活的子进程（bootstrap 超时/健康
+        // 检查失败）。终止并等待退出后再重试，避免孤儿进程与引用丢失。
+        const failed = this.process;
         this.process = null;
-        log(`引导尝试 #${attempt} 失败：${error instanceof Error ? error.message : String(error)}`);
+        if (failed !== null && failed.exitCode === null && !failed.killed) {
+          failed.kill();
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, EXIT_TIMEOUT_MS);
+            failed.once("exit", () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+        }
+        this.log(`引导尝试 #${attempt} 失败：${error instanceof Error ? error.message : String(error)}`);
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
     }
