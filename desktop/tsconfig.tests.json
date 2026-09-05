@@ -18,6 +18,7 @@
     "tests/fixtures/replay-chat-source.ts",
     "tests/fixtures/sse/replay-sequence.ts",
     "tests/fixtures/pages/**",
+    "tests/fixtures/lane-a4a/session-lane.ts",
     "tests/e2e/pages/**"
   ]
 }
