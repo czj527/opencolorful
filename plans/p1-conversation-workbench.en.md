@@ -328,6 +328,43 @@ Main-Agent review: diff independently reviewed (flattening extraction is faithfu
   9/9 contract tests green); accepted. B2 may code against the exported adapter surface.
 ```
 
+### B2 implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B2 session metadata/API/migration v15/events (branch p1-wave-b-b2-session-api)
+Commit(s): 1b42856 (branch API + migration v15 + events) and 677a8cd (shared runtime
+  bootstrap extraction fix), rebased onto main after B1 merged (PR #57).
+Commands and exit codes: lane verification — npx tsc --noEmit → 0; targeted vitest files
+  (migration v15, branch api, fork, bootstrap) all → 0; full npx vitest run → 191 files /
+  2260 tests passed; scripts/verify-pi-sdk-imports.mjs → 0. Main-Agent reruns full gates
+  at merge.
+Evidence paths: src/storage/migrations.ts (v15), src/storage/session-index.ts,
+  src/runtime/session-runtime.ts (regenerate/switchBranch/head rule), src/runtime/session-service.ts
+  (tree/entries/fork), src/server/routes/session-branches.ts, src/server/routes/runtime-bootstrap.ts,
+  src/contracts/session-branch.ts + events.ts, tests/integration/session-{migration-v15,
+  branch-api,fork,branch-bootstrap}.test.ts.
+Observed result: regenerate unifies edit-and-retry through the shared prompt path
+  (single-flight, identical turn events); branch head persisted per B0 §3.2.3 (apply rule
+  verified: descendant-of-head → file-last wins); fork on detached instance with source
+  metadata; tree/entries with turn-<userEntryId> grouping; migration v15 idempotent
+  (v9/v12 precedent) with session_todos DDL for B5. Review found and FIXED one defect:
+  the lane's simplified lazy runtime creation would have silently dropped plugin/skill/
+  subagent/memory wiring when the first action after restart was a regenerate — resolved
+  by extracting messages.ts ensureRuntime VERBATIM into a shared runtime bootstrap used
+  by both route groups (regression test proves full tool surface on restart+regenerate).
+  Interpretations recorded: branch events use dedicated branch-<uuid> streams (same
+  pattern as the existing ctrl- control streams; live delivery is per-session so
+  multi-client sync holds; missed replays recover via GET tree/entries); branchId for
+  regenerate is observed via pre-turn entry snapshot diff; sessions holding only
+  session_info count as empty (fork 400).
+Unverified: skill/subagent context wiring in the extracted bootstrap rests on the verbatim
+  move plus existing wiring tests (no dedicated new-economy test) — B6 exercises them.
+Deviation and follow-up: none beyond the interpretations above.
+Main-Agent review: core accepted; ensureRuntime-lite defect fixed and re-verified
+  (2260/2260); B3/B5a may start from this surface.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.

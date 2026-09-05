@@ -1,5 +1,6 @@
 import type { AbortResult } from "./execution-registry.js";
-import type { PromptRun, SessionRuntime } from "./session-runtime.js";
+import type { RegenerateRun, PromptRun, SessionRuntime } from "./session-runtime.js";
+import type { SessionBranchesChangedReason } from "../contracts/session-branch.js";
 
 export class PromptService {
   private readonly sessions = new Map<string, SessionRuntime>();
@@ -10,6 +11,24 @@ export class PromptService {
 
   prompt(sessionId: string, text: string): PromptRun {
     return this.require(sessionId).prompt(text);
+  }
+
+  /** 波次 B2：edit-and-retry 统一重生成原语（与 prompt 共享单飞与 turn 路径） */
+  regenerate(sessionId: string, targetEntryId: string, text: string): Promise<RegenerateRun> {
+    return this.require(sessionId).regenerate(targetEntryId, text);
+  }
+
+  /** 波次 B2：切换当前分支（叶子指针移动 + 分支头持久化 + 会话流事件） */
+  switchBranch(sessionId: string, branchId: string): { branchId: string; currentBranchId: string } {
+    return this.require(sessionId).switchBranch(branchId);
+  }
+
+  /**
+   * 波次 B2：在源会话流上广播 branches.changed（fork 用）。runtime 未加载时
+   * no-op（fork 语义：不加载源会话也可执行，事件仅对已加载流可达）。
+   */
+  emitBranchesChanged(sessionId: string, reason: SessionBranchesChangedReason): void {
+    this.sessions.get(sessionId)?.emitBranchesChanged(reason);
   }
 
   abort(sessionId: string, streamId: string): AbortResult {

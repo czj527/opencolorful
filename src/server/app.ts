@@ -16,9 +16,11 @@ import { instrument } from "../observability/instrument.js";
 import { registerDirectoryRoutes } from "./routes/directories.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerMessageRoutes } from "./routes/messages.js";
+import { createRuntimeBootstrap } from "./routes/runtime-bootstrap.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerSessionBranchRoutes } from "./routes/session-branches.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerSandboxRoutes } from "./routes/sandbox.js";
@@ -148,6 +150,48 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   if (options.replayStore !== undefined) {
     registerAgentEventRoutes(app, options.replayStore, options.agentStore, options.sessionService);
   }
+  // 波次 B2 修复：共享 Runtime Bootstrap 单例（Runtime 全量装配 + profile/
+  // 插件签名跟踪）。messages 路由与会话分支路由共用同一实例，保证分支路由
+  // 懒创建的 Runtime 工具面（插件/Skill/Subagent/记忆/人设）与 messages 路径
+  // 完全一致，不存在静默降级装配。
+  const memorySettingsResolver =
+    options.preferencesStore !== undefined && options.agentStore !== undefined
+      ? (agentId: string) => {
+          // 评审 P1#7b：injectBudgetChars 走真实记忆设置（per-Agent 覆盖 → 全局默认 →
+          // 平台默认），与 start.ts resolveMemorySettings 同一优先级链
+          const global = options.preferencesStore!.get().memory ?? defaultMemoryAgentSettings();
+          try {
+            const perAgent = options.agentStore!.getSettings(agentId)?.memory;
+            if (perAgent !== undefined) return perAgent;
+          } catch { /* 读取失败用全局默认 */ }
+          return global;
+        }
+      : undefined;
+  const runtimeBootstrap =
+    options.promptService !== undefined
+      ? createRuntimeBootstrap({
+          promptService: options.promptService,
+          ...(options.sessionService !== undefined ? { sessionService: options.sessionService } : {}),
+          ...(options.replayStore !== undefined ? { replayStore: options.replayStore } : {}),
+          ...(options.paths !== undefined ? { paths: options.paths } : {}),
+          ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
+          ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
+          ...(options.database !== undefined ? { database: options.database } : {}),
+          ...(options.pluginFacade !== undefined ? { pluginFacade: options.pluginFacade } : {}),
+          ...(options.skillCoreService !== undefined ? { skillCoreService: options.skillCoreService } : {}),
+          ...(memorySettingsResolver !== undefined ? { memorySettingsResolver } : {}),
+          ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
+        })
+      : undefined;
+
+  if (options.sessionService !== undefined && runtimeBootstrap !== undefined) {
+    // 波次 B2：会话分支/重生成/Fork 路由（共享 Runtime Bootstrap）
+    registerSessionBranchRoutes(app, {
+      sessionService: options.sessionService,
+      promptService: options.promptService!,
+      runtimeBootstrap,
+    });
+  }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(
       app,
@@ -159,9 +203,10 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       options.audit,
     );
   }
-  if (options.promptService !== undefined) {
+  if (runtimeBootstrap !== undefined) {
     registerMessageRoutes(app, {
-      promptService: options.promptService,
+      promptService: options.promptService!,
+      runtimeBootstrap,
       ...(options.sessionService !== undefined ? { sessionService: options.sessionService } : {}),
       ...(options.replayStore !== undefined ? { replayStore: options.replayStore } : {}),
       ...(options.paths !== undefined ? { paths: options.paths } : {}),
@@ -171,18 +216,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
       ...(options.pluginFacade !== undefined ? { pluginFacade: options.pluginFacade } : {}),
       // Phase 13 T6：Skill Core Service（注入后 Agent 会话启用五个 Skill Core 工具）
       ...(options.skillCoreService !== undefined ? { skillCoreService: options.skillCoreService } : {}),
-      // 评审 P1#7b：injectBudgetChars 走真实记忆设置（per-Agent 覆盖 → 全局默认 → 平台默认），
-      // 与 start.ts resolveMemorySettings 同一优先级链
-      ...(options.preferencesStore !== undefined && options.agentStore !== undefined ? {
-        memorySettingsResolver: (agentId: string) => {
-          const global = options.preferencesStore!.get().memory ?? defaultMemoryAgentSettings();
-          try {
-            const perAgent = options.agentStore!.getSettings(agentId)?.memory;
-            if (perAgent !== undefined) return perAgent;
-          } catch { /* 读取失败用全局默认 */ }
-          return global;
-        },
-      } : {}),
+      ...(memorySettingsResolver !== undefined ? { memorySettingsResolver } : {}),
       // Phase 14 T6：Subagent 运行时组合根（主会话启用七个 Core 工具 + 父端口）
       ...(options.subagent !== undefined ? { subagent: options.subagent } : {}),
     });

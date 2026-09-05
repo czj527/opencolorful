@@ -100,7 +100,8 @@ describe("usage schema v14（统一模型用量）", () => {
       .pluck()
       .get() as number;
     expect(version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(14);
+    // v15 起版本号随串行迁移推进（波次 B2），本测试只锚定"新鲜库 = 当前版本"
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(14);
 
     const columns = database.prepare("PRAGMA table_info(usage_records)").all() as Array<{ name: string }>;
     const names = columns.map((column) => column.name);
@@ -153,7 +154,7 @@ describe("usage schema v14（统一模型用量）", () => {
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(14);
+    expect(version).toBe(CURRENT_SCHEMA_VERSION);
 
     const rows = database
       .prepare("SELECT * FROM usage_records ORDER BY session_id")
