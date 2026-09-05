@@ -1,4 +1,4 @@
-import type { ChatEvent, ChatMessage, TimelineItem, ToolCall } from "../mock-data.js";
+import type { ChatEvent, ChatMessage, CompactionItem, CompactionStatus, TimelineItem, ToolCall } from "../mock-data.js";
 
 /** 平台事件 Envelope 的 renderer 侧最小形状（payload 防御式解析） */
 export interface LiveEnvelope {
@@ -60,6 +60,8 @@ export interface ProjectorState {
   readonly indexOf: Map<string, number>;
   /** 最后一条 message 型 item 的下标（-1 表示还没有）；事件追加不影响它 */
   lastMessageIndex: number;
+  /** 波次 B4：进行中压缩卡的 item id（session.compacting → session.compacted 配对；无进行中压缩时为 null） */
+  activeCompactionId: string | null;
   /** items 自上次快照后被原地改动；snapshotOf 时重建数组以获得新引用（不可变契约） */
   dirty: boolean;
 }
@@ -68,7 +70,7 @@ export function createProjector(agentName: string): ProjectorState {
   return {
     items: [], streaming: false, activeStreamId: null, pendingPrompt: false,
     seenStreams: new Set(), agentName,
-    indexOf: new Map(), lastMessageIndex: -1, dirty: false,
+    indexOf: new Map(), lastMessageIndex: -1, activeCompactionId: null, dirty: false,
   };
 }
 
@@ -92,6 +94,8 @@ export function seedItems(state: ProjectorState, items: TimelineItem[]): void {
     if (item.type === "message") lastMessageIndex = index;
   });
   state.lastMessageIndex = lastMessageIndex;
+  // 整表替换意味着受控视图重建（历史/分支条目投影）：进行中的压缩卡不再存在
+  state.activeCompactionId = null;
   state.dirty = false;
 }
 
@@ -129,17 +133,26 @@ export function projectHistory(entries: readonly HistoryEntry[], agentName: stri
  * 波次 B3：分支条目 → timeline 投影（当前分支根→叶）。
  * 优先于 projectHistory：条目携带不可变 entryId/turnId/timestamp，
  * 消息行据此产出稳定锚点（timeline 导航跨刷新/重启存活）。
- * 非 message 条目（compaction/label 等）渲染为状态事件行，不产生锚点。
+ * 波次 B4：compaction 条目投影为压缩卡（与 live 事件同一卡片结构），
+ * 其余非 message 条目（label 等）仍渲染为状态事件行，不产生锚点。
  */
 export function projectBranchEntries(entries: readonly BranchEntry[], agentName: string): TimelineItem[] {
   const items: TimelineItem[] = [];
   for (const entry of entries) {
     if (entry.type !== "message" || entry.role === undefined || entry.role === "toolResult") {
-      // compaction / label / 其他受控条目：一行状态事件（无锚点语义）
+      // compaction：历史重放卡片（id 与 live 卡同前缀；status=completed，tokens 不在条目视图中）
+      if (entry.type === "compaction") {
+        items.push({
+          id: `compaction-${entry.entryId}`, type: "compaction", status: "completed",
+          reason: "history", summary: entry.text,
+        });
+        continue;
+      }
+      // label / 其他受控条目：一行状态事件（无锚点语义）
       if (entry.type !== "message") {
         items.push({
           id: `entry-${entry.entryId}`, type: "event", kind: "status",
-          title: entry.type === "compaction" ? "上下文压缩" : "条目",
+          title: "条目",
           summary: entry.text !== "" ? entry.text.slice(0, 80) : entry.type, meta: "历史",
         });
       }
@@ -194,6 +207,27 @@ function asRecord(payload: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * 波次 B4：构造压缩卡 item（nullable/空串字段按 optional 语义缺省，
+ * 满足 exactOptionalPropertyTypes）。live 事件与历史条目共用同一 item 形状。
+ */
+function compactionCard(
+  id: string,
+  status: CompactionStatus,
+  fields: { reason: string; tokensBefore: number | null; tokensAfter: number | null; summary: string; errorMessage: string },
+): CompactionItem {
+  return {
+    id,
+    type: "compaction",
+    status,
+    reason: fields.reason,
+    ...(fields.tokensBefore !== null ? { tokensBefore: fields.tokensBefore } : {}),
+    ...(fields.tokensAfter !== null ? { tokensAfter: fields.tokensAfter } : {}),
+    ...(fields.summary !== "" ? { summary: fields.summary } : {}),
+    ...(fields.errorMessage !== "" ? { errorMessage: fields.errorMessage } : {}),
+  };
 }
 
 /**
@@ -445,17 +479,38 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
       break;
     }
     case "session.compacting": {
-      pushStatusEvent(state, `compact-${envelope.eventId}`, "上下文压缩", "正在压缩上下文…");
+      // 波次 B4：压缩开始 → 插入进行中压缩卡（无正文；id 记入 activeCompactionId 与 compacted 配对）
+      const id = `compaction-${envelope.eventId}`;
+      state.activeCompactionId = id;
+      replaceItem(state, id, {
+        id, type: "compaction", status: "compacting",
+        reason: asString(payload["reason"]),
+      });
       break;
     }
     case "session.compacted": {
-      const before = typeof payload["tokensBefore"] === "number" ? payload["tokensBefore"] : null;
-      const after = typeof payload["tokensAfter"] === "number" ? payload["tokensAfter"] : null;
-      const failed = payload["aborted"] === true || payload["errorMessage"] !== undefined;
-      const summary = failed
-        ? `压缩未完成：${asString(payload["errorMessage"]) || "已中止"}`
-        : before !== null && after !== null ? `压缩完成 · ${before} → ${after} tokens` : "压缩完成";
-      pushStatusEvent(state, `compact-${envelope.eventId}`, "上下文压缩", summary);
+      const aborted = payload["aborted"] === true;
+      const errorMessage = asString(payload["errorMessage"]);
+      const summary = asString(payload["summary"]);
+      const reason = asString(payload["reason"]);
+      // 分态优先级：有错误信息 → failed；已中止（无错误）→ aborted；否则 completed
+      const status: CompactionStatus = errorMessage !== ""
+        ? "failed"
+        : aborted ? "aborted" : "completed";
+      const item = compactionCard(
+        state.activeCompactionId ?? `compaction-${envelope.eventId}`,
+        status,
+        {
+          reason,
+          tokensBefore: typeof payload["tokensBefore"] === "number" ? payload["tokensBefore"] : null,
+          // 服务端 estimatedTokensAfter（估算值）→ UI 标注「约」
+          tokensAfter: typeof payload["tokensAfter"] === "number" ? payload["tokensAfter"] : null,
+          summary,
+          errorMessage,
+        },
+      );
+      state.activeCompactionId = null;
+      replaceItem(state, item.id, item);
       break;
     }
     case "error": {

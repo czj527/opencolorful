@@ -20,6 +20,7 @@ import { useLocalPrefs } from "../data/local-prefs.js";
 import type { DesktopDataSource } from "../data/source.js";
 import { correlationShortRef, type ErrorCorrelation } from "../errors.js";
 import { TimelineNav } from "./TimelineNav.js";
+import { CompactionCard } from "./CompactionCard.js";
 import { useTimelineAnchorScroll } from "./timeline-scroll.js";
 
 const eventIcons: Record<EventKind, LucideIcon> = {
@@ -309,12 +310,14 @@ export function Timeline({ items, onOpenDiff, errorCorrelation, onOpenLogs, mess
       {items.map((item) =>
         item.type === "message"
           ? <MessageRow key={item.id} message={item} actions={messageActions} canRegenerate={canRegenerate} />
-          : <EventRow
-              key={item.id}
-              event={item}
-              onOpenDiff={onOpenDiff}
-              {...(isErrorRow(item) ? { errorCorrelation: errorCorrelation ?? null, onOpenLogs } : {})}
-            />,
+          : item.type === "compaction"
+            ? <CompactionCard key={item.id} item={item} />
+            : <EventRow
+                key={item.id}
+                event={item}
+                onOpenDiff={onOpenDiff}
+                {...(isErrorRow(item) ? { errorCorrelation: errorCorrelation ?? null, onOpenLogs } : {})}
+              />,
       )}
     </div>
   );
