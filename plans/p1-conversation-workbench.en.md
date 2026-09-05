@@ -365,6 +365,35 @@ Main-Agent review: core accepted; ensureRuntime-lite defect fixed and re-verifie
   (2260/2260); B3/B5a may start from this surface.
 ```
 
+### B3 implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B3 Desktop branch switcher + linear timeline (worktree lane, branch p1-wave-b-b3-desktop)
+Commit(s): b0dd924 (data layer + UI), 67a1558 (tests + turn-terminal anchor reload fix).
+Commands and exit codes: npx tsc --noEmit → 0; desktop npx tsc -p tsconfig.tests.json --noEmit
+  → 0; desktop full unit suite npx vitest run → 84/84; npx vite build → 0; lane true-chain
+  npx playwright test lane-b3-branches.truechain.spec.ts → 3/3 (evidence under
+  desktop/test-artifacts/pw-output/). Main-Agent independently re-ran all of the above → same
+  results. Full integration gates run by the main agent at merge/B6.
+Evidence paths: desktop/src/data/{source,ipc-source,mock-source,projector}.ts,
+  desktop/src/components/{BranchSwitcher,TimelineNav,timeline-scroll,ChatView}.tsx,
+  desktop/tests/unit/branch-data.test.ts, desktop/src/branch.mock.test.tsx,
+  desktop/tests/e2e/lane-b3-branches.truechain.spec.ts + fixtures/pages.
+Observed result: branch switcher (chat-head popover) and linear current-branch timeline with
+  immutable entryId/turnId anchors; hover 编辑并重生成/重试 and fork wired to the B2 endpoints;
+  409 busy (停止 action), 404 stale (刷新), archived, loading/empty/error states implemented;
+  branch events consumed without disturbing prompt-stream adoption or the compact section
+  (untouched for B4). True-chain asserts API/JSONL truth (append-only old branch, sibling
+  branch current, branch head survives app restart) and fork source-integrity.
+Deviation and follow-up: live-streamed turns reload entries at turn terminal events so new
+  turns gain anchors (spec-correctness fix found by the true-chain lane, main-Agent reviewed
+  in diff). One process incident: an exploratory git stash popped a PRE-EXISTING foreign
+  stash; the lane aborted the apply with git reset --merge — stash and HEAD verified intact
+  afterwards by the main agent; no data lost.
+Main-Agent review: accepted pending CI; B4/B5b may build on this desktop structure.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
