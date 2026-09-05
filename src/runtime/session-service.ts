@@ -26,7 +26,9 @@ import type {
   SessionTreeView,
 } from "../contracts/session-branch.js";
 import { SessionBranchError } from "../contracts/session-branch.js";
+import type { SessionTodoItemView } from "../contracts/events.js";
 import type { SessionIndex, SessionMetadata } from "../storage/session-index.js";
+import type { SessionTodoStore } from "../storage/session-todos.js";
 import { registerBranchHeadWriter, unregisterBranchHeadWriter } from "./session-runtime.js";
 import { instrument } from "../observability/instrument.js";
 
@@ -49,6 +51,11 @@ export interface SessionView extends Omit<SessionMetadata, "model" | "provider">
   readonly currentBranchId: string | null;
   /** 波次 B2：当前分支根→叶条目视图（turnId 分组，见 getEntries） */
   readonly entries: readonly SessionEntryView[];
+  /**
+   * 波次 B5a：会话级 durable todo（position 顺序；从 SQLite session_todos
+   * 恢复，未注入 todoStore 或无待办时为空列表）。
+   */
+  readonly todos: readonly SessionTodoItemView[];
 }
 
 /** 分支叶预览截断长度（B2 §4：~80 字符，只读元数据不含完整正文） */
@@ -66,7 +73,23 @@ export class SessionService {
     private readonly index: SessionIndex,
     /** 归档时的可选回调（记忆系统用它触发 sealed batch 封存，fire-and-forget） */
     private readonly onArchive?: (sessionId: string) => void,
+    /**
+     * 波次 B5a：durable todo 存储端口（可选注入；注入后 SessionView.todos
+     * 从 SQLite session_todos 加载。无 store 时视图恒为空列表）。
+     */
+    private readonly todoStore?: SessionTodoStore,
   ) {}
+
+  /** 波次 B5a：会话待办视图（未注入 store 时恒为空列表；读取失败降级为空） */
+  private loadTodos(sessionId: string): SessionTodoItemView[] {
+    if (this.todoStore === undefined) return [];
+    try {
+      return this.todoStore.list(sessionId);
+    } catch {
+      // 待办读取失败不阻塞会话视图（重启恢复场景不因局部损坏不可用）
+      return [];
+    }
+  }
 
   create(request: CreateSessionRequest): PiSessionHandle {
     const id = request.id ?? crypto.randomUUID();
@@ -266,6 +289,7 @@ export class SessionService {
       model: current.model,
       currentBranchId: current.currentBranchId,
       entries: current.entries,
+      todos: current.todos,
     };
   }
 
@@ -457,6 +481,7 @@ export class SessionService {
       model: session.model,
       currentBranchId,
       entries,
+      todos: this.loadTodos(metadata.id),
     };
   }
 
