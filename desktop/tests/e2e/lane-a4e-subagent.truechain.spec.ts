@@ -58,6 +58,13 @@ interface TranscriptWire {
   readonly artifacts: readonly unknown[];
 }
 
+/** SSE 帧形状（模块级声明：函数签名与实现共同引用） */
+interface StreamFrame {
+  readonly seq: number;
+  readonly event: string;
+  readonly data: any;
+}
+
 /**
  * Node 侧对 `subagent:<threadId>` SSE 流（GET /api/subagents/threads/:id/stream）的只读订阅，
  * 收集 {seq, event, data} 帧。连接建立时服务端 getSince(threadId, 0) 全量重放已保留事件
@@ -71,11 +78,6 @@ async function collectSubagentStreamFrames(
   until: (frames: readonly StreamFrame[]) => boolean,
   timeoutMs = 60_000,
 ): Promise<readonly StreamFrame[]> {
-  interface StreamFrame {
-    readonly seq: number;
-    readonly event: string;
-    readonly data: any;
-  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const url = `${serverUrl}/api/subagents/threads/${encodeURIComponent(threadId)}/stream?ownerAgentId=${encodeURIComponent(ownership.ownerAgentId)}&parentSessionId=${encodeURIComponent(ownership.parentSessionId)}`;

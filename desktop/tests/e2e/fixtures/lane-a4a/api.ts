@@ -19,12 +19,12 @@ export async function apiSend<T>(
   apiPath: string,
   body?: unknown,
 ): Promise<ApiResult<T>> {
-  const response = await fetch(`${serverUrl}${apiPath}`, {
-    method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
-  });
+  const init: RequestInit = { method, signal: AbortSignal.timeout(15_000) };
+  if (body !== undefined) {
+    init.headers = { "content-type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(`${serverUrl}${apiPath}`, init);
   const text = await response.text();
   let json: unknown = null;
   if (text !== "") {
