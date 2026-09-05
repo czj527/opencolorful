@@ -485,6 +485,42 @@ Deviation and follow-up: true-chain evidence deferred to B6/B7 (B6 covers "todo 
 Main-Agent review: self-implemented; full local gates green.
 ```
 
+### B6 integration record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B6 cross-surface integration gates on merged main 4eed54c (all of B0-B5b landed via #55-#61)
+Commands and exit codes (each run on merged main, isolated commands):
+  npm run check → aggregate gate; root vitest 192 files / 2274 passed, 1 failed:
+    tests/integration/supervisor-watchdog.test.ts (watchdog.consecutiveFailures timing
+    assertion) — rerun in isolation → 6/6 passed; same suite passed in CI on the #61 merge
+    30 min earlier. Verdict: load-induced timing flake, not a Wave B regression (supervisor
+    process watchdog is unrelated to session-tree code).
+  web npx playwright test → 60/60 passed (incl. the previously flaky workspace focus test).
+  desktop npx playwright test (full true-chain suite) → 26 passed, 1 failed:
+    lane-b3 BRANCH-03/04 (send button stays disabled at a post-branch-switch send;
+    TimeoutError at chat-po.ts:21). Bisected: the test fails IDENTICALLY at the B3 merge
+    commit a05f09f — NOT a B4/B5b regression; the lane passed 3/3 in its own pre-merge run
+    (different timing), and CI only runs the smoke spec so the full lane was never a merge
+    gate. Classification: EXPLICIT BOUNDED DEFECT, root cause open.
+  Desktop unit suite (part of check): 20 files / 102 tests passed.
+Unverified (deferred true-chain evidence, tracked below): compact live-card + restart
+  history identity (B4); todo live card via real todo_write + restart recovery (B5b);
+  both covered at Mock/L5 level and by projector-matrix tests, but not yet by Electron
+  true-chain specs.
+Bounded defects / follow-up tasks:
+  1. lane-b3 BRANCH-03/04 send-disabled-after-branch-switch (root cause open; suspected
+     draft-state interaction in the branch-switch flow; the 409/stop/switch-back semantics
+     are otherwise covered by BRANCH-05 unit + Mock paths).
+  2. lane-b4 compact true-chain spec missing.
+  3. lane-b5 todo true-chain spec missing.
+  4. web KNOWN_EVENT_TYPES does not yet include todo.updated (web is the frozen protocol
+     client; additive follow-up).
+Deviation and follow-up: B6/B7 ran inside the main-agent session after the subagent
+  platform outage; B7 status flip is BLOCKED on items 1-3 above — Wave B remains 进行中.
+Main-Agent review: gates executed personally; evidence above is first-hand, not delegated.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
