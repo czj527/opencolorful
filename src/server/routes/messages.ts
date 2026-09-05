@@ -646,6 +646,14 @@ export function registerMessageRoutes(app: Hono, options: MessageRoutesOptions):
 
       // 如果 session 选择了模型且有 modelService，使用真实模型
       const selectedModel = session.model;
+      // 生产链路不允许在没有主对话模型时静默落入 faux。faux 仅用于未注入
+      // modelService 的测试/开发路径，或 Session 显式选择 faux 的兼容场景。
+      if (modelService !== undefined && selectedModel === null) {
+        throw new EnsureRuntimeError(
+          createApiError("CONFLICT", "当前 Session 未选择主对话模型，请先配置默认模型或显式选择模型"),
+          409,
+        );
+      }
       if (selectedModel && modelService && selectedModel.providerId !== "faux") {
         const runtime = await SessionRuntime.create({
           sessionId,

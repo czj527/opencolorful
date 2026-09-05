@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { PreferencesStore } from "../../src/config/preferences-store.js";
@@ -15,6 +15,8 @@ import { createServerApp } from "../../src/server/app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { parseSessionSettings } from "../../src/contracts/session-settings.js";
 import { ToolPolicy } from "../../src/runtime/tool-policy.js";
+import type { ModelService } from "../../src/runtime/model-service.js";
+import { instrument } from "../../src/observability/instrument.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -547,6 +549,90 @@ describe("session settings", () => {
 
     ctx.service.closeAll();
     ctx.database.close();
+  });
+
+  it("binds the canonical primary selection when a default model is available", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    preferencesStore.update({
+      defaults: { thinkingLevel: "medium", toolMode: "read-only", model: { providerId: "faux", modelId: "faux-1" } } as never,
+    });
+    const modelService = {
+      listProviders: () => [{ providerId: "faux", credentialConfigured: true }],
+      resolveModel: (providerId: string, modelId: string) => ({ providerId, modelId }),
+    } as unknown as ModelService;
+
+    const { app } = createServerApp({
+      sessionService: ctx.service,
+      modelService,
+      preferencesStore,
+      audit: new AuditRecorder({
+        database: ctx.database,
+        producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+      }),
+    });
+    const response = await app.request("http://local/api/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "默认模型", cwd: process.cwd() }),
+    });
+
+    expect(response.status).toBe(201);
+    expect((await response.json()) as { model: unknown }).toMatchObject({
+      model: { providerId: "faux", modelId: "faux-1" },
+    });
+
+    ctx.service.closeAll();
+    ctx.database.close();
+  });
+
+  it("keeps the session unbound and diagnoses an unavailable default model", async () => {
+    const ctx = createContext();
+    const preferencesStore = new PreferencesStore(ctx.paths.preferences);
+    preferencesStore.update({
+      defaults: { thinkingLevel: "medium", toolMode: "read-only", model: { providerId: "faux", modelId: "faux-1" } } as never,
+    });
+    const modelService = {
+      listProviders: () => [{ providerId: "faux", credentialConfigured: false }],
+      resolveModel: () => {
+        throw new Error("resolver should not be called when credentials are absent");
+      },
+    } as unknown as ModelService;
+    const warnSpy = vi.spyOn(instrument, "warn").mockImplementation(() => {});
+
+    try {
+      const { app } = createServerApp({
+        sessionService: ctx.service,
+        modelService,
+        preferencesStore,
+        audit: new AuditRecorder({
+          database: ctx.database,
+          producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
+        }),
+      });
+      const response = await app.request("http://local/api/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "不可用默认模型", cwd: process.cwd() }),
+      });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()) as { model: unknown }).toMatchObject({ model: null });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "session.model.default_selection_failed",
+        "创建会话时未绑定主对话默认模型",
+        expect.objectContaining({
+          reasonCode: "model_no_credentials",
+          reason: expect.stringContaining("未配置凭据"),
+          role: "primary",
+          source: "user_default",
+        }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+      ctx.service.closeAll();
+      ctx.database.close();
+    }
   });
 
   it("keeps an existing session override after global defaults change", async () => {

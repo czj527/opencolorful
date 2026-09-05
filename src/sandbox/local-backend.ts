@@ -5,6 +5,18 @@ import type { ExecuteOptions, ExecuteResult, SandboxBackend } from "./backend.js
 import { PathGuard } from "./path-guard.js";
 import { checkBashPreflight } from "./preflight.js";
 
+function normalizeExitCode(code: unknown): number {
+  if (typeof code === "number" && Number.isInteger(code)) {
+    return code;
+  }
+
+  if (typeof code === "string" && /^-?\d+$/.test(code)) {
+    return Number(code);
+  }
+
+  return 1;
+}
+
 /**
  * 从命令字符串中提取绝对路径参数。
  *
@@ -100,7 +112,7 @@ export class LocalBackend implements SandboxBackend {
         (error, stdout, stderr) => {
           if (error) {
             resolve({
-              exitCode: error.code ?? 1,
+              exitCode: normalizeExitCode(error.code),
               stdout,
               stderr,
               timedOut: (error as unknown as { killed?: boolean }).killed === true,

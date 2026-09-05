@@ -20,7 +20,9 @@ export type ErrorContext =
   | "createAgent"
   | "loadLogs"
   | "queryActivity"
-  | "loadMoreActivity";
+  | "loadMoreActivity"
+  /** A8c：全局用量页加载失败（Desktop UsagePage） */
+  | "loadUsage";
 
 /** 面向用户的错误建议：提示 + 可选下一步动作 + 可选诊断关联引用 */
 export interface ErrorAdvice {
@@ -94,6 +96,7 @@ const FALLBACK: Record<ErrorContext, string> = {
   loadLogs: "日志加载失败，请重试。",
   queryActivity: "活动事件加载失败，请重试。",
   loadMoreActivity: "加载更多失败，请重试。",
+  loadUsage: "用量数据加载失败，请重试。",
 };
 
 function normalize(raw: string): string {
@@ -151,6 +154,11 @@ function isNoModel(raw: string): boolean {
   ].some((marker) => text.includes(marker));
 }
 
+function isModelSelectionMissing(raw: string): boolean {
+  const text = normalize(raw);
+  return ["未选择模型", "请选择模型"].some((marker) => text.includes(marker));
+}
+
 function modelsAction(): ErrorAdvice["action"] {
   return { label: "去设置 → 模型与 Provider", category: "models" };
 }
@@ -178,7 +186,12 @@ function classify(raw: string, context: ErrorContext): ErrorAdvice {
     };
   }
 
-  // 4. Provider / 模型未配置
+  // 4. 当前草稿尚未显式选择模型（与“没有任何可用模型”区分）
+  if (isModelSelectionMissing(raw)) {
+    return { message: "请先选择模型，再发送消息。" };
+  }
+
+  // 5. Provider / 模型未配置
   if (isNoModel(raw)) {
     return {
       message: "还没有可用模型，请先在设置中配置 Provider 与 API Key。",

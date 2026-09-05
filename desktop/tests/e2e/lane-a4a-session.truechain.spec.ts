@@ -157,8 +157,15 @@ test.describe("@a4a SESS-03/04/05 会话生命周期真链", () => {
 
   test("SESS-05: 会话设置 chips（模型/思考级别/工具模式）切换 → GET 真值一致 → 重启后 chips 保持", async ({ harness }) => {
     const runId = Date.now().toString(36);
-    // 双模型 Provider：初始 chip 落在首个可用模型（a），切换目标为 b
-    await configureStubProvider(harness);
+    // 双模型 Provider：先把用户明确选择的模型 A 设为 primary 默认，切换目标为 B
+    const stub = await configureStubProvider(harness);
+    const defaultResponse = await fetch(`${harness.serverUrl}/api/settings/preferences`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ defaults: { model: { providerId: stub.providerId, modelId: stub.modelId } } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    expect(defaultResponse.ok, `设置初始 primary 默认模型应成功：${defaultResponse.status}`).toBe(true);
     const agent = await createAgentViaApi(harness, `oc-e2e-chips助理-${runId}`);
     const title = `oc-e2e-chips会话-${runId}`;
     const session = await createSessionViaApi(harness, {

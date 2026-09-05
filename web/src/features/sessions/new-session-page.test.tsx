@@ -1,13 +1,15 @@
 /**
  * NewSessionPage T9 测试。
  *
- * 覆盖六个核心场景：
+ * 覆盖八个核心场景：
  *  1. 草稿离开不落库（路由切换不调创建 API）
  *  2. 首次发送只创建一次（submitting 锁 + 重复点击防护）
  *  3. 创建失败保留草稿
  *  4. 创建成功 Prompt 失败保留 session+草稿可重试
  *  5. Agent 选择切换 defaultCwd 继承
  *  6. 无 Agent 无 cwd 时禁用发送
+ *  7. 无默认模型时发送前拦截且提供设置入口
+ *  8. 偏好仍在加载时发送前拦截，不创建无模型 Session
  *
  * Mock 策略：用 vi.fn 替换 ApiClient 实例方法，避免触发真实网络。
  * happy-dom 默认 UA 派生自宿主平台（win32→含 "win32"，linux→不含），
@@ -102,12 +104,22 @@ const fakeAgents: AgentView[] = [
   },
 ];
 
-const fakeModels: ModelSummary[] = [];
+const fakeModels: ModelSummary[] = [
+  {
+    providerId: "fixture-provider",
+    modelId: "fixture-model",
+    name: "Fixture Model",
+    protocol: "openai-completions",
+    baseUrl: "http://localhost/v1",
+    capabilities: { reasoning: false, input: ["text"], contextWindow: 4096, maxTokens: 512 },
+    credentialConfigured: true,
+  },
+];
 
 const fakePreferences: PreferencesDocument = {
   version: 1,
   defaults: {
-    model: null,
+    model: { providerId: "fixture-provider", modelId: "fixture-model" },
     thinkingLevel: "off",
     toolMode: "off",
   },
@@ -124,6 +136,11 @@ const fakePreferences: PreferencesDocument = {
     showToolCalls: true,
     showThinking: true,
   },
+};
+
+const noDefaultPreferences: PreferencesDocument = {
+  ...fakePreferences,
+  defaults: { ...fakePreferences.defaults, model: null },
 };
 
 interface MockApi {
@@ -369,5 +386,51 @@ describe("NewSessionPage", () => {
     // 发送按钮在 textarea disabled 时也 disabled（MessageComposer 内部 disabled 透传）
     const sendButton = screen.getByLabelText("发送消息");
     expect((sendButton as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("无默认模型时发送前拦截：不创建 Session 且提供设置入口", async () => {
+    renderWithTheme(
+      <NewSessionPage
+        agents={fakeAgents}
+        api={api}
+        models={fakeModels}
+        preferences={noDefaultPreferences}
+        onSessionCreated={onSessionCreated}
+      />,
+    );
+
+    await pickDirectoryPath(api, "D:\\test");
+    inputMessage("你好");
+    fireEvent.click(screen.getByLabelText("发送消息"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("new-session-error").textContent).toContain("默认模型");
+    });
+    expect(api.createSession).not.toHaveBeenCalled();
+    expect(api.sendPrompt).not.toHaveBeenCalled();
+    expect(screen.getByTestId("new-session-model-settings")).toBeTruthy();
+  });
+
+  it("偏好仍在加载时发送前拦截：不创建无模型 Session", async () => {
+    renderWithTheme(
+      <NewSessionPage
+        agents={fakeAgents}
+        api={api}
+        models={fakeModels}
+        preferences={null}
+        onSessionCreated={onSessionCreated}
+      />,
+    );
+
+    await pickDirectoryPath(api, "D:\\test");
+    inputMessage("你好");
+    fireEvent.click(screen.getByLabelText("发送消息"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("new-session-error").textContent).toContain("加载");
+    });
+    expect(api.createSession).not.toHaveBeenCalled();
+    expect(api.sendPrompt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("new-session-model-settings")).toBeNull();
   });
 });

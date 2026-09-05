@@ -64,18 +64,13 @@ test.describe("@smoke 真链最小冒烟", () => {
       // 引导完成 → 对话空态，草稿助理为新建助理
       await expect(page.getByRole("heading", { name: `要做什么，交给${agentName}吧` })).toBeVisible({ timeout: 30_000 });
 
-      /* 模型确定性：App 的模型列表在引导完成后不刷新（产品缺口，见计划实施日志），
-       * 草稿模型可能解析到环境凭据的内置模型；此处经 API 把全局默认模型固定到 stub，
-       * 保证 createThread 的服务端默认模型一定是本地 stub（配合 fixture 的凭据环境变量剥离）。 */
+      /* 模型确定性：引导中用户明确配置的 Provider/model 已写入 primary 默认；
+       * 这里读取真实偏好与 Provider 真值，确保后续新会话不会静默借用其他模型。 */
       const providers = await harness.apiGet<Array<{ providerId: string; models: Array<{ modelId: string }> }>>("/api/settings/providers");
       expect(providers, "引导后应恰好一个自定义 Provider").toHaveLength(1);
       const stubModelId = providers[0]!.models[0]!.modelId;
-      const prefsRes = await fetch(`${harness.serverUrl}/api/settings/preferences`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ defaults: { model: { providerId: providers[0]!.providerId, modelId: stubModelId } } }),
-      });
-      expect(prefsRes.ok, `PUT preferences 应成功：${prefsRes.status}`).toBe(true);
+      const preferences = await harness.apiGet<{ defaults: { model: { providerId: string; modelId: string } | null } }>("/api/settings/preferences");
+      expect(preferences.defaults.model).toEqual({ providerId: providers[0]!.providerId, modelId: stubModelId });
 
       /* ---- SESS-01 + CHAT-01：无 cwd 发送首条消息（cwd 由服务端兜底解析）---- */
       const chat = new ChatPO(page);

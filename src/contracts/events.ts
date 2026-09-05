@@ -84,8 +84,19 @@ const EventPayloadSchema = Type.Union([
     mimeType: Type.Optional(Type.String()),
   }),
   Type.Object({ reason: Type.String() }),
-  // turn.failed 终态负载（turn.cancelled 复用上面的 { reason }；A4 CHAT-06）
-  Type.Object({ errorMessage: Type.String() }),
+  // turn.cancelled/turn.interrupted 终态负载（A8a 可选字段：turnId/usage 供用量摄取；
+  // usage 仅在终态化时最后一条 turn 账目可得才附上，缺省 = 无账目）
+  Type.Object({
+    reason: Type.String(),
+    turnId: Type.Optional(Type.String()),
+    usage: Type.Optional(TokenUsageSchema),
+  }),
+  // turn.failed 终态负载（A4 CHAT-06；A8a 可选 turnId/usage 同上）
+  Type.Object({
+    errorMessage: Type.String(),
+    turnId: Type.Optional(Type.String()),
+    usage: Type.Optional(TokenUsageSchema),
+  }),
   Type.Object({
     reason: Type.String(),
     tokensBefore: Type.Optional(Type.Integer({ minimum: 0 })),

@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -911,6 +911,72 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
       CREATE INDEX IF NOT EXISTS idx_journal_agent_priority ON memory_journal(agent_id, priority, status, created_at);
     `);
     database.prepare("UPDATE schema_version SET version = 13").run();
+  }
+
+  // v14：波次 A8 统一模型用量（plans/p1-quality-model-usage.en.md A8 节）。
+  // usage_records 重建为跨来源账目表：source（main/subagent/utility）、role
+  // （primary/secondary）、status 终态、agent/thread/run/call 关联与起止时间。
+  // session_id/turn_id 放宽为可空：utility 全局调用（如每日记忆整理）无会话归属。
+  // 幂等键改为 dedupe_key UNIQUE：main = `${sessionId}:${turnId}`，subagent =
+  // `run:${runId}`，utility = `call:${callId}`，跨来源不再共挤一个键空间。
+  // 存量行即主会话成功 turn，按 source=main / role=primary / status=completed
+  // 回填；agent/thread/run/call 对存量行不可恢复（旧记录未携带），保持 NULL =
+  // 未知，不做猜测回填。
+  if (current < 14) {
+    database.exec(`
+      CREATE TABLE usage_records_v14 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT,
+        turn_id TEXT,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input INTEGER NOT NULL DEFAULT 0,
+        output INTEGER NOT NULL DEFAULT 0,
+        cache_read INTEGER NOT NULL DEFAULT 0,
+        cache_write INTEGER NOT NULL DEFAULT 0,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
+        context_tokens INTEGER,
+        context_window INTEGER,
+        created_at TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'main'
+          CHECK (source IN ('main','subagent','utility')),
+        role TEXT NOT NULL DEFAULT 'primary'
+          CHECK (role IN ('primary','secondary')),
+        status TEXT NOT NULL DEFAULT 'completed'
+          CHECK (status IN ('completed','failed','cancelled','timeout','interrupted','budget_exhausted')),
+        agent_id TEXT,
+        thread_id TEXT,
+        run_id TEXT,
+        call_id TEXT,
+        started_at TEXT,
+        finished_at TEXT,
+        dedupe_key TEXT NOT NULL UNIQUE
+      );
+      INSERT INTO usage_records_v14
+        (id, session_id, turn_id, provider, model, input, output, cache_read, cache_write,
+         total_tokens, context_tokens, context_window, created_at, source, role, status,
+         agent_id, thread_id, run_id, call_id, started_at, finished_at, dedupe_key)
+        SELECT
+          id, session_id, turn_id, provider, model, input, output, cache_read, cache_write,
+          total_tokens, context_tokens, context_window, created_at, 'main', 'primary', 'completed',
+          NULL, NULL, NULL, NULL, NULL, NULL,
+          session_id || ':' || turn_id
+        FROM usage_records;
+      DROP TABLE usage_records;
+      ALTER TABLE usage_records_v14 RENAME TO usage_records;
+
+      CREATE INDEX IF NOT EXISTS idx_usage_records_created_at
+        ON usage_records (created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_records_source_time
+        ON usage_records (source, created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_records_agent_time
+        ON usage_records (agent_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_records_role_time
+        ON usage_records (role, created_at);
+      CREATE INDEX IF NOT EXISTS idx_usage_records_session_time
+        ON usage_records (session_id, created_at);
+    `);
+    database.prepare("UPDATE schema_version SET version = 14").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

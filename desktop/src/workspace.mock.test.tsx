@@ -68,6 +68,44 @@ it("WS-01: toolMode=all 且未勾确认 → 对话框内报错，不创建会话
   app.consoleTracker.expectNoErrors();
 });
 
+it("A7: 高级新建会话不会静默回退首个凭据模型", async () => {
+  const base = new MockDataSource();
+  const createThreadCalls: string[] = [];
+  injected.current = overrideSource(base, {
+    getPreferences: () => Promise.resolve({
+      defaults: {
+        model: { providerId: "openai", modelId: "gpt-5.2" },
+        thinkingLevel: "medium",
+        toolMode: "read-only",
+      },
+    }),
+    createThread: (agentId, title, options) => {
+      createThreadCalls.push(`${agentId}:${title}:${options?.toolMode ?? "-"}`);
+      return base.createThread(agentId, title, options);
+    },
+  });
+  const app = await renderApp();
+  try {
+    await screen.findByText(/把桌面原型改成极简风格/);
+    await makeSidebarPO(app.user).newThread();
+    await screen.findByRole("button", { name: "打开 原 的档案页" });
+    await makeChathomePO(app.user).openAdvancedNewSession();
+
+    const dialog = screen.getByRole("dialog", { name: "高级新建会话" });
+    const scoped = within(dialog);
+    const model = scoped.getByRole("combobox", { name: "模型" }) as HTMLSelectElement;
+    expect(model.value).toBe("");
+
+    await app.user.click(scoped.getByRole("button", { name: "创建并进入会话" }));
+    expect(scoped.getByRole("alert").textContent).toBe("请选择模型");
+    expect(createThreadCalls).toEqual([]);
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
 /* ---- A4a：WS-02/WS-03 横幅可见状态机（L5 侧；行目标层 L6 由 lane-a4a-workspace 真链验证） ---- */
 
 interface SettingsPatchRecord {

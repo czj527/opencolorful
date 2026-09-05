@@ -73,7 +73,7 @@ export function NewSessionDialog({
     if (agent?.workspace !== undefined) setCwd(agent.workspace);
   }, [selectedAgentId, agents]);
 
-  // 模型默认：当前草稿优先，否则首个已配置凭据的模型
+  // 模型默认：当前草稿优先；偏好缺失/不可用时保持未选择，交给用户显式选择。
   useEffect(() => {
     if (availableModels.length === 0) {
       setSelectedModel(null);
@@ -82,8 +82,7 @@ export function NewSessionDialog({
     setSelectedModel((current) => {
       if (current !== null && availableModels.some((option) => matchesModel(current, option))) return current;
       if (draftModel !== null && availableModels.some((option) => matchesModel(draftModel, option))) return draftModel;
-      const first = availableModels[0];
-      return first !== undefined ? { providerId: first.providerId, modelId: first.modelId } : null;
+      return null;
     });
   }, [availableModels, draftModel]);
 
@@ -106,8 +105,12 @@ export function NewSessionDialog({
       setError("完整工具模式需要确认工作区授权");
       return;
     }
-    if (selectedModel === null && availableModels.length === 0) {
+    if (availableModels.length === 0) {
       setError("还没有可用模型，请先在设置中配置 Provider 与 API Key");
+      return;
+    }
+    if (selectedModel === null) {
+      setError("请选择模型");
       return;
     }
 
@@ -121,7 +124,9 @@ export function NewSessionDialog({
         ...(toolMode === "all" ? { workspaceConfirmed } : {}),
       });
       if (selectedModel !== null) {
-        await source.updateSessionModel(thread.id, selectedModel).catch(() => undefined);
+        // 模型绑定失败时不要关闭弹窗或继续完成；A6 生产路由对无模型 Session
+        // fail-closed，必须把绑定错误直接交给用户处理。
+        await source.updateSessionModel(thread.id, selectedModel);
       }
       onCreated(thread, selectedAgentId);
     } catch (cause) {
@@ -233,6 +238,7 @@ export function NewSessionDialog({
               disabled={busy || availableModels.length === 0}
             >
               {availableModels.length === 0 && <option value="">未配置可用模型</option>}
+              {availableModels.length > 0 && selectedModel === null && <option value="">请选择模型</option>}
               {availableModels.map((option) => (
                 <option key={modelKey(option)} value={modelKey(option)}>
                   {option.name} ({option.providerId})

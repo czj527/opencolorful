@@ -143,12 +143,38 @@
 }
 
 .error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-12);
   padding: var(--space-12) var(--space-16);
   background: var(--bg-secondary);
   border: 1px solid var(--danger);
   border-radius: var(--radius-card);
   color: var(--danger);
   font-size: var(--fs-ui);
+}
+
+.errorMessage {
+  min-width: 0;
+  flex: 1;
+}
+
+.settingsAction {
+  flex-shrink: 0;
+  padding: var(--space-4) var(--space-12);
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-input);
+  color: var(--danger);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-ui);
+}
+
+.settingsAction:hover {
+  background: var(--bg-tertiary);
 }
 
 @media (max-width: 768px) {

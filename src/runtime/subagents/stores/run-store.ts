@@ -40,6 +40,22 @@ export interface SubagentRunUsage {
   readonly totalTokens: number;
 }
 
+/**
+ * A8a：Run 终态摄取事件的载荷（completeRun 持久化累计 token 的同一转换点
+ * 由组合根注入的摄取回调消费，写入统一 usage_records 账目）。
+ * status 为终态（succeeded/failed/cancelled/timed_out/interrupted/budget_exhausted）。
+ */
+export interface SubagentRunTerminalUsageEvent {
+  readonly runId: SubagentRunId;
+  readonly threadId: SubagentThreadId;
+  readonly status: SubagentRunStatus;
+  readonly ownership: SubagentOwnership;
+  /** 终态事务写入的累计账目（usage=null 时为 0，0 = 无账目） */
+  readonly usage: SubagentRunUsage;
+  readonly startedAt: string | null;
+  readonly finishedAt: string;
+}
+
 export interface SubagentRunRecord {
   readonly runId: SubagentRunId;
   readonly threadId: SubagentThreadId;
@@ -233,10 +249,21 @@ function mapRunRow(row: RunRow): SubagentRunRecord {
 }
 
 export class RunStore {
+  /** A8a：终态摄取回调（组合根注入；缺省 null = 不摄取）。 */
+  #terminalUsageIngestion: ((event: SubagentRunTerminalUsageEvent) => void) | null = null;
+
   constructor(
     private readonly database: Database.Database,
     private readonly threadStore: ThreadStore,
   ) {}
+
+  /**
+   * A8a：注入终态摄取回调。在 completeRun 持久化累计 token 的同一转换点触发
+   * （事件回调自身负责 try/catch——摄取失败不得影响 Run 终态）。
+   */
+  setTerminalUsageIngestion(hook: ((event: SubagentRunTerminalUsageEvent) => void) | null): void {
+    this.#terminalUsageIngestion = hook;
+  }
 
   /**
    * 创建 queued Run（§7.4）：IMMEDIATE 事务内校验
@@ -426,7 +453,7 @@ export class RunStore {
    * - terminal 重复写幂等返回已有记录。
    */
   completeRun(input: CompleteRunInput, ownership: SubagentOwnership): TransitRunResult {
-    return this.database
+    const outcome = this.database
       .transaction(() => {
         const current = this.#getOwnedOrThrow(input.runId, ownership);
         if (isSubagentRunTerminal(current.status) && current.status === input.to) {
@@ -493,10 +520,40 @@ export class RunStore {
         return { run: this.#loadRun(input.runId), idempotent: false };
       })
       .immediate();
+    if (outcome.idempotent) {
+      // terminal 重复写幂等：不重复摄取（usage_records `run:<runId>` 键本也可挡，
+      // 这里直接跳过，语义与 T7 投影的 idempotent 分支一致）
+      return outcome;
+    }
+    // A8a：终态摄取在事务外触发（事务内回调若再写库会嵌套；幂等由
+    // usage_records dedupe_key `run:<runId>` 保证——重启重放不重复计）。
+    // 回调自身也兜底 try/catch：摄取失败绝不影响 Run 终态。
+    const ingested = outcome.run;
+    const hook = this.#terminalUsageIngestion;
+    if (hook !== null) {
+      try {
+        hook({
+          runId: ingested.runId,
+          threadId: ingested.threadId,
+          status: ingested.status,
+          ownership,
+          usage: {
+            inputTokens: ingested.inputTokens,
+            outputTokens: ingested.outputTokens,
+            totalTokens: ingested.totalTokens,
+          },
+          startedAt: ingested.startedAt,
+          finishedAt: ingested.finishedAt ?? input.now,
+        });
+      } catch {
+        // 摄取失败不影响 Run 终态（诊断由摄取回调内部负责）
+      }
+    }
+    return { run: ingested, idempotent: false };
   }
 
   /**
-   * queued → starting + snapshot + Runtime Lease 单事务（§16.4 #3，§15.4）。
+   * queued → starting + snapshot + Runtime Lease 单事务（§16.4 #3，§15.4）：
    * only when queued；snapshot_json 原样透传（T3/T4 冻结 EffectiveSnapshot 的
    * JSON 序列化），limits_json 过 TypeBox 校验；started_at 首次写入。
    */

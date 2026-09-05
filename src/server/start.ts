@@ -22,7 +22,7 @@ import { MemoryJournalStore } from "../storage/memory/journal-store.js";
 import { PinnedMemoryStore } from "../storage/memory/pinned-store.js";
 import { MemoryPolicy } from "../runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../runtime/memory/proposal-application.js";
-import { defaultMemoryAgentSettings } from "../contracts/memory.js";
+import { defaultMemoryAgentSettings, type MemoryAgentSettings } from "../contracts/memory.js";
 import { defaultObservabilityPreferences } from "../contracts/preferences.js";
 import { MemoryRecallStore } from "../storage/memory/recall-store.js";
 import { ActivationUpdater } from "../runtime/memory/activation-updater.js";
@@ -30,12 +30,14 @@ import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
 import { EventIndexer } from "../runtime/memory/event-indexer.js";
 import { MemoryCompilePipeline } from "../runtime/memory/compile-pipeline.js";
 import { completeUtilityTextForResolved } from "../pi-sdk/complete-text.js";
+import { runUtilityCallWithUsage } from "../runtime/usage-recorder.js";
 import { MemoryBatchStore } from "../storage/memory/batch-store.js";
 import { MemoryDailyStateStore, MemoryWatermarkStore, SchedulerStateStore } from "../storage/memory/recovery-store.js";
 import { SessionSummaryStore } from "../storage/memory/summary-store.js";
 import { MemoryEventStore } from "../storage/memory/event-store.js";
 import { MemoryFactStore } from "../storage/memory/fact-store.js";
 import path from "node:path";
+
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -51,6 +53,7 @@ import { buildSubagentComposition, type SubagentRuntimeComposition } from "../ru
 import type { SubagentStartupRecoveryReport } from "../runtime/subagents/recovery/startup-recovery.js";
 import { instrument } from "../observability/instrument.js";
 import { createBootId } from "../observability/trace-context.js";
+import { selectSecondary } from "../runtime/model-policy.js";
 
 export interface StartServerOptions {
   readonly host: string;
@@ -347,6 +350,13 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       } catch {
         return null;
       }
+    }, (sessionId) => {
+      // A8a：主会话 agentId 归属（会话不存在/解析失败 → null = 未知）
+      try {
+        return sessionService.getView(sessionId).agentId ?? null;
+      } catch {
+        return null;
+      }
     });
     // 记忆设置生效链路：per-Agent 覆盖 → 全局默认 → 平台默认（P0-2：生产必须读真实设置）
     const resolveMemorySettings = (agentId: string) => {
@@ -357,29 +367,56 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       } catch { /* 读取失败用全局默认 */ }
       return global;
     };
-    // 工具型 LLM：按记忆设置解析 Provider/模型（utilityProviderId/utilityModel），
-    // 未配置时回退第一个有凭据的 Provider 及其第一个模型；
-    // 无凭据/解析失败时抛错 → 各记忆组件走 degraded 路径（不阻塞对话）
-    const completeText = async (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
-      const settings = resolveMemorySettings(agentId);
-      let provider = modelService.listProviders().find((p) => p.credentialConfigured && p.providerId === settings.utilityProviderId);
-      provider = provider ?? modelService.listProviders().find((p) => p.credentialConfigured);
-      if (provider === undefined) throw new Error("无可用 Provider 凭据");
-      let model = modelService.listModels().find((m) => m.providerId === provider.providerId && m.modelId === settings.utilityModel);
-      model = model ?? modelService.listModels().find((m) => m.providerId === provider.providerId);
-      if (model === undefined) throw new Error("Provider 未配置模型");
-      const resolved = modelService.resolveModel(provider.providerId, model.modelId);
-      return completeUtilityTextForResolved(resolved, {
-        systemPrompt: req.systemPrompt,
-        prompt: req.prompt,
-        ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
+    // 工具型 LLM：统一走 secondary 模型策略；未配置/不可用时抛稳定策略错误，
+    // 各记忆组件转 degraded，不阻塞主对话，也不枚举环境模型或首个凭据 Provider。
+    // A8a：每次调用（成功/失败/取消）经 runUtilityCallWithUsage 落一行 source=utility
+    // 账目——agentId 来自调用方上下文，sessionId 可选（无会话归属的全局调用传 null）；
+    // 消费方（RollingSummary/MemoryCompilePipeline/BackgroundReview/MemoryAgent 等）
+    // 仍拿 string，接口不变。
+    const completeText = async (
+      agentId: string,
+      req: { systemPrompt: string; prompt: string; maxTokens?: number; signal?: AbortSignal },
+      context?: { sessionId?: string | null },
+    ): Promise<string> => {
+      const preferences = preferencesStore.get();
+      let perAgent: MemoryAgentSettings | undefined;
+      if (agentId.trim() !== "") {
+        try {
+          perAgent = agentStore.getSettings(agentId).memory;
+        } catch {
+          // 失效 Agent 标识沿用既有记忆设置回退链，不让后台整理反向打崩。
+        }
+      }
+      const selection = selectSecondary("memory", {
+        preferences,
+        modelService,
+        ...(perAgent !== undefined ? { perAgent } : {}),
       });
+      const resolved = modelService.resolveModel(selection.providerId, selection.modelId);
+      return runUtilityCallWithUsage(
+        usageStore,
+        {
+          agentId: agentId.trim() !== "" ? agentId : null,
+          sessionId: context?.sessionId ?? null,
+          provider: selection.providerId,
+          model: selection.modelId,
+          role: selection.role,
+          ...(req.signal !== undefined ? { signal: req.signal } : {}),
+        },
+        () =>
+          completeUtilityTextForResolved(resolved, {
+            systemPrompt: req.systemPrompt,
+            prompt: req.prompt,
+            ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
+            ...(req.signal !== undefined ? { signal: req.signal } : {}),
+          }),
+      );
     };
 
     const summaryStore = new SessionSummaryStore(database);
     const watermarkStore = new MemoryWatermarkStore(database);
     // 编译/滚动摘要属 agent-agnostic 工具型调用：走全局记忆设置（resolveMemorySettings("") 回退全局/默认）
-    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req);
+    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req, { sessionId: null });
     const compilePipeline = new MemoryCompilePipeline({
       summaryStore,
       dailyStateStore: new MemoryDailyStateStore(database),

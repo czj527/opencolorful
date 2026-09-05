@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings } from "lucide-react";
+import { Archive, BarChart3, ChevronDown, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RotateCcw, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Agent, Thread } from "../mock-data.js";
@@ -21,16 +21,20 @@ interface SidebarProps {
   readonly onUpdateThreadTitle: (sessionId: string, title: string) => void;
   readonly onUnarchiveThread: (sessionId: string) => void;
   readonly onCollapse: () => void;
+  /** A8c：全局用量页入口（侧栏底部，与设置同排风格） */
+  readonly onOpenUsage: () => void;
   readonly onOpenSettings: () => void;
 }
 
 interface SidebarRailProps {
   readonly onExpand: () => void;
   readonly onNewThread: () => void;
+  /** A8c：收起态保持用量入口可达（与展开态侧栏底部入口一致） */
+  readonly onOpenUsage: () => void;
   readonly onOpenSettings: () => void;
 }
 
-export function SidebarRail({ onExpand, onNewThread, onOpenSettings }: SidebarRailProps) {
+export function SidebarRail({ onExpand, onNewThread, onOpenUsage, onOpenSettings }: SidebarRailProps) {
   return (
     <aside className="sidebar-rail" aria-label="会话侧栏（已收起）">
       <button type="button" className="icon-btn" aria-label="展开侧栏" title="展开侧栏" onClick={onExpand}>
@@ -40,6 +44,9 @@ export function SidebarRail({ onExpand, onNewThread, onOpenSettings }: SidebarRa
         <Plus size={16} />
       </button>
       <div className="rail-spacer" />
+      <button type="button" className="icon-btn" aria-label="用量" title="用量" data-testid="oc-rail-usage" onClick={onOpenUsage}>
+        <BarChart3 size={15} />
+      </button>
       <button type="button" className="icon-btn" aria-label="设置" title="设置" onClick={onOpenSettings}>
         <Settings size={15} />
       </button>
@@ -222,7 +229,7 @@ function ThreadGroup({
 export function Sidebar(props: SidebarProps) {
   const {
     threads, archivedThreads, activeThreadId, agentsById, showAgentBadge,
-    onThread, onNewThread, onUpdateThreadTitle, onUnarchiveThread, onCollapse, onOpenSettings,
+    onThread, onNewThread, onUpdateThreadTitle, onUnarchiveThread, onCollapse, onOpenUsage, onOpenSettings,
   } = props;
   const [archivedOpen, setArchivedOpen] = useState(false);
 
@@ -319,6 +326,10 @@ export function Sidebar(props: SidebarProps) {
       <div className="sidebar-spacer" />
 
       <div className="sidebar-foot">
+        <button type="button" className="plain-row" data-testid="oc-sidebar-usage" onClick={onOpenUsage}>
+          <BarChart3 size={14} />
+          <span><strong>用量</strong></span>
+        </button>
         <button type="button" className="plain-row" onClick={onOpenSettings}>
           <Settings size={14} />
           <span><strong>设置</strong></span>

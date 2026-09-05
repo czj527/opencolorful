@@ -9,6 +9,9 @@ import type { AuditRecorder } from "../../observability/audit-recorder.js";
 import type { ActivityRecorder } from "../../observability/activity-recorder.js";
 import type { ModelService } from "../../runtime/model-service.js";
 import type { SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
+import { UsageStore } from "../../storage/usage-store.js";
+import { selectSecondary } from "../model-policy.js";
+import { createSubagentUsageIngestion } from "./runtime/usage-ingestion.js";
 import { ParentMailboxDeliveryCoordinator } from "./mailbox/parent-mailbox-delivery-coordinator.js";
 import { ProtocolDispatcher } from "./protocol/protocol-dispatcher.js";
 import { SubagentStartupRecovery, type SubagentStartupRecoveryReport } from "./recovery/startup-recovery.js";
@@ -128,6 +131,11 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
   // 1. Stores
   const threads = new ThreadStore(database);
   const runs = new RunStore(database, threads);
+  // A8a：Run 终态 → 统一 usage_records 账目摄取（completeRun 持久化累计 token 的
+  // 同一转换点；try/catch 内部兜底，摄取失败不影响 Run 终态）。
+  runs.setTerminalUsageIngestion(
+    createSubagentUsageIngestion({ usageStore: new UsageStore(database), database }),
+  );
   const messages = new MessageStore(database, threads);
   const artifacts = new ArtifactStore(database, threads);
   const mailbox = new ParentMailboxStore(database);
@@ -274,6 +282,14 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
     projector,
     toolServices: {
       preferences: () => ({ subagents: preferencesStore.get().subagents }),
+      selectSecondary: (reason, explicit) => {
+        const preferences = preferencesStore.get();
+        return selectSecondary(reason, {
+          ...(explicit !== undefined && explicit !== null ? { explicit } : {}),
+          preferences,
+          modelService,
+        });
+      },
       modelResolver: (providerId, modelId) => {
         try {
           modelService.resolveModel(providerId, modelId);

@@ -8,6 +8,8 @@ import { expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
 import { MockDataSource } from "./data/mock-source.js";
+import { CorrelatedError, type ErrorCorrelation } from "./errors.js";
+import type { ActivityLogRow } from "./mock-data.js";
 import {
   applyEvent,
   applyLocalUserMessage,
@@ -18,7 +20,7 @@ import {
   type LiveEnvelope,
 } from "./data/projector.js";
 import type { Thread } from "./mock-data.js";
-import type { DesktopDataSource, SessionUsageView } from "./data/source.js";
+import type { DesktopDataSource, ActivityFilter, SessionUsageView } from "./data/source.js";
 import { renderApp } from "../tests/fixtures/app-harness.js";
 import { overrideSource } from "../tests/fixtures/override-source.js";
 import { replayChatSource } from "../tests/fixtures/replay-chat-source.js";
@@ -514,7 +516,7 @@ it("SEC-04: 聊天内审批「拒绝」→ 状态机切 denied（按钮消失 + 
   const app = await renderApp();
   try {
     await screen.findByText("需要确认");
-    expect(screen.getByText(/工作区写入 · D:\\PI-study\\opencolorful/)).toBeTruthy();
+    expect(screen.getByText("等待你的决定")).toBeTruthy();
 
     await app.user.click(screen.getByRole("button", { name: "拒绝" }));
 
@@ -522,6 +524,162 @@ it("SEC-04: 聊天内审批「拒绝」→ 状态机切 denied（按钮消失 + 
     expect(result.className).toContain("s-failed");
     expect(screen.queryByRole("button", { name: "允许一次" })).toBeNull();
     expect(screen.queryByRole("button", { name: "拒绝" })).toBeNull();
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+/* ---------------------------------------------------------------------------
+ * A5 lane（OBS-05：Desktop UI→日志关联）：
+ * - 错误回放源复用本文件 stepwiseReplaySource（turn.failed 终态 → projector
+ *   "运行错误"状态行，与 A4b CHAT-06 同一投影路径）；
+ * - queryActivity 经 overrideSource 脚本化：ChatView 的会话级解析调用
+ *   ({sessionId,status:"failed"}) 与日志页 traceId 预填查询分别断言；
+ * - 脱敏红线：凭据片段不进入错误文案、诊断引用与整页（服务端真实链路的
+ *   errorMessage 经 sanitizeSensitiveText 脱敏，fixture 与其保持一致）。
+ * ------------------------------------------------------------------------- */
+
+function makeFailedActivityRow(sessionId: string, traceId: string): ActivityLogRow {
+  return {
+    id: 901,
+    recordedAt: "2026-09-02T10:00:00+08:00",
+    eventName: "turn.failed",
+    level: "error",
+    status: "failed",
+    category: "turn",
+    producerComponent: "SessionRuntime",
+    durationMs: 120,
+    sessionId,
+    ownerAgentId: "yuan",
+    traceId,
+    payloadPreview: "{ errorCode: AUTHENTICATION_FAILED }",
+  };
+}
+
+function a5ReplaySource(base: DesktopDataSource, threadId: string, userMessage: string): DesktopDataSource {
+  const envelope = makeEnvelopeFactory();
+  return stepwiseReplaySource(base, {
+    threadId,
+    userMessage,
+    batches: [
+      {
+        atMs: 60,
+        mark: true,
+        events: [
+          envelope("turn.started", { turnId: "turn-a5-1" }),
+          envelope("message.started", { role: "assistant" }),
+          envelope("message.delta", { delta: "即将失败…" }),
+        ],
+      },
+      {
+        atMs: 600,
+        // 与真实链路一致：服务端在发出失败终态前已对 errorMessage 脱敏
+        events: [envelope("turn.failed", { errorMessage: "HTTP 401 Unauthorized（凭据被拒绝）" })],
+      },
+    ],
+  });
+}
+
+it("A5: 运行错误行渲染诊断引用 +「在日志中查看」跳转日志页按 traceId 预填（凭据不透出）", async () => {
+  const base = new MockDataSource();
+  const fakeKey = "sk-oc-e2e-leaky-key";
+  const userMessage = "A5 诊断引用回放：错误行出现可跳转引用";
+  const failedRow = makeFailedActivityRow("lane-a5-ref", "trace-a5-01");
+  const activityCalls: ActivityFilter[] = [];
+  injected.current = overrideSource(a5ReplaySource(base, "lane-a5-ref", userMessage), {
+    queryActivity: (filter: ActivityFilter) => {
+      activityCalls.push(filter);
+      // ChatView 会话级解析（sessionId+failed）与日志页 traceId 预填查询都命中失败记录
+      if (filter.status === "failed" || filter.traceId !== undefined) {
+        return Promise.resolve({ rows: [failedRow], nextCursor: null });
+      }
+      return Promise.resolve({ rows: [], nextCursor: null });
+    },
+  });
+  const app = await renderApp();
+  try {
+    await makeSidebarPO(app.user).newThread();
+    const composer = makeComposerPO(app.user);
+    await composer.type(userMessage);
+    await composer.pressEnter();
+
+    // 运行错误行出现 → 解析出诊断引用（短引用 + title 完整 traceId）
+    await screen.findByText("运行错误");
+    const ref = await screen.findByText(/诊断引用 /);
+    expect(ref.getAttribute("title")).toBe("trace-a5-01");
+    expect(ref.textContent).toContain("trace-a5");
+
+    // 凭据/英文原文不透出：错误行、引用、整页均不含
+    expect(screen.queryByText(new RegExp(fakeKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeNull();
+    expect(screen.queryByText("Unauthorized")).toBeNull();
+
+    // 跳转：日志页活动 tab + traceId 预填 + 过滤参数真实下发 + 失败记录可见
+    await app.user.click(screen.getByRole("button", { name: "在日志中查看" }));
+    await screen.findByRole("heading", { name: "日志" });
+    const traceInput = screen.getByPlaceholderText("traceId") as HTMLInputElement;
+    expect(traceInput.value).toBe("trace-a5-01");
+    await screen.findByText("turn.failed");
+    const traceQuery = activityCalls.find((filter) => filter.traceId !== undefined);
+    expect(traceQuery?.traceId).toBe("trace-a5-01");
+    expect(screen.queryByText(fakeKey)).toBeNull();
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("A5: 会话级解析失败时错误行回退会话引用（server origin，traceId=sessionId）", async () => {
+  const base = new MockDataSource();
+  const userMessage = "A5 回退引用回放：解析失败回退会话 id";
+  injected.current = overrideSource(a5ReplaySource(base, "lane-a5-fallback", userMessage), {
+    queryActivity: () => Promise.reject(new Error("日志服务离线")),
+  });
+  const app = await renderApp();
+  try {
+    await makeSidebarPO(app.user).newThread();
+    const composer = makeComposerPO(app.user);
+    await composer.type(userMessage);
+    await composer.pressEnter();
+
+    // 解析查询失败 → 回退会话 id（会话路由以 sessionId 作为 traceId 盖章）
+    await screen.findByText("运行错误");
+    const ref = await screen.findByText(/诊断引用 /);
+    expect(ref.getAttribute("title")).toBe("lane-a5-fallback");
+    expect(ref.textContent).toContain("tr-lane-a5");
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("A5: 纯 IPC 失败本地引用降级——alert 显示 ipc- 短引用（无服务端 traceId），原始错误不透出", async () => {
+  const fixedLocal: ErrorCorrelation = {
+    traceId: "9a5b7c3d-0000-0000-0000-000000000001",
+    origin: "local",
+    at: "2026-09-02T10:00:00+08:00",
+  };
+  const source = overrideSource(new MockDataSource(), {
+    createThread: () => Promise.reject(new CorrelatedError("请求失败（0）", fixedLocal)),
+  });
+  injected.current = source;
+  const app = await renderApp();
+  try {
+    await makeSidebarPO(app.user).newThread();
+    const composer = makeComposerPO(app.user);
+    await composer.type("A5 纯 IPC 失败降级");
+    await composer.pressEnter();
+
+    // isOffline 分支中文文案 + 本地短引用（ipc- 前缀，title 为完整 id）
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("连接已断开，请检查本地服务是否运行，恢复后会自动重连。");
+    expect(alert.textContent).toContain("ipc-9a5b7c3d");
+    expect(alert.querySelector("code")?.getAttribute("title")).toBe(fixedLocal.traceId);
+    // 原始英文/状态码不透出
+    expect(alert.textContent).not.toContain("请求失败");
   } finally {
     app.consoleTracker.restore();
     injected.current = null;
