@@ -154,7 +154,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| MEM-01 | 打开记忆页 | `GET /api/agents/:id/memory/compiled|facts|events|pinned|health` | 四段与列表渲染；加载/错误态 | L3/L5 | L3 `memory-admin-api.test.ts`（11） | PASS（L3）/SKIP（L5 未建） | — |
+| MEM-01 | 打开记忆页 | `GET /api/agents/:id/memory/compiled\|facts\|events\|pinned\|health` | 四段与列表渲染；加载/错误态 | L3/L5 | L3 `memory-admin-api.test.ts`（11） | PASS（L3）/SKIP（L5 未建） | — |
 | MEM-02 | 关键字搜索（400ms 防抖） | `GET facts/events?q=` | 过滤结果 | L3/L5 | L3 `memory-recall.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | UI 防抖行为无测试 |
 | MEM-03 | pinned 新增/删除 | `POST/DELETE /api/agents/:id/memory/pinned` | 列表即时更新 | L3/L5 | L3 `memory-admin-api.test.ts` | PASS（L3）/SKIP（L5） | — |
 | MEM-04 | 手动 flush（封装+重建索引） | `POST /api/agents/:id/memory/flush` | 完成提示 | L3/L5 | L3 `memory-compile.test.ts`、`memory-stores.test.ts` | PASS（L3）/SKIP（L5） | — |
@@ -182,7 +182,7 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript|messages|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件） | PASS（L1/L3）/SKIP（L5 未建） | — |
+| SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript\|messages\|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件） | PASS（L1/L3）/SKIP（L5 未建） | — |
 | SUB-02 | transcript SSE 实时推进 | `GET /api/subagents/threads/:id/stream` | 详情随流更新 | L1/L6 | L1 `subagents-replay-store.test.ts` | PASS（L1）/SKIP（L6） | 真链转发仅 L6 |
 | SUB-03 | subagents.defaultModel 持久化 | preferences `subagents` 段 | route→file→reopen 保持 | L3 | L1 `preferences.test.ts` + L3 `settings-routes.test.ts`（A0 RED→GREEN） | PASS（L3） | Desktop 设置页无 subagents 模型入口（A7d 补齐） |
 | SUB-04 | subagent tokens 进统一用量查询 | `subagent_runs` 累计 tokens 不在 usage API | — | — | 无 | SKIP（A8 缺口，已立项） | A8 交付后补行 |
@@ -203,9 +203,9 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| SKILL-01 | inspect/install → 确认令牌 → approve → 绑定生效 | `POST /api/skills/inspect|install`、`POST confirmation/:tokenId/approve` | Web 面生命周期完成 | L1/L3/L4 | L1 `tests/unit/skills/*`（约 35 文件）；L3 `skills/skill-routes.test.ts`；L4 `skill-lifecycle.spec.ts` | PASS（L1/L3/L4） | — |
+| SKILL-01 | inspect/install → 确认令牌 → approve → 绑定生效 | `POST /api/skills/inspect\|install`、`POST confirmation/:tokenId/approve` | Web 面生命周期完成 | L1/L3/L4 | L1 `tests/unit/skills/*`（约 35 文件）；L3 `skills/skill-routes.test.ts`；L4 `skill-lifecycle.spec.ts` | PASS（L1/L3/L4） | — |
 | SKILL-02 | 会话 Skill 绑定注入五工具 | `GET/POST /api/sessions/:id/skills` | 会话内工具可用 | L1/L3 | L1 `session-skill-service.test.ts`、`skill-tools.test.ts` | PASS（L1） | — |
-| SKILL-03 | 来源信任/linked sources/bundles 管理面 | `/api/skill-sources`、`/api/skills/linked-sources|bundles|:ref/files`、`PUT agents/:id/skills/policy` | —（无 Desktop UI） | L1/L3 | L3 `skills/composition-root.test.ts` 等；L1 `linked-source-registry.test.ts` | PASS（L1/L3） | — |
+| SKILL-03 | 来源信任/linked sources/bundles 管理面 | `/api/skill-sources`、`/api/skills/linked-sources\|bundles\|:ref/files`、`PUT agents/:id/skills/policy` | —（无 Desktop UI） | L1/L3 | L3 `skills/composition-root.test.ts` 等；L1 `linked-source-registry.test.ts` | PASS（L1/L3） | — |
 
 ### SUPV · Supervisor 进程管理
 
@@ -219,9 +219,9 @@
 
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
-| OBS-01 | 日志页三 tab（活动/错误/安全审计）+ 健康 badge | `GET /api/observability/activity|audit|errors|health` | 三视图 + 健康 badge 渲染 | L3/L4/L5 | L3 `observability-api/server.test.ts`；L4 `logs.spec.ts` | PASS（L3/L4）/SKIP（L5 未建） | — |
+| OBS-01 | 日志页三 tab（活动/错误/安全审计）+ 健康 badge | `GET /api/observability/activity\|audit\|errors\|health` | 三视图 + 健康 badge 渲染 | L3/L4/L5 | L3 `observability-api/server.test.ts`；L4 `logs.spec.ts` | PASS（L3/L4）/SKIP（L5 未建） | — |
 | OBS-02 | 活动过滤（category/level/status/搜索）+ 分页 + SSE 实时追加 | `GET activity` 过滤参数、`{channel}/stream` | 过滤生效、新行追加 | L1/L5 | L1 `observability-query.test.ts` | PASS（L1）/SKIP（L5） | — |
-| OBS-03 | retention 预览/执行（与 Audit 同事务 fail-closed） | `POST /api/observability/retention/preview|run` | 删除生效、审计留痕 | L1/L3 | L1 `observability-retention.test.ts`；L3 `observability-server.test.ts` | PASS（L1/L3） | — |
+| OBS-03 | retention 预览/执行（与 Audit 同事务 fail-closed） | `POST /api/observability/retention/preview\|run` | 删除生效、审计留痕 | L1/L3 | L1 `observability-retention.test.ts`；L3 `observability-server.test.ts` | PASS（L1/L3） | — |
 | OBS-04 | 客户端事件回传脱敏 | `POST /api/observability/client-events` | 落库无敏感值 | L3 | L3 `observability-api.test.ts` | PASS（L3） | — |
 | OBS-05 | 诊断 tail 与 trace 关联查询 | `GET diagnostic/tail`、`GET traces/:traceId` | 可定位记录 | L3 | L3 `observability-api.test.ts` | PASS（L3）/SKIP（A5） | Desktop UI→日志关联（A5）未建 |
 
