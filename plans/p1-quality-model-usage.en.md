@@ -619,6 +619,36 @@ Known limitations (explicit, not silent): call-level detail list endpoint not bu
   ties have no stable secondary sort (consumers must not depend on tie order).
 ```
 
+```text
+Date: 2026-09-05
+Task: A9 wave integration gate (main agent, serial)
+Gates (all run separately on the merged tree, exit codes recorded):
+  node scripts/verify-pi-sdk-imports.mjs → PASS
+  npx tsc --noEmit -p tsconfig.json → PASS
+  npx tsc -p tsconfig.build.json → PASS
+  npx vitest run (root, full) → 186 files / 2233 tests PASS (.tmp/a8-full-vitest.log)
+  npm run test --workspace=web → 34 files / 428 tests PASS
+  npm run web:build → PASS | npm run desktop:build → PASS
+  cd web; npx playwright test → 59/60, 1 FAIL investigated and fixed (see below); phase8 rerun 18/18
+  desktop Electron true-chain full suite (9 specs / 24 tests) → 24 PASS in 6.4m (.tmp/a9-desktop-truechain.log)
+A9 finding and fix: web phase8 test "e. 首次发送只创建一次" set defaults.model as the legacy string
+  "fixture-provider:fixture-model"; the settings route has always required {providerId, modelId}
+  (400), so the default was never persisted. Before the A6 closeout the page sent anyway; after the
+  fail-closed change the page correctly showed "请先在设置的默认对话中选择默认模型" and blocked
+  sending — product behavior verified correct by the failure screenshot/alert. Fixed the test to the
+  object form (same as line 231) with an explanatory comment; single test and full Phase 8 spec
+  (18/18) rerun green. No production change.
+Exit-condition status against plan §8: matrix coverage complete (92 rows; 0 FAIL, 0 BLOCKED-ENV;
+  remaining SKIPs are explicit and bounded: WS-04/SHELL-04 L5 unbuilt, SHELL-02 L6 unbuilt, SUPV-03
+  deferred to CI-verified desktop-smoke, REL-01/02/03 install/update evidence pending G2 release,
+  SUB-04/USAGE-02 L6 true-chain rows recorded as wave follow-up). Two-tier policy unified (A6/A7);
+  usage queryable by source/role/model/agent/session/time incl. non-success (A8); diagnostics
+  correlate one real failure path (A5, tr-608b3ef3); Desktop Mock + true-chain suites repeatable
+  with CI smoke job configured.
+Remaining for wave closeout: merge the stacked PR chain (#44→#45→#51→#52→#53) so CI triggers on
+  main; release/install evidence stays a G2 item, not a Wave A blocker.
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

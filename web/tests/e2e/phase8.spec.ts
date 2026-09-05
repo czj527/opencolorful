@@ -392,8 +392,10 @@ test.describe("Phase 8：底色模板创建 Agent 与 NewSessionPage", () => {
     await ensureFixtureProvider(page);
 
     // 设置 fixture 模型为默认，确保 /new 首条 prompt 走 fixture
+    // （model 必须是 {providerId, modelId} 对象；字符串形状会被路由 400 拒绝，
+    //  A6 收口后 /new 对无默认模型 fail-closed，首条消息会被拦下）
     await page.request.put(`${baseUrl()}/api/settings/preferences`, {
-      data: { defaults: { model: "fixture-provider:fixture-model" } },
+      data: { defaults: { model: { providerId: "fixture-provider", modelId: "fixture-model" } } },
     });
 
     // 监听 POST /api/sessions 调用次数
