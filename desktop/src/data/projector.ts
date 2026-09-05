@@ -1,4 +1,4 @@
-import type { ChatEvent, ChatMessage, CompactionItem, CompactionStatus, TimelineItem, ToolCall } from "../mock-data.js";
+import type { ChatEvent, ChatMessage, CompactionItem, CompactionStatus, SessionTodoItem, TimelineItem, ToolCall } from "../mock-data.js";
 
 /** 平台事件 Envelope 的 renderer 侧最小形状（payload 防御式解析） */
 export interface LiveEnvelope {
@@ -47,6 +47,8 @@ export interface BranchEntry {
 export interface ChatSnapshot {
   readonly items: readonly TimelineItem[];
   readonly streaming: boolean;
+  /** 波次 B5b：durable session todo 只读投影（空列表 = 无卡） */
+  readonly todos: readonly SessionTodoItem[];
 }
 
 export interface ProjectorState {
@@ -60,6 +62,8 @@ export interface ProjectorState {
   readonly indexOf: Map<string, number>;
   /** 最后一条 message 型 item 的下标（-1 表示还没有）；事件追加不影响它 */
   lastMessageIndex: number;
+  /** 波次 B5b：durable session todo 只读投影（todo.updated 整表替换；空列表=清空） */
+  todos: readonly SessionTodoItem[];
   /** 波次 B4：进行中压缩卡的 item id（session.compacting → session.compacted 配对；无进行中压缩时为 null） */
   activeCompactionId: string | null;
   /** items 自上次快照后被原地改动；snapshotOf 时重建数组以获得新引用（不可变契约） */
@@ -70,8 +74,16 @@ export function createProjector(agentName: string): ProjectorState {
   return {
     items: [], streaming: false, activeStreamId: null, pendingPrompt: false,
     seenStreams: new Set(), agentName,
-    indexOf: new Map(), lastMessageIndex: -1, activeCompactionId: null, dirty: false,
+    indexOf: new Map(), lastMessageIndex: -1, todos: [], activeCompactionId: null, dirty: false,
   };
+}
+
+/**
+ * 波次 B5b：todo 只读投影的种子（SessionView.todos，打开/重启恢复）与
+ * todo.updated 整表替换共用入口；UI 永远不是写入方，这里只替代表达。
+ */
+export function applyTodoSnapshot(state: ProjectorState, todos: readonly SessionTodoItem[]): void {
+  state.todos = todos;
 }
 
 export function snapshotOf(state: ProjectorState): ChatSnapshot {
@@ -81,7 +93,7 @@ export function snapshotOf(state: ProjectorState): ChatSnapshot {
     state.items = [...state.items];
     state.dirty = false;
   }
-  return { items: state.items, streaming: state.streaming };
+  return { items: state.items, streaming: state.streaming, todos: state.todos };
 }
 
 /** 整表替换（历史投影 / 外部重建）：重建索引与末消息指针；数组已是新引用，不置 dirty */
@@ -327,6 +339,21 @@ export function markPromptFailed(state: ProjectorState, message: string) {
   pushStatusEvent(state, `error-${Date.now()}`, "发送失败", message);
 }
 
+/** 波次 B5b：todo.updated 条目的防御式解析（形状分歧按缺省兜底，不抛错） */
+function parseTodoItem(value: unknown): SessionTodoItem {
+  const row = value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
+  const status = row["status"] === "in_progress" || row["status"] === "completed" || row["status"] === "cancelled"
+    ? row["status"]
+    : "pending";
+  const priority = row["priority"] === "high" || row["priority"] === "low" ? row["priority"] : "medium";
+  return {
+    content: asString(row["content"]),
+    status,
+    priority,
+    ...(typeof row["activeForm"] === "string" && row["activeForm"] !== "" ? { activeForm: row["activeForm"] } : {}),
+  };
+}
+
 // eslint-disable-next-line complexity
 export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
   const type = envelope.type;
@@ -335,6 +362,16 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
   // 由数据源（ipc-source / mock-source）的 channel 逻辑消费；这里仅放行过滤，
   // 不落入下面的 prompt 流收养门（否则会被当成未知流丢弃或收养错流）。
   if (type === "session.branch.switched" || type === "session.branches.changed") {
+    return;
+  }
+  // 波次 B5b：todo.updated 挂在稳定 todo:<sessionId> 流上，同样不进入 prompt 流
+  // 收养门；整表替换只读投影（写入方是 todo_write 工具，UI 只消费）。
+  if (type === "todo.updated") {
+    const todoPayload = envelope.payload !== null && typeof envelope.payload === "object"
+      ? envelope.payload as Record<string, unknown>
+      : {};
+    const rawItems = Array.isArray(todoPayload["items"]) ? todoPayload["items"] as unknown[] : [];
+    applyTodoSnapshot(state, rawItems.map(parseTodoItem));
     return;
   }
   const isControl = type === "session.compacting" || type === "session.compacted";

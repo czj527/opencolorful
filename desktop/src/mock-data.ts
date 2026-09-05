@@ -111,6 +111,19 @@ export interface CompactionItem {
   readonly errorMessage?: string;
 }
 
+/* ---------- 波次 B5b：durable session todo（只读投影；写入方是 todo_write 工具） ---------- */
+
+export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
+export type TodoPriority = "high" | "medium" | "low";
+
+/** todo.updated 事件负载条目 / SessionView.todos 条目（服务端 SessionTodoItemView 的 Wire 镜像） */
+export interface SessionTodoItem {
+  readonly content: string;
+  readonly status: TodoStatus;
+  readonly priority: TodoPriority;
+  readonly activeForm?: string;
+}
+
 export interface DockFile {
   readonly path: string;
   readonly additions: number;

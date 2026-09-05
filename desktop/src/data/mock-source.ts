@@ -19,6 +19,7 @@ import {
   memoryTimelineFacts,
   mockReplies,
   type Agent,
+  type SessionTodoItem,
   type Thread,
 } from "../mock-data.js";
 import {
@@ -226,6 +227,16 @@ class MockBranchError extends Error {
 }
 
 /** Mock 数据源：fixture + 模拟事件流（与真实数据源走同一份 projector） */
+/** 波次 B5b：Mock todo 场景（首轮写入 → 后续轮整表替换为全完成） */
+const MOCK_TODO_INITIAL: readonly SessionTodoItem[] = [
+  { content: "梳理桌面端亮暗主题的语义令牌分层", status: "completed", priority: "high" },
+  { content: "落地 data-theme 覆盖方案", status: "in_progress", priority: "high", activeForm: "正在落地 data-theme 覆盖方案" },
+];
+const MOCK_TODO_DONE: readonly SessionTodoItem[] = [
+  { content: "梳理桌面端亮暗主题的语义令牌分层", status: "completed", priority: "high" },
+  { content: "落地 data-theme 覆盖方案", status: "completed", priority: "high" },
+];
+
 export class MockDataSource implements DesktopDataSource {
   readonly info: ConnectionInfo = { mode: "mock", connected: false, label: "离线 · mock 数据" };
 
@@ -504,6 +515,14 @@ export class MockDataSource implements DesktopDataSource {
     this.later(session, doneAt + 120, () => {
       this.emit(session, "turn.completed", { turnId: "mock-turn", usage: { input: 320, output: 180, cacheRead: 0, cacheWrite: 0, totalTokens: 500 } }, streamId);
     });
+    // 波次 B5b：模拟模型在轮内调用 todo_write（整表替换，todo:<sessionId> 稳定流）。
+    // 首个 prompt 建两项目录（一项进行中），后续 prompt 整表替换为全完成 → 卡片计数联动。
+    if (sessionId === BRANCH_DEMO_SESSION_ID) {
+      const todos = session.replyIndex === 1 ? MOCK_TODO_INITIAL : MOCK_TODO_DONE;
+      this.later(session, doneAt + 220, () => {
+        this.emit(session, "todo.updated", { items: todos }, `todo:${sessionId}`);
+      });
+    }
     return Promise.resolve();
   }
 

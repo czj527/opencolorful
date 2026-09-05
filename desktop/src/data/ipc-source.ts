@@ -5,6 +5,7 @@ import type {
   LogLevel,
   AuditDecision,
   MemoryMaintenance,
+  SessionTodoItem,
   Thread,
 } from "../mock-data.js";
 import {
@@ -17,6 +18,7 @@ import {
   projectHistory,
   seedItems,
   snapshotOf,
+  applyTodoSnapshot,
   type BranchEntry,
   type ChatSnapshot,
   type HistoryEntry,
@@ -74,6 +76,8 @@ interface SessionViewWire {
   readonly currentBranchId?: string | null;
   readonly entries?: readonly BranchEntryWire[];
   readonly sourceSessionId?: string | null;
+  /** 波次 B5b：durable session todo（打开/重启恢复的初始列表） */
+  readonly todos?: unknown;
 }
 
 interface PromptResponseWire {
@@ -232,6 +236,18 @@ function mapBranchEntries(wire: BranchEntriesWire): BranchEntriesView {
 }
 
 /** SessionView.entries（SessionEntryView[]）→ 分支条目（同一形状，仅收紧 unknown） */
+/** 波次 B5b：SessionView.todos 的防御式映射（形状分歧按缺省兜底，不抛错） */
+function sessionTodos(value: unknown): SessionTodoItem[] {
+  return asArray<Record<string, unknown>>(value).map((row) => ({
+    content: String(row["content"] ?? ""),
+    status: row["status"] === "in_progress" || row["status"] === "completed" || row["status"] === "cancelled"
+      ? row["status"]
+      : "pending",
+    priority: row["priority"] === "high" || row["priority"] === "low" ? row["priority"] : "medium",
+    ...(typeof row["activeForm"] === "string" && row["activeForm"] !== "" ? { activeForm: row["activeForm"] } : {}),
+  }));
+}
+
 function sessionEntriesAsBranchEntries(value: unknown): BranchEntryView[] {
   return asArray<BranchEntryWire>(value).map(mapBranchEntry);
 }
@@ -1133,6 +1149,8 @@ export class IpcDataSource implements DesktopDataSource {
           ? projectBranchEntries(sessionEntriesAsBranchEntries(session.entries), channel.projector.agentName)
           : projectHistory(session.messageEntries, channel.projector.agentName);
         seedItems(channel.projector, entries);
+        // 波次 B5b：SessionView.todos 作为 todo 只读投影的初始状态（打开/重启恢复）
+        applyTodoSnapshot(channel.projector, sessionTodos(session.todos));
         this.notify(channel);
       })
       .catch((cause: unknown) => {
