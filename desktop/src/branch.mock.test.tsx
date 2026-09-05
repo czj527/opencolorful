@@ -97,7 +97,7 @@ it("BRANCH-04a: 用户消息「编辑并重生成」→ 行内编辑器 → 新�
     await user.type(textarea, "更小的方案：亮暗主题最少做哪些事？");
     await user.click(within(editor).getByTestId("oc-regenerate-confirm"));
     // 脚本场景：turn-e-u1 的重生成命中预置兄弟分支 e-a1b（成为当前分支）
-    await screen.findByText(BRANCH_B_REPLY, { timeout: 3000 });
+    await screen.findByText(BRANCH_B_REPLY, undefined, { timeout: 3000 });
     const trigger = screen.getByTestId("oc-branch-switcher");
     await user.click(trigger);
     expect(within(screen.getByTestId("oc-branch-menu")).getByTestId("oc-branch-item-e-a1b").className).toContain("is-current");
@@ -142,7 +142,7 @@ it("BRANCH-05: 流式期间切换分支 → 409 文案 + 停止动作，停止�
     await user.click(within(strip).getByTestId("oc-branch-stop"));
     // mock abort 收敛流式态；菜单仍开，重试切换成功
     await user.click(screen.getByTestId("oc-branch-item-e-a1b"));
-    await screen.findByText(BRANCH_B_REPLY, { timeout: 3000 });
+    await screen.findByText(BRANCH_B_REPLY, undefined, { timeout: 3000 });
   } finally {
     app.consoleTracker.restore();
     app.unmount();
