@@ -130,7 +130,7 @@ describe("projector O(1)：合批窗口内就地累积，快照（flush）时才
     applyEvent(p, env("message.completed", { content: "好的，开始。" }));
 
     const snap = snapshotOf(p);
-    const kinds = snap.items.map((item) => item.type === "message" ? `msg:${item.role}` : `evt:${item.kind}`);
+    const kinds = snap.items.map((item) => item.type === "message" ? `msg:${item.role}` : item.type === "event" ? `evt:${item.kind}` : "compaction");
     expect(kinds).toEqual(["msg:user", "evt:plan", "msg:assistant", "evt:memory"]);
     const assistant = snap.items.filter((item) => item.type === "message" && item.role === "assistant");
     expect(assistant.map((m) => asMessage(m).body)).toEqual(["好的，开始。"]);
@@ -159,7 +159,7 @@ describe("projector O(1)：delta 流中 thinking / tool 事件不受影响", () 
 
     const snap = snapshotOf(p);
     // 顺序：thinking → assistant → tool（thinking 在 assistant 前创建，随后被 upsert 更新）
-    expect(snap.items.map((item) => item.type === "message" ? "msg" : `evt:${item.kind}`)).toEqual([
+    expect(snap.items.map((item) => item.type === "message" ? "msg" : item.type === "event" ? `evt:${item.kind}` : "compaction")).toEqual([
       "evt:thinking", "msg", "evt:tool",
     ]);
     const thinking = snap.items[0]!;
@@ -241,7 +241,7 @@ describe("projector：历史投影（seedItems）后索引重建，实时事件�
     const p = createProjector("原");
     seedItems(p, projectHistory(history, "原"));
     const loaded = snapshotOf(p);
-    expect(loaded.items.map((item) => item.type === "message" ? "msg" : `evt:${item.kind}`)).toEqual([
+    expect(loaded.items.map((item) => item.type === "message" ? "msg" : item.type === "event" ? `evt:${item.kind}` : "compaction")).toEqual([
       "msg", "evt:thinking", "evt:tool", "msg",
     ]);
     const last = asMessage(loaded.items[3]!);

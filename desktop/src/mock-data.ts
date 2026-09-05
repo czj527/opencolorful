@@ -89,7 +89,27 @@ export interface ChatEvent {
   readonly recalled?: readonly string[];
 }
 
-export type TimelineItem = ChatMessage | ChatEvent;
+export type TimelineItem = ChatMessage | ChatEvent | CompactionItem;
+
+/* ---------- 波次 B4：压缩卡（§3.2.4 冻结分态；live 事件与历史条目共用同一结构） ---------- */
+
+export type CompactionStatus = "compacting" | "completed" | "aborted" | "failed";
+
+/** 压缩卡 item：与通用状态行不同，携带 tokens / summary 正文 / 错误信息（正文不做客户端截断） */
+export interface CompactionItem {
+  readonly id: string;
+  readonly type: "compaction";
+  readonly status: CompactionStatus;
+  /** 触发原因（服务端 payload.reason，如 manual / auto） */
+  readonly reason: string;
+  readonly tokensBefore?: number;
+  /** 服务端估算值 → UI 必须标注「约」 */
+  readonly tokensAfter?: number;
+  /** 服务端已脱敏（≤500 字符）的压缩摘要正文；compacting/为空时缺省 */
+  readonly summary?: string;
+  /** 失败态错误行（服务端已脱敏） */
+  readonly errorMessage?: string;
+}
 
 /* ---------- 波次 B5b：durable session todo（只读投影；写入方是 todo_write 工具） ---------- */
 
@@ -375,10 +395,21 @@ export interface BranchDemoBranch {
 }
 
 /**
+ * 波次 B4：分支演示会话的压缩摘要 fixture（模拟服务端脱敏后的 ≤500 字符摘要）。
+ * 同时用于历史 compaction 条目（e-c1）与 live compactSession 事件，保证 Mock 场景
+ * 里「历史重放」与「live 压缩」的卡正文一致。
+ */
+export const BRANCH_DEMO_COMPACTION_SUMMARY =
+  "会话此前围绕桌面端亮暗主题展开：确认了语义令牌方向——组件不引用具体色值，只引用 --bg/--text 等" +
+  "语义层；暗色主题通过 data-theme 属性整体覆盖；事件层（思考/工具/文件/子任务）默认收起为单行摘要，" +
+  "普通回复保持连续可读。用户接下来关心令牌的具体分层方式。";
+
+/**
  * 脚本化分支树（两分支，用于 Mock 分支切换 / 重生成 / Fork 场景）：
  * root
- *   ├─ e-u1（用户 · turn-e-u1）→ e-a1（助手 · 分支A继续 e-u2 → e-a2）   ← 分支A（默认当前）
+ *   ├─ e-u1（用户 · turn-e-u1）→ e-a1（助手）→ e-c1（compaction）→ e-u2（用户 · 分支A继续 e-u2 → e-a2）   ← 分支A（默认当前）
  *   └─ e-u1b（用户 · turn-e-u1b）→ e-a1b（助手）                        ← 分支B（turn1 的重生成兄弟）
+ * 波次 B4：分支 A 含一条 compaction 历史条目 → 投影为压缩卡（历史重放场景）。
  */
 export const branchDemoBranches: readonly BranchDemoBranch[] = [
   {
@@ -387,6 +418,7 @@ export const branchDemoBranches: readonly BranchDemoBranch[] = [
     entries: [
       { entryId: "e-u1", parentId: null, turnId: "turn-e-u1", type: "message", role: "user", text: "帮我梳理桌面端亮暗主题的实现要点。", timestamp: "2026-09-05T09:30:00+08:00" },
       { entryId: "e-a1", parentId: "e-u1", turnId: "turn-e-u1", type: "message", role: "assistant", text: "核心是语义令牌：组件不引用具体色值，只引用 --bg/--text 等语义层，暗色主题靠 data-theme 覆盖。", timestamp: "2026-09-05T09:30:20+08:00" },
+      { entryId: "e-c1", parentId: "e-a1", turnId: null, type: "compaction", text: BRANCH_DEMO_COMPACTION_SUMMARY, timestamp: "2026-09-05T09:30:40+08:00" },
       { entryId: "e-u2", parentId: "e-a1", turnId: "turn-e-u2", type: "message", role: "user", text: "那令牌具体怎么分层？", timestamp: "2026-09-05T09:31:00+08:00" },
       { entryId: "e-a2", parentId: "e-u2", turnId: "turn-e-u2", type: "message", role: "assistant", text: "令牌按「基础色板 → 语义令牌 → 组件别名」三层组织，组件只引用语义层。", timestamp: "2026-09-05T09:31:25+08:00" },
     ],

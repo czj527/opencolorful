@@ -1,0 +1,53 @@
+/* 波次 B4：压缩摘要卡（§3.2.4） */
+.compaction-card {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border, #d8dce6);
+  border-left: 3px solid #8a93a8;
+  border-radius: 10px;
+  background: var(--panel, #f6f7fb);
+  max-width: 640px;
+}
+.compaction-card-completed { border-left-color: #3aa96c; }
+.compaction-card-aborted,
+.compaction-card-failed { border-left-color: #d07a4a; }
+.compaction-card-compacting { border-left-color: #5b8def; }
+
+.compaction-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.compaction-card-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text, #2a2f3a);
+}
+.compaction-card-tokens {
+  font-size: 12px;
+  color: var(--text-2, #6a7284);
+  font-variant-numeric: tabular-nums;
+}
+.compaction-card-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #b3552f;
+}
+.compaction-card-toggle {
+  margin-top: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: #4a7bd0;
+  cursor: pointer;
+}
+.compaction-card-summary {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-2, #4a5164);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
