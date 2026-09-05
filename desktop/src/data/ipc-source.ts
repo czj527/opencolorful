@@ -510,7 +510,10 @@ export class IpcDataSource implements DesktopDataSource {
     this.notify(channel);
     try {
       const response = await this.request<PromptResponseWire>("POST", `/api/sessions/${encodeURIComponent(sessionId)}/messages`, { content });
-      markPromptSent(channel.projector, response.streamId);
+      markPromptSent(channel.projector, streamIdOf(response));
+      // 波次 B3：turn 终态后重载条目——本地乐观轮次被受控条目（entryId/turnId 锚点）替换，
+      // 新一轮消息立刻获得 timeline 锚点（重试/导航/跨重启存活）
+      channel.pendingBranchReload = "";
     } catch (cause) {
       markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "发送失败");
       this.notify(channel);
@@ -1164,11 +1167,11 @@ export class IpcDataSource implements DesktopDataSource {
     this.consumePendingBranchReload(channel, envelope, sessionId);
   }
 
-  /** turn 终态（completed/failed/cancelled/interrupted）后执行挂起的分支条目重载 */
+  /** turn 终态后执行挂起的分支条目重载（failed 保留挂起：失败轮次的时间线错误行不覆盖） */
   private consumePendingBranchReload(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
     if (channel.pendingBranchReload === null) return;
-    if (envelope.type !== "turn.completed" && envelope.type !== "turn.failed"
-      && envelope.type !== "turn.cancelled" && envelope.type !== "turn.interrupted") return;
+    if (envelope.type !== "turn.completed" && envelope.type !== "turn.cancelled"
+      && envelope.type !== "turn.interrupted") return;
     const branchId = channel.pendingBranchReload === "" ? undefined : channel.pendingBranchReload;
     channel.pendingBranchReload = null;
     void this.reloadBranchEntries(sessionId, channel, branchId);
@@ -1266,4 +1269,9 @@ export class IpcDataSource implements DesktopDataSource {
 
 function pushChannelError(channel: ChatChannel, cause: unknown) {
   markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "加载失败");
+}
+
+/** PromptResponseWire 防御式取 streamId（202 响应必须携带） */
+function streamIdOf(response: PromptResponseWire): string {
+  return typeof response.streamId === "string" ? response.streamId : "";
 }

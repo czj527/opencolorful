@@ -19,6 +19,9 @@
     "tests/fixtures/sse/replay-sequence.ts",
     "tests/fixtures/pages/**",
     "tests/fixtures/lane-a4a/session-lane.ts",
-    "tests/e2e/pages/**"
+    "tests/e2e/pages/**",
+    // 波次 B3：分支数据层单测 import src/data/mock-source（经 ipc-source 触达
+    // Window/DOM 类型），与上方同族豁免；类型检查由主 tsconfig.json 覆盖。
+    "tests/unit/branch-data.test.ts"
   ]
 }
