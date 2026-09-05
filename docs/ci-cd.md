@@ -2,11 +2,12 @@
 
 ## 当前已落地
 
-`.github/workflows/quality.yml` 在 Pull Request、推送到 `main` 和手动触发时运行三个门禁：
+`.github/workflows/quality.yml` 在 Pull Request、推送到 `main` 和手动触发时运行四个门禁：
 
 1. **Governance**：分析 diff，按 `docs/change-impact.json` 检查文档收口和例外理由。
 2. **Typecheck, tests and builds**：Node 22.19、干净 `npm ci --legacy-peer-deps`、仓库 `npm run check`。
 3. **Browser E2E**：先构建插件包与 Web 客户端（`build:protocol` + `build:sdk` + `web:build`，E2E 依赖插件包 `dist/` 与 `web/dist/`），安装 Chromium 后从 `web/` 运行 Playwright。
+4. **Desktop true-chain smoke**（P1 波次 A · A3）：构建插件包与 Desktop 渲染层（`build:protocol` + `build:sdk` + `desktop:build`），在 `xvfb-run` 下从仓库根运行 `npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @smoke`——隔离 `OPENCOLORFUL_HOME`/`--user-data-dir` + 本地 stub Provider 的 Electron 真链最小流（引导 → 无 cwd 会话 → 首条消息 → 流式 → 中止 → 重启持久化）；失败上传 `desktop/test-artifacts/`（trace/截图/引导日志）。
 
 ## GitHub 仓库设置
 

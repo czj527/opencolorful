@@ -162,6 +162,8 @@ npm run test --workspace=web
 npm run web:build
 npx tsc -p tsconfig.build.json
 cd web; npx playwright test
+npm run desktop:test
+npm run desktop:build
 
 # ===== browser-use 实际交互验收（阶段新增功能验证）=====
 # 启动服务后，使用 browser-use（control-browser skill）打开 Web 工作台

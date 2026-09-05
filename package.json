@@ -26,7 +26,7 @@
     "cli": "tsx src/cli/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "check": "npm run check:docs && npm run check:pi-imports && npm run check:plugin-imports && npm run build:protocol && npm run build:sdk && npm run typecheck && npm run test && npm run build && npm run web:test && npm run web:build && npm run desktop:build",
+    "check": "npm run check:docs && npm run check:pi-imports && npm run check:plugin-imports && npm run build:protocol && npm run build:sdk && npm run typecheck && npm run test && npm run build && npm run web:test && npm run web:build && npm run desktop:test && npm run desktop:build",
     "desktop:dev": "npm run dev --workspace=@opencolorful/desktop",
     "desktop:build": "npm run build --workspace=@opencolorful/desktop",
     "desktop:start": "npm run start --workspace=@opencolorful/desktop",
@@ -34,7 +34,8 @@
     "web:dev": "npm run dev --workspace=web",
     "web:build": "npm run build --workspace=web",
     "web:test": "npm run test --workspace=web",
-    "test:skills-live": "vitest run --config vitest.live.config.ts"
+    "test:skills-live": "vitest run --config vitest.live.config.ts",
+    "desktop:test": "npm run test --workspace=@opencolorful/desktop"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.10",

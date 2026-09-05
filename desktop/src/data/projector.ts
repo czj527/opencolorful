@@ -392,6 +392,33 @@ export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
       }
       break;
     }
+    case "turn.failed":
+    case "turn.cancelled":
+    case "turn.interrupted": {
+      // Abort/失败终态：与 turn.completed 同样收尾，否则 UI 永远停在流式态
+      // （2026-09-01 真链实测：模型 401 与用户停止后发送按钮都卡死）
+      state.streaming = false;
+      const failed = type === "turn.failed";
+      const last = lastMessage(state);
+      if (last !== undefined && last.role === "assistant") {
+        replaceItem(state, last.id, {
+          ...last,
+          streaming: false,
+          meta: failed ? "生成失败" : "已停止",
+        });
+      }
+      const abortedThinkingId = `thinking-${streamKey}`;
+      const abortedThinkingIndex = indexById(state, abortedThinkingId);
+      const abortedThinking = abortedThinkingIndex !== -1 ? state.items[abortedThinkingIndex] : undefined;
+      if (abortedThinking?.type === "event" && abortedThinking.summary === "正在思考…") {
+        replaceItem(state, abortedThinkingId, { ...abortedThinking, summary: failed ? "思考中断" : "思考完成" });
+      }
+      if (failed) {
+        const detail = asString(payload["errorMessage"]) || asString(payload["message"]) || asString(payload["reason"]);
+        pushStatusEvent(state, `error-${envelope.eventId}`, "运行错误", detail === "" ? "本轮生成失败，请重试" : detail);
+      }
+      break;
+    }
     default:
       break;
   }

@@ -80,3 +80,33 @@ jobs:
           name: playwright-test-results
           path: web/test-results/
           retention-days: 7
+
+  desktop-smoke:
+    name: Desktop true-chain smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Use Node.js 22.19.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      # 真链前置构建：agent server 子进程经 workspace exports 解析插件包 dist；
+      # Electron 渲染层加载 desktop/dist/index.html（fixtures 以 OPENCOLORFUL_SERVER_URL
+      # 注入隔离后端，Electron 二进制由 npm ci 时 electron 包自动下载）
+      - name: Build plugin packages and desktop renderer
+        run: npm run build:protocol && npm run build:sdk && npm run desktop:build
+      # Linux runner 无显示服务：Electron 必须挂在 xvfb 下启动
+      - name: Run desktop true-chain smoke
+        run: xvfb-run --auto-servernum npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @smoke
+      - name: Upload desktop smoke failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-smoke-results
+          path: desktop/test-artifacts/
+          retention-days: 7
