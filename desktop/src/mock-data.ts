@@ -30,6 +30,15 @@ export interface ChatMessage {
   readonly body: string;
   readonly meta: string;
   readonly streaming?: boolean;
+  /**
+   * 波次 B3：稳定锚点（来自分支条目视图）。entryId 在 JSONL 中不可变，
+   * timeline 定位/轮次导航跨刷新与重启存活；流式中的本地条目无锚点。
+   */
+  readonly entryId?: string;
+  /** `turn-<userEntryId>`；user message 条目开启 turn，assistant 条目归属其 turn */
+  readonly turnId?: string;
+  /** 条目时间戳（ISO）；timeline 导航的相对时间来源 */
+  readonly timestamp?: string;
 }
 
 export interface ToolCall {
@@ -239,6 +248,9 @@ export const activityStatuses = [
 
 /* ---------- 会话 mock ---------- */
 
+/** 分支演示会话 id（mock-source 据此装载分支场景；桌面侧栏新增的演示会话行） */
+export const BRANCH_DEMO_SESSION_ID = "branch-demo";
+
 export const agents: readonly Agent[] = [
   { id: "yuan", name: "原", initial: "原", color: "#3aa96c", description: "在代码、记忆与长期计划之间保持连续性。", workspace: "D:\\PI-study\\opencolorful" },
   { id: "lin", name: "林间", initial: "林", color: "#5b8def", description: "负责研究、整理与把复杂问题讲清楚。", workspace: "D:\\PI-study\\references" },
@@ -251,6 +263,7 @@ export const initialThreads: readonly Thread[] = [
   { id: "plugin", title: "插件运行时复盘", preview: "权限快照与失败恢复的边界", time: "昨天", status: "quiet", agentId: "lin" },
   { id: "github", title: "GitHub 发布准备", preview: "README、仓库结构与安全清单", time: "周日", status: "quiet", agentId: "zi" },
   { id: "archived-demo", title: "已归档会话演示", preview: "用于验证归档区恢复", time: "08-15", status: "quiet", agentId: "lin", archivedAt: "2026-08-15T21:00:00+08:00" },
+  { id: BRANCH_DEMO_SESSION_ID, title: "分支演示：重生成与 Fork", preview: "两分支 · 重生成 · 切换", time: "刚刚", status: "active", agentId: "yuan" },
 ];
 
 export const initialTimeline: readonly TimelineItem[] = [
@@ -326,6 +339,53 @@ export const mockReplies: readonly string[] = [
   "收到。我会把执行细节留在事件层：思考、工具调用和文件变更都以摘要呈现，你可以随时展开检查，普通回复保持连续可读。",
   "好的，这一步我先读相关文件再动手。需要写入工作区时，我会在事件里请你确认；右侧工作台可以打开变更审查和终端。",
   "完成。本轮修改已经列入文件变更事件，diff 可以在右侧工作台逐个文件查看；如果有不满意的地方，直接指出，我会返工。",
+];
+
+/* ---------- 波次 B3：分支演示会话（Mock 分支场景脚本，与 B2 条目视图形状一致） ---------- */
+
+/** 分支演示场景的单条目（对齐 GET /api/sessions/:id/entries 的 SessionEntryView） */
+export interface BranchDemoEntry {
+  readonly entryId: string;
+  readonly parentId: string | null;
+  readonly turnId: string | null;
+  readonly type: string;
+  readonly role?: "user" | "assistant" | "toolResult";
+  readonly text: string;
+  readonly timestamp: string;
+}
+
+/** 分支演示场景的分支记录（对齐 SessionBranchSummary；entries 为该分支根→叶路径） */
+export interface BranchDemoBranch {
+  readonly branchId: string;
+  readonly leafPreview: string;
+  readonly entries: readonly BranchDemoEntry[];
+}
+
+/**
+ * 脚本化分支树（两分支，用于 Mock 分支切换 / 重生成 / Fork 场景）：
+ * root
+ *   ├─ e-u1（用户 · turn-e-u1）→ e-a1（助手 · 分支A继续 e-u2 → e-a2）   ← 分支A（默认当前）
+ *   └─ e-u1b（用户 · turn-e-u1b）→ e-a1b（助手）                        ← 分支B（turn1 的重生成兄弟）
+ */
+export const branchDemoBranches: readonly BranchDemoBranch[] = [
+  {
+    branchId: "e-a2",
+    leafPreview: "令牌按「基础色板 → 语义令牌 → 组件别名」三层组织，组件只引用语义层。",
+    entries: [
+      { entryId: "e-u1", parentId: null, turnId: "turn-e-u1", type: "message", role: "user", text: "帮我梳理桌面端亮暗主题的实现要点。", timestamp: "2026-09-05T09:30:00+08:00" },
+      { entryId: "e-a1", parentId: "e-u1", turnId: "turn-e-u1", type: "message", role: "assistant", text: "核心是语义令牌：组件不引用具体色值，只引用 --bg/--text 等语义层，暗色主题靠 data-theme 覆盖。", timestamp: "2026-09-05T09:30:20+08:00" },
+      { entryId: "e-u2", parentId: "e-a1", turnId: "turn-e-u2", type: "message", role: "user", text: "那令牌具体怎么分层？", timestamp: "2026-09-05T09:31:00+08:00" },
+      { entryId: "e-a2", parentId: "e-u2", turnId: "turn-e-u2", type: "message", role: "assistant", text: "令牌按「基础色板 → 语义令牌 → 组件别名」三层组织，组件只引用语义层。", timestamp: "2026-09-05T09:31:25+08:00" },
+    ],
+  },
+  {
+    branchId: "e-a1b",
+    leafPreview: "先用 data-theme 挂两套值，再把常用色收敛成语义令牌即可。",
+    entries: [
+      { entryId: "e-u1b", parentId: null, turnId: "turn-e-u1b", type: "message", role: "user", text: "给我一个更小的方案：亮暗主题最少要做哪些事？", timestamp: "2026-09-05T10:02:00+08:00" },
+      { entryId: "e-a1b", parentId: "e-u1b", turnId: "turn-e-u1b", type: "message", role: "assistant", text: "先用 data-theme 挂两套值，再把常用色收敛成语义令牌即可。", timestamp: "2026-09-05T10:02:15+08:00" },
+    ],
+  },
 ];
 
 export const dockFiles: readonly DockFile[] = [

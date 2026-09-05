@@ -16,6 +16,66 @@ import type {
 } from "../mock-data.js";
 import type { ChatSnapshot } from "./projector.js";
 
+/* ---- 波次 B3：会话分支 / 重生成 / Fork（对齐 B2 冻结契约 §3.3） ---- */
+
+/** GET /api/sessions/:id/tree 的单个分支摘要（branchId = 叶子条目 id） */
+export interface BranchSummaryView {
+  readonly branchId: string;
+  readonly leafEntryId: string;
+  readonly leafPreview: string;
+  readonly entryCount: number;
+  readonly updatedAt: string;
+  readonly isCurrent: boolean;
+}
+
+/** GET /api/sessions/:id/tree 响应视图（元数据 + 短预览，不含完整正文） */
+export interface BranchTreeView {
+  readonly currentBranchId: string | null;
+  readonly branches: readonly BranchSummaryView[];
+}
+
+/** GET /api/sessions/:id/entries 的单条目视图（分支路径根→叶 + turnId 分组） */
+export interface BranchEntryView {
+  readonly entryId: string;
+  readonly parentId: string | null;
+  /** `turn-<userEntryId>`；首个用户消息之前的条目为 null */
+  readonly turnId: string | null;
+  readonly type: string;
+  readonly role?: "user" | "assistant" | "toolResult";
+  readonly text: string;
+  readonly timestamp: string;
+  readonly toolCalls?: readonly {
+    readonly toolCallId: string;
+    readonly toolName: string;
+    readonly status: "completed" | "error";
+    readonly result?: string;
+  }[];
+}
+
+/** GET /api/sessions/:id/entries 响应视图 */
+export interface BranchEntriesView {
+  readonly branchId: string | null;
+  readonly currentBranchId: string | null;
+  readonly entries: readonly BranchEntryView[];
+}
+
+/** POST /api/sessions/:id/regenerate 202 响应视图 */
+export interface RegenerateResultView {
+  readonly status: string;
+  readonly sessionId: string;
+  readonly streamId: string;
+  readonly branchId: string;
+}
+
+/**
+ * 波次 B3：分支状态事件投影（session.branch.switched / session.branches.changed
+ * 到达 UI 的最小信号）。timeline 的条目重载由数据源内部完成；UI 只需在
+ * branchesChanged 后刷新分支树（isCurrent/entryCount 可能已变化）。
+ */
+export type BranchStateUpdate =
+  | { readonly kind: "switched"; readonly branchId: string }
+  | { readonly kind: "branchesChanged"; readonly reason: "regenerate" | "fork" | "switch" };
+
 /** T5：助理档案页聚合视图 */
 export interface AgentProfileView {
   readonly id: string;
@@ -335,6 +395,20 @@ export interface DesktopDataSource {
   sendPrompt(sessionId: string, content: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
   subscribeChat(sessionId: string, handler: (snapshot: ChatSnapshot) => void): () => void;
+
+  /* 波次 B3：分支树 / 条目 / 切换 / 重生成 / Fork（Mock 与 IPC 接口一致，wire-shape parity） */
+  getBranchTree(sessionId: string): Promise<BranchTreeView>;
+  getBranchEntries(sessionId: string, branchId?: string): Promise<BranchEntriesView>;
+  switchBranch(sessionId: string, branchId: string): Promise<void>;
+  regenerateMessage(sessionId: string, targetEntryId: string, text: string): Promise<void>;
+  /** Fork 成独立会话；返回新会话 id（201 响应含完整 SessionView，桌面端仅需 id 导航） */
+  forkSession(sessionId: string, targetEntryId?: string): Promise<string>;
+  /**
+   * 分支状态事件订阅（可选）：session.branch.switched / session.branches.changed
+   * 经各数据源的既有事件通道转发。注册即回调一次当前未知状态（null = 无更新），
+   * 与 subscribeConnection 的"注册即回调当前值"约定对齐。
+   */
+  subscribeBranchState?(sessionId: string, handler: (update: BranchStateUpdate | null) => void): () => void;
 
   /* 会话设置 / 模型 / 用量 */
   listModels(): Promise<readonly ModelOption[]>;

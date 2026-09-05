@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentChip } from "./components/AgentChip.js";
 import { AgentIdCard, type AssistantStatus } from "./components/AgentIdCard.js";
+import { BranchSwitcher } from "./components/BranchSwitcher.js";
 import { ChatView } from "./components/ChatView.js";
 import { Composer } from "./components/Composer.js";
 import { Dock, DockToggleButtons, type DockTool } from "./components/Dock.js";
@@ -396,6 +397,13 @@ export function App() {
     setPage("chat");
   }
 
+  /** 波次 B3：Fork 完成 → 选中新会话并刷新列表（服务端已建独立实例，含标题后缀） */
+  function navigateToFork(newSessionId: string) {
+    setThreadId(newSessionId);
+    setPage("chat");
+    if (source !== null) reloadThreads(source);
+  }
+
   function startNewThread() {
     setThreadId(NEW_THREAD);
     setDraft("");
@@ -675,6 +683,15 @@ export function App() {
                     <strong>{chatTitle}</strong>
                     <span>{workspaceLabel}</span>
                   </div>
+                  {/* 波次 B3：分支切换器（与线性 timeline 两视图分离；仅已落库会话显示） */}
+                  {!isNewThread && (
+                    <BranchSwitcher
+                      source={source}
+                      sessionId={threadId}
+                      running={streaming}
+                      onForked={navigateToFork}
+                    />
+                  )}
                   {sessionUsage !== null && <UsageBadge usage={sessionUsage} />}
                   <DockToggleButtons dock={dock} onToggle={toggleDock} />
                 </header>
@@ -771,6 +788,7 @@ export function App() {
                     onOpenDiff={onOpenDiff}
                     onStreamingChange={setStreaming}
                     onOpenLogs={openLogsWithReference}
+                    onForked={navigateToFork}
                   />
                 )}
               </div>

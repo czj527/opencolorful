@@ -2,6 +2,8 @@ import {
   activityLogs,
   agents,
   auditLogs,
+  BRANCH_DEMO_SESSION_ID,
+  branchDemoBranches,
   errorGroups,
   initialThreads,
   initialTimeline,
@@ -23,13 +25,43 @@ import {
   applyLocalUserMessage,
   createProjector,
   markPromptSent,
+  projectBranchEntries,
+  seedItems,
   snapshotOf,
+  type BranchEntry,
   type ChatSnapshot,
   type LiveEnvelope,
   type ProjectorState,
 } from "./projector.js";
-import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, ModelRef, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView, UsageSummaryFilterView, UsageSummaryView, UsageTokenTotals } from "./source.js";
-import type { AgentProfileView, AgentTemplateView, CreateAgentInput } from "./source.js";
+import type {
+  ActivityFilter,
+  ActivityPageResult,
+  AgentProfileView,
+  AgentTemplateView,
+  BranchEntriesView,
+  BranchEntryView,
+  BranchStateUpdate,
+  BranchSummaryView,
+  BranchTreeView,
+  ConnectionInfo,
+  CreateAgentInput,
+  DesktopDataSource,
+  LogsPageData,
+  MemoryAgentSettingsView,
+  MemoryPageData,
+  ModelOption,
+  ModelRef,
+  PreferencesView,
+  ProviderInput,
+  ProviderView,
+  SessionSettingsView,
+  SessionUsageView,
+  SubagentThreadCard,
+  SubagentTranscriptView,
+  UsageSummaryFilterView,
+  UsageSummaryView,
+  UsageTokenTotals,
+} from "./source.js";
 
 interface MockSession {
   readonly projector: ProjectorState;
@@ -37,6 +69,18 @@ interface MockSession {
   timers: number[];
   streamSeq: number;
   replyIndex: number;
+  /** 波次 B3：分支状态订阅者（mock 分支场景驱动） */
+  readonly branchHandlers: Set<(update: BranchStateUpdate) => void>;
+}
+
+/** 波次 B3：分支演示会话的可变运行状态（脚本化分支树 + 模拟 busy 409） */
+interface MockBranchState {
+  /** 当前分支在「脚本分支 + extra」序列中的下标 */
+  currentIndex: number;
+  /** 额外分支（fork 产物 / 重生成新分支），追加在脚本分支之后 */
+  extra: { branchId: string; leafPreview: string; entries: readonly BranchEntry[] }[];
+  /** 演示用：置真后下一次分支操作返回 409 SESSION_BUSY（setBranchBusy 测试钩子） */
+  busy: boolean;
 }
 
 /** T1：onboarding 模板 fixture（镜像服务端 BASE_COLOR_TEMPLATES 的形状与色系） */
@@ -169,6 +213,17 @@ function summarizeRecords(records: readonly MockUsageRecord[], days: number): Us
   };
 }
 
+/** 波次 B3：Mock 分支操作错误（对齐服务端稳定错误码；UI 按 code 分态） */
+class MockBranchError extends Error {
+  readonly code: "NOT_FOUND" | "INVALID_INPUT" | "SESSION_BUSY" | "CONFLICT";
+
+  constructor(code: "NOT_FOUND" | "INVALID_INPUT" | "SESSION_BUSY" | "CONFLICT", message: string) {
+    super(message);
+    this.name = "MockBranchError";
+    this.code = code;
+  }
+}
+
 /** Mock 数据源：fixture + 模拟事件流（与真实数据源走同一份 projector） */
 export class MockDataSource implements DesktopDataSource {
   readonly info: ConnectionInfo = { mode: "mock", connected: false, label: "离线 · mock 数据" };
@@ -226,10 +281,99 @@ export class MockDataSource implements DesktopDataSource {
     if (session === undefined) {
       const projector = createProjector(this.currentAgentName);
       if (sessionId === "desktop") projector.items = [...initialTimeline];
-      session = { projector, handlers: new Set(), timers: [], streamSeq: 0, replyIndex: 0 };
+      if (sessionId === BRANCH_DEMO_SESSION_ID) {
+        // 波次 B3：分支演示会话以受控条目投影（锚点齐备）作为初始 timeline
+        seedItems(projector, projectBranchEntries(this.branchDemoCurrent().entries, this.currentAgentName));
+      }
+      session = { projector, handlers: new Set(), timers: [], streamSeq: 0, replyIndex: 0, branchHandlers: new Set() };
       this.sessions.set(sessionId, session);
     }
     return session;
+  }
+
+  /* ---- 波次 B3：分支演示场景（多分支 / 切换 / 重生成 / Fork） ---- */
+
+  private branchState = new Map<string, MockBranchState>();
+
+  private branchStateFor(sessionId: string): MockBranchState {
+    let state = this.branchState.get(sessionId);
+    if (state === undefined) {
+      state = { currentIndex: 0, extra: [], busy: false };
+      this.branchState.set(sessionId, state);
+    }
+    return state;
+  }
+
+  private isBranchScenario(sessionId: string): boolean {
+    return sessionId === BRANCH_DEMO_SESSION_ID || this.branchState.has(sessionId);
+  }
+
+  /** 当前分支的全部条目（脚本分支 + extra） */
+  private branchDemoCurrent(): { branchId: string; leafPreview: string; entries: readonly BranchEntry[] } {
+    const state = this.branchStateFor(BRANCH_DEMO_SESSION_ID);
+    const scripted: readonly { branchId: string; leafPreview: string; entries: readonly BranchEntry[] }[] = [
+      ...branchDemoBranches.map((branch) => ({ branchId: branch.branchId, leafPreview: branch.leafPreview, entries: branch.entries as readonly BranchEntry[] })),
+      ...state.extra,
+    ];
+    const branch = scripted[state.currentIndex] ?? scripted[0];
+    if (branch === undefined) return { branchId: "", leafPreview: "", entries: [] };
+    return branch;
+  }
+
+  /** 分支树视图（含 isCurrent 高亮；空会话/非分支会话 → branches: []） */
+  private branchTreeOf(sessionId: string): BranchTreeView {
+    if (!this.isBranchScenario(sessionId)) return { currentBranchId: null, branches: [] };
+    const state = this.branchStateFor(sessionId);
+    const scripted: readonly { branchId: string; leafPreview: string; entries: readonly BranchEntry[] }[] = [
+      ...branchDemoBranches.map((branch) => ({ branchId: branch.branchId, leafPreview: branch.leafPreview, entries: branch.entries as readonly BranchEntry[] })),
+      ...state.extra,
+    ];
+    const currentBranchId = this.branchDemoCurrent().branchId;
+    const branches: BranchSummaryView[] = scripted.map((branch) => ({
+      branchId: branch.branchId,
+      leafEntryId: branch.branchId,
+      leafPreview: branch.leafPreview,
+      entryCount: branch.entries.length,
+      updatedAt: branch.entries[branch.entries.length - 1]?.timestamp ?? "",
+      isCurrent: branch.branchId === currentBranchId,
+    }));
+    return { currentBranchId, branches };
+  }
+
+  private branchEntriesOf(sessionId: string, branchId?: string): BranchEntriesView {
+    if (!this.isBranchScenario(sessionId)) return { branchId: null, currentBranchId: null, entries: [] };
+    const tree = this.branchTreeOf(sessionId);
+    const target = branchId !== undefined && branchId !== "" ? branchId : tree.currentBranchId;
+    const state = this.branchStateFor(sessionId);
+    const scripted: readonly { branchId: string; entries: readonly BranchEntry[] }[] = [
+      ...branchDemoBranches,
+      ...state.extra,
+    ];
+    const branch = scripted.find((item) => item.branchId === target) ?? scripted[0];
+    return {
+      branchId: branch?.branchId ?? null,
+      currentBranchId: tree.currentBranchId,
+      entries: branch ? [...branch.entries] : [],
+    };
+  }
+
+  private notifyBranchState(sessionId: string, update: BranchStateUpdate): void {
+    if (!this.isBranchScenario(sessionId)) return;
+    const session = this.sessionFor(sessionId);
+    for (const handler of session.branchHandlers) handler(update);
+  }
+
+  private emitBranchEvent(session: MockSession, sessionId: string, type: "session.branch.switched" | "session.branches.changed", payload: Record<string, unknown>): void {
+    session.streamSeq += 1;
+    if (type === "session.branch.switched") {
+      this.notifyBranchState(sessionId, { kind: "switched", branchId: String(payload["branchId"] ?? "") });
+      return;
+    }
+    const reason = payload["reason"];
+    this.notifyBranchState(sessionId, {
+      kind: "branchesChanged",
+      reason: reason === "fork" || reason === "switch" ? reason : "regenerate",
+    });
   }
 
   private emit(session: MockSession, type: string, payload: unknown, streamId: string | null) {
@@ -379,6 +523,196 @@ export class MockDataSource implements DesktopDataSource {
     return () => {
       session.handlers.delete(handler);
     };
+  }
+
+  /* ---- 波次 B3：分支场景（Mock 与 IPC wire-shape parity） ---- */
+
+  getBranchTree(sessionId: string): Promise<BranchTreeView> {
+    return Promise.resolve(this.branchTreeOf(sessionId));
+  }
+
+  getBranchEntries(sessionId: string, branchId?: string): Promise<BranchEntriesView> {
+    return Promise.resolve(this.branchEntriesOf(sessionId, branchId));
+  }
+
+  switchBranch(sessionId: string, branchId: string): Promise<void> {
+    if (!this.isBranchScenario(sessionId)) return Promise.resolve();
+    const state = this.branchStateFor(sessionId);
+    try {
+      this.assertBranchIdle(sessionId, state);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const tree = this.branchTreeOf(sessionId);
+    if (!tree.branches.some((branch) => branch.branchId === branchId)) {
+      return Promise.reject(new MockBranchError("NOT_FOUND", "引用的会话节点不存在，请刷新后重试"));
+    }
+    const index = this.allBranchIds(sessionId).indexOf(branchId);
+    state.currentIndex = Math.max(0, index);
+    // 服务端语义：switch 后会话流收到 switched + branches.changed{switch}
+    this.emitBranchEvent(this.sessionFor(sessionId), sessionId, "session.branch.switched", { branchId });
+    this.emitBranchEvent(this.sessionFor(sessionId), sessionId, "session.branches.changed", { reason: "switch" });
+    this.resyncBranchProjector(sessionId);
+    return Promise.resolve();
+  }
+
+  regenerateMessage(sessionId: string, targetEntryId: string, text: string): Promise<void> {
+    const state = this.branchStateFor(sessionId);
+    try {
+      this.assertBranchIdle(sessionId, state);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const branch = this.branchDemoCurrent();
+    // 与服务端一致：目标不存在 → 404；非用户消息目标沿父链解析到所属轮次的用户条目
+    const target = branch.entries.find((item) => item.entryId === targetEntryId);
+    if (target === undefined) {
+      return Promise.reject(new MockBranchError("NOT_FOUND", "引用的会话节点不存在，请刷新后重试"));
+    }
+    let entry = target;
+    while (entry.role !== "user") {
+      if (entry.parentId === null) {
+        return Promise.reject(new MockBranchError("INVALID_INPUT", "只能从用户消息重新生成"));
+      }
+      const parent = branch.entries.find((item) => item.entryId === entry.parentId);
+      if (parent === undefined) {
+        return Promise.reject(new MockBranchError("NOT_FOUND", "引用的会话节点不存在，请刷新后重试"));
+      }
+      entry = parent;
+    }
+    if (entry.turnId === null) {
+      return Promise.reject(new MockBranchError("INVALID_INPUT", "只能从用户消息重新生成"));
+    }
+    // 脚本化：与目标同父的脚本兄弟分支视为重生成产物（turn-e-u1 → e-u1b 分支）；
+    // 无预置兄弟时按真实语义新建兄弟分支（同父新用户条目 + 助手回复）
+    const session = this.sessionFor(sessionId);
+    const scriptedSibling = branchDemoBranches.find((item) =>
+      item.entries.some((itemEntry) => itemEntry.parentId === entry.parentId && itemEntry.role === "user" && itemEntry.entryId !== entry.entryId));
+    const parentId = entry.parentId;
+    const newEntryId = scriptedSibling !== undefined
+      ? scriptedSibling.branchId
+      : `e-regen-${++this.idCounter}`;
+    const newBranchId = newEntryId;
+    if (scriptedSibling === undefined) {
+      const prefix = branch.entries.slice(0, branch.entries.findIndex((item) => item.entryId === entry.entryId) + 1);
+      state.extra.push({
+        branchId: newBranchId,
+        leafPreview: `已按新的表述重新生成：${text.slice(0, 72)}`,
+        entries: [
+          ...prefix,
+          { entryId: newEntryId, parentId, turnId: entry.turnId, type: "message", role: "user" as const, text, timestamp: new Date().toISOString() },
+          {
+            entryId: `e-regen-reply-${this.idCounter}`, parentId: newEntryId, turnId: entry.turnId,
+            type: "message", role: "assistant" as const, text: `已按新的表述重新生成：${text.slice(0, 24)}`,
+            timestamp: new Date().toISOString(),
+          } as BranchEntry,
+        ],
+      });
+    }
+    state.currentIndex = this.allBranchIds(sessionId).indexOf(newBranchId);
+    // 重生成走正常 turn 流（乐观条目 + markPromptSent + 完整事件序列），随后切到新分支
+    this.emitBranchEvent(session, sessionId, "session.branches.changed", { reason: "regenerate" });
+    this.runMockRegenerateTurn(session, sessionId, text, newBranchId);
+    return Promise.resolve();
+  }
+
+  forkSession(sessionId: string, targetEntryId?: string): Promise<string> {
+    const state = this.branchStateFor(sessionId);
+    try {
+      this.assertBranchIdle(sessionId, state);
+    } catch (cause) {
+      return Promise.reject(cause);
+    }
+    const branch = this.branchDemoCurrent();
+    if (branch.entries.length === 0) {
+      return Promise.reject(new MockBranchError("INVALID_INPUT", "空会话无法 Fork"));
+    }
+    if (targetEntryId !== undefined && !branch.entries.some((item) => item.entryId === targetEntryId)) {
+      return Promise.reject(new MockBranchError("NOT_FOUND", "引用的会话节点不存在，请刷新后重试"));
+    }
+    const cutIndex = targetEntryId !== undefined
+      ? branch.entries.findIndex((item) => item.entryId === targetEntryId)
+      : branch.entries.length - 1;
+    const forkEntries = branch.entries.slice(0, cutIndex + 1);
+    state.extra.push({
+      branchId: `fork-${++this.idCounter}`,
+      leafPreview: forkEntries[forkEntries.length - 1]?.text.slice(0, 80) ?? "",
+      entries: forkEntries,
+    });
+    const newSessionId = `branch-fork-${++this.idCounter}`;
+    // 与服务端一致：fork 建新会话（完整可交互，标题带 Fork 后缀），源会话流广播 branches.changed{fork}
+    this.branchState.set(newSessionId, { currentIndex: this.allBranchIds(sessionId).length - 1, extra: [], busy: false });
+    const forkSessionState = this.sessionFor(newSessionId);
+    seedItems(forkSessionState.projector, projectBranchEntries(forkEntries, this.currentAgentName));
+    const sourceThread = this.threads.find((thread) => thread.id === sessionId);
+    this.threads.unshift({
+      id: newSessionId,
+      title: `${sourceThread?.title ?? "会话"}（Fork）`,
+      preview: sourceThread?.preview ?? "Fork 会话",
+      time: "刚刚",
+      status: "active",
+      agentId: sourceThread?.agentId ?? null,
+    });
+    this.emitBranchEvent(this.sessionFor(sessionId), sessionId, "session.branches.changed", { reason: "fork" });
+    return Promise.resolve(newSessionId);
+  }
+
+  subscribeBranchState(sessionId: string, handler: (update: BranchStateUpdate | null) => void): () => void {
+    const session = this.sessionFor(sessionId);
+    session.branchHandlers.add(handler);
+    return () => {
+      session.branchHandlers.delete(handler);
+    };
+  }
+
+  /** 演示/测试钩子：置真后下一次分支操作 409（对齐 SESSION_BUSY 冻结文案） */
+  setBranchBusy(sessionId: string, busy: boolean): void {
+    if (!this.isBranchScenario(sessionId)) return;
+    this.branchStateFor(sessionId).busy = busy;
+  }
+
+  private assertBranchIdle(sessionId: string, state: MockBranchState): void {
+    if (state.busy || this.sessionFor(sessionId).projector.streaming) {
+      throw new MockBranchError("SESSION_BUSY", "会话正在运行，请先停止后再操作");
+    }
+  }
+
+  private allBranchIds(sessionId: string): readonly string[] {
+    return this.branchTreeOf(sessionId).branches.map((branch) => branch.branchId);
+  }
+
+  /** 分支操作后把 projector timeline 重同步为当前分支的受控条目 */
+  private resyncBranchProjector(sessionId: string): void {
+    if (!this.isBranchScenario(sessionId)) return;
+    const session = this.sessionFor(sessionId);
+    if (session.projector.streaming || session.projector.pendingPrompt) return;
+    seedItems(session.projector, projectBranchEntries(this.branchEntriesOf(sessionId).entries, this.currentAgentName));
+    this.notify(session);
+  }
+
+  /** 重生成的 turn 流：乐观用户条目 → markPromptSent → 完成/终态（与 sendPrompt 同语义） */
+  private runMockRegenerateTurn(session: MockSession, sessionId: string, text: string, newBranchId: string): void {
+    const projector = session.projector;
+    applyLocalUserMessage(projector, text);
+    this.notify(session);
+    const streamId = `mock-stream-${session.streamSeq + 1}`;
+    this.later(session, 150, () => {
+      markPromptSent(projector, streamId);
+      this.emit(session, "turn.started", { turnId: "mock-turn" }, streamId);
+    });
+    const reply = `已按新的表述重新生成：${text.slice(0, 24)}`;
+    this.later(session, 500, () => {
+      this.emit(session, "message.started", { role: "assistant" }, streamId);
+    });
+    this.later(session, 700, () => {
+      this.emit(session, "message.completed", { role: "assistant", content: reply }, streamId);
+    });
+    this.later(session, 850, () => {
+      this.emit(session, "turn.completed", { turnId: "mock-turn", usage: { input: 300, output: 160, cacheRead: 0, cacheWrite: 0, totalTokens: 460 } }, streamId);
+      // turn 终态后切到新分支的受控条目视图（锚点恢复）
+      seedItems(projector, projectBranchEntries(this.branchEntriesOf(sessionId, newBranchId).entries, this.currentAgentName));
+      this.notify(session);
+    });
   }
 
   getMemoryData(_agentId: string, query?: string): Promise<MemoryPageData> {

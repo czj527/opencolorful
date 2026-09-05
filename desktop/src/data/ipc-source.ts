@@ -13,9 +13,11 @@ import {
   createProjector,
   markPromptFailed,
   markPromptSent,
+  projectBranchEntries,
   projectHistory,
   seedItems,
   snapshotOf,
+  type BranchEntry,
   type ChatSnapshot,
   type HistoryEntry,
   type LiveEnvelope,
@@ -26,6 +28,10 @@ import type {
   ActivityPageResult,
   AgentProfileView,
   AgentTemplateView,
+  BranchEntriesView,
+  BranchEntryView,
+  BranchStateUpdate,
+  BranchTreeView,
   ConnectionInfo,
   CreateAgentInput,
   DesktopDataSource,
@@ -64,11 +70,72 @@ interface SessionViewWire {
   readonly agentId: string | null;
   readonly workspaceCwd: string | null;
   readonly messageEntries: readonly HistoryEntry[];
+  /** 波次 B2：SessionView 附加字段（entries 优先作为历史投影来源） */
+  readonly currentBranchId?: string | null;
+  readonly entries?: readonly BranchEntryWire[];
+  readonly sourceSessionId?: string | null;
 }
 
 interface PromptResponseWire {
   readonly status: string;
   readonly streamId: string;
+}
+
+/* ---- 波次 B3：分支端点 Wire 形状（服务端 src/contracts/session-branch.ts 的防御式镜像） ---- */
+
+interface BranchSummaryWire {
+  readonly branchId?: unknown;
+  readonly leafEntryId?: unknown;
+  readonly leafPreview?: unknown;
+  readonly entryCount?: unknown;
+  readonly updatedAt?: unknown;
+  readonly isCurrent?: unknown;
+}
+
+interface BranchTreeWire {
+  readonly currentBranchId?: unknown;
+  readonly branches?: unknown;
+}
+
+interface BranchEntryWire {
+  readonly entryId?: unknown;
+  readonly parentId?: unknown;
+  readonly turnId?: unknown;
+  readonly type?: unknown;
+  readonly role?: unknown;
+  readonly text?: unknown;
+  readonly timestamp?: unknown;
+  readonly toolCalls?: unknown;
+}
+
+interface BranchEntriesWire {
+  readonly branchId?: unknown;
+  readonly currentBranchId?: unknown;
+  readonly entries?: unknown;
+}
+
+interface RegenerateResponseWire {
+  readonly status?: unknown;
+  readonly sessionId?: unknown;
+  readonly streamId?: unknown;
+  readonly branchId?: unknown;
+}
+
+/** 服务端稳定错误码（ApiError.code；B0 §3.4 冻结矩阵的 renderer 侧只读感知） */
+type ApiErrorCode = "NOT_FOUND" | "INVALID_INPUT" | "SESSION_BUSY" | "CONFLICT" | string;
+
+/** 分支操作失败：保留服务端稳定错误码供 UI 分态（409 busy → 停止按钮 / 404 → 刷新） */
+export class BranchOperationError extends Error {
+  readonly code: ApiErrorCode;
+  /** 与 CorrelatedError 相同的诊断引用（分支操作失败点由 request 统一签发/透传） */
+  readonly correlation: ErrorCorrelation | null;
+
+  constructor(code: ApiErrorCode, message: string, correlation: ErrorCorrelation | null = null) {
+    super(message);
+    this.name = "BranchOperationError";
+    this.code = code;
+    this.correlation = correlation;
+  }
 }
 
 const DECOR_COLORS: Record<string, string> = {
@@ -103,6 +170,74 @@ function unwrap<T>(value: unknown, key: string): T {
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }
+
+/* ---- 波次 B3：分支 Wire → 视图映射（防御式；形状分歧按缺失字段兜底，不抛错） ---- */
+
+function asStringOrDefault(value: unknown, fallback: string): string {
+  return typeof value === "string" && value !== "" ? value : fallback;
+}
+
+function mapBranchSummary(wire: BranchSummaryWire, index: number): import("./source.js").BranchSummaryView {
+  const leafEntryId = asStringOrDefault(wire.branchId, `branch-unknown-${index}`);
+  return {
+    branchId: leafEntryId,
+    leafEntryId: asStringOrDefault(wire.leafEntryId, leafEntryId),
+    leafPreview: typeof wire.leafPreview === "string" ? wire.leafPreview : "",
+    entryCount: typeof wire.entryCount === "number" ? wire.entryCount : 0,
+    updatedAt: typeof wire.updatedAt === "string" ? wire.updatedAt : "",
+    isCurrent: wire.isCurrent === true,
+  };
+}
+
+function mapBranchTree(wire: BranchTreeWire): BranchTreeView {
+  const branches = asArray<BranchSummaryWire>(wire.branches).map(mapBranchSummary);
+  const current = typeof wire.currentBranchId === "string" ? wire.currentBranchId : null;
+  return { currentBranchId: current, branches };
+}
+
+function mapBranchToolCalls(value: unknown): BranchEntryView["toolCalls"] {
+  const rows = asArray<Record<string, unknown>>(value);
+  if (rows.length === 0) return undefined;
+  return rows.map((row) => ({
+    toolCallId: String(row["toolCallId"] ?? ""),
+    toolName: String(row["toolName"] ?? ""),
+    status: row["status"] === "error" ? ("error" as const) : ("completed" as const),
+    ...(typeof row["result"] === "string" ? { result: row["result"] as string } : {}),
+  }));
+}
+
+function mapBranchEntry(wire: BranchEntryWire, index: number): BranchEntryView {
+  const role = wire.role === "user" || wire.role === "assistant" || wire.role === "toolResult" ? wire.role : undefined;
+  const toolCalls = mapBranchToolCalls(wire.toolCalls);
+  return {
+    entryId: asStringOrDefault(wire.entryId, `entry-unknown-${index}`),
+    parentId: typeof wire.parentId === "string" ? wire.parentId : null,
+    turnId: typeof wire.turnId === "string" ? wire.turnId : null,
+    type: typeof wire.type === "string" ? wire.type : "message",
+    ...(role !== undefined ? { role } : {}),
+    text: typeof wire.text === "string" ? wire.text : "",
+    timestamp: typeof wire.timestamp === "string" ? wire.timestamp : "",
+    ...(toolCalls !== undefined ? { toolCalls } : {}),
+  };
+}
+
+function mapBranchEntries(wire: BranchEntriesWire): BranchEntriesView {
+  const branchId = typeof wire.branchId === "string" ? wire.branchId : null;
+  const current = typeof wire.currentBranchId === "string" ? wire.currentBranchId : null;
+  return {
+    branchId,
+    currentBranchId: current,
+    entries: asArray<BranchEntryWire>(wire.entries).map(mapBranchEntry),
+  };
+}
+
+/** SessionView.entries（SessionEntryView[]）→ 分支条目（同一形状，仅收紧 unknown） */
+function sessionEntriesAsBranchEntries(value: unknown): BranchEntryView[] {
+  return asArray<BranchEntryWire>(value).map(mapBranchEntry);
+}
+
+/** 波次 B3：分支路由路径（失败时保留稳定错误码；B0 §3.4 冻结矩阵） */
+const BRANCH_API_PATH_RE = /\/api\/sessions\/[^/]+\/(tree|entries|regenerate|fork|branch\/switch)$/;
 
 /* ---- A5 诊断关联：IPC 失败点签发/透传 correlation 引用 ----
  *
@@ -166,6 +301,13 @@ interface ChatChannel {
   pending: LiveEnvelope[];
   /** 当前 pendingFlush 的调度句柄；null 表示无进行中的合批窗口 */
   flushToken: { cancel: () => void } | null;
+  /** 波次 B3：分支状态订阅者（session.branch.* 事件到达时通知 UI 刷新分支树） */
+  readonly branchHandlers: Set<(update: BranchStateUpdate) => void>;
+  /**
+   * 波次 B3：turn 终态后重载条目（regenerate 切到新分支后线性化 / 流式中切换延迟重载）。
+   * 值 = 待重载的 branchId（"" 表示当前分支）。
+   */
+  pendingBranchReload: string | null;
 }
 
 /** 后端可达性巡检间隔（连接状态动态化的慢路径；请求成功/失败是快路径） */
@@ -250,13 +392,15 @@ export class IpcDataSource implements DesktopDataSource {
     if (!result.ok) {
       // 网络层失败（不可达/502）立即转离线，不等下一次巡检
       if (result.status === 0 || result.status === 502) this.setConnection(false);
-      const data = result.data as { message?: string } | null;
+      const data = result.data as { message?: string; code?: string } | null;
       // A5：主进程对失败的 IPC 请求签发诊断引用（落 shell.log）随响应带回，优先复用
       const diagRef = (result as unknown as { diagRef?: unknown }).diagRef;
-      throw new CorrelatedError(
-        data?.message ?? `请求失败（${result.status}）`,
-        correlationForPath(path, typeof diagRef === "string" && diagRef !== "" ? diagRef : undefined),
-      );
+      const correlation = correlationForPath(path, typeof diagRef === "string" && diagRef !== "" ? diagRef : undefined);
+      // 波次 B3：分支路由失败保留服务端稳定错误码（B0 §3.4），UI 据此分态（busy → 停止 / 404 → 刷新）
+      if (BRANCH_API_PATH_RE.test(path) && typeof data?.code === "string" && data.code !== "") {
+        throw new BranchOperationError(data.code, data?.message ?? `请求失败（${result.status}）`, correlation);
+      }
+      throw new CorrelatedError(data?.message ?? `请求失败（${result.status}）`, correlation);
     }
     this.setConnection(true);
     // api-proxy 对"HTTP 200 + 非 JSON 响应"的包装：显式抛错，不当空数据静默（台账 #8）
@@ -366,7 +510,10 @@ export class IpcDataSource implements DesktopDataSource {
     this.notify(channel);
     try {
       const response = await this.request<PromptResponseWire>("POST", `/api/sessions/${encodeURIComponent(sessionId)}/messages`, { content });
-      markPromptSent(channel.projector, response.streamId);
+      markPromptSent(channel.projector, streamIdOf(response));
+      // 波次 B3：turn 终态后重载条目——本地乐观轮次被受控条目（entryId/turnId 锚点）替换，
+      // 新一轮消息立刻获得 timeline 锚点（重试/导航/跨重启存活）
+      channel.pendingBranchReload = "";
     } catch (cause) {
       markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "发送失败");
       this.notify(channel);
@@ -388,34 +535,111 @@ export class IpcDataSource implements DesktopDataSource {
     const channel = this.chatFor(sessionId);
     channel.handlers.add(handler);
     this.ensureEventRouter();
-    if (!channel.historyLoaded) {
-      channel.historyLoaded = true;
-      void this.request<SessionViewWire>("GET", `/api/sessions/${encodeURIComponent(sessionId)}`)
-        .then((session) => {
-          channel.projector.agentName = this.agentNameOf(session.agentId);
-          seedItems(channel.projector, projectHistory(session.messageEntries, channel.projector.agentName));
-          this.notify(channel);
-        })
-        .catch((cause: unknown) => {
-          pushChannelError(channel, cause);
-          this.notify(channel);
-        });
-      channel.sseSubId = this.api.subscribeEvents(`/api/sessions/${encodeURIComponent(sessionId)}/events`);
-    }
+    this.ensureChatStream(channel, sessionId);
     handler(snapshotOf(channel.projector));
     return () => {
       channel.handlers.delete(handler);
-      if (channel.handlers.size === 0) {
-        // 取消订阅即取消合批窗口：不再消费该 channel 的排队事件
-        if (channel.flushToken !== null) {
-          channel.flushToken.cancel();
-          channel.flushToken = null;
-        }
-        channel.pending.length = 0;
-        if (channel.sseSubId !== null) this.api.unsubscribeEvents(channel.sseSubId);
-        this.chats.delete(sessionId);
-      }
+      this.maybeDisposeChannel(sessionId, channel);
     };
+  }
+
+  /* ---- 波次 B3：分支树 / 条目 / 切换 / 重生成 / Fork ---- */
+
+  async getBranchTree(sessionId: string): Promise<BranchTreeView> {
+    const data = await this.request<unknown>("GET", `/api/sessions/${encodeURIComponent(sessionId)}/tree`);
+    return mapBranchTree(data as BranchTreeWire);
+  }
+
+  async getBranchEntries(sessionId: string, branchId?: string): Promise<BranchEntriesView> {
+    const query = branchId !== undefined && branchId !== "" ? `?branchId=${encodeURIComponent(branchId)}` : "";
+    const data = await this.request<unknown>(
+      "GET",
+      `/api/sessions/${encodeURIComponent(sessionId)}/entries${query}`,
+    );
+    return mapBranchEntries(data as BranchEntriesWire);
+  }
+
+  async switchBranch(sessionId: string, branchId: string): Promise<void> {
+    await this.request("POST", `/api/sessions/${encodeURIComponent(sessionId)}/branch/switch`, { branchId });
+    // 事件驱动重载为主（session.branch.switched），这里兜底立即重载一次：
+    // SSE 帧丢失/重连窗口下 UI 也能落到正确分支（幂等 GET，重复无害）
+    await this.reloadBranchEntries(sessionId, this.chatFor(sessionId), branchId);
+  }
+
+  async regenerateMessage(sessionId: string, targetEntryId: string, text: string): Promise<void> {
+    const channel = this.chatFor(sessionId);
+    applyLocalUserMessage(channel.projector, text);
+    this.notify(channel);
+    try {
+      const response = await this.request<RegenerateResponseWire>(
+        "POST",
+        `/api/sessions/${encodeURIComponent(sessionId)}/regenerate`,
+        { targetEntryId, text },
+      );
+      const streamId = typeof response.streamId === "string" ? response.streamId : "";
+      if (streamId === "") throw new BranchOperationError("INTERNAL_ERROR", "重新生成未返回事件流，请稍后重试");
+      markPromptSent(channel.projector, streamId);
+      // turn 终态后重载条目：本地乐观轮次被新分支的受控条目（带锚点）替换
+      channel.pendingBranchReload = "";
+    } catch (cause) {
+      markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "重新生成失败");
+      this.notify(channel);
+      throw cause;
+    }
+  }
+
+  async forkSession(sessionId: string, targetEntryId?: string): Promise<string> {
+    const view = await this.request<SessionViewWire>(
+      "POST",
+      `/api/sessions/${encodeURIComponent(sessionId)}/fork`,
+      targetEntryId !== undefined && targetEntryId !== "" ? { targetEntryId } : {},
+    );
+    if (typeof view.id !== "string" || view.id === "") {
+      throw new BranchOperationError("INTERNAL_ERROR", "Fork 响应缺少新会话 id");
+    }
+    return view.id;
+  }
+
+  subscribeBranchState(sessionId: string, handler: (update: BranchStateUpdate | null) => void): () => void {
+    const channel = this.chatFor(sessionId);
+    this.ensureEventRouter();
+    this.ensureChatStream(channel, sessionId);
+    channel.branchHandlers.add(handler);
+    return () => {
+      channel.branchHandlers.delete(handler);
+      this.maybeDisposeChannel(sessionId, channel);
+    };
+  }
+
+  /**
+   * 重载指定分支（缺省当前分支）的条目并整表重投影：timeline 回到
+   * 「当前分支根→叶」的受控视图（条目锚点恢复，轮次导航可用）。
+   * 流式中的会话跳过即时重载（避免打断在途流），改为挂起至 turn 终态。
+   */
+  private async reloadBranchEntries(sessionId: string, channel: ChatChannel, branchId?: string): Promise<void> {
+    if (channel.projector.streaming || channel.projector.pendingPrompt) {
+      channel.pendingBranchReload = branchId ?? "";
+      return;
+    }
+    channel.pendingBranchReload = null;
+    try {
+      const view = await this.getBranchEntries(sessionId, branchId);
+      seedItems(channel.projector, projectBranchEntries(view.entries, channel.projector.agentName));
+      this.notify(channel);
+    } catch {
+      // 条目重载失败保留当前投影（树刷新由 UI 层的分支状态处理负责）
+    }
+  }
+
+  private maybeDisposeChannel(sessionId: string, channel: ChatChannel): void {
+    if (channel.handlers.size !== 0 || channel.branchHandlers.size !== 0) return;
+    if (channel.flushToken !== null) {
+      channel.flushToken.cancel();
+      channel.flushToken = null;
+    }
+    channel.pending.length = 0;
+    if (channel.sseSubId !== null) this.api.unsubscribeEvents(channel.sseSubId);
+    this.chats.delete(sessionId);
   }
 
   async getMemoryData(agentId: string, query?: string): Promise<MemoryPageData> {
@@ -889,10 +1113,33 @@ export class IpcDataSource implements DesktopDataSource {
         projector: createProjector(this.agentNameOf(null)),
         handlers: new Set(), sseSubId: null, historyLoaded: false,
         pending: [], flushToken: null,
+        branchHandlers: new Set(), pendingBranchReload: null,
       };
       this.chats.set(sessionId, channel);
     }
     return channel;
+  }
+
+  /** 历史装载 + SSE 订阅（subscribeChat 与 subscribeBranchState 共用；幂等） */
+  private ensureChatStream(channel: ChatChannel, sessionId: string): void {
+    if (channel.historyLoaded) return;
+    channel.historyLoaded = true;
+    const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+    void this.request<SessionViewWire>("GET", path)
+      .then((session) => {
+        channel.projector.agentName = this.agentNameOf(session.agentId);
+        // 波次 B3：entries（条目视图，带不可变锚点）优先；缺失时回退 messageEntries
+        const entries = session.entries !== undefined && Array.isArray(session.entries) && session.entries.length > 0
+          ? projectBranchEntries(sessionEntriesAsBranchEntries(session.entries), channel.projector.agentName)
+          : projectHistory(session.messageEntries, channel.projector.agentName);
+        seedItems(channel.projector, entries);
+        this.notify(channel);
+      })
+      .catch((cause: unknown) => {
+        pushChannelError(channel, cause);
+        this.notify(channel);
+      });
+    channel.sseSubId = this.api.subscribeEvents(`${path}/events`);
   }
 
   private notify(channel: ChatChannel) {
@@ -903,24 +1150,40 @@ export class IpcDataSource implements DesktopDataSource {
   /**
    * SSE 事件按 channel 合批：leading 事件立即应用并通知（保住首个 token 的呈现延迟），
    * 同帧（rAF 不可用退 50ms）内到达的后续事件入队，trailing flush 时依次应用、只通知一次。
+   * 波次 B3：turn 终态若挂有分支重载（pendingBranchReload），flush 后触发条目重载。
    */
-  private enqueueChatEvent(channel: ChatChannel, envelope: LiveEnvelope): void {
+  private enqueueChatEvent(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
     if (channel.flushToken === null) {
-      applyEvent(channel.projector, envelope);
-      this.notify(channel);
-      channel.flushToken = this.scheduleFlush(channel);
+      this.applyChatEvent(channel, envelope, sessionId);
+      channel.flushToken = this.scheduleFlush(channel, sessionId);
     } else {
       channel.pending.push(envelope);
     }
   }
 
-  private scheduleFlush(channel: ChatChannel): { cancel: () => void } {
+  private applyChatEvent(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
+    applyEvent(channel.projector, envelope);
+    this.notify(channel);
+    this.consumePendingBranchReload(channel, envelope, sessionId);
+  }
+
+  /** turn 终态后执行挂起的分支条目重载（failed 保留挂起：失败轮次的时间线错误行不覆盖） */
+  private consumePendingBranchReload(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
+    if (channel.pendingBranchReload === null) return;
+    if (envelope.type !== "turn.completed" && envelope.type !== "turn.cancelled"
+      && envelope.type !== "turn.interrupted") return;
+    const branchId = channel.pendingBranchReload === "" ? undefined : channel.pendingBranchReload;
+    channel.pendingBranchReload = null;
+    void this.reloadBranchEntries(sessionId, channel, branchId);
+  }
+
+  private scheduleFlush(channel: ChatChannel, sessionId: string): { cancel: () => void } {
     const flush = () => {
       channel.flushToken = null;
       if (channel.pending.length === 0) return;
       const queued = channel.pending;
       channel.pending = [];
-      for (const envelope of queued) applyEvent(channel.projector, envelope);
+      for (const envelope of queued) this.applyChatEvent(channel, envelope, sessionId);
       this.notify(channel);
     };
     if (typeof requestAnimationFrame === "function") {
@@ -935,7 +1198,7 @@ export class IpcDataSource implements DesktopDataSource {
     if (this.eventRouterRegistered) return;
     this.eventRouterRegistered = true;
     this.api.onEvent(({ subId, frame }) => {
-      for (const channel of this.chats.values()) {
+      for (const [sessionId, channel] of this.chats) {
         if (channel.sseSubId !== subId) continue;
         let envelope: LiveEnvelope;
         try {
@@ -943,7 +1206,13 @@ export class IpcDataSource implements DesktopDataSource {
         } catch {
           return;
         }
-        this.enqueueChatEvent(channel, envelope);
+        // 波次 B3：分支事件（独立 branch-<uuid> 流）不进 prompt 流合批管道，
+        // 直接驱动 timeline 重载与分支树刷新通知
+        if (envelope.type === "session.branch.switched" || envelope.type === "session.branches.changed") {
+          this.handleBranchEvent(sessionId, channel, envelope);
+          return;
+        }
+        this.enqueueChatEvent(channel, envelope, sessionId);
         return;
       }
       const activityHandler = this.activityStreamHandlers.get(subId);
@@ -976,8 +1245,33 @@ export class IpcDataSource implements DesktopDataSource {
       }
     });
   }
+
+  /**
+   * 波次 B3：分支事件处理。
+   * - switched：timeline 重载到新分支的根→叶条目（流式中则挂起，与 reloadBranchEntries
+   *   的忙碌语义一致——switch 本身在服务端被 409 拒绝，此事件只会在他端切换后到达）；
+   * - branches.changed：通知 UI 刷新分支树（regenerate 建了新叶 / fork 加了源引用 / switch 高亮）。
+   * 流 ID 与 sequence 不校验（多 branch-<uuid> 流并存、各自从 1 起序，B2 实现记录）。
+   */
+  private handleBranchEvent(sessionId: string, channel: ChatChannel, envelope: LiveEnvelope): void {
+    const payload = (envelope.payload ?? {}) as Record<string, unknown>;
+    if (envelope.type === "session.branch.switched") {
+      const branchId = typeof payload["branchId"] === "string" ? payload["branchId"] : null;
+      if (branchId !== null) void this.reloadBranchEntries(sessionId, channel, branchId);
+    }
+    for (const handler of channel.branchHandlers) {
+      handler(envelope.type === "session.branch.switched"
+        ? { kind: "switched", branchId: typeof payload["branchId"] === "string" ? payload["branchId"] : "" }
+        : { kind: "branchesChanged", reason: payload["reason"] === "switch" || payload["reason"] === "fork" ? payload["reason"] : "regenerate" });
+    }
+  }
 }
 
 function pushChannelError(channel: ChatChannel, cause: unknown) {
   markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "加载失败");
+}
+
+/** PromptResponseWire 防御式取 streamId（202 响应必须携带） */
+function streamIdOf(response: PromptResponseWire): string {
+  return typeof response.streamId === "string" ? response.streamId : "";
 }

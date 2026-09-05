@@ -23,6 +23,27 @@ export interface HistoryEntry {
   }[];
 }
 
+/**
+ * 波次 B3：分支条目视图（对齐 GET /api/sessions/:id/entries 的 SessionEntryView）。
+ * entryId 在 PI JSONL 中不可变 → 作为 timeline 稳定锚点（data-anchor / 轮次导航）。
+ */
+export interface BranchEntry {
+  readonly entryId: string;
+  readonly parentId: string | null;
+  /** `turn-<userEntryId>`；首个用户消息之前的条目为 null */
+  readonly turnId: string | null;
+  readonly type: string;
+  readonly role?: "user" | "assistant" | "toolResult";
+  readonly text: string;
+  readonly timestamp: string;
+  readonly toolCalls?: readonly {
+    toolCallId: string;
+    toolName: string;
+    status: "completed" | "error";
+    result?: string;
+  }[];
+}
+
 export interface ChatSnapshot {
   readonly items: readonly TimelineItem[];
   readonly streaming: boolean;
@@ -102,6 +123,69 @@ export function projectHistory(entries: readonly HistoryEntry[], agentName: stri
     items.push({ id: `history-${index}`, type: "message", role: "assistant", author: agentName, body: entry.content, meta: "" });
   });
   return items;
+}
+
+/**
+ * 波次 B3：分支条目 → timeline 投影（当前分支根→叶）。
+ * 优先于 projectHistory：条目携带不可变 entryId/turnId/timestamp，
+ * 消息行据此产出稳定锚点（timeline 导航跨刷新/重启存活）。
+ * 非 message 条目（compaction/label 等）渲染为状态事件行，不产生锚点。
+ */
+export function projectBranchEntries(entries: readonly BranchEntry[], agentName: string): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  for (const entry of entries) {
+    if (entry.type !== "message" || entry.role === undefined || entry.role === "toolResult") {
+      // compaction / label / 其他受控条目：一行状态事件（无锚点语义）
+      if (entry.type !== "message") {
+        items.push({
+          id: `entry-${entry.entryId}`, type: "event", kind: "status",
+          title: entry.type === "compaction" ? "上下文压缩" : "条目",
+          summary: entry.text !== "" ? entry.text.slice(0, 80) : entry.type, meta: "历史",
+        });
+      }
+      continue;
+    }
+    const meta = relativeEntryTime(entry.timestamp);
+    if (entry.role === "user") {
+      items.push({
+        id: `entry-${entry.entryId}`, type: "message", role: "user",
+        body: entry.text, meta, entryId: entry.entryId, timestamp: entry.timestamp,
+        ...(entry.turnId !== null ? { turnId: entry.turnId } : {}),
+      });
+      continue;
+    }
+    if (entry.toolCalls && entry.toolCalls.length > 0) {
+      const tools: ToolCall[] = entry.toolCalls.map((call) => ({
+        name: call.toolName,
+        target: (call.result ?? "").slice(0, 120),
+        status: call.status === "error" ? "failed" : "succeeded",
+      }));
+      items.push({
+        id: `entry-tools-${entry.entryId}`, type: "event", kind: "tool",
+        title: "工具调用", summary: `${tools.length} 个工具`, meta: "历史", tools,
+      });
+    }
+    items.push({
+      id: `entry-${entry.entryId}`, type: "message", role: "assistant", author: agentName,
+      body: entry.text, meta, entryId: entry.entryId, timestamp: entry.timestamp,
+      ...(entry.turnId !== null ? { turnId: entry.turnId } : {}),
+    });
+  }
+  return items;
+}
+
+/** 条目时间戳 → 相对时间文案（历史行 meta；解析失败回退空串） */
+function relativeEntryTime(timestamp: string): string {
+  const then = new Date(timestamp).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMin = Math.floor((Date.now() - then) / 60_000);
+  if (diffMin < 1) return "刚刚";
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} 小时前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay} 天前`;
+  return `${Math.floor(diffDay / 30)} 个月前`;
 }
 
 function asRecord(payload: unknown): Record<string, unknown> {
@@ -212,6 +296,13 @@ export function markPromptFailed(state: ProjectorState, message: string) {
 // eslint-disable-next-line complexity
 export function applyEvent(state: ProjectorState, envelope: LiveEnvelope) {
   const type = envelope.type;
+  // 波次 B3：分支事件挂在独立 branch-<uuid> 流上（streamId 与 prompt 流无关、
+  // 可能出现在任何时刻）。它们不投影为 items，只驱动 timeline/分支树重载，
+  // 由数据源（ipc-source / mock-source）的 channel 逻辑消费；这里仅放行过滤，
+  // 不落入下面的 prompt 流收养门（否则会被当成未知流丢弃或收养错流）。
+  if (type === "session.branch.switched" || type === "session.branches.changed") {
+    return;
+  }
   const isControl = type === "session.compacting" || type === "session.compacted";
   const streamId = envelope.streamId;
 
