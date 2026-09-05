@@ -7,11 +7,49 @@ import { sanitizeSensitiveText, sanitizeToolResult } from "./sanitize.js";
 export class PlatformEventMapper {
   private sequence = 0;
   private turnId = "";
+  private assistantError: string | undefined;
+  private assistantAborted = false;
+  private terminalTypeValue:
+    | "turn.completed"
+    | "turn.failed"
+    | "turn.cancelled"
+    | "turn.interrupted"
+    | undefined;
 
   constructor(
     private readonly sessionId: string,
     private readonly streamId: string,
   ) {}
+
+  /** 最近一条 assistant 消息的 stopReason="error" 原因（PI 模型失败不抛出，见 A4 CHAT-06） */
+  get lastAssistantError(): string | undefined {
+    return this.assistantError;
+  }
+
+  /** 当前 PI turn 已接受的唯一终态；未终态化时为 undefined。 */
+  get terminalType():
+    | "turn.completed"
+    | "turn.failed"
+    | "turn.cancelled"
+    | "turn.interrupted"
+    | undefined {
+    return this.terminalTypeValue;
+  }
+
+  /** 最近一条 assistant 消息是否以 PI stopReason="aborted" 收尾。 */
+  get isAssistantAborted(): boolean {
+    return this.assistantAborted;
+  }
+
+  /** turn 终态信封（turn.failed/cancelled/interrupted 进会话 SSE，驱动 Desktop 终态投影） */
+  terminal(
+    type: "turn.failed" | "turn.cancelled" | "turn.interrupted",
+    payload: Record<string, unknown>,
+  ): PlatformEventEnvelope | undefined {
+    if (this.terminalTypeValue !== undefined) return undefined;
+    this.terminalTypeValue = type;
+    return this.envelope(type, payload);
+  }
 
   sessionStatus(status: "running" | "idle" | "error"): PlatformEventEnvelope {
     return this.envelope("session.status", { status });
@@ -25,12 +63,26 @@ export class PlatformEventMapper {
     if (event.type === "agent_start" || event.type === "agent_end") return [];
     if (event.type === "turn_start") {
       this.turnId = `turn-${crypto.randomUUID()}`;
+      this.assistantError = undefined;
+      this.assistantAborted = false;
+      this.terminalTypeValue = undefined;
       return [this.envelope("turn.started", { turnId: this.turnId })];
     }
     if (event.type === "turn_end") {
+      // PI 的 error/aborted 都以 assistant message + 正常 resolved prompt 收尾。
+      // 这两类 turn 不能先投影 completed；Runtime 会在 prompt 收尾时提交对应
+      // failed/cancelled 终态，避免 usage/memory 下游收到相互冲突的终态。
+      if (
+        this.assistantError !== undefined ||
+        this.assistantAborted ||
+        this.terminalTypeValue !== undefined
+      ) {
+        return [];
+      }
       const payload: Record<string, unknown> = { turnId: this.turnId };
       if (event.usage) payload.usage = event.usage;
       if (event.context) payload.context = event.context;
+      this.terminalTypeValue = "turn.completed";
       return [this.envelope("turn.completed", payload)];
     }
     if (event.type === "compaction_start") {
@@ -65,14 +117,20 @@ export class PlatformEventMapper {
       return [this.envelope("thinking.delta", { delta: event.delta })];
     }
     if (event.type === "message_end") {
-      return event.role === "assistant"
-        ? [
-            this.envelope("message.completed", {
-              role: event.role,
-              content: event.content,
-            }),
-          ]
-        : [];
+      if (event.role === "assistant") {
+        if (event.stopReason === "error") {
+          this.assistantError = sanitizeSensitiveText(event.errorMessage ?? "模型调用失败", 200);
+        } else if (event.stopReason === "aborted") {
+          this.assistantAborted = true;
+        }
+        return [
+          this.envelope("message.completed", {
+            role: event.role,
+            content: event.content,
+          }),
+        ];
+      }
+      return [];
     }
     if (event.type === "tool_start") {
       return [

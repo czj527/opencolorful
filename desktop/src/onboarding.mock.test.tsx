@@ -1,6 +1,7 @@
 /**
  * L5 · ONB（Onboarding 首启引导）Mock 渲染层回归。
  * 矩阵行：ONB-03（引导退出与重进）/ ONB-04（校验错误与模板失败兜底）。
+ * A4a 追加：ONB-05 L5 侧（无 desktopShell 桥时「浏览…」静默 null 回退，不崩、不阻塞手输）。
  * ONB-03 需注入"无助理/无会话"状态（Mock fixture 注入表：empty），其余用生产 Mock。
  */
 import { render, screen, waitFor } from "@testing-library/react";
@@ -71,7 +72,7 @@ function renderOnboarding(source: DesktopDataSource) {
     completedAgentIds.push(agentId);
   });
   render(<OnboardingPage source={source} onExit={onExit} onComplete={onComplete} />);
-  return { po: makeOnboardingPO(user), onExit, completedAgentIds, consoleTracker };
+  return { po: makeOnboardingPO(user), user, onExit, completedAgentIds, consoleTracker };
 }
 
 it("ONB-04: 第 1 步空名点下一步 → 内联中文错误（role=alert）且不推进", async () => {
@@ -149,6 +150,35 @@ it("ONB-04: 模板接口失败 → 渲染兜底空白模板不崩，创建流程
     await t.po.fillApiKey("sk-fixture-not-a-real-key");
     await t.po.next();
     await t.po.next(); // 第 3 步工作目录可留空
+    await t.po.finish();
+    await waitFor(() => expect(t.completedAgentIds).toHaveLength(1));
+  } finally {
+    t.consoleTracker.restore();
+  }
+  t.consoleTracker.expectNoErrors();
+});
+
+/* ---- ONB-05（L5 侧）：无 desktopShell 桥（纯浏览器/happy-dom）时「浏览…」静默回退 ---- */
+
+it("ONB-05(L5): 无桥环境点「浏览…」静默返回 null → 不崩、手输路径保留、创建链路不受阻", async () => {
+  // happy-dom 无 window.desktopShell → pickDirectory() 返回 null（desktop/src/data/pick-directory.ts）
+  expect((window as { desktopShell?: unknown }).desktopShell).toBeUndefined();
+  const t = renderOnboarding(new MockDataSource());
+  try {
+    await t.po.typeName("小澄");
+    await t.po.next();
+    await t.po.fillApiKey("sk-fixture-not-a-real-key");
+    await t.po.next();
+    expect(screen.getByRole("heading", { name: "选一个工作目录" })).toBeTruthy();
+
+    // 先手输路径，再点「浏览…」：无桥 → 静默 null → 输入框原样保留（回退手输）
+    const directory = screen.getByPlaceholderText("例如 D:\\Projects\\notes") as HTMLInputElement;
+    await t.user.type(directory, "D:\\oc-l5\\manual-cwd");
+    await t.user.click(screen.getByRole("button", { name: "浏览…" }));
+    await waitFor(() => expect(directory.value).toBe("D:\\oc-l5\\manual-cwd"));
+
+    // 引导可正常走完（兜底路径不阻塞创建）
+    await t.po.next();
     await t.po.finish();
     await waitFor(() => expect(t.completedAgentIds).toHaveLength(1));
   } finally {

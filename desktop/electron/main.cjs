@@ -9,6 +9,16 @@ const { initAutoUpdater } = require("./auto-update.cjs");
 
 const sseManager = new SseProxyManager(resolveBase);
 
+// dev 下 app.getVersion() 返回 Electron 运行时版本而非应用版本（2026-09-01 A4 SET-05
+// 真链发现：关于页显示 37.10.3）；显式对齐 desktop/package.json 的版本
+if (!app.isPackaged) {
+  try {
+    app.setVersion(require(path.join(__dirname, "..", "package.json")).version);
+  } catch {
+    // 读取失败保持默认，关于页仍可用
+  }
+}
+
 let mainWindow = null;
 // G2 T1：packaged 模式下由主进程内嵌启动的 Agent Server（dev 模式恒为 null）
 let embeddedServer = null;

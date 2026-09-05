@@ -36,6 +36,85 @@ describe("PlatformEventMapper turn usage and context", () => {
     expect(started?.sequence).toBe(1);
     expect(completed?.sequence).toBe(2);
   });
+
+  it("does not map a failed assistant turn_end to turn.completed", () => {
+    const mapper = new PlatformEventMapper("session-1", "stream-1");
+    const events = [
+      ...mapper.map({ type: "turn_start" }),
+      ...mapper.map({
+        type: "message_end",
+        role: "assistant",
+        content: "",
+        stopReason: "error",
+        errorMessage: "401 Unauthorized",
+      }),
+      ...mapper.map({
+        type: "turn_end",
+        usage,
+        context,
+      }),
+    ];
+    const failed = mapper.terminal("turn.failed", { errorMessage: "401 Unauthorized" });
+    if (failed !== undefined) events.push(failed);
+
+    expect(events.filter((event) => event.type.startsWith("turn.")).map((event) => event.type)).toEqual([
+      "turn.started",
+      "turn.failed",
+    ]);
+    expect(mapper.terminalType).toBe("turn.failed");
+    expect(mapper.lastAssistantError).toBe("401 Unauthorized");
+  });
+
+  it("does not map an aborted assistant turn_end to turn.completed", () => {
+    const mapper = new PlatformEventMapper("session-1", "stream-1");
+    mapper.map({ type: "turn_start" });
+    mapper.map({
+      type: "message_end",
+      role: "assistant",
+      content: "",
+      stopReason: "aborted",
+      errorMessage: "Request was aborted",
+    });
+
+    expect(mapper.map({ type: "turn_end", usage, context })).toEqual([]);
+    expect(mapper.isAssistantAborted).toBe(true);
+    expect(mapper.terminal("turn.cancelled", { reason: "aborted" })?.type).toBe("turn.cancelled");
+  });
+
+  it("accepts only one terminal for a turn", () => {
+    const mapper = new PlatformEventMapper("session-1", "stream-1");
+    mapper.map({ type: "turn_start" });
+
+    const failed = mapper.terminal("turn.failed", { errorMessage: "failed" });
+    const cancelled = mapper.terminal("turn.cancelled", { reason: "aborted" });
+
+    expect(failed?.type).toBe("turn.failed");
+    expect(cancelled).toBeUndefined();
+    expect(mapper.map({ type: "turn_end", usage, context })).toEqual([]);
+    expect(mapper.terminalType).toBe("turn.failed");
+  });
+
+  it("does not accept a failure after turn.completed", () => {
+    const mapper = new PlatformEventMapper("session-1", "stream-1");
+    mapper.map({ type: "turn_start" });
+    const [completed] = mapper.map({ type: "turn_end", usage, context });
+
+    expect(completed?.type).toBe("turn.completed");
+    expect(mapper.terminal("turn.failed", { errorMessage: "late failure" })).toBeUndefined();
+    expect(mapper.terminalType).toBe("turn.completed");
+  });
+
+  it("resets terminal state for the next PI turn", () => {
+    const mapper = new PlatformEventMapper("session-1", "stream-1");
+    mapper.map({ type: "turn_start" });
+    mapper.terminal("turn.failed", { errorMessage: "failed" });
+
+    mapper.map({ type: "turn_start" });
+    const [completed] = mapper.map({ type: "turn_end", usage, context });
+
+    expect(completed?.type).toBe("turn.completed");
+    expect(mapper.terminalType).toBe("turn.completed");
+  });
 });
 
 describe("PlatformEventMapper compaction events", () => {

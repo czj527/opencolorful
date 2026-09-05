@@ -112,9 +112,13 @@ export function OnboardingPage({ source, onExit, onComplete }: OnboardingPagePro
   function applyPreset(key: string) {
     setPresetKey(key);
     const preset = PROVIDER_PRESETS.find((p) => p.key === key);
-    if (preset !== undefined && preset.key !== "custom") {
-      setBaseUrl(preset.baseUrl);
-      setModelId(preset.modelId);
+    if (preset !== undefined) {
+      if (preset.key !== "custom") {
+        setBaseUrl(preset.baseUrl);
+        setModelId(preset.modelId);
+      }
+      // 自定义也要清显示名：否则残留上一预设的 modelName（真链实测把自定义模型标成
+      // "DeepSeek Chat"，2026-09-01 A4 PROV 真链发现）
       setModelName(preset.modelName);
     }
   }

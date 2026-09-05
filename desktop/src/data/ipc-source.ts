@@ -157,6 +157,7 @@ export class IpcDataSource implements DesktopDataSource {
   private readonly chats = new Map<string, ChatChannel>();
   private readonly memorySubs = new Map<string, { handler: (payload: unknown) => void }>();
   private readonly activityStreamHandlers = new Map<string, (row: ReturnType<typeof mapActivityRow>) => void>();
+  private readonly memorySettingsWrites = new Map<string, Promise<void>>();
   private eventRouterRegistered = false;
 
   private constructor(api: NonNullable<Window["desktopApi"]>, base: string) {
@@ -634,10 +635,21 @@ export class IpcDataSource implements DesktopDataSource {
   }
 
   async updateMemorySettings(agentId: string, patch: Partial<MemoryAgentSettingsView>): Promise<void> {
-    const current = await this.request<Record<string, unknown>>("GET", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`);
-    const settings = (current["settings"] ?? {}) as Record<string, unknown>;
-    const next = { ...settings, ...patch };
-    await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`, next);
+    // PUT /memory/settings 是整对象替换而非补丁：GET+merge+PUT 必须按 agent 串行，
+    // 否则连续快速保存会用同一旧基线互相覆盖（A4 AGENT-05 真链回归发现）
+    const previous = this.memorySettingsWrites.get(agentId) ?? Promise.resolve();
+    const write = previous.catch(() => undefined).then(async () => {
+      const current = await this.request<Record<string, unknown>>("GET", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`);
+      const settings = (current["settings"] ?? {}) as Record<string, unknown>;
+      const next = { ...settings, ...patch };
+      await this.request("PUT", `/api/agents/${encodeURIComponent(agentId)}/memory/settings`, next);
+    });
+    this.memorySettingsWrites.set(agentId, write);
+    try {
+      await write;
+    } finally {
+      if (this.memorySettingsWrites.get(agentId) === write) this.memorySettingsWrites.delete(agentId);
+    }
   }
 
   async addPinnedMemory(agentId: string, content: string): Promise<import("../mock-data.js").PinnedMemory> {

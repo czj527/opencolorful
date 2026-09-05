@@ -304,6 +304,57 @@ Deviation and follow-up:
 Main-Agent review: diff reviewed directly; smoke re-run independently; child report used as work record only
 ```
 
+```text
+Date: 2026-09-02
+Task: A4 wave 1 — existing-function regression lanes A4a/A4b/A4c (parallel_group: wave-a-a4-lanes)
+Branch: p1-wave-a-a4-regression (stacked on p1-wave-a-desktop-harness for A1-A3 contracts)
+Commits: 8624f8b (production hotfixes uncovered by the lanes, main agent), 528f113 (A4a), 9d2e310 (A4b), bd45ab9 (A4c)
+Dispatch: three parallel child agents with disjoint file ownership (lane specs + lane-local fixtures only; shared fixtures/POs/configs read-only). All three hit their turn limit mid-debug without a final report; the main agent took over per development.md §一 and finished/verified each lane.
+Cross-lane interference observed (recorded for wave 2): parallel Playwright runs share desktop/test-artifacts/pw-output and clear each other's artifacts → wave-2 lanes must run sequentially or use per-lane output dirs; in-flight edits of one lane can transiently fail another lane's whole-suite run.
+Production hotfixes uncovered by the lanes (8624f8b, CHANGELOG updated):
+  1. Model-call failures were swallowed: PI returns errors as assistant stopReason="error" without throwing; session-runtime only inspected the throw path → failed turns recorded as turn.completed, no UI terminal. Fix: pi-sdk passes stopReason/errorMessage on message_end, PlatformEventMapper records + exposes lastAssistantError and gains terminal(), runPrompt emits turn.failed (abort path: turn.cancelled) envelopes; contracts/events.ts registers the three terminal types + turn.failed payload (EventSequenceGuard drops unregistered types; negative contract test guards the payload union).
+  2. Onboarding "custom" preset kept the previous preset's modelName state → custom models registered as "DeepSeek Chat" (applyPreset now resets modelName for custom).
+  3. Memory settings PUT is a whole-object replace; GET+merge+PUT raced on rapid consecutive saves (serialized per-agent write queue in ipc-source).
+  4. Dev About page showed the Electron runtime version (main.cjs pins app.setVersion to desktop/package.json when unpackaged).
+Test-authoring defects fixed by the main agent (not product issues): wrong profile-page/id-card heading anchors (real DOM: heading 助理档案 + paragraph), archived-row is not a button role, stub setStub only patches (fast mode must re-supply text), fire-and-forget saves need expect.poll on server truth, restart-mid-turn timeline needs a draft→switch detail rebuild (same family as known limitation #7), strict-mode duplicate 已连接 label scoped to the settings dialog, "{Escape}" invalid key name.
+Commands and exit codes (all run separately by the main agent):
+  - npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @a4a → 11 passed (1.4m), exit 0
+  - --grep @a4b → 5 passed (3.1m), exit 0
+  - --grep @a4c → 4 passed (23.5s), exit 0
+  - npm run test --workspace=@opencolorful/desktop → 11 files / 42 tests passed, exit 0
+  - npx tsc -p tsconfig.json --noEmit (desktop + root) → exit 0
+  - npm run desktop:build → exit 0 (required after renderer/main-process changes: e2e loads desktop/dist)
+  - tests/contract/events.test.ts + abort/prompt-events/event-mapper/desktop-projector targeted runs → pass (25-39 cases)
+  - Full npm run check re-run after writeback commit (see final gate evidence in this log)
+Evidence paths: desktop/tests/e2e/lane-a4a-*{onboarding,agent,session,workspace}*, lane-a4b-{chat,abort}*, lane-a4c-provider-settings*; lane fixtures under desktop/tests/e2e/fixtures/lane-a4{a,b,c}/ and desktop/tests/fixtures/lane-a4a/
+Observed result: 20 new L6 true-chain cases across 7 specs; matrix rows ONB-05, AGENT-03..06, WS-02/03, SESS-03/04/05, CHAT-05/06, ABORT-01/02, PROV-01..04, SET-05 updated to PASS with dates
+Known deviations recorded: 档案页改名不触发 agents 列表刷新（A7 打磨）；在途 turn 完成不自动刷新已打开时间线（已知限制 #7 同族）；草稿模型解析兜底到内置目录（A6 收口）；CI desktop-smoke job 仍待首次 GitHub runner 实测
+Main-Agent review: all lane diffs reviewed directly; every lane suite re-run independently by the main agent after fixes; child reports (incomplete) used as work records only
+```
+
+```text
+Date: 2026-09-02
+Task: A4 wave 2 — regression lanes A4d/A4e/A4f (serial dispatch per wave-1 lesson)
+Branch: p1-wave-a-a4-regression
+Commits: daa24d2 (A4d), 09f5001 (A4e), 2406b22 (A4f)
+Dispatch: three lanes dispatched SEQUENTIALLY (one child at a time) per the wave-1 cross-lane interference record. Briefs pre-verified all UI anchors, interface methods and route facts before dispatch.
+Child outcomes:
+  - A4d Memory: DONE (44 tool uses) — brief-compliant, no boundary violations; report flagged a duplicate MEM-02 coverage question (adjudicated: keep both, extend-not-rewrite).
+  - A4e Subagent: hit turn limit (95 turns) after fixtures/PO/spec were written but before any test run; rescued by main agent per development.md §一. Only fix needed: ownerAgentId ownership resolution (spec left it empty → HTTP 400 from routes/subagents.ts §22.1; resolved from session detail agentId). Passed first try after the fix.
+  - A4f OBS/USAGE/SEC: DONE (30 turns) — clean report; mock-source untouched (injection via overrideSource instead; approved as the minimal-change reading of the brief).
+Verification (all re-run independently by main agent):
+  - A4d: desktop vitest 44/44; desktop:build pass; @a4d 1/1 ×3 reruns (4.7-5.0s)
+  - A4e: @a4e 1/1 (9.9s)
+  - A4f: desktop vitest 50/50 (44→50)
+  - Full @a4 sweep: 22/22 across all five lanes in one sequential run (4.5m)
+  - Flakiness note: one full desktop-vitest run showed 7 transient waitFor timeouts under heavy parallel load (including wave-1 tests); single-file and full reruns green twice — pre-existing load sensitivity, not introduced by wave 2 (recorded for A7 hardening)
+New coverage: MEM-02 mock parity fix (production mock honors q), MEM-05 L6 (deep-dive SSE maintenance bar + report truth), MAGENT-01 L5+L6, SUB-02 L6 (real spawn via stub streaming tool_calls — first lane to drive the real tool-call loop), OBS-02 L5 (filters/pagination/live-follow), USAGE-01 L5 (badge + refresh chain), SEC-04 L5 (approval state machine anchors)
+Matrix rows updated: MEM-02/04/05/06, MAGENT-01/02, SUB-02, OBS-02, USAGE-01, SEC-04
+Conclusion records (no automatable gap): PLUG/SKILL rows PASS at L1/L3/L4 (no Desktop UI by product design); SUPV-01/02 PASS L3; SUPV-03 pending CI first run; REL-01..04 G2/A3/A9 scope; TICK-02 pending A6
+Known deviations recorded: MEM-04 has no Desktop flush UI (立即整理=deep-dive); SEC-04 tests pin the current local-state semantics pending A2 protocol alignment; OBS-02 pagination verified via injected source (production mock ignores cursor)
+Main-Agent review: diffs of all three lanes reviewed; A4e rescue fix applied by main agent; all suites re-run independently
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

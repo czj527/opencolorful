@@ -183,7 +183,13 @@ export type PiAgentEvent =
       readonly errorMessage?: string;
     }
   | { readonly type: "message_start"; readonly role: string }
-  | { readonly type: "message_end"; readonly role: string; readonly content: string }
+  | {
+      readonly type: "message_end";
+      readonly role: string;
+      readonly content: string;
+      readonly stopReason?: string;
+      readonly errorMessage?: string;
+    }
   | { readonly type: "text_delta" | "thinking_delta"; readonly delta: string }
   | {
       readonly type: "tool_start";

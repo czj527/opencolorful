@@ -315,7 +315,15 @@ function createSessionEventMapper(
         const usage = extractUsage(event.message);
         if (usage) turnUsage = addUsage(turnUsage, usage);
       }
-      return { type: "message_end", role: event.message.role, content: messageText(event.message) };
+      // stopReason="error" 表示模型调用失败（PI 不抛出，错误附在消息上）；透传给运行时判定失败终态
+      const message = event.message as { stopReason?: string; errorMessage?: string };
+      return {
+        type: "message_end",
+        role: event.message.role,
+        content: messageText(event.message),
+        ...(message.stopReason !== undefined ? { stopReason: message.stopReason } : {}),
+        ...(message.errorMessage !== undefined ? { errorMessage: message.errorMessage } : {}),
+      };
     }
     return mapRemainingEvent(event);
   };

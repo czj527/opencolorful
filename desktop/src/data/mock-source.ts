@@ -261,11 +261,24 @@ export class MockDataSource implements DesktopDataSource {
     };
   }
 
-  getMemoryData(): Promise<MemoryPageData> {
+  getMemoryData(_agentId: string, query?: string): Promise<MemoryPageData> {
+    // MEM-02 parity 修复（A4d）：对齐服务端 GET memory/facts|events 的 q 过滤——
+    // 服务端 FTS 命中面 = fact 文本 / summary+topics（fact-store.ts / event-indexer.ts），
+    // unicode61 对 ASCII 大小写折叠；空查询返回全量。
+    const keyword = query?.trim() ?? "";
+    const folded = keyword.toLowerCase();
+    const facts = folded === ""
+      ? memoryFacts
+      : memoryFacts.filter((fact) => fact.fact.toLowerCase().includes(folded));
+    const events = folded === ""
+      ? memoryEvents
+      : memoryEvents.filter((event) =>
+        event.summary.toLowerCase().includes(folded)
+        || event.topics.some((topic) => topic.toLowerCase().includes(folded)));
     return Promise.resolve({
       compiled: memoryCompiled,
-      facts: memoryFacts,
-      events: memoryEvents,
+      facts,
+      events,
       pinned: this.mockPinned,
       health: memoryHealth,
       timelineFacts: memoryTimelineFacts,

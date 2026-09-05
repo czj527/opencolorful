@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
@@ -9,6 +11,11 @@ import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createInMemorySession } from "../../src/pi-sdk/index.js";
+import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
+import { UsageRecorder } from "../../src/runtime/usage-recorder.js";
+import { UsageStore } from "../../src/storage/usage-store.js";
+import { openMetadataDatabase } from "../../src/storage/database.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -27,6 +34,65 @@ function createRuntime(options: { response: string; tokensPerSecond?: number }) 
     faux: options,
     publish: (event) => events.push(event),
   }).then((runtime) => ({ runtime, events }));
+}
+
+async function createFailingRuntime() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-prompt-failure-"));
+  temporaryDirectories.push(directory);
+  const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
+  const events: PlatformEventEnvelope[] = [];
+  const replayStore = new EventReplayStore();
+  const database = openMetadataDatabase(paths.database);
+  const usageStore = new UsageStore(database);
+  const usageRecorder = new UsageRecorder(replayStore, usageStore, () => ({
+    providerId: "faux",
+    modelId: "faux-1",
+  }));
+  const faux = fauxProvider();
+  const modelRuntime = await ModelRuntime.create({
+    authPath: paths.authFile,
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
+  modelRuntime.registerProvider("faux", {
+    name: "Faux",
+    baseUrl: "http://localhost:0",
+    api: faux.provider as never,
+    streamSimple: faux.provider.stream as never,
+    models: [{
+      id: "faux-1",
+      name: "Faux Model",
+      reasoning: false,
+      input: ["text"] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 100_000,
+      maxTokens: 4_000,
+    }],
+  });
+  await modelRuntime.setRuntimeApiKey("faux", "dummy-key");
+  const model = modelRuntime.getModel("faux", "faux-1");
+  if (model === undefined) throw new Error("faux 模型未注册");
+  faux.setResponses([{
+    ...fauxAssistantMessage(""),
+    stopReason: "error",
+    errorMessage: "401 Unauthorized",
+  }]);
+  const modelService = {
+    resolveModel: () => ({ runtime: modelRuntime, model }),
+    getRuntime: () => ({ resolveModel: () => ({ runtime: modelRuntime, model }) }),
+  };
+  const runtime = await SessionRuntime.create({
+    sessionId: "session-prompt-failure",
+    cwd: directory,
+    authPath: paths.authFile,
+    publish: (event) => events.push(event),
+    replayStore,
+    sessionHandle: createInMemorySession(directory),
+    modelService: modelService as never,
+    resolveProviderId: "faux",
+    resolveModelId: "faux-1",
+  });
+  return { runtime, events, replayStore, usageStore, usageRecorder, database };
 }
 
 afterEach(() => {
@@ -60,8 +126,34 @@ describe("prompt event normalization", () => {
     runtime.dispose();
   });
 
+  it("emits only turn.failed for an assistant error and skips success side effects", async () => {
+    const { runtime, events, replayStore, usageStore, usageRecorder, database } = await createFailingRuntime();
+    const run = runtime.prompt("fail");
+    try {
+      await run.completed;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const terminalTypes = events
+        .filter((event) =>
+          event.streamId === run.streamId &&
+          (event.type === "turn.completed" ||
+            event.type === "turn.failed" ||
+            event.type === "turn.cancelled" ||
+            event.type === "turn.interrupted"),
+        )
+        .map((event) => event.type);
+      expect(terminalTypes).toEqual(["turn.failed"]);
+      expect(usageStore.sessionTotals("session-prompt-failure").turns).toBe(0);
+      expect(replayStore.getSince(run.streamId, 0).events.map((event) => event.type)).not.toContain("turn.completed");
+    } finally {
+      runtime.dispose();
+      usageRecorder.dispose();
+      database.close();
+    }
+  });
+
   it("rejects stale aborts and reports repeated aborts without affecting a new stream", async () => {
-    const { runtime } = await createRuntime({
+    const { runtime, events } = await createRuntime({
       response: "abcdefghijklmnopqrstuvwxyz",
       tokensPerSecond: 20,
     });
@@ -70,6 +162,17 @@ describe("prompt event normalization", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(runtime.abort(first.streamId).status).toBe("accepted");
     await first.completed;
+    expect(
+      events
+        .filter((event) =>
+          event.streamId === first.streamId &&
+          (event.type === "turn.completed" ||
+            event.type === "turn.failed" ||
+            event.type === "turn.cancelled" ||
+            event.type === "turn.interrupted"),
+        )
+        .map((event) => event.type),
+    ).toEqual(["turn.cancelled"]);
     expect(runtime.abort(first.streamId)).toEqual({ status: "already-stopped" });
 
     const second = runtime.prompt("second");
