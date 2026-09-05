@@ -15,11 +15,12 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ChatEvent, ChatMessage, EventKind, TimelineItem } from "../mock-data.js";
+import type { ChatEvent, ChatMessage, EventKind, SessionTodoItem, TimelineItem } from "../mock-data.js";
 import { useLocalPrefs } from "../data/local-prefs.js";
 import type { DesktopDataSource } from "../data/source.js";
 import { correlationShortRef, type ErrorCorrelation } from "../errors.js";
 import { TimelineNav } from "./TimelineNav.js";
+import { SessionTodoCard } from "./SessionTodoCard.js";
 import { useTimelineAnchorScroll } from "./timeline-scroll.js";
 
 const eventIcons: Record<EventKind, LucideIcon> = {
@@ -349,6 +350,8 @@ function branchErrorCodeOf(cause: unknown): string | null {
 export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOpenLogs, onForked }: ChatViewProps) {
   const [items, setItems] = useState<readonly TimelineItem[]>([]);
   const [streaming, setStreaming] = useState(false);
+  // 波次 B5b：durable session todo 只读投影（todo.updated / SessionView.todos）
+  const [todos, setTodos] = useState<readonly SessionTodoItem[]>([]);
   const prefs = useLocalPrefs();
 
   /* ---- 波次 B3：分支动作状态 ---- */
@@ -399,6 +402,7 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOp
   useEffect(() => {
     if (threadId === NEW_THREAD) {
       setItems([]);
+      setTodos([]);
       onStreamingChange(false);
       setStreaming(false);
       setActionError(null);
@@ -406,6 +410,7 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOp
     }
     return source.subscribeChat(threadId, (snapshot) => {
       setItems(snapshot.items);
+      setTodos(snapshot.todos);
       setStreaming(snapshot.streaming);
       onStreamingChange(snapshot.streaming);
     });
@@ -507,6 +512,8 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOp
           </span>
         </div>
       )}
+      {/* 波次 B5b：durable session todo 只读卡（时间线上方的持久状态卡，非 timeline item） */}
+      {todos.length > 0 && <SessionTodoCard todos={todos} />}
       <Timeline
         items={visible}
         onOpenDiff={onOpenDiff}
