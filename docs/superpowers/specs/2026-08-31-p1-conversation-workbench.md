@@ -1,7 +1,7 @@
 # P1 波次 B：对话工作台能力
 
 **日期：2026-08-31**  
-**状态：规划中**  
+**状态：进行中（2026-09-05 B0 产品语义已冻结；B1-B7 未实施）**  
 **实施计划：** [`plans/p1-conversation-workbench.en.md`](../../../plans/p1-conversation-workbench.en.md)  
 **上游路线：** [`docs/positioning-and-roadmap.md`](../../positioning-and-roadmap.md) §五 P1/P2  
 **当前状态：** [`docs/project-status.md`](../../project-status.md)
@@ -20,35 +20,41 @@ OpenColorful 当前已经有 Session JSONL、PI SessionManager 的底层 branch/
 4. 提供 session-owned、可持久化、可回放的 plan/todo 工具与视图。
 5. 让刷新、重启、SSE replay、并发和运行中竞态都有明确行为和验收证据。
 
-## 三、产品语义
+## 三、产品语义（2026-09-05 B0 冻结）
 
-### 1. 回退并修改
+本节产品语义已冻结；实现细节、稳定 ID、错误矩阵与 API/事件契约以英文实施计划 §3 为准。修改本节必须先修订本规格再实施。
 
-用户在一条用户消息上选择“回退并修改”时，系统从该节点创建新 branch，打开可编辑输入并重新生成；旧 branch 保留，不覆盖旧 assistant 输出。修改后的消息属于新 branch，旧 branch 的消息不自动混入新 branch 的正文上下文。
+### 1. 回退并修改与重试共用同一原语
 
-### 2. 重试
+两者都以"选中轮次的用户消息"为支点，在原分支旁边创建新分支：回退并修改带入用户编辑后的新文本，重试沿用原文本（在 assistant 结果上重试时，服务端解析回该轮的用户消息）。旧分支与旧输出永久保留在 JSONL 中，可随时切换回去。运行中的会话必须先停止（服务端返回 409 并提示"会话正在运行，请先停止后再操作"，前端提供停止按钮），服务端绝不静默中止正在运行的任务；压缩进行中同样 409。
 
-用户在 assistant 结果上选择“重试”时，系统创建新的结果 branch，不覆盖旧输出。旧结果仍可查看和切换；重试期间同一 Session 的其他 branch 操作按运行中竞态规则处理。
+### 2. 分支切换与分支头持久化
+
+时间线始终展示"当前分支"。切换旧分支只移动当前视图与后续写入位置，不产生任何新消息；切换结果持久化到 SQLite（分支头元数据），刷新、重启后仍保持。切换后在输入框继续发送即延续该分支，该分支随之成为当前分支。两个客户端同时切换时后写生效，双方都会收到 `session.branch.switched` 事件并刷新。
 
 ### 3. Fork 独立会话
 
-“Fork 成独立会话”创建新的 Session identity，保留来源 Session、来源 branch 和来源 entry 元数据。新会话后续可以独立归档、重命名、切换模型和继续运行。
+从当前状态或选中消息复制"根→目标"路径为全新会话：新会话身份、新 JSONL 文件，记录来源会话与来源节点元数据，标题带来源标记。原会话及其运行时不受任何影响；新会话可独立改名、切换模型、归档。空会话不支持 Fork（400）。会话至少有一条消息才可 Fork。
 
-### 4. 运行中与错误
+### 4. 稳定标识
 
-运行中的 Session 不允许无定义地 branch/reset/fork。产品可以要求先停止运行，也可以返回稳定的 409；具体按钮交互由实现计划按本规格固定。不存在的 Session、非法 entry、过期 branch/ref 和无法恢复的 PI 操作必须返回可操作的中文错误。
+时间线与分支切换器使用稳定 ID：`entryId`（PI 条目 ID，JSONL 永久可溯）、`branchId`（分支叶子条目 ID，派生不存储）、`turnId`（`turn-<用户消息条目ID>`，重启后不变）。刷新、重启、SSE replay 后这些 ID 保持稳定，锚点定位不漂移。
 
-### 5. 时间线与分支
+### 5. 时间线与分支 switcher 职责
 
-右侧时间线先承担当前 branch 的线性 turn/entry 定位：点击后滚动到消息并高亮当前节点。branch tree/switcher 是另一种导航职责，显示父子关系、当前 branch 和可切换旧 branch；不把线性时间线直接变成难以扫描的复杂树。
+右侧时间线承担当前分支的线性 turn/entry 定位：点击后滚动到消息并高亮当前节点。branch switcher 是另一种导航职责，显示分支列表、父子关系和当前分支，并执行切换；不把线性时间线变成复杂树。
 
 ### 6. 压缩摘要
 
-沿用现有 `session.compacting`/`session.compacted` 事件和 payload。Desktop 完成卡显示 tokens before/after 与 summary 正文，并支持展开/折叠。压缩失败、取消、no-op、busy 都要有不同的可见状态。手动/自动 compaction 的启用策略、summary 长度上限和敏感信息处理必须先记录在实现计划和测试中；本规格不授权悄悄改变自动压缩默认值。
+沿用现有 `session.compacting`/`session.compacted` 事件与 payload，服务端压缩行为与默认值不变。Desktop 完成卡显示 tokens 前后（后值为估算，界面标注"约"）与 summary 正文（服务端已脱敏至 500 字符以内，前端不再二次截断），支持展开/折叠，长摘要默认折叠。压缩中止（已中止）与失败（含错误信息）分别显示；无需压缩与忙时沿用现有 409 中文提示，不显示卡片。summary 正文不得写入日志。
 
 ### 7. Session plan/todo
 
-Todo 属于 Session，状态至少为 `pending`、`in_progress`、`completed`、`cancelled`，带 priority 和 activeForm。更新采用 whole-list replacement，写入 SQLite，事务成功后发布 `todo.updated` Replay 事件，Desktop 只消费投影。工具、存储、事件、UI 和 reload/restart 必须形成闭环；UI 不得自行伪造计划完成状态。
+Todo 属于会话，仅由第一方工具在轮次执行中写入（会话单飞串行化），UI 只做只读投影，不得自行伪造计划完成状态。条目字段：`content`、`status`（至少 `pending`/`in_progress`/`completed`/`cancelled`）、`priority`（`high`/`medium`/`low`）、可选 `activeForm`。更新采用整表替换，单事务写入 SQLite，成功后发布 `todo.updated` Replay 事件；空列表是合法的显式清空。工具结果必须告知模型写入是否被接受。存储层不强制"至多一项进行中"，由工具描述约定，UI 将第一个 `in_progress` 显示为活跃项。现有 `plan.updated` 契约保持不变且不新增发射方，durable 事实面是 `todo.updated`。
+
+### 8. 错误与文案
+
+所有负例返回稳定错误码与可操作的中文文案（404 节点不存在、400 输入非法、409 运行中/已归档），具体矩阵见英文实施计划 §3.4。
 
 ## 四、范围
 
@@ -72,8 +78,8 @@ Todo 属于 Session，状态至少为 `pending`、`in_progress`、`completed`、
 
 1. 回退并修改、重试、Fork 三条路径都保留旧 branch/输出，并在刷新、重启后可切换和继续。
 2. 运行中、非法节点、过期引用、404/409/400 等负例有稳定错误和 UI 下一步。
-3. 当前 branch 的线性时间线可以点击定位并正确高亮；branch switcher/tree 与线性时间线职责不混淆。
-4. Desktop 压缩完成卡可以从实时流和历史 replay 读取 summary 正文，并正确显示成功、取消、失败、no-op、busy。
+3. 当前 branch 的线性时间线可以点击定位并正确高亮（使用稳定 entryId/turnId 锚点，重启后不漂移）；branch switcher/tree 与线性时间线职责不混淆；分支切换结果在刷新、重启后保持。
+4. Desktop 压缩完成卡可以从实时流和历史 replay 读取 summary 正文，并正确显示成功、中止、失败、no-op、busy。
 5. todo 工具 → SQLite → `todo.updated` Replay → Desktop projection → reload/restart 全链路成立。
 6. Todo 空列表、整表替换、非法状态、并发冲突、断线回放、多客户端一致性和失败恢复均有自动化证据。
 7. Desktop 界面在长会话、窄窗口和无数据状态下不溢出、不静默失败。
