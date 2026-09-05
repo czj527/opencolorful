@@ -1,6 +1,6 @@
 # P1 Wave A: Quality System, Two-Tier Models, and Unified Usage
 
-**Status:** 规划中  
+**Status:** 已完成（2026-09-05）  
 **Date:** 2026-08-31  
 **Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`](../docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md)  
 **Current status:** [`docs/project-status.md`](../docs/project-status.md)  
@@ -647,6 +647,28 @@ Exit-condition status against plan §8: matrix coverage complete (92 rows; 0 FAI
   with CI smoke job configured.
 Remaining for wave closeout: merge the stacked PR chain (#44→#45→#51→#52→#53) so CI triggers on
   main; release/install evidence stays a G2 item, not a Wave A blocker.
+```
+
+## 7.1 Final closeout record
+
+```text
+Date: 2026-09-05
+Task: Wave A formal closeout (main agent)
+Merged to main (squash; each PR CI-green incl. Desktop smoke; Quality job now runs desktop tests):
+  #44 A1 -> 9155204 | #45 A2/A3 (+review fixes 3ac9d5f) -> c918cb5 | #51 A4 (+lane type fixes e1f2ac2) -> 84cba6d
+  #52 A5 (diagRef priority 2f8f18e) -> 27d6b76 | #53 A6-A9 -> 2be2bac
+Review threads resolved with evidence before each merge:
+  #44 matrix pipe escaping (d6d3042); #45 four threads (terminal-event contract via ed82da8,
+  desktop tests wired into root quality gate, credential env deny layers + unit tests, fixture
+  crash fix + tests typecheck wired into desktop:build); #51 unique terminal events (ed82da8);
+  #52 diagRef priority (2f8f18e).
+Post-merge sanity on main 2be2bac: verify-pi-sdk-imports PASS; root tsc PASS; desktop vitest 65/65.
+Stacked-PR merge conflicts resolved by main agent with per-file superset analysis (5 harness files
+  taken from main-side review fixes; wave-side docs/tests taken from wave branches; matrix
+  re-escaped at each hop).
+Known explicit remainders (not Wave A blockers): SUB-04/USAGE-02 L6 true-chain rows; call-level
+  usage detail endpoint backlog; REL-* install/update evidence = G2 scope; matrix SKIPs documented
+  in the A9 record above.
 ```
 
 ## 8. Wave A exit conditions
