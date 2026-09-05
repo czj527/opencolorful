@@ -426,6 +426,35 @@ Deviation and follow-up: the stale "no emitter" comment on todo.updated in event
 Main-Agent review: accepted pending CI; merged as #59 (c206e44).
 ```
 
+### B5b implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B5b Desktop SessionTodoCard (worktree lane, branch p1-wave-b-b5b-todo-ui)
+Commit(s): b4fdde4 (card + projection + IPC seeding + Mock scenario + tests).
+Implemented by the main agent (subagent platform outage); full local gates green.
+Commands and exit codes: npx tsc --noEmit (root) → 0; desktop MAIN tsc --noEmit → 0;
+  desktop tsconfig.tests tsc → 0; desktop full unit suite → 18 files / 94 tests passed;
+  npx vite build → 0. True-chain todo lane deferred to B6/B7 evidence.
+Evidence paths: desktop/src/components/{SessionTodoCard.tsx,SessionTodoCard.css},
+  desktop/src/data/projector.ts (todos state + todo.updated gate outside the prompt-stream
+  adoption + defensive item parsing), desktop/src/data/ipc-source.ts (SessionView.todos
+  Wire seeding), desktop/src/data/mock-source.ts (scripted todo_write emulation on the
+  demo session: first turn 2 items with one in_progress, second turn whole-list replace),
+  desktop/src/components/ChatView.tsx (card slot above the timeline),
+  tests: src/todo-card.mock.test.tsx (4), tests/unit/todo-projection.test.ts (6).
+Observed result: read-only session todo card (no write-path buttons asserted), first
+  in_progress shows activeForm, done/total counts completed+cancelled, empty list hides
+  the card, todo:<sessionId> events never adopted by the prompt stream (seenStreams
+  untouched), SessionView.todos recovers state on open/restart.
+Unverified: Electron true-chain todo flow (faux turn with real todo_write tool call →
+  live card → restart recovery).
+Deviation and follow-up: true-chain evidence deferred to B6/B7 (B6 covers "todo after
+  reload"; B7 real-Desktop walkthrough); web KNOWN_EVENT_TYPES for todo.updated left to
+  B6 (web is the frozen protocol client).
+Main-Agent review: self-implemented; full local gates green.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
