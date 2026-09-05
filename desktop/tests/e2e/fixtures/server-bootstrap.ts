@@ -119,7 +119,7 @@ const stubServer = http.createServer((request, response) => {
       return;
     }
     if (index < chunks.length) {
-      response.write(chunkFrame(chunks[index]));
+      response.write(chunkFrame(chunks[index] ?? ""));
       index += 1;
       return;
     }
