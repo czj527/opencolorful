@@ -31,6 +31,7 @@ import { CorrelatedError, correlationShortRef, localCorrelation, toUserError, ty
 import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
 import { LogsPage } from "./pages/LogsPage.js";
+import { UsagePage } from "./pages/UsagePage.js";
 import { useTheme } from "./theme.js";
 import { useFirstRun } from "./use-first-run.js";
 
@@ -639,6 +640,7 @@ export function App() {
           <SidebarRail
             onExpand={() => setSidebarCollapsed(false)}
             onNewThread={startNewThread}
+            onOpenUsage={() => setPage("usage")}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : (
@@ -653,6 +655,7 @@ export function App() {
             onUpdateThreadTitle={updateThreadTitle}
             onUnarchiveThread={unarchiveThread}
             onCollapse={() => setSidebarCollapsed(true)}
+            onOpenUsage={() => setPage("usage")}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
@@ -791,6 +794,7 @@ export function App() {
             <div className="page-scroll"><MemoryPage source={source} agent={memoryAgent} agents={agents} onAgent={setMemoryAgentId} /></div>
           )}
           {page === "logs" && <div className="page-scroll"><LogsPage source={source} focus={logsFocus} /></div>}
+          {page === "usage" && <div className="page-scroll"><UsagePage source={source} /></div>}
           {page === "profile" && profileAgent !== undefined && (
             <div className="page-scroll"><AgentProfilePage agent={profileAgent} source={source} /></div>
           )}

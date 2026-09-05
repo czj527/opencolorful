@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getRuntimePaths } from "../../src/config/paths.js";
+import type { UsageCallStatus, UsageRole, UsageSource } from "../../src/contracts/usage.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { UsageStore } from "../../src/storage/usage-store.js";
 import { createServerApp } from "../../src/server/app.js";
@@ -30,8 +31,8 @@ afterEach(() => {
 function insertRecord(
   store: UsageStore,
   overrides: Partial<{
-    sessionId: string;
-    turnId: string;
+    sessionId: string | null;
+    turnId: string | null;
     provider: string;
     model: string;
     input: number;
@@ -42,11 +43,18 @@ function insertRecord(
     contextTokens: number | null;
     contextWindow: number | null;
     createdAt: string;
+    source: UsageSource;
+    role: UsageRole;
+    status: UsageCallStatus;
+    agentId: string | null;
+    runId: string | null;
+    callId: string | null;
   }> = {},
 ) {
+  const source = overrides.source ?? "main";
   store.record({
-    sessionId: overrides.sessionId ?? "session-1",
-    turnId: overrides.turnId ?? `turn-${crypto.randomUUID()}`,
+    sessionId: overrides.sessionId === undefined ? "session-1" : overrides.sessionId,
+    turnId: overrides.turnId === undefined ? `turn-${crypto.randomUUID()}` : overrides.turnId,
     provider: overrides.provider ?? "faux",
     model: overrides.model ?? "faux-1",
     input: overrides.input ?? 100,
@@ -57,6 +65,13 @@ function insertRecord(
     contextTokens: overrides.contextTokens ?? null,
     contextWindow: overrides.contextWindow ?? null,
     createdAt: overrides.createdAt ?? new Date().toISOString(),
+    source,
+    // 与 UsageStore.record 的缺省推导保持一致：main → primary，其余 → secondary
+    role: overrides.role ?? (source === "main" ? "primary" : "secondary"),
+    status: overrides.status ?? "completed",
+    agentId: overrides.agentId ?? null,
+    runId: overrides.runId ?? null,
+    callId: overrides.callId ?? null,
   });
 }
 
@@ -135,6 +150,24 @@ describe("usage API", () => {
       expect(body.context).toBeNull();
       database.close();
     });
+
+    it("counts calls across sources while turns stays main-only", async () => {
+      const { app, usageStore, database } = createContext();
+      const now = new Date().toISOString();
+      // main 轮次 ×2
+      insertRecord(usageStore, { sessionId: "s1", turnId: "t1", createdAt: now });
+      insertRecord(usageStore, { sessionId: "s1", turnId: "t2", createdAt: now });
+      // 派生子代理调用（source=subagent，缺省 role=secondary）
+      insertRecord(usageStore, { sessionId: "s1", turnId: null, source: "subagent", runId: "run-1", agentId: "agent-x", createdAt: now });
+
+      const response = await app.request("http://local/api/sessions/s1/usage");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.turns).toBe(2);
+      expect(body.calls).toBe(3);
+      expect(body.totals).toEqual({ input: 300, output: 150, cacheRead: 60, cacheWrite: 30, totalTokens: 540 });
+      database.close();
+    });
   });
 
   describe("GET /api/usage/summary", () => {
@@ -150,6 +183,11 @@ describe("usage API", () => {
       expect(body.turns).toBe(0);
       expect(body.byDay).toEqual([]);
       expect(body.byModel).toEqual([]);
+      // A8 新增字段：零记录时 calls 为 0，分组聚合为数组
+      expect(body.calls).toBe(0);
+      expect(body.bySource).toEqual([]);
+      expect(body.byRole).toEqual([]);
+      expect(body.byStatus).toEqual([]);
       database.close();
     });
 
@@ -256,6 +294,309 @@ describe("usage API", () => {
       const response = await app.request("http://local/api/usage/summary?days=5");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(1);
+      database.close();
+    });
+  });
+
+  describe("GET /api/usage/summary filtering (A8)", () => {
+    /** 插入覆盖 main/subagent/utility 三来源的混合行，返回各来源期望记录数。 */
+    function insertMixedRecords(usageStore: UsageStore, sessionId: string): void {
+      const now = new Date().toISOString();
+      // main：session 内两轮
+      insertRecord(usageStore, {
+        source: "main",
+        sessionId,
+        turnId: "turn-main-1",
+        provider: "faux",
+        model: "faux-1",
+        totalTokens: 100,
+        createdAt: now,
+      });
+      insertRecord(usageStore, {
+        source: "main",
+        sessionId,
+        turnId: "turn-main-2",
+        provider: "faux",
+        model: "faux-1",
+        totalTokens: 110,
+        createdAt: now,
+      });
+      // subagent：同一父会话、不同 agent
+      insertRecord(usageStore, {
+        source: "subagent",
+        sessionId,
+        turnId: null,
+        agentId: "agent-explorer",
+        runId: "run-1",
+        provider: "other",
+        model: "other-1",
+        totalTokens: 200,
+        createdAt: now,
+      });
+      insertRecord(usageStore, {
+        source: "subagent",
+        sessionId,
+        turnId: null,
+        agentId: "agent-planner",
+        runId: "run-2",
+        provider: "faux",
+        model: "faux-2",
+        totalTokens: 300,
+        createdAt: now,
+      });
+      // utility：无会话归属的全局调用
+      insertRecord(usageStore, {
+        source: "utility",
+        sessionId: null,
+        turnId: null,
+        agentId: null,
+        callId: "call-1",
+        provider: "faux",
+        model: "faux-1",
+        totalTokens: 400,
+        createdAt: now,
+      });
+    }
+
+    it("filters by source=utility", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?source=utility");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.turns).toBe(0);
+      expect(body.calls).toBe(1);
+      expect(body.sessions).toBe(0);
+      expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 400 });
+      database.close();
+    });
+
+    it("filters by source=main and keeps turns semantics", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?source=main");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.turns).toBe(2);
+      expect(body.calls).toBe(2);
+      expect(body.sessions).toBe(1);
+      expect(body.totals).toEqual({ input: 200, output: 100, cacheRead: 40, cacheWrite: 20, totalTokens: 210 });
+      database.close();
+    });
+
+    it("filters by source=subagent", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?source=subagent");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.turns).toBe(0);
+      expect(body.calls).toBe(2);
+      expect(body.sessions).toBe(1);
+      expect(body.totals).toEqual({ input: 200, output: 100, cacheRead: 40, cacheWrite: 20, totalTokens: 500 });
+      database.close();
+    });
+
+    it("filters by role=secondary", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?role=secondary");
+      const body = (await response.json()) as Record<string, unknown>;
+      // main 缺省 role=primary，其余缺省 secondary
+      expect(body.calls).toBe(3);
+      expect(body.turns).toBe(0);
+      expect(body.totals).toEqual({ input: 300, output: 150, cacheRead: 60, cacheWrite: 30, totalTokens: 900 });
+      database.close();
+    });
+
+    it("filters by role=primary", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?role=primary");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(2);
+      expect(body.turns).toBe(2);
+      expect(body.totals).toEqual({ input: 200, output: 100, cacheRead: 40, cacheWrite: 20, totalTokens: 210 });
+      database.close();
+    });
+
+    it("filters by agentId", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?agentId=agent-explorer");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(1);
+      expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 200 });
+      database.close();
+    });
+
+    it("filters by sessionId", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+      // 另一会话的行不应计入
+      insertRecord(usageStore, { sessionId: "s-other", turnId: "turn-other", totalTokens: 999 });
+
+      const response = await app.request("http://local/api/usage/summary?sessionId=s-mix");
+      const body = (await response.json()) as Record<string, unknown>;
+      // s-mix：main×2 + subagent×2（utility 无会话归属）
+      expect(body.calls).toBe(4);
+      expect(body.totals).toEqual({ input: 400, output: 200, cacheRead: 80, cacheWrite: 40, totalTokens: 710 });
+      database.close();
+    });
+
+    it("filters by providerId", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?providerId=other");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(1);
+      expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 200 });
+      const byModel = body.byModel as Array<{ provider: string; model: string }>;
+      expect(byModel).toEqual([{ provider: "other", model: "other-1", input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 200 }]);
+      database.close();
+    });
+
+    it("filters by modelId", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?modelId=faux-2");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(1);
+      expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 300 });
+      database.close();
+    });
+
+    it("trims whitespace on text filters and treats empty string as not provided", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const trimmed = await app.request("http://local/api/usage/summary?agentId=%20agent-planner%20");
+      expect(trimmed.status).toBe(200);
+      const trimmedBody = (await trimmed.json()) as Record<string, unknown>;
+      expect(trimmedBody.calls).toBe(1);
+      expect(trimmedBody.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 300 });
+
+      const empty = await app.request("http://local/api/usage/summary?agentId=");
+      expect(empty.status).toBe(200);
+      const emptyBody = (await empty.json()) as Record<string, unknown>;
+      // 空串视为未提供：返回全部 5 行
+      expect(emptyBody.calls).toBe(5);
+      database.close();
+    });
+
+    it("returns 400 for invalid source", async () => {
+      const { app, database } = createContext();
+      const response = await app.request("http://local/api/usage/summary?source=unknown");
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { code: string; message: string };
+      expect(body.code).toBe("INVALID_INPUT");
+      expect(body.message).toBe("source 必须是 main、subagent、utility 之一");
+      database.close();
+    });
+
+    it("returns 400 for invalid role", async () => {
+      const { app, database } = createContext();
+      const response = await app.request("http://local/api/usage/summary?role=admin");
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { code: string; message: string };
+      expect(body.code).toBe("INVALID_INPUT");
+      expect(body.message).toBe("role 必须是 primary、secondary 之一");
+      database.close();
+    });
+
+    it("returns 400 for invalid days combined with valid filter", async () => {
+      const { app, database } = createContext();
+      const response = await app.request("http://local/api/usage/summary?source=utility&days=999");
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { code: string; message: string };
+      expect(body.code).toBe("INVALID_INPUT");
+      expect(body.message).toBe("days 必须是 1-365 的整数");
+      database.close();
+    });
+
+    it("combines source and sessionId filters", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?source=subagent&sessionId=s-mix");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(2);
+      expect(body.turns).toBe(0);
+      expect(body.totals).toEqual({ input: 200, output: 100, cacheRead: 40, cacheWrite: 20, totalTokens: 500 });
+      database.close();
+    });
+
+    it("combines source and providerId filters", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary?source=utility&providerId=faux");
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(1);
+      expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 400 });
+      database.close();
+    });
+
+    it("returns calls/bySource/byRole/byStatus with correct shapes", async () => {
+      const { app, usageStore, database } = createContext();
+      const now = new Date().toISOString();
+      insertRecord(usageStore, { sessionId: "s1", turnId: "t1", provider: "faux", model: "faux-1", totalTokens: 100, createdAt: now });
+      insertRecord(usageStore, { source: "subagent", sessionId: "s1", turnId: null, agentId: "agent-x", runId: "run-1", provider: "faux", model: "faux-2", totalTokens: 200, createdAt: now });
+      insertRecord(usageStore, { source: "utility", sessionId: null, turnId: null, callId: "call-1", provider: "other", model: "other-1", totalTokens: 350, createdAt: now });
+      insertRecord(usageStore, { source: "main", sessionId: "s1", turnId: "t2", totalTokens: 400, status: "failed", createdAt: now });
+
+      const response = await app.request("http://local/api/usage/summary?days=1");
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as Record<string, unknown>;
+      expect(body.calls).toBe(4);
+      expect(body.turns).toBe(2);
+      expect(body.sessions).toBe(1);
+
+      // 每行缺省 input=100 output=50 cacheRead=20 cacheWrite=10；分组和随行数变化
+      const oneRow = { input: 100, output: 50, cacheRead: 20, cacheWrite: 10 };
+      const twoRows = { input: 200, output: 100, cacheRead: 40, cacheWrite: 20 };
+      const threeRows = { input: 300, output: 150, cacheRead: 60, cacheWrite: 30 };
+      // bySource 按 total_tokens 降序：main(500) > utility(350) > subagent(200)
+      expect(body.bySource).toEqual([
+        { source: "main", ...twoRows, totalTokens: 500, calls: 2 },
+        { source: "utility", ...oneRow, totalTokens: 350, calls: 1 },
+        { source: "subagent", ...oneRow, totalTokens: 200, calls: 1 },
+      ]);
+      // byRole 按 total_tokens 降序：secondary(550) > primary(500)
+      expect(body.byRole).toEqual([
+        { role: "secondary", ...twoRows, totalTokens: 550, calls: 2 },
+        { role: "primary", ...twoRows, totalTokens: 500, calls: 2 },
+      ]);
+      // byStatus 按 calls 降序：completed(3) > failed(1)
+      expect(body.byStatus).toEqual([
+        { status: "completed", ...threeRows, totalTokens: 650, calls: 3 },
+        { status: "failed", ...oneRow, totalTokens: 400, calls: 1 },
+      ]);
+      database.close();
+    });
+
+    it("keeps legacy field shapes alongside new A8 fields", async () => {
+      const { app, usageStore, database } = createContext();
+      insertMixedRecords(usageStore, "s-mix");
+
+      const response = await app.request("http://local/api/usage/summary");
+      const body = (await response.json()) as Record<string, unknown>;
+      // 既有字段零变化：键集合包含旧字段且形状不变
+      expect(Object.keys(body)).toEqual(
+        expect.arrayContaining(["days", "totals", "cacheHitRate", "sessions", "turns", "byDay", "byModel", "calls", "bySource", "byRole", "byStatus"]),
+      );
+      expect(body.days).toBe(30);
+      expect(body.sessions).toBe(1); // 仅 s-mix（utility 无会话归属，不计入 sessions）
+      expect(body.turns).toBe(2);
+      expect(body.calls).toBe(5);
+      expect(Array.isArray(body.byDay)).toBe(true);
+      expect(Array.isArray(body.byModel)).toBe(true);
       database.close();
     });
   });

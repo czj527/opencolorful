@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { PlatformEventEnvelope, PlatformEventType } from "../contracts/events.js";
+import type { PlatformEventEnvelope, PlatformEventType, ContextUsage, TokenUsage } from "../contracts/events.js";
 import type { PiAgentEvent } from "../pi-sdk/index.js";
 import { sanitizeSensitiveText, sanitizeToolResult } from "./sanitize.js";
 
@@ -15,6 +15,11 @@ export class PlatformEventMapper {
     | "turn.cancelled"
     | "turn.interrupted"
     | undefined;
+  // A8a：失败/取消 turn 的账目透传。PI 的 error/aborted turn 也以 turn_end 收尾
+  // （带累计 usage/context），但该 turn 不能投影 turn.completed；这里先把账目
+  // 暂存，供 runtime 终态化时附到 turn.failed/turn.cancelled payload 供用量摄取。
+  private pendingTurnUsage: TokenUsage | undefined;
+  private pendingTurnContext: ContextUsage | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -48,7 +53,15 @@ export class PlatformEventMapper {
   ): PlatformEventEnvelope | undefined {
     if (this.terminalTypeValue !== undefined) return undefined;
     this.terminalTypeValue = type;
-    return this.envelope(type, payload);
+    // A8a：终态 payload 附带 turnId + 可得账目（usage 缺省 = 无账目，供 UsageRecorder 落 0 行）。
+    const enriched: Record<string, unknown> = { ...payload };
+    if (this.turnId !== "") {
+      enriched.turnId = this.turnId;
+    }
+    if (this.pendingTurnUsage !== undefined) {
+      enriched.usage = this.pendingTurnUsage;
+    }
+    return this.envelope(type, enriched);
   }
 
   sessionStatus(status: "running" | "idle" | "error"): PlatformEventEnvelope {
@@ -66,9 +79,15 @@ export class PlatformEventMapper {
       this.assistantError = undefined;
       this.assistantAborted = false;
       this.terminalTypeValue = undefined;
+      this.pendingTurnUsage = undefined;
+      this.pendingTurnContext = undefined;
       return [this.envelope("turn.started", { turnId: this.turnId })];
     }
     if (event.type === "turn_end") {
+      // A8a：先暂存本 turn 账目（error/aborted turn 也带 turn_end，供终态化透传），
+      // 再判定该 turn 能否投影 turn.completed。
+      if (event.usage) this.pendingTurnUsage = event.usage;
+      if (event.context) this.pendingTurnContext = event.context;
       // PI 的 error/aborted 都以 assistant message + 正常 resolved prompt 收尾。
       // 这两类 turn 不能先投影 completed；Runtime 会在 prompt 收尾时提交对应
       // failed/cancelled 终态，避免 usage/memory 下游收到相互冲突的终态。

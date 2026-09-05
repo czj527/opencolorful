@@ -1,0 +1,36 @@
+/* UsagePage（A8c）：用量页局部样式，令牌见 styles.css :root */
+
+.usage-section { margin-bottom: 22px; }
+.usage-section h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+/* 汇总区：总 token 卡 + 七格统计（输入/输出/缓存读/缓存写/调用/轮次/会话） */
+.usage-total-card {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+.usage-total-card > strong { font-size: 10.5px; font-weight: 600; color: var(--text-3); }
+.usage-total-value { font-size: 22px; font-weight: 650; font-family: var(--mono); }
+.usage-total-card small { color: var(--text-3); font-size: 10.5px; }
+
+.usage-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 0; }
+
+/* 分组表：token 明细两行排布，合计列右对齐等宽字体 */
+.usage-token-cell { display: grid; gap: 1px; }
+.usage-token-detail { color: var(--text-3); font-size: 10px; font-family: var(--mono); }
+.usage-total-cell {
+  text-align: right;
+  font-family: var(--mono);
+  font-weight: 600;
+  white-space: nowrap;
+}

@@ -2,14 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 import { getRuntimePaths } from "../../src/config/paths.js";
 import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import { UsageRecorder } from "../../src/runtime/usage-recorder.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { UsageStore } from "../../src/storage/usage-store.js";
-import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -52,6 +53,39 @@ function makeTurnCompletedEvent(
       ...(context !== undefined ? { context } : {}),
     },
   };
+}
+
+function makeTerminalEvent(
+  sessionId: string,
+  type: "turn.failed" | "turn.cancelled" | "turn.interrupted",
+  payload: { errorMessage?: string; reason?: string; turnId: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number } },
+): PlatformEventEnvelope {
+  return {
+    protocolVersion: 1,
+    eventId: `evt-${type}-${payload.turnId}`,
+    sessionId,
+    streamId: `stream-${payload.turnId}`,
+    sequence: 2,
+    timestamp: new Date().toISOString(),
+    type,
+    payload,
+  };
+}
+
+interface UsageRow {
+  source: string;
+  role: string;
+  status: string;
+  agent_id: string | null;
+  input: number;
+  output: number;
+  total_tokens: number;
+}
+
+function usageRows(database: Database.Database): UsageRow[] {
+  return database
+    .prepare("SELECT source, role, status, agent_id, input, output, total_tokens FROM usage_records ORDER BY id")
+    .all() as UsageRow[];
 }
 
 describe("UsageRecorder", () => {
@@ -237,6 +271,123 @@ describe("UsageRecorder", () => {
     return new Promise<void>((resolve) => {
       setImmediate(() => {
         expect(usageStore.sessionTotals("session-1").turns).toBe(0);
+        database.close();
+        resolve();
+      });
+    });
+  });
+
+  // ── A8a：主会话失败/取消/中断终态行（含 agentId 归属）──────────
+
+  it("records turn.failed with payload usage as a failed main row", () => {
+    const { usageStore, replayStore, database } = createContext();
+    const recorder = new UsageRecorder(replayStore, usageStore, () => ({
+      providerId: "faux",
+      modelId: "faux-1",
+    }), () => "agent-1");
+
+    replayStore.publish(
+      makeTerminalEvent("session-1", "turn.failed", {
+        errorMessage: "模型调用失败",
+        turnId: "turn-f1",
+        usage: { input: 30, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 34 },
+      }),
+    );
+
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        const rows = usageRows(database);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          source: "main",
+          role: "primary",
+          status: "failed",
+          agent_id: "agent-1",
+          input: 30,
+          output: 4,
+          total_tokens: 34,
+        });
+        expect(usageStore.summary(30).byStatus).toContainEqual(
+          expect.objectContaining({ status: "failed", calls: 1 }),
+        );
+        recorder.dispose();
+        database.close();
+        resolve();
+      });
+    });
+  });
+
+  it("records turn.cancelled and turn.interrupted rows with zero account when usage absent", () => {
+    const { usageStore, replayStore, database } = createContext();
+    const recorder = new UsageRecorder(replayStore, usageStore, () => null, () => null);
+
+    replayStore.publish(makeTerminalEvent("session-1", "turn.cancelled", { reason: "aborted", turnId: "turn-c1" }));
+    replayStore.publish(makeTerminalEvent("session-1", "turn.interrupted", { reason: "session_disposed", turnId: "turn-i1" }));
+
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        const rows = usageRows(database);
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toMatchObject({ source: "main", status: "cancelled", input: 0, output: 0, total_tokens: 0 });
+        expect(rows[1]).toMatchObject({ source: "main", status: "interrupted", input: 0, output: 0, total_tokens: 0 });
+        recorder.dispose();
+        database.close();
+        resolve();
+      });
+    });
+  });
+
+  it("does not double count duplicate terminal events (idempotent replay)", () => {
+    const { usageStore, replayStore, database } = createContext();
+    const recorder = new UsageRecorder(replayStore, usageStore, () => null);
+
+    const event = makeTerminalEvent("session-1", "turn.failed", {
+      errorMessage: "模型调用失败",
+      turnId: "turn-dup",
+      usage: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 10 },
+    });
+    replayStore.publish(event);
+    replayStore.publish({ ...event, eventId: "evt-replay-2" }); // 同 turnId 重放 → 同 dedupe 键
+
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        const rows = usageRows(database);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.total_tokens).toBe(10);
+        recorder.dispose();
+        database.close();
+        resolve();
+      });
+    });
+  });
+
+  it("records one row per terminal status across a mixed lifecycle", () => {
+    const { usageStore, replayStore, database } = createContext();
+    const recorder = new UsageRecorder(replayStore, usageStore, () => ({
+      providerId: "faux",
+      modelId: "faux-1",
+    }));
+
+    replayStore.publish(
+      makeTurnCompletedEvent("session-1", "turn-ok", {
+        input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15,
+      }),
+    );
+    replayStore.publish(makeTerminalEvent("session-2", "turn.failed", { errorMessage: "boom", turnId: "turn-bad" }));
+    replayStore.publish(makeTerminalEvent("session-3", "turn.cancelled", { reason: "aborted", turnId: "turn-abort" }));
+    replayStore.publish(makeTerminalEvent("session-4", "turn.interrupted", { reason: "shutdown", turnId: "turn-int" }));
+
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        const statuses = usageRows(database).map((row) => row.status).sort();
+        expect(statuses).toEqual(["cancelled", "completed", "failed", "interrupted"]);
+        // 三类非成功样例各有来源/角色正确的落库行
+        for (const row of usageRows(database)) {
+          expect(row.source).toBe("main");
+          expect(row.role).toBe("primary");
+        }
+        expect(usageStore.summary(30).calls).toBe(4);
+        recorder.dispose();
         database.close();
         resolve();
       });

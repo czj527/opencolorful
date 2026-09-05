@@ -564,6 +564,61 @@ Matrix: TICK-02 flipped to PASS (ticker/summary now assemble through selectSecon
   session-settings.test.ts asserts the real selectSecondary wiring).
 ```
 
+```text
+Date: 2026-09-05
+Task: A8 contract freeze (main agent, serial — shared-schema exception per development.md §一铁律 4)
+Scope: src/contracts/usage.ts (USAGE_SOURCES/ROLES/CALL_STATUSES, UtilityCompletion, UsageQueryParams),
+  migrations v14 (usage_records rebuilt as cross-source ledger: source main/subagent/utility,
+  role primary/secondary, six terminal statuses, nullable session/turn for global utility calls,
+  dedupe_key UNIQUE with per-source key spaces, existing rows backfilled main/primary/completed,
+  agent/thread/run/call left NULL = unknown), UsageStore (record with source/role/status/identity,
+  summaryFiltered with days/source/role/agent/session/provider/model filters + bySource/byRole/byStatus,
+  sessionTotals keeps turns semantics and adds calls, summary(days) kept as compat entry).
+Verification (main agent, independent): new tests/integration/usage-store-v14.test.ts 6/6
+  (v13→v14 rebuild preserves rows + backfill, per-source dedupe idempotency, filters, session totals);
+  existing usage-api 15/15 + usage-recorder green; root tsc pass. Commit 777521a.
+```
+
+```text
+Date: 2026-09-05
+Task: A8 parallel lanes (parallel_group: wave-a-usage-lanes; A8a ingestion / A8b query API / A8c Desktop UI)
+parallel eligibility: schema/contract frozen in 777521a; file sets disjoint (A8a: usage-recorder/
+  complete-text/start.ts/subagents terminal/events.ts; A8b: routes/usage.ts; A8c: desktop/*) — verified
+  by main agent before dispatch and after merge.
+A8a (subagent + main review): completeUtilityText returns UtilityCompletion {text, usage|null}
+  (null = runtime provided no accounting, never fabricated 0; invalid stopReason throws
+  UtilityTextCallError carrying available usage; abort recognized); start.ts completeText wrapper
+  records source=utility rows (callId=uuid, startedAt/finishedAt, status completed/failed/cancelled,
+  provider/model/role from selectSecondary result, sessionId via new optional context; consumers still
+  receive string — service interfaces unchanged); UsageRecorder consumes turn.completed/failed/
+  cancelled/interrupted (completed without usage still not recorded; non-success rows with no
+  accounting record 0 = no accounting per spec); agentId resolved via sessionService.getView;
+  event-mapper stashes turn_end usage/context and attaches turnId+usage to failed/cancelled terminal
+  payloads (contracts/events.ts additive optional fields only); subagent ingestion at
+  RunStore.completeRun via injected hook (all six terminal dispositions mapped, dedupe run:<runId>,
+  ingestion failure never affects run terminal state, composition wires UsageStore);
+  OUT-OF-OWNS APPROVED BY MAIN AGENT: event-mapper.ts (brief req 4 required it; owns list omission
+  was main-agent error), prompt-events.test.ts one-line assertion aligned to new contract (failed
+  turn now records one main row).
+A8b (subagent + main review): GET /api/usage/summary accepts days/source/role/agentId/sessionId/
+  providerId/modelId (strict enum validation 400 on bad source/role, trim/empty→unset for text
+  params); response keeps all 7 legacy fields and adds calls/bySource/byRole/byStatus;
+  session endpoint adds calls. No changes to app.ts registration signature.
+A8c (subagent + main review): Desktop usage page (sidebar "用量" entry + PageId) with 7/30/90-day,
+  source (主对话/子代理/后台任务) and role (主模型/次级模型) filters; totals card + per-source/status/
+  model/date groups; loading/error(retry)/empty states; data-testid oc-usage-*/oc-sidebar-usage;
+  Mock fixture filters truthfully; IPC parses contract defensively; no cost anywhere (negative
+  assertion in test). OUT-OF-OWNS APPROVED BY MAIN AGENT: errors.ts +2 lines ("loadUsage" error
+  context) — correct errors.ts pattern, avoids wrong "日志加载失败" copy.
+Main-agent verification on merged tree (independent rerun): root tsc PASS; usage suites 60/60
+  (ingestion 10, recorder 11, store-v14 6, api 33); desktop tsc + vitest 62/62 (13 files) + build PASS;
+  web vitest 428/428; web:build + desktop:build + verify-pi-sdk-imports PASS; full root vitest
+  result recorded in .tmp/a8-full-vitest.log at commit time.
+Known limitations (explicit, not silent): call-level detail list endpoint not built (backlog, noted
+  by A8b); L6 true-chain usage rows (spawn → usage_records) to be covered in wave follow-up; byStatus
+  ties have no stable secondary sort (consumers must not depend on tie order).
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

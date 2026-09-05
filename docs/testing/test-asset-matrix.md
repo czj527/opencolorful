@@ -166,7 +166,7 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | TICK-01 | 长会话触发 ticker → rolling summary 更新与注入预算 | utility LLM 调用；预算阈值 | 注入内容受预算约束 | L3 | L3 `memory-ticker.test.ts`、`memory-summary.test.ts` | PASS（L3） | — |
-| TICK-02 | ticker/摘要模型来源与角色标注 | selectSecondary("memory") 统一选择；旧字段仅作映射来源 | 次级模型来源/角色在用量与日志可辨 | L3 | L3 `session-settings.test.ts`（真实 selectSecondary 装配断言） | PASS（L3，2026-09-04） | 用量角色标注待 A8 交付 |
+| TICK-02 | ticker/摘要模型来源与角色标注 | selectSecondary("memory") 统一选择；旧字段仅作映射来源 | 次级模型来源/角色在用量与日志可辨 | L3 | L3 `session-settings.test.ts`（真实 selectSecondary 装配断言） | PASS（L3，2026-09-04） | — |
 
 ### MAGENT · Memory Agent / 后台复盘
 
@@ -185,7 +185,7 @@
 | SUB-01 | Dock 列 threads → 选 thread → transcript/runs/messages/artifacts | `GET /api/subagents/threads/:id/transcript|messages|artifacts` | 列表/详情/错误态 | L3/L5 | L3 `subagent-spawn-repro.test.ts`、`subagent-migration.test.ts`；L1 `subagents-*`（约 20 文件）；A2 `subagent.mock.test.tsx`（2026-09-01） | PASS（L1/L3/L5，2026-09-01） | — |
 | SUB-02 | transcript SSE 实时推进 | `GET /api/subagents/threads/:id/stream` | 详情随流更新 | L1/L6 | L1 `subagents-replay-store.test.ts`；A4e `lane-a4e-subagent`（2026-09-02：真实 spawn tool_calls → dock 列表/详情/运行中/终态 → SSE seq 严格递增 + progress→run→result 顺序） | PASS（L1/L6，2026-09-02） | 真链 spawn 依赖 stub 流式 tool_calls（lane 本地 fixture 已建） |
 | SUB-03 | subagents.defaultModel 持久化 | preferences `subagents` 段 | route→file→reopen 保持 | L3 | L1 `preferences.test.ts` + L3 `settings-routes.test.ts`（A0 RED→GREEN） | PASS（L3） | Desktop 设置页无 subagents 模型入口（A7d 补齐） |
-| SUB-04 | subagent tokens 进统一用量查询 | `subagent_runs` 累计 tokens 不在 usage API | — | — | 无 | SKIP（A8 缺口，已立项） | A8 交付后补行 |
+| SUB-04 | subagent tokens 进统一用量查询 | Run 终态摄取 → usage_records source=subagent/role=secondary | summary bySource 含 subagent；按 run 幂等 | L3 | L3 `usage-ingestion.test.ts`（六终态映射 + `run:<runId>` 幂等 + 摄取失败不影响终态，2026-09-04） | PASS（L3，2026-09-04） | L6 真链子代理 spawn→用量行待波次后补 |
 
 ### PLUG · Plugin 插件
 
@@ -232,9 +232,9 @@
 | ID | 详细交互链 | 服务端事实 | 预期可见结果 | 自动化层 | 既有覆盖 | 状态 | 风险 |
 |---|---|---|---|---|---|---|---|
 | USAGE-01 | 会话头 UsageBadge：tokens/turns/context% | `GET /api/sessions/:id/usage` | badge 渲染；一轮结束后刷新 | L3/L5 | L3 `usage-api.test.ts`、`usage-recorder.test.ts`；A4f `chat.mock.test.tsx`（2026-09-02：渲染 + streaming 翻转刷新链） | PASS（L3/L5，2026-09-02） | mock 无 usage recorder，第 2 次返回值为脚本化（服务端记账由 L1/L3 覆盖） |
-| USAGE-02 | 全局用量摘要 | `GET /api/usage/summary` | Web 运维面展示 | L3/L4 | L3 `usage-api.test.ts`；web `usage-section.test.tsx` | PASS（L3/L4 组件） | Desktop 无全局入口（A8 交付） |
-| USAGE-03 | 幂等不重复计数 | `(session_id, turn_id)` 去重 | 重复事件不双计 | L1/L3 | L3 `usage-recorder.test.ts` | PASS（L3） | — |
-| USAGE-04 | 非成功终态的部分用量 | — | — | — | 无 | SKIP（A8） | A8 交付后补行 |
+| USAGE-02 | 全局用量摘要 | `GET /api/usage/summary`（source/role/agent/session/provider/model 过滤） | Web 运维面展示；Desktop 全局用量页 | L3/L4/L5 | L3 `usage-api.test.ts`（33 例，2026-09-04）；web `usage-section.test.tsx`；A8c `usage.mock.test.tsx`（过滤器/空态/错误+重试，2026-09-04） | PASS（L3/L4/L5，2026-09-04） | L6 真链 IPC 端到端待波次后补 |
+| USAGE-03 | 幂等不重复计数 | dedupe_key（v14：main=`session:turn`） | 重复事件不双计 | L1/L3 | L3 `usage-recorder.test.ts`；L3 `usage-store-v14.test.ts`（2026-09-04） | PASS（L1/L3） | — |
+| USAGE-04 | 非成功终态的部分用量 | turn.failed/cancelled/interrupted + run 终态 + utility 失败/取消均落行（status 标注；无账目落 0） | 按状态可见失败/取消调用 | L3 | L3 `usage-ingestion.test.ts`、`usage-recorder.test.ts`、`usage-store-v14.test.ts`（2026-09-04） | PASS（L3，2026-09-04） | completed 无账目仍不落行（既有语义，保持） |
 
 ### SEC · Sandbox/审批
 

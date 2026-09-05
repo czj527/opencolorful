@@ -20,7 +20,9 @@ export type ErrorContext =
   | "createAgent"
   | "loadLogs"
   | "queryActivity"
-  | "loadMoreActivity";
+  | "loadMoreActivity"
+  /** A8c：全局用量页加载失败（Desktop UsagePage） */
+  | "loadUsage";
 
 /** 面向用户的错误建议：提示 + 可选下一步动作 + 可选诊断关联引用 */
 export interface ErrorAdvice {
@@ -94,6 +96,7 @@ const FALLBACK: Record<ErrorContext, string> = {
   loadLogs: "日志加载失败，请重试。",
   queryActivity: "活动事件加载失败，请重试。",
   loadMoreActivity: "加载更多失败，请重试。",
+  loadUsage: "用量数据加载失败，请重试。",
 };
 
 function normalize(raw: string): string {

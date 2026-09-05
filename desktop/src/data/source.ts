@@ -133,6 +133,71 @@ export interface CreateAgentInput {
   readonly defaultCwd?: string | null;
 }
 
+/* ---- A8：全局模型用量汇总 ---- */
+
+/** 用量汇总过滤条件（对齐 GET /api/usage/summary 的 query 参数；缺省 = 近 30 天全量） */
+export interface UsageSummaryFilterView {
+  readonly days?: number;
+  readonly source?: string;
+  readonly role?: string;
+}
+
+/** 四段 token 计数 + 汇总数（totalTokens = input + output + cacheRead + cacheWrite） */
+export interface UsageTokenTotals {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+}
+
+export interface UsageDayBucket {
+  readonly date: string;
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+}
+
+export interface UsageModelBucket extends UsageTokenTotals {
+  readonly provider: string;
+  readonly model: string;
+}
+
+export interface UsageSourceBucket extends UsageTokenTotals {
+  readonly source: "main" | "subagent" | "utility";
+  readonly calls: number;
+}
+
+export interface UsageRoleBucket extends UsageTokenTotals {
+  readonly role: "primary" | "secondary";
+  readonly calls: number;
+}
+
+export interface UsageStatusBucket extends UsageTokenTotals {
+  readonly status: "completed" | "failed" | "cancelled" | "timeout" | "interrupted" | "budget_exhausted";
+  readonly calls: number;
+}
+
+/** 全局用量汇总视图（对齐后端 /api/usage/summary 冻结契约，A8b 并行实现） */
+export interface UsageSummaryView {
+  readonly days: number;
+  readonly totals: UsageTokenTotals;
+  readonly cacheHitRate: number | null;
+  /** 有会话归属的去重会话数 */
+  readonly sessions: number;
+  /** source=main 的记录数（主对话轮次） */
+  readonly turns: number;
+  /** 全部记录数 */
+  readonly calls: number;
+  readonly byDay: readonly UsageDayBucket[];
+  readonly byModel: readonly UsageModelBucket[];
+  readonly bySource: readonly UsageSourceBucket[];
+  readonly byRole: readonly UsageRoleBucket[];
+  readonly byStatus: readonly UsageStatusBucket[];
+}
+
 /* ---- 日志服务端查询 ---- */
 
 export interface ActivityFilter {
@@ -291,6 +356,9 @@ export interface DesktopDataSource {
     readonly workspaceConfirmed?: boolean;
   }): Promise<void>;
   getSessionUsage(sessionId: string): Promise<SessionUsageView>;
+
+  /* A8：全局模型用量汇总（Desktop 用量页唯一数据入口） */
+  getUsageSummary(filter?: UsageSummaryFilterView): Promise<UsageSummaryView>;
 
   /* 记忆 */
   getMemoryData(agentId: string, query?: string): Promise<MemoryPageData>;

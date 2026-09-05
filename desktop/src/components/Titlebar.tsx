@@ -3,7 +3,7 @@ import { BookOpen, MessageSquare, Minus, Moon, ScrollText, Square, Sun, X } from
 import type { ConnectionInfo } from "../data/source.js";
 import type { ThemeController } from "../theme.js";
 
-export type PageId = "chat" | "memory" | "logs" | "onboarding" | "profile";
+export type PageId = "chat" | "memory" | "logs" | "onboarding" | "profile" | "usage";
 
 // onboarding / profile 是隐藏路由（不进顶栏页签）：onboarding 由首启检测驱动，profile 由侧栏身份证卡进入
 const pages: readonly { id: PageId; label: string; icon: typeof MessageSquare }[] = [

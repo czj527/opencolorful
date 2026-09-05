@@ -28,7 +28,7 @@ import {
   type LiveEnvelope,
   type ProjectorState,
 } from "./projector.js";
-import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, ModelRef, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView } from "./source.js";
+import type { ConnectionInfo, DesktopDataSource, LogsPageData, MemoryAgentSettingsView, MemoryPageData, ModelOption, ModelRef, PreferencesView, ProviderInput, ProviderView, SessionSettingsView, SessionUsageView, ActivityFilter, ActivityPageResult, SubagentThreadCard, SubagentTranscriptView, UsageSummaryFilterView, UsageSummaryView, UsageTokenTotals } from "./source.js";
 import type { AgentProfileView, AgentTemplateView, CreateAgentInput } from "./source.js";
 
 interface MockSession {
@@ -48,6 +48,126 @@ const mockAgentTemplates: readonly AgentTemplateView[] = [
 ];
 
 const MOCK_AGENT_COLORS = ["#5b8def", "#3aa96c", "#e87561", "#e8b128", "#8c72bf", "#d07fa8"] as const;
+
+/* ---- A8：全局用量 mock fixture（确定性；聚合语义与后端 usage-store 对齐） ---- */
+
+/** 单条用量记录（对应 usage_recorder 落库一行：source/role/status + token 四段） */
+interface MockUsageRecord {
+  readonly sessionId: string | null;
+  readonly source: "main" | "subagent" | "utility";
+  readonly role: "primary" | "secondary";
+  readonly status: "completed" | "failed" | "cancelled" | "timeout" | "interrupted" | "budget_exhausted";
+  readonly provider: string;
+  readonly model: string;
+  /** 距今天数（0 = 今天）；days 过滤按 recordDays < days 语义（对齐后端近 N 天窗口） */
+  readonly daysAgo: number;
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+}
+
+const emptyTotals = (): UsageTokenTotals => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 });
+
+/** 可变累加器（UsageTokenTotals 字段 readonly，聚合时用本地可变形状） */
+type MutableTotals = { -readonly [K in keyof UsageTokenTotals]: UsageTokenTotals[K] };
+
+function addTotals(target: MutableTotals, record: Pick<MockUsageRecord, "input" | "output" | "cacheRead" | "cacheWrite">): void {
+  target.input += record.input;
+  target.output += record.output;
+  target.cacheRead += record.cacheRead;
+  target.cacheWrite += record.cacheWrite;
+  target.totalTokens += record.input + record.output + record.cacheRead + record.cacheWrite;
+}
+
+/** 日期桶 key（YYYY-MM-DD，按 daysAgo 反推的确定日期） */
+function mockDateKey(daysAgo: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** 固定记录：main 若干（主对话，primary/secondary 混合，含 failed/cancelled）+ subagent + utility；
+ * daysAgo 跨 7/30/90 三个窗口（12/45 天各一条），供时间范围过滤断言 */
+const MOCK_USAGE_RECORDS: readonly MockUsageRecord[] = [
+  { sessionId: "s-main-1", source: "main", role: "primary", status: "completed", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 0, input: 4200, output: 1800, cacheRead: 2600, cacheWrite: 400 },
+  { sessionId: "s-main-1", source: "main", role: "primary", status: "completed", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 0, input: 3100, output: 1200, cacheRead: 1900, cacheWrite: 0 },
+  { sessionId: "s-main-2", source: "main", role: "primary", status: "failed", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 1, input: 1500, output: 0, cacheRead: 800, cacheWrite: 0 },
+  { sessionId: "s-main-2", source: "main", role: "secondary", status: "cancelled", provider: "moonshot", model: "kimi-k3", daysAgo: 1, input: 900, output: 300, cacheRead: 0, cacheWrite: 0 },
+  { sessionId: "s-main-3", source: "main", role: "primary", status: "completed", provider: "moonshot", model: "kimi-k3", daysAgo: 2, input: 5200, output: 2400, cacheRead: 3100, cacheWrite: 600 },
+  { sessionId: "s-main-3", source: "main", role: "secondary", status: "completed", provider: "moonshot", model: "kimi-k3", daysAgo: 3, input: 1100, output: 500, cacheRead: 200, cacheWrite: 0 },
+  { sessionId: null, source: "subagent", role: "primary", status: "completed", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 0, input: 6800, output: 3600, cacheRead: 2200, cacheWrite: 900 },
+  { sessionId: null, source: "subagent", role: "secondary", status: "completed", provider: "moonshot", model: "kimi-k3", daysAgo: 1, input: 2400, output: 1100, cacheRead: 500, cacheWrite: 0 },
+  { sessionId: null, source: "subagent", role: "primary", status: "timeout", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 2, input: 3300, output: 600, cacheRead: 0, cacheWrite: 0 },
+  { sessionId: null, source: "utility", role: "secondary", status: "completed", provider: "moonshot", model: "kimi-k3", daysAgo: 0, input: 700, output: 350, cacheRead: 100, cacheWrite: 0 },
+  { sessionId: null, source: "utility", role: "secondary", status: "completed", provider: "moonshot", model: "kimi-k3", daysAgo: 12, input: 650, output: 250, cacheRead: 80, cacheWrite: 0 },
+  { sessionId: "s-main-4", source: "main", role: "primary", status: "completed", provider: "deepseek-local", model: "deepseek-v3.2", daysAgo: 45, input: 5200, output: 2100, cacheRead: 900, cacheWrite: 100 },
+];
+
+/** 服务端 summary(days) 语义：四段求和 + 分组聚合 + cacheHitRate（input+cacheRead 分母） */
+function summarizeRecords(records: readonly MockUsageRecord[], days: number): UsageSummaryView {
+  const totals = emptyTotals();
+  const byDay = new Map<string, UsageTokenTotals>();
+  const byModel = new Map<string, UsageTokenTotals & { provider: string; model: string }>();
+  const bySource = new Map<MockUsageRecord["source"], UsageTokenTotals & { source: MockUsageRecord["source"]; calls: number }>();
+  const byRole = new Map<MockUsageRecord["role"], UsageTokenTotals & { role: MockUsageRecord["role"]; calls: number }>();
+  const byStatus = new Map<MockUsageRecord["status"], UsageTokenTotals & { status: MockUsageRecord["status"]; calls: number }>();
+  const sessionIds = new Set<string>();
+  let turns = 0;
+
+  for (const record of records) {
+    addTotals(totals, record);
+    if (record.source === "main") turns += 1;
+    if (record.sessionId !== null) sessionIds.add(record.sessionId);
+
+    const dayKey = mockDateKey(record.daysAgo);
+    const day = byDay.get(dayKey) ?? emptyTotals();
+    addTotals(day, record);
+    byDay.set(dayKey, day);
+
+    const modelKey = `${record.provider}/${record.model}`;
+    const model = byModel.get(modelKey) ?? { provider: record.provider, model: record.model, ...emptyTotals() };
+    addTotals(model, record);
+    byModel.set(modelKey, model);
+
+    const source = bySource.get(record.source) ?? { source: record.source, ...emptyTotals(), calls: 0 };
+    addTotals(source, record);
+    source.calls += 1;
+    bySource.set(record.source, source);
+
+    const role = byRole.get(record.role) ?? { role: record.role, ...emptyTotals(), calls: 0 };
+    addTotals(role, record);
+    role.calls += 1;
+    byRole.set(record.role, role);
+
+    const status = byStatus.get(record.status) ?? { status: record.status, ...emptyTotals(), calls: 0 };
+    addTotals(status, record);
+    status.calls += 1;
+    byStatus.set(record.status, status);
+  }
+
+  const denominator = totals.input + totals.cacheRead;
+  const bucket = <K, V extends UsageTokenTotals>(map: Map<K, V>): V[] =>
+    [...map.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+
+  return {
+    days,
+    totals,
+    cacheHitRate: denominator > 0 ? totals.cacheRead / denominator : null,
+    sessions: sessionIds.size,
+    turns,
+    calls: records.length,
+    byDay: [...byDay.entries()]
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([date, day]) => ({ date, ...day })),
+    byModel: bucket(byModel),
+    bySource: bucket(bySource),
+    byRole: bucket(byRole),
+    byStatus: bucket(byStatus),
+  };
+}
 
 /** Mock 数据源：fixture + 模拟事件流（与真实数据源走同一份 projector） */
 export class MockDataSource implements DesktopDataSource {
@@ -406,6 +526,21 @@ export class MockDataSource implements DesktopDataSource {
 
   getSessionUsage(): Promise<SessionUsageView> {
     return Promise.resolve({ totalTokens: 39200, turns: 6, contextTokens: 38400, contextWindow: 128000, contextPercent: 30 });
+  }
+
+  /* ---- A8：全局用量汇总（mock，固定 fixture + 真实过滤/聚合） ---- */
+
+  getUsageSummary(filter?: UsageSummaryFilterView): Promise<UsageSummaryView> {
+    const days = filter?.days ?? 30;
+    const source = filter?.source ?? "";
+    const role = filter?.role ?? "";
+    const records = MOCK_USAGE_RECORDS.filter((record) => {
+      if (record.daysAgo >= days) return false;
+      if (source !== "" && record.source !== source) return false;
+      if (role !== "" && record.role !== role) return false;
+      return true;
+    });
+    return Promise.resolve(summarizeRecords(records, days));
   }
 
   /* ---- 记忆增强（mock） ---- */

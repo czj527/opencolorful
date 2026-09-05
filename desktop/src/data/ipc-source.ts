@@ -41,6 +41,8 @@ import type {
   SessionUsageView,
   SubagentThreadCard,
   SubagentTranscriptView,
+  UsageSummaryFilterView,
+  UsageSummaryView,
 } from "./source.js";
 
 /* ---- 服务端响应的最小契约形状（对齐 web/src/lib/types.ts 与 contracts） ---- */
@@ -603,6 +605,64 @@ export class IpcDataSource implements DesktopDataSource {
       contextTokens: context !== null && typeof context["tokens"] === "number" ? context["tokens"] : null,
       contextWindow: context !== null ? Number(context["contextWindow"] ?? 0) : 0,
       contextPercent: context !== null && typeof context["percent"] === "number" ? context["percent"] : null,
+    };
+  }
+
+  /* ---- A8：全局模型用量汇总（对齐 /api/usage/summary 冻结契约，A8b 并行实现） ---- */
+
+  async getUsageSummary(filter: UsageSummaryFilterView = {}): Promise<UsageSummaryView> {
+    const params = new URLSearchParams();
+    if (filter.days !== undefined) params.set("days", String(filter.days));
+    if (filter.source !== undefined && filter.source !== "") params.set("source", filter.source);
+    if (filter.role !== undefined && filter.role !== "") params.set("role", filter.role);
+    const query = params.toString();
+    const data = await this.request<Record<string, unknown>>("GET", `/api/usage/summary${query !== "" ? `?${query}` : ""}`);
+
+    const totals = (data["totals"] ?? {}) as Record<string, unknown>;
+    const bucketTotals = (row: Record<string, unknown>) => ({
+      input: Number(row["input"] ?? 0),
+      output: Number(row["output"] ?? 0),
+      cacheRead: Number(row["cacheRead"] ?? 0),
+      cacheWrite: Number(row["cacheWrite"] ?? 0),
+      totalTokens: Number(row["totalTokens"] ?? 0),
+    });
+    const bucketRows = asArray<Record<string, unknown>>(data["byDay"]).map((row) => ({
+      date: String(row["date"] ?? ""),
+      ...bucketTotals(row),
+    }));
+    const modelRows = asArray<Record<string, unknown>>(data["byModel"]).map((row) => ({
+      provider: String(row["provider"] ?? ""),
+      model: String(row["model"] ?? ""),
+      ...bucketTotals(row),
+    }));
+    const sourceRows = asArray<Record<string, unknown>>(data["bySource"]).map((row) => ({
+      source: String(row["source"] ?? "") as UsageSummaryView["bySource"][number]["source"],
+      ...bucketTotals(row),
+      calls: Number(row["calls"] ?? 0),
+    }));
+    const roleRows = asArray<Record<string, unknown>>(data["byRole"]).map((row) => ({
+      role: String(row["role"] ?? "") as UsageSummaryView["byRole"][number]["role"],
+      ...bucketTotals(row),
+      calls: Number(row["calls"] ?? 0),
+    }));
+    const statusRows = asArray<Record<string, unknown>>(data["byStatus"]).map((row) => ({
+      status: String(row["status"] ?? "") as UsageSummaryView["byStatus"][number]["status"],
+      ...bucketTotals(row),
+      calls: Number(row["calls"] ?? 0),
+    }));
+
+    return {
+      days: Number(data["days"] ?? 30),
+      totals: bucketTotals(totals),
+      cacheHitRate: typeof data["cacheHitRate"] === "number" ? data["cacheHitRate"] : null,
+      sessions: Number(data["sessions"] ?? 0),
+      turns: Number(data["turns"] ?? 0),
+      calls: Number(data["calls"] ?? 0),
+      byDay: bucketRows,
+      byModel: modelRows,
+      bySource: sourceRows,
+      byRole: roleRows,
+      byStatus: statusRows,
     };
   }
 

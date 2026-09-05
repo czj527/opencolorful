@@ -30,12 +30,14 @@ import { RollingSummaryService } from "../runtime/memory/rolling-summary.js";
 import { EventIndexer } from "../runtime/memory/event-indexer.js";
 import { MemoryCompilePipeline } from "../runtime/memory/compile-pipeline.js";
 import { completeUtilityTextForResolved } from "../pi-sdk/complete-text.js";
+import { runUtilityCallWithUsage } from "../runtime/usage-recorder.js";
 import { MemoryBatchStore } from "../storage/memory/batch-store.js";
 import { MemoryDailyStateStore, MemoryWatermarkStore, SchedulerStateStore } from "../storage/memory/recovery-store.js";
 import { SessionSummaryStore } from "../storage/memory/summary-store.js";
 import { MemoryEventStore } from "../storage/memory/event-store.js";
 import { MemoryFactStore } from "../storage/memory/fact-store.js";
 import path from "node:path";
+
 import { createServerApp, type ServerAppOptions } from "./app.js";
 import {
   acquireServerLock,
@@ -348,6 +350,13 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       } catch {
         return null;
       }
+    }, (sessionId) => {
+      // A8a：主会话 agentId 归属（会话不存在/解析失败 → null = 未知）
+      try {
+        return sessionService.getView(sessionId).agentId ?? null;
+      } catch {
+        return null;
+      }
     });
     // 记忆设置生效链路：per-Agent 覆盖 → 全局默认 → 平台默认（P0-2：生产必须读真实设置）
     const resolveMemorySettings = (agentId: string) => {
@@ -360,7 +369,15 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     };
     // 工具型 LLM：统一走 secondary 模型策略；未配置/不可用时抛稳定策略错误，
     // 各记忆组件转 degraded，不阻塞主对话，也不枚举环境模型或首个凭据 Provider。
-    const completeText = async (agentId: string, req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => {
+    // A8a：每次调用（成功/失败/取消）经 runUtilityCallWithUsage 落一行 source=utility
+    // 账目——agentId 来自调用方上下文，sessionId 可选（无会话归属的全局调用传 null）；
+    // 消费方（RollingSummary/MemoryCompilePipeline/BackgroundReview/MemoryAgent 等）
+    // 仍拿 string，接口不变。
+    const completeText = async (
+      agentId: string,
+      req: { systemPrompt: string; prompt: string; maxTokens?: number; signal?: AbortSignal },
+      context?: { sessionId?: string | null },
+    ): Promise<string> => {
       const preferences = preferencesStore.get();
       let perAgent: MemoryAgentSettings | undefined;
       if (agentId.trim() !== "") {
@@ -376,17 +393,30 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         ...(perAgent !== undefined ? { perAgent } : {}),
       });
       const resolved = modelService.resolveModel(selection.providerId, selection.modelId);
-      return completeUtilityTextForResolved(resolved, {
-        systemPrompt: req.systemPrompt,
-        prompt: req.prompt,
-        ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
-      });
+      return runUtilityCallWithUsage(
+        usageStore,
+        {
+          agentId: agentId.trim() !== "" ? agentId : null,
+          sessionId: context?.sessionId ?? null,
+          provider: selection.providerId,
+          model: selection.modelId,
+          role: selection.role,
+          ...(req.signal !== undefined ? { signal: req.signal } : {}),
+        },
+        () =>
+          completeUtilityTextForResolved(resolved, {
+            systemPrompt: req.systemPrompt,
+            prompt: req.prompt,
+            ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
+            ...(req.signal !== undefined ? { signal: req.signal } : {}),
+          }),
+      );
     };
 
     const summaryStore = new SessionSummaryStore(database);
     const watermarkStore = new MemoryWatermarkStore(database);
     // 编译/滚动摘要属 agent-agnostic 工具型调用：走全局记忆设置（resolveMemorySettings("") 回退全局/默认）
-    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req);
+    const utilityCompleteText = (req: { systemPrompt: string; prompt: string; maxTokens?: number }): Promise<string> => completeText("", req, { sessionId: null });
     const compilePipeline = new MemoryCompilePipeline({
       summaryStore,
       dailyStateStore: new MemoryDailyStateStore(database),

@@ -143,7 +143,9 @@ describe("prompt event normalization", () => {
         )
         .map((event) => event.type);
       expect(terminalTypes).toEqual(["turn.failed"]);
-      expect(usageStore.sessionTotals("session-prompt-failure").turns).toBe(0);
+      // A8a：失败 turn 也落一行 source=main 账目（status=failed；usage 无则 0 =
+      // 无账目），"所有模型使用量可查"不再漏失败调用；turns 计 main 行数。
+      expect(usageStore.sessionTotals("session-prompt-failure").turns).toBe(1);
       expect(replayStore.getSince(run.streamId, 0).events.map((event) => event.type)).not.toContain("turn.completed");
     } finally {
       runtime.dispose();
