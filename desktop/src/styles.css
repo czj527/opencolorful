@@ -265,6 +265,39 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
   padding: 8px 11px; background: var(--bg-subtle);
   border: 1px solid var(--border); border-radius: 8px;
 }
+
+/* 波次 B3：消息悬停操作 + 行内重生成编辑器 + 分支动作错误条 + 锚点高亮 */
+.msg-actions { display: flex; gap: 8px; margin-top: 5px; }
+.msg-action {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg); color: var(--text-3); font-size: 11px; cursor: pointer;
+}
+.msg-action:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text); }
+.regenerate-editor {
+  margin-top: 8px; padding: 9px 10px;
+  background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: 8px;
+  display: grid; gap: 7px;
+}
+.regenerate-editor textarea {
+  width: 100%; resize: vertical; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 12.5px;
+}
+.regenerate-editor-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.anchor-highlight { animation: anchor-flash 1.2s ease; }
+@keyframes anchor-flash {
+  0%, 55% { box-shadow: 0 0 0 2px var(--accent-soft); border-radius: 8px; }
+  100% { box-shadow: none; }
+}
+.branch-strip {
+  max-width: 740px; margin: 8px auto 0; padding: 8px 12px;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-subtle); font-size: 12px; color: var(--text-2);
+}
+.branch-strip-error { border-color: var(--err); color: var(--err); background: var(--bg); }
+.branch-state-actions { display: inline-flex; gap: 10px; margin-left: auto; }
 .stream-caret {
   display: inline-block; width: 7px; height: 14px; margin-left: 3px;
   vertical-align: -2px; background: var(--accent);

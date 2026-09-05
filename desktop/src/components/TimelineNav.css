@@ -1,0 +1,76 @@
+/* 波次 B3：当前分支线性 timeline 导航（sticky 悬浮于 chat-scroll 顶部） */
+
+.timeline-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 6px 24px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.timeline-track::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-node {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.timeline-node:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.timeline-node.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.timeline-index {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--bg-active);
+  color: var(--text-2);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.timeline-node.is-active .timeline-index {
+  background: var(--accent);
+  color: #fff;
+}
+
+.timeline-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
