@@ -1,18 +1,9 @@
 import type { Hono, Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
-import type { AgentStore } from "../../config/agent-store.js";
-import type { RuntimePaths } from "../../config/paths.js";
 import { createApiError, type ApiError } from "../../contracts/api-error.js";
-import type { ToolMode } from "../../contracts/session-settings.js";
 import { SessionBranchError } from "../../contracts/session-branch.js";
-import type { EventReplayStore } from "../../runtime/event-replay-store.js";
-import type { ModelService } from "../../runtime/model-service.js";
-import type { PromptService } from "../../runtime/prompt-service.js";
-import type { SessionService } from "../../runtime/session-service.js";
-import { SessionRuntime } from "../../runtime/session-runtime.js";
-import { ToolPolicy } from "../../runtime/tool-policy.js";
-import type Database from "better-sqlite3";
+import { EnsureRuntimeError, type RuntimeBootstrap } from "./runtime-bootstrap.js";
 
 /**
  * 波次 B2：会话分支 / 重生成 / Fork 路由（plans/p1-conversation-workbench.en.md §3.3/§3.4）。
@@ -25,16 +16,18 @@ import type Database from "better-sqlite3";
  *
  * 错误矩阵（B0 §3.4 冻结）：busy → 409 SESSION_BUSY；引用节点不存在 → 404
  * NOT_FOUND；输入不合法/空源 → 400 INVALID_INPUT；已归档 → 409 CONFLICT。
+ *
+ * 波次 B2 修复：Runtime 懒创建复用共享 bootstrap（runtime-bootstrap.ts，与
+ * messages 路由同一实例）——插件/Skill/Subagent/记忆/人设工具面与 profile/
+ * 插件签名重建逻辑与 messages 路径完全一致，杜绝分支路由首次动作触发静默
+ * 降级装配。
  */
 
 export interface SessionBranchRoutesOptions {
-  readonly sessionService: SessionService;
-  readonly promptService: PromptService;
-  readonly paths?: RuntimePaths;
-  readonly modelService?: ModelService;
-  readonly replayStore?: EventReplayStore;
-  readonly database?: Database.Database;
-  readonly agentStore?: AgentStore;
+  readonly sessionService: import("../../runtime/session-service.js").SessionService;
+  readonly promptService: import("../../runtime/prompt-service.js").PromptService;
+  /** 共享 Runtime Bootstrap（app 组合根构造的单例，与 registerMessageRoutes 同实例） */
+  readonly runtimeBootstrap: RuntimeBootstrap;
 }
 
 interface MappedError {
@@ -73,97 +66,7 @@ function jsonError(context: Context, error: unknown, unexpectedMessage: string):
 }
 
 export function registerSessionBranchRoutes(app: Hono, options: SessionBranchRoutesOptions): void {
-  const { sessionService, promptService } = options;
-
-  class EnsureRuntimeFailure extends Error {
-    constructor(readonly mapped: MappedError) {
-      super(mapped.body.message);
-    }
-  }
-
-  /**
-   * 懒创建 Runtime（分支操作在会话未加载时也可执行）。
-   *
-   * 这是 messages.ts ensureRuntime 的核心子集：工具模式解析、faux/真实模型
-   * 解析、思维级别、工作区、replayStore 与 Agent 归属一致；插件/Skill/
-   * Subagent 工具与沙箱上下文不在此复制——绑定 Agent 的会话在下一次用户
-   * 消息时会因 profile/插件签名失配被 messages.ts 自动重建（自愈），无 Agent
-   * 会话无这些工具面。偏离已在 B2 报告中记录。
-   */
-  async function ensureRuntime(sessionId: string): Promise<void> {
-    if (promptService.hasRuntime(sessionId)) return;
-    const { paths, modelService } = options;
-    if (!paths) {
-      throw new EnsureRuntimeFailure({
-        status: 409,
-        body: createApiError("CONFLICT", "Session Runtime 未就绪"),
-      });
-    }    try {
-      const session = sessionService.open(sessionId);
-      const view = sessionService.getView(sessionId);
-      const toolMode = (view.toolMode ?? "off") as ToolMode;
-      const toolPolicy = new ToolPolicy();
-      const fileTools = toolPolicy.resolveTools(
-        toolMode,
-        view.workspaceCwd ?? undefined,
-        view.workspaceConfirmed,
-      );
-      const runtimeCwd = view.workspaceCwd || process.cwd();
-      const noTools = toolPolicy.shouldDisableAllTools(toolMode) ? ("all" as const) : undefined;
-      const tools = fileTools.length > 0 ? [...fileTools] : undefined;
-      const selectedModel = session.model;
-      if (modelService !== undefined && selectedModel === null) {
-        throw new EnsureRuntimeFailure({
-          status: 409,
-          body: createApiError("CONFLICT", "当前 Session 未选择主对话模型，请先配置默认模型或显式选择模型"),
-        });
-      }
-      if (selectedModel && modelService && selectedModel.providerId !== "faux") {
-        const runtime = await SessionRuntime.create({
-          sessionId,
-          cwd: runtimeCwd,
-          authPath: paths.authFile,
-          publish: () => {},
-          sessionHandle: session,
-          modelService,
-          resolveProviderId: selectedModel.providerId,
-          resolveModelId: selectedModel.modelId,
-          ...(view.agentId != null ? { agentId: view.agentId } : {}),
-          ...(noTools ? { noTools } : {}),
-          ...(tools ? { tools } : {}),
-          thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
-          ...(options.replayStore ? { replayStore: options.replayStore } : {}),
-          workspaceCwd: view.workspaceCwd,
-        });
-        promptService.register(runtime);
-        return;
-      }
-      const runtime = await SessionRuntime.create({
-        sessionId,
-        cwd: runtimeCwd,
-        sessionDir: paths.sessions,
-        authPath: paths.authFile,
-        providerId: "faux",
-        modelId: "faux-1",
-        faux: { response: "已收到您的消息", tokensPerSecond: 20 },
-        publish: () => {},
-        sessionHandle: session,
-        ...(view.agentId != null ? { agentId: view.agentId } : {}),
-        ...(noTools ? { noTools } : {}),
-        ...(tools ? { tools } : {}),
-        thinkingLevel: view.thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max",
-        ...(options.replayStore ? { replayStore: options.replayStore } : {}),
-        workspaceCwd: view.workspaceCwd,
-      });
-      promptService.register(runtime);
-    } catch (error) {
-      if (error instanceof EnsureRuntimeFailure) throw error;
-      throw new EnsureRuntimeFailure({
-        status: 409,
-        body: createApiError("CONFLICT", "Session Runtime 未就绪"),
-      });
-    }
-  }
+  const { sessionService, promptService, runtimeBootstrap } = options;
 
   // ── 分支树视图 ──────────────────────────────────────────────────────
   app.get("/api/sessions/:id/tree", (context) => {
@@ -205,10 +108,11 @@ export function registerSessionBranchRoutes(app: Hono, options: SessionBranchRou
         return context.json(createApiError("CONFLICT", "会话已归档"), 409);
       }
       try {
-        await ensureRuntime(sessionId);
+        // 共享 bootstrap：懒创建/按需重建（含插件/Skill/记忆/人设全量装配）
+        await runtimeBootstrap.ensureRuntime(sessionId);
       } catch (error) {
-        if (error instanceof EnsureRuntimeFailure) {
-          return context.json(error.mapped.body, error.mapped.status);
+        if (error instanceof EnsureRuntimeError) {
+          return context.json(error.apiError, error.status);
         }
         throw error;
       }
@@ -266,10 +170,11 @@ export function registerSessionBranchRoutes(app: Hono, options: SessionBranchRou
         return context.json(createApiError("SESSION_BUSY", "会话正在运行，请先停止后再操作"), 409);
       }
       try {
-        await ensureRuntime(sessionId);
+        // 共享 bootstrap：切换前确保 Runtime 就绪（全量工具面装配）
+        await runtimeBootstrap.ensureRuntime(sessionId);
       } catch (error) {
-        if (error instanceof EnsureRuntimeFailure) {
-          return context.json(error.mapped.body, error.mapped.status);
+        if (error instanceof EnsureRuntimeError) {
+          return context.json(error.apiError, error.status);
         }
         throw error;
       }
