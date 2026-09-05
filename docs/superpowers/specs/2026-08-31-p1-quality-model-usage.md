@@ -1,7 +1,7 @@
 # P1 波次 A：质量体系、两档模型与统一用量
 
 **日期：2026-08-31**  
-**状态：规划中**  
+**状态：已完成（2026-09-05，A0-A9 全部实施合并并验收）**  
 **实施计划：** [`plans/p1-quality-model-usage.en.md`](../../../plans/p1-quality-model-usage.en.md)  
 **上游路线：** [`docs/positioning-and-roadmap.md`](../../positioning-and-roadmap.md) §五 P1  
 **当前状态：** [`docs/project-status.md`](../../project-status.md)

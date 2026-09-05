@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-05**
-**当前基线：** `main`  `b244fa1`（A0 收口）；波次 A 实施分支 `p1-wave-a-a6-model-policy` 已推送至 `6bacdf3`，对应堆叠 PR 链 #44→#45→#51→#52→#53 待合并（合并后 CI 方会在 main 触发）
+**当前基线：** `main`  `2be2bac`（波次 A 全部实施已合并）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 ## 当前结论
@@ -23,7 +23,7 @@
 | Governance G1 | 仓库收敛与 Desktop 优先 | 已完成（2026-08-26） | `plans/g1-repo-convergence.md` |
 | Governance G2 | 桌面发布分发与版本更新 | 热修已合并；`v0.1.1` tag 已存在但 GitHub Release 仍为 Draft，待正式发布与安装/更新实测 | `plans/g2-desktop-release.md` |
 | Product P1 | 个人助理基础体验 | 进行中（切片 1/1.5/1.75 代码已合并；波次八、发布实测和后续规划待收口） | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`、`docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`、`docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`、`plans/desktop-parity.md`、`plans/p1-t1~t15-*.md` |
-| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | 进行中（A0 已收口 PR #40-#43；A1-A8 代码全部完成于实施分支：A1 矩阵 92 行 0 FAIL、A2 Mock 62 例、A3 真链 24 例 + CI smoke job、A4 六 lane 全回归、A5 排障关联、A6/A7 两档模型统一接线、A8 统一用量摄取/查询/Desktop 全局用量页；A9 集成质量门已执行——根 2233 例、Desktop 真链 24/24、Web Playwright 60/60、双构建全绿。待合并堆叠 PR 链后收口） | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`、`docs/testing/test-asset-matrix.md`、`docs/testing/desktop-test-conventions.md` |
+| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | **已完成（2026-09-05）**：A0-A9 全部实施合并（PR #40-#43、#44、#45、#51、#52、#53）。A1 矩阵 92 行 0 FAIL；A2 Mock 65 例 + A3 真链 24 例 + CI Desktop smoke；A4 六 lane 全回归；A5 排障关联；A6/A7 两档模型统一（selectPrimary/selectSecondary）；A8 统一用量（schema v14 + 摄取/查询/Desktop 全局用量页）；A9 集成质量门全绿（根 2233 例、Desktop 真链 24/24、Web Playwright 60/60）。评审线程全部带证据解决；Desktop 测试已接入根质量门 | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`（含 A9/收口记录）、`docs/testing/test-asset-matrix.md`、`docs/testing/desktop-test-conventions.md` |
 | Product P1 内部波次 B | 对话工作台能力 | 规划中（本次只建立文档，尚未实施） | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md` |
 | Product P1 独立专项 | 浏览器能力与安全边界 | 规划中（独立于波次 B，尚未实施） | `docs/superpowers/specs/2026-08-31-browser-capability.md`、`plans/browser-capability.en.md` |
 | Product P2 | 个人效率工作台 | 未排期 | `docs/positioning-and-roadmap.md` |
@@ -32,12 +32,11 @@
 
 ## 当前优先级
 
-1. **合并波次 A 堆叠 PR 链并收口**：A0-A8 已全部完成于 `p1-wave-a-a6-model-policy`（含 A9 集成质量门：根全量 2233 例、Desktop 真链 24/24、Web Playwright 60/60、双构建、PI 边界全绿）。剩余动作：按 #44→#45→#51→#52→#53 顺序合并堆叠 PR（合并即触发 CI），矩阵遗留 SKIP 均为显式且边界明确（见 `plans/p1-quality-model-usage.en.md` A9 记录）。
-2. **P1 波次 A 完成后实施波次 B**：参考 OpenCode、OpenHanako、Codex、Hermes Agent 和 Kimi Code，补齐会话回退/修改/重试/Fork、分支切换、线性时间线、压缩摘要正文和 durable session todo。规划见 `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md` 与 `plans/p1-conversation-workbench.en.md`。
-3. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
-4. **G2 发布事实单独收口**：`v0.1.1` tag 已存在，但 GitHub Release 仍为 Draft；正式发布、安装启动、更新链路和仓库外启动冒烟必须有独立证据，不能以 tag 或 CI 绿替代。
-5. **五天真实日用后置**：在波次 A、波次 B 的关键能力、Desktop 真实交互验收和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务；所有未实现能力和验收缺口继续在权威计划中显式记录。
-6. **保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建**，所有变更走 PR，不直推 `main`。
+1. **立项并实施 P1 波次 B（对话工作台）**：波次 A 已于 2026-09-05 正式收口（见上）。下一步按既有规划实施波次 B：会话回退/修改/重试/Fork、分支切换、线性时间线、压缩摘要正文、durable session todo。规划见 `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md` 与 `plans/p1-conversation-workbench.en.md`（B0 产品语义冻结为第一道 integration barrier）。
+2. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
+3. **G2 发布事实单独收口**：`v0.1.1` tag 已存在，但 GitHub Release 仍为 Draft（含一个只有 blockmap 的孤儿草稿）；正式发布、安装启动、更新链路和仓库外启动冒烟必须有独立证据，不能以 tag 或 CI 绿替代。
+4. **五天真实日用后置**：在波次 B 关键能力、Desktop 真实交互验收和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务；所有未实现能力和验收缺口继续在权威计划中显式记录。
+5. **保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建**，所有变更走 PR，不直推 `main`。
 
 ## 状态更新规则
 
