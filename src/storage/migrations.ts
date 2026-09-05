@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -977,6 +977,43 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
         ON usage_records (session_id, created_at);
     `);
     database.prepare("UPDATE schema_version SET version = 14").run();
+  }
+
+  // v15：波次 B2 会话分支元数据 + durable todo 底座（plans/p1-conversation-workbench.en.md §3）。
+  // sessions 增加：branch_head_entry_id/branch_head_updated_at（B0 §3.2.3 分支头持久化，
+  // NULL = PI 默认叶子 = 文件序最后 entry）；source_session_id/source_leaf_entry_id
+  // （Fork 溯源元数据）。session_todos 是会话级 durable todo 事实表（B5 在其上实现
+  // store/工具/路由/UI，本次只交付 DDL，单一串行迁移由 B2 独占）；消息正文仍在 PI
+  // JSONL，SQLite 只存元数据/索引/状态。
+  if (current < 15) {
+    // ALTER 判重后执行（同 v9/v12 模式）：迁移中断恢复（表已升级但版本号未推进）
+    // 重跑本段时不会因 duplicate column 失败。
+    const sessionColumns = database.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    if (!sessionColumns.some((column) => column.name === "branch_head_entry_id")) {
+      database.exec("ALTER TABLE sessions ADD COLUMN branch_head_entry_id TEXT");
+    }
+    if (!sessionColumns.some((column) => column.name === "branch_head_updated_at")) {
+      database.exec("ALTER TABLE sessions ADD COLUMN branch_head_updated_at TEXT");
+    }
+    if (!sessionColumns.some((column) => column.name === "source_session_id")) {
+      database.exec("ALTER TABLE sessions ADD COLUMN source_session_id TEXT");
+    }
+    if (!sessionColumns.some((column) => column.name === "source_leaf_entry_id")) {
+      database.exec("ALTER TABLE sessions ADD COLUMN source_leaf_entry_id TEXT");
+    }
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS session_todos (
+        session_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending','in_progress','completed','cancelled')),
+        priority TEXT NOT NULL CHECK (priority IN ('high','medium','low')),
+        active_form TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, position)
+      );
+    `);
+    database.prepare("UPDATE schema_version SET version = 15").run();
   }
 
   if (current > CURRENT_SCHEMA_VERSION) {

@@ -19,6 +19,7 @@ import { registerMessageRoutes } from "./routes/messages.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
+import { registerSessionBranchRoutes } from "./routes/session-branches.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerSandboxRoutes } from "./routes/sandbox.js";
@@ -147,6 +148,18 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
   if (options.replayStore !== undefined) {
     registerAgentEventRoutes(app, options.replayStore, options.agentStore, options.sessionService);
+  }
+  if (options.sessionService !== undefined && options.promptService !== undefined) {
+    // 波次 B2：会话分支/重生成/Fork 路由（依赖 SessionService + PromptService）
+    registerSessionBranchRoutes(app, {
+      sessionService: options.sessionService,
+      promptService: options.promptService,
+      ...(options.paths !== undefined ? { paths: options.paths } : {}),
+      ...(options.modelService !== undefined ? { modelService: options.modelService } : {}),
+      ...(options.replayStore !== undefined ? { replayStore: options.replayStore } : {}),
+      ...(options.database !== undefined ? { database: options.database } : {}),
+      ...(options.agentStore !== undefined ? { agentStore: options.agentStore } : {}),
+    });
   }
   if (options.sessionService !== undefined) {
     registerSessionRoutes(

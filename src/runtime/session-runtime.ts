@@ -2,15 +2,25 @@ import crypto from "node:crypto";
 import path from "node:path";
 
 import type { AgentSettingsV2 } from "../contracts/agent-settings.js";
-import type { PlatformEventEnvelope } from "../contracts/events.js";
+import type { PlatformEventEnvelope, PlatformEventType } from "../contracts/events.js";
+import type { SessionBranchesChangedReason } from "../contracts/session-branch.js";
+import { SessionBranchError } from "../contracts/session-branch.js";
 import {
+  branchTo,
+  branchToRoot,
   createPiAgentSession,
   createPiFauxAgentSession,
+  getBranchEntries,
+  getLeafEntryId,
+  getSessionTree,
+  resolveEntry,
   type PiAgentEvent,
   type PiAgentSessionHandle,
   type PiFauxAgentOptions,
   type PiResourceSkills,
   type PiSessionHandle,
+  type PiSessionTreeNode,
+  type PiSessionTreeEntry,
   type PluginSessionTool,
   type PluginToolTurnContext,
   type SkillFileReadOutcome,
@@ -47,6 +57,12 @@ export interface SessionRuntimeOptions {
   readonly publish: (event: PlatformEventEnvelope) => void;
   readonly replayStore?: EventReplayStore;
   readonly sessionHandle?: PiSessionHandle;
+  /**
+   * 波次 B2（B0 §3.2.3 冻结持久化规则）：分支头写入端口（per-runtime 覆盖，
+   * 测试内联注入用）。缺省回退模块级 registry（registerBranchHeadWriter，
+   * SessionService 注册），组合根无需改动。
+   */
+  readonly refreshHead?: (sessionId: string, entryId: string | null) => void;
   readonly tools?: readonly string[];
   readonly noTools?: "all";
   readonly thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -110,6 +126,34 @@ export interface PromptRun {
   readonly completed: Promise<void>;
 }
 
+/** 波次 B2：regenerate 结果。branchId = 新用户条目 id（该分支的 turn root）。 */
+export interface RegenerateRun {
+  readonly streamId: string;
+  readonly branchId: string;
+  readonly completed: Promise<void>;
+}
+
+/**
+ * 波次 B2（B0 §3.2.3 冻结持久化规则）：分支头写入端口注册表。
+ *
+ * Runtime 在每次用户条目 append 落地 / switchBranch / turn 收尾时写入分支头
+ * （= 当前叶子）。写入器由 SessionService（持有 SQLite SessionIndex）注册，
+ * Runtime 自身不依赖存储层；按 sessionId 键控，dispose 注销。per-runtime
+ * 的 options.refreshHead 优先（测试内联注入用），未注入时查注册表。
+ */
+const branchHeadWriters = new Map<string, (sessionId: string, entryId: string | null) => void>();
+
+export function registerBranchHeadWriter(
+  sessionId: string,
+  write: (sessionId: string, entryId: string | null) => void,
+): void {
+  branchHeadWriters.set(sessionId, write);
+}
+
+export function unregisterBranchHeadWriter(sessionId: string): void {
+  branchHeadWriters.delete(sessionId);
+}
+
 export class SessionRuntime {
   private readonly executions = new ExecutionRegistry();
   private mapper: PlatformEventMapper | undefined;
@@ -131,9 +175,13 @@ export class SessionRuntime {
   /** 会话级插件工具（P0-1/P0-2：注入 PI 注册表；每 turn 冻结快照） */
   private readonly pluginTools: readonly PluginSessionTool[];
   private readonly snapshotFactory: SessionRuntimeOptions["snapshotFactory"];
+  /** 波次 B2：分支头持久化端口（未注入时回退模块级 registry，见下） */
+  private readonly refreshHead: ((sessionId: string, entryId: string | null) => void) | undefined;
   /** T11：Skill 元数据槽（beginTurn 每 turn 冻结写入；PI loader 每 turn 读取） */
   private readonly skillsSlotRef: { current: PiResourceSkills };
   private readonly skillSnapshotFactory: SessionRuntimeOptions["skillSnapshotFactory"];
+  /** 波次 B2：会话句柄（树原语经 src/pi-sdk 受控适配器使用；分支操作必需） */
+  private readonly sessionHandle: PiSessionHandle | undefined;
   /** Phase 14 T6：Subagent 生命周期 hook（turnId 槽/用户抢占/安全边界） */
   private readonly subagentLifecycle: SessionRuntimeOptions["subagentLifecycle"];
   /** T11（P0-2）：沙箱服务（turn 冻结后同步 Skill 只读根） */
@@ -159,6 +207,8 @@ export class SessionRuntime {
     this.modelId = options.resolveModelId ?? options.modelId;
     this.pluginTools = options.pluginTools ?? [];
     this.snapshotFactory = options.snapshotFactory;
+    this.refreshHead = options.refreshHead;
+    this.sessionHandle = options.sessionHandle;
     this.skillSnapshotFactory = options.skillSnapshotFactory;
     this.subagentLifecycle = options.subagentLifecycle;
     this.unsubscribe = agent.subscribe((event) => {
@@ -372,9 +422,145 @@ export class SessionRuntime {
 
   prompt(text: string): PromptRun {
     if (!text.trim()) throw new Error("Prompt 不能为空");
+    return this.startTurn(text, false);
+  }
+
+  /**
+   * 波次 B2：regenerate（edit-and-retry 统一原语，B0 §3.2.1）。
+   * 与 prompt 共享同一个单飞 ExecutionRegistry 与同一条内部 runTurn 路径
+   * （turn 事件、streamId、abort、终态分类、观测账目完全一致）。
+   *
+   * 定位 turn 的用户条目：target 本身是 user message → 即 turn root；否则沿
+   * parentId 链向根走，取最近的 user-message 祖先；找不到 → INVALID_INPUT。
+   * 之后把叶子移到用户条目的父（根用户条目 → branchToRoot），append 新文本
+   * 走 prompt 完全同一条路径，形成同父的新兄弟分支。
+   *
+   * branchId = 新用户条目 id：PI 在 turn 内部 append 用户消息后才产生 id，
+   * 这里等待第一个 user message_end 落地后返回（turn 继续在后台执行，
+   * completed 仍由 ExecutionRegistry 跟踪）。turn 启动即失败（未 append 用户
+   * 条目，如模型鉴权失败）时抛错，失败终态已照常投影到会话流。
+   */
+  async regenerate(targetEntryId: string, text: string): Promise<RegenerateRun> {
+    if (!text.trim()) {
+      throw new SessionBranchError("invalid_input", "重生成内容不能为空");
+    }
+    // 单飞前置检查：并发 prompt/regenerate 在叶子移动之前拒绝（不留下半移动状态）
+    if (this.executions.activeStream(this.sessionId) !== undefined) {
+      throw new SessionBranchError("busy", "会话正在运行，请先停止后再操作");
+    }
+    const handle = this.requireSessionHandle("重生成");
+    const target = resolveEntry(handle, targetEntryId);
+    if (target === undefined) {
+      throw new SessionBranchError("not_found", "引用的会话节点不存在，请刷新后重试");
+    }
+    const userEntry = this.resolveTurnUserEntry(handle, target);
+    // 定位叶子：用户条目 parentId === null → branchToRoot，否则移到其父条目。
+    // branchTo 只是纯指针移动，下一次 append 即成为同父的新兄弟分支。
+    if (userEntry.parentId === null) {
+      branchToRoot(handle);
+    } else {
+      branchTo(handle, userEntry.parentId);
+    }
+    const run = this.startTurn(text, true);
+    const branchId = await run.branchId;
+    if (branchId === null) {
+      throw new Error("重新生成未能启动（用户消息未落盘），请查看会话流中的失败原因");
+    }
+    return { streamId: run.streamId, branchId, completed: run.completed };
+  }
+
+  /** 解析 regenerate 的 turn 用户条目（目标自身或最近的 user-message 祖先）。 */
+  private resolveTurnUserEntry(
+    handle: PiSessionHandle,
+    target: PiSessionTreeEntry,
+  ): PiSessionTreeEntry {
+    let current: PiSessionTreeEntry | undefined = target;
+    while (current !== undefined) {
+      if (current.type === "message" && current.role === "user") {
+        return current;
+      }
+      current = current.parentId === null ? undefined : resolveEntry(handle, current.parentId);
+    }
+    throw new SessionBranchError("invalid_input", "只能从用户消息重新生成");
+  }
+
+  /**
+   * 波次 B2：切换当前分支（B0 §3.2.3）。busy 时由调用方（路由层）先行 409，
+   * 这里再拒绝一次重复保护；叶子指针移动 + 分支头持久化 + 两个会话流事件
+   * （session.branch.switched / session.branches.changed），Replay Store 先写。
+   */
+  switchBranch(branchId: string): { branchId: string; currentBranchId: string } {
+    if (this.executions.activeStream(this.sessionId) !== undefined) {
+      throw new SessionBranchError("busy", "会话正在运行，请先停止后再操作");
+    }
+    const handle = this.requireSessionHandle("分支切换");
+    const target = resolveEntry(handle, branchId);
+    if (target === undefined) {
+      throw new SessionBranchError("not_found", "引用的会话节点不存在，请刷新后重试");
+    }
+    branchTo(handle, branchId);
+    this.persistBranchHead(branchId);
+    // Replay Store 先写再广播（与既有事件同一条 emit 路径）
+    this.emitSessionEvent("session.branch.switched", { branchId });
+    this.emitSessionEvent("session.branches.changed", { reason: "switch" });
+    return { branchId, currentBranchId: branchId };
+  }
+
+  /** 波次 B2：分支集合变化事件（regenerate 在 turn 启动时 / fork 在源会话流） */
+  emitBranchesChanged(reason: SessionBranchesChangedReason): void {
+    this.emitSessionEvent("session.branches.changed", { reason });
+  }
+
+  private emitSessionEvent(
+    type: "session.branch.switched" | "session.branches.changed",
+    payload: { branchId: string } | { reason: SessionBranchesChangedReason },
+  ): void {
+    // 分支事件直接挂在会话流之外独立成流（streamId 独立、sequence 从 1 开始），
+    // 不占用进行中 prompt 的 streamId 序列；仍经 Replay Store 先写再广播。
+    const streamId = `branch-${crypto.randomUUID()}`;
+    const envelope: PlatformEventEnvelope = {
+      protocolVersion: 1,
+      eventId: crypto.randomUUID(),
+      sessionId: this.sessionId,
+      streamId,
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      type,
+      payload,
+    } as PlatformEventEnvelope;
+    this.emit(envelope);
+  }
+
+  private persistBranchHead(entryId: string | null): void {
+    try {
+      const write = this.refreshHead ?? branchHeadWriters.get(this.sessionId);
+      write?.(this.sessionId, entryId);
+    } catch {
+      // 分支头持久化失败不阻断 turn（重启后回退 PI 默认叶子语义，可恢复）
+    }
+  }
+
+  private requireSessionHandle(operation: string): PiSessionHandle {
+    const handle = this.sessionHandle;
+    if (handle === undefined) {
+      throw new SessionBranchError("conflict", `会话 Runtime 未绑定持久会话，无法${operation}`);
+    }
+    return handle;
+  }
+
+  /**
+   * prompt 与 regenerate 的公共入口：单飞检查 → stream/turn 观测装配 →
+   * 统一的 runTurn 异步路径。isRegenerate 为 true 时额外广播
+   * branches.changed{regenerate}，并暴露新用户条目 id 的就绪 promise。
+   */
+  private startTurn(text: string, isRegenerate: boolean): PromptRun & { readonly branchId: Promise<string | null> } {
     const controller = new AbortController();
     const started = this.executions.start(this.sessionId, controller);
-    if (started.status !== "accepted") throw new Error("Session 已有运行中的 Prompt");
+    if (started.status !== "accepted") {
+      // 波次 B2：与 prompt 共用同一单飞机制，并发 prompt/regenerate 一律
+      // "already-running" → 路由层映射 409 SESSION_BUSY。
+      throw new SessionBranchError("busy", "会话正在运行，请先停止后再操作");
+    }
 
     const mapper = new PlatformEventMapper(this.sessionId, started.streamId);
     this.mapper = mapper;
@@ -426,10 +612,70 @@ export class SessionRuntime {
     } catch {
       // best-effort
     }
-    return instrument.runWithTrace({ trace }, () => {
-      void this.runPrompt(text, started.streamId, mapper, controller);
-      return { streamId: started.streamId, completed: started.completed };
+    // 波次 B2：regenerate 的分支创建（叶子移动后第一个 append）在 turn 启动时
+    // 广播 branches.changed；prompt 不发。广播失败不影响 turn。
+    if (isRegenerate) {
+      try {
+        this.emitBranchesChanged("regenerate");
+      } catch {
+        // best-effort
+      }
+    }
+    // 波次 B2（B0 §3.2.3 冻结规则）：用户条目 append 落地即刷新分支头 = 新叶子
+    // （崩溃恢复语义：重生成中途崩溃后重开应落在进行中的重生成分支）。
+    // branchId = 新用户条目 id：PI 在 turn 内 append 时才产生 id，这里用
+    // turn 前条目快照 diff 出本 turn 的新用户条目（不依赖 PI 内部事件与
+    // SessionManager append 的先后次序，turn 快速完成时同样正确）。
+    const preTurnEntryIds = collectEntryIds(this.sessionHandle);
+    let branchIdResolve: (value: string | null) => void = () => {};
+    const branchId = new Promise<string | null>((resolve) => {
+      branchIdResolve = resolve;
     });
+    void this.watchTurnUserEntry(preTurnEntryIds, branchIdResolve);
+    return instrument.runWithTrace({ trace }, () => {
+      void this.runTurn(text, started.streamId, mapper, controller);
+      return { streamId: started.streamId, completed: started.completed, branchId };
+    });
+  }
+
+  /**
+   * 观察本 turn 的用户条目 append：当前分支路径上第一个不属于 turn 前快照的
+   * user message 条目即新用户条目 → 持久化分支头；regenerate 场景下同时以
+   * 其为 branchId。执行结束仍未观察到 → branchId 解析为 null。
+   */
+  private async watchTurnUserEntry(
+    preTurnEntryIds: ReadonlySet<string>,
+    resolveBranchId: (value: string | null) => void,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      await new Promise<void>((resolveTick) => setImmediate(resolveTick));
+      const handle = this.sessionHandle;
+      if (handle === undefined) {
+        resolveBranchId(null);
+        return;
+      }
+      const leaf = getLeafEntryId(handle);
+      if (leaf !== null) {
+        const branch = getBranchEntries(handle, leaf);
+        const newUserEntry = branch.find(
+          (entry) =>
+            entry.type === "message" &&
+            entry.role === "user" &&
+            !preTurnEntryIds.has(entry.entryId),
+        );
+        if (newUserEntry !== undefined) {
+          this.persistBranchHead(leaf);
+          resolveBranchId(newUserEntry.entryId);
+          return;
+        }
+      }
+      // 执行已结束且路径上没有新用户条目 → 用户条目未落盘（turn 启动即失败）
+      if (this.executions.activeStream(this.sessionId) === undefined) {
+        resolveBranchId(null);
+        return;
+      }
+    }
+    resolveBranchId(null);
   }
 
   abort(streamId: string): AbortResult {
@@ -472,7 +718,7 @@ export class SessionRuntime {
     this.publish(event);
   }
 
-  private async runPrompt(
+  private async runTurn(
     text: string,
     streamId: string,
     mapper: PlatformEventMapper,
@@ -508,6 +754,14 @@ export class SessionRuntime {
     } finally {
       this.activeModelCall = undefined;
       this.turn = undefined;
+      // 波次 B2：turn 结束后叶子可能已推进到最终 assistant 条目（工具循环多轮
+      // append），把分支头刷新到当前叶子；用户条目落地时的首次刷新由
+      // watchTurnUserEntry 完成。
+      const handle = this.sessionHandle;
+      if (handle !== undefined) {
+        const finalLeaf = getLeafEntryId(handle);
+        if (finalLeaf !== null) this.persistBranchHead(finalLeaf);
+      }
       this.emit(mapper.sessionStatus("idle"));
       this.executions.finish(this.sessionId, streamId);
       if (this.mapper === mapper) this.mapper = undefined;
@@ -653,4 +907,19 @@ export class SessionRuntime {
       return;
     }
   }
+}
+
+/** turn 前条目快照：当前分支全部条目 id（含历史分支共享前缀部分）。 */
+function collectEntryIds(handle: PiSessionHandle | undefined): ReadonlySet<string> {
+  if (handle === undefined) return new Set<string>();
+  const ids = new Set<string>();
+  try {
+    const leaf = getLeafEntryId(handle);
+    if (leaf !== null) {
+      for (const entry of getBranchEntries(handle, leaf)) ids.add(entry.entryId);
+    }
+  } catch {
+    // 快照失败按空集合处理（diff 会把全部条目视为新条目，watcher 取首个用户条目）
+  }
+  return ids;
 }

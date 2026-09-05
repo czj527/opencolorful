@@ -23,6 +23,11 @@ export const EVENT_TYPES = [
   "turn.cancelled",
   "turn.interrupted",
   "plan.updated",
+  "session.branch.switched",
+  "session.branches.changed",
+  // 注意：todo.updated 本波次（B2）只声明契约；写入方（durable todo 工具/store）
+  // 由波次 B5 实现，当前没有任何 emitter。
+  "todo.updated",
   "attachment.available",
   "session.compacting",
   "session.compacted",
@@ -55,6 +60,44 @@ export const TokenUsageSchema = Type.Object({
   totalTokens: Type.Integer({ minimum: 0 }),
 });
 export type TokenUsage = Static<typeof TokenUsageSchema>;
+
+/**
+ * 波次 B2/B5：会话级 durable todo 条目视图。B2 只声明契约（todo.updated 事件
+ * 负载）；写入方（todo_write 工具 + store + 路由）由波次 B5 实现。
+ */
+export const SessionTodoItemSchema = Type.Object({
+  content: Type.String(),
+  status: Type.Union([
+    Type.Literal("pending"),
+    Type.Literal("in_progress"),
+    Type.Literal("completed"),
+    Type.Literal("cancelled"),
+  ]),
+  priority: Type.Union([
+    Type.Literal("high"),
+    Type.Literal("medium"),
+    Type.Literal("low"),
+  ]),
+  activeForm: Type.Optional(Type.String()),
+});
+export type SessionTodoItemView = Static<typeof SessionTodoItemSchema>;
+
+export const SessionTodoItemsPayloadSchema = Type.Object({
+  items: Type.Array(SessionTodoItemSchema),
+});
+
+export const SessionBranchSwitchedPayloadSchema = Type.Object({
+  branchId: Type.String({ minLength: 1 }),
+});
+
+export const SessionBranchesChangedPayloadSchema = Type.Object({
+  reason: Type.Union([
+    Type.Literal("regenerate"),
+    Type.Literal("fork"),
+    Type.Literal("switch"),
+  ]),
+});
+export type SessionBranchesChangedReason = Static<typeof SessionBranchesChangedPayloadSchema>["reason"];
 
 export const ContextUsageSchema = Type.Object({
   tokens: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
@@ -106,6 +149,11 @@ const EventPayloadSchema = Type.Union([
     errorMessage: Type.Optional(Type.String()),
   }),
   Type.Object({ code: Type.String(), message: Type.String(), retryable: Type.Boolean() }),
+  // 波次 B2：分支切换/分支集合变化（regenerate/fork/switch）会话流事件
+  SessionBranchSwitchedPayloadSchema,
+  SessionBranchesChangedPayloadSchema,
+  // 波次 B2 声明、B5 实现：durable todo 列表整体替换事件
+  SessionTodoItemsPayloadSchema,
   MemoryUpdatedPayloadSchema,
   MemoryRecallPayloadSchema,
   MemoryAgentPayloadSchema,

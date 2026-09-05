@@ -12,6 +12,9 @@ export interface CreateSessionInput {
   readonly workspaceConfirmed?: boolean;
   readonly thinkingLevel?: string;
   readonly agentId?: string | null;
+  /** 波次 B2：Fork 溯源元数据（新会话继承源会话 id + 分叉点叶子） */
+  readonly sourceSessionId?: string;
+  readonly sourceLeafEntryId?: string;
 }
 
 export interface SessionMetadata {
@@ -28,6 +31,12 @@ export interface SessionMetadata {
   readonly workspaceConfirmed: boolean;
   readonly thinkingLevel: string;
   readonly agentId: string | null;
+  /** 波次 B2：分支头（B0 §3.2.3；NULL = PI 默认叶子 = 文件序最后 entry） */
+  readonly branchHeadEntryId: string | null;
+  readonly branchHeadUpdatedAt: string | null;
+  /** 波次 B2：Fork 溯源（非 Fork 会话为 null） */
+  readonly sourceSessionId: string | null;
+  readonly sourceLeafEntryId: string | null;
 }
 
 interface SessionRow {
@@ -44,6 +53,10 @@ interface SessionRow {
   workspace_confirmed: number;
   thinking_level: string;
   agent_id: string | null;
+  branch_head_entry_id: string | null;
+  branch_head_updated_at: string | null;
+  source_session_id: string | null;
+  source_leaf_entry_id: string | null;
 }
 
 function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
@@ -64,6 +77,10 @@ function mapRow(row: SessionRow | undefined): SessionMetadata | undefined {
     workspaceConfirmed: row.workspace_confirmed === 1,
     thinkingLevel: row.thinking_level ?? "medium",
     agentId: row.agent_id ?? null,
+    branchHeadEntryId: row.branch_head_entry_id ?? null,
+    branchHeadUpdatedAt: row.branch_head_updated_at ?? null,
+    sourceSessionId: row.source_session_id ?? null,
+    sourceLeafEntryId: row.source_leaf_entry_id ?? null,
   };
 }
 
@@ -75,8 +92,8 @@ export class SessionIndex {
     this.database
       .prepare(
         `INSERT INTO sessions
-          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed, thinking_level, agent_id)
-         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed, @thinkingLevel, @agentId)`,
+          (id, title, session_path, created_at, updated_at, provider, model, tool_mode, workspace_cwd, workspace_confirmed, thinking_level, agent_id, source_session_id, source_leaf_entry_id)
+         VALUES (@id, @title, @sessionPath, @createdAt, @updatedAt, @provider, @model, @toolMode, @workspaceCwd, @workspaceConfirmed, @thinkingLevel, @agentId, @sourceSessionId, @sourceLeafEntryId)`,
       )
       .run({
         id: input.id,
@@ -91,6 +108,8 @@ export class SessionIndex {
         workspaceConfirmed: input.workspaceConfirmed ? 1 : 0,
         thinkingLevel: input.thinkingLevel ?? "medium",
         agentId: input.agentId ?? null,
+        sourceSessionId: input.sourceSessionId ?? null,
+        sourceLeafEntryId: input.sourceLeafEntryId ?? null,
       });
     return this.get(input.id) as SessionMetadata;
   }
@@ -176,6 +195,20 @@ export class SessionIndex {
     if (result.changes !== 1) {
       throw new Error(`Session 不存在: ${id}`);
     }
+    return this.get(id) as SessionMetadata;
+  }
+
+  /**
+   * 波次 B2（B0 §3.2.3 冻结持久化规则）：写入分支头。entryId 为 null 表示
+   * 清除分支头（回退到 PI 默认叶子语义）。提示词/重生成每次 append 落地后
+   * 刷新；switchBranch 显式写入。
+   */
+  setBranchHead(id: string, entryId: string | null, updatedAt = new Date().toISOString()): SessionMetadata {
+    this.database
+      .prepare(
+        "UPDATE sessions SET branch_head_entry_id = ?, branch_head_updated_at = ? WHERE id = ?",
+      )
+      .run(entryId, updatedAt, id);
     return this.get(id) as SessionMetadata;
   }
 }
