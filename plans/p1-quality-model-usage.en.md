@@ -87,6 +87,7 @@ Exact paths must be finalized in each dispatch brief after the current tree is r
 - **decision_mode:** `human-fixed` for coverage intent and product frontend boundaries; `agent-recommends` for IDs/selectors and evidence layout.
 - **report:** Fixed report structure in this plan, including executed command and exit code for each gate.
 - **docs:** Link the matrix from this plan and the new Desktop test documentation; do not duplicate product requirements into `docs/project-status.md`.
+- **deliverables (2026-09-01):** [`docs/testing/test-asset-matrix.md`](../docs/testing/test-asset-matrix.md) — all 22 module codes now populated (CHAT~SHELL appended in A1) — and [`docs/testing/desktop-test-conventions.md`](../docs/testing/desktop-test-conventions.md) — L5/L6 engineering, selector, isolation, evidence and Mock/IPC parity contract that A2/A3 must follow.
 
 ### A2 — Desktop Mock UI harness (`parallel_group: wave-a-desktop-harness`)
 
@@ -233,6 +234,20 @@ Observed result: cwd fallback merged (explicit > agent default > per-agent works
 Unverified: real installed-app (Electron packaged) exercise of the cwd fallback — covered by Wave A A3 true-chain harness, not re-verified manually here
 Deviation and follow-up: PR #42 required a branch update after #41 merged (squash sequencing); no code conflicts. A1+ not started
 Main-Agent review: diffs reviewed directly; RED→GREEN reproduced locally; child reports not used as evidence
+```
+
+```text
+Date: 2026-09-01
+Task: A1 — Test asset matrix and fixture contract
+Commit(s): this change on branch p1-wave-a-a1-test-assets (final hash recorded at PR squash merge)
+Commands and exit codes:
+  - npm run check:docs → exit 0 (document governance over the new docs/testing assets and status edits)
+  - Full npm run check not rerun: docs-only change, no production code touched; baseline main b244fa1 was CI-green on PR #43
+Evidence paths: docs/testing/test-asset-matrix.md (CHAT/SSE/ABORT/COMPACT/PROV/SET/MEM/TICK/MAGENT/SUB/PLUG/SKILL/SUPV/OBS/USAGE/SEC/REL/SHELL appended — 18 module codes); docs/testing/desktop-test-conventions.md (new L5/L6 contract)
+Observed result: matrix covers all 22 module codes; every row carries interaction chain, server facts, automation layer, existing coverage and explicit status; Desktop-only layers stay SKIP with 未建 reasons; L5/L6 engineering, selector, isolation, evidence and parity rules fixed in the conventions doc
+Unverified: rows whose target layer is L5/L6/L7 remain SKIP by definition until A2/A3/A9 execute them; Plugin/Skill rows record the "no Desktop UI entry" fact rather than promising coverage
+Deviation and follow-up: matrix and conventions doc written in Chinese to match the existing draft and the author's reading flow; per document-governance §8 渐进迁移 no English companion was created (this plan stays the A-class English authority). A2/A3 dispatch must list desktop-test-conventions.md in read_first. Main Agent directly authored this docs-only task (allowed by development.md §一 "仅 infra/文档/救火")
+Main-Agent review: rows cross-checked against src/server/app.ts route registry, desktop/src/data/source.ts contract, electron IPC channels (desktop:api, desktop:pick-directory, update:*), desktop/package.json (no test infra yet) and the root/web test file inventory; no child agents involved
 ```
 
 ## 8. Wave A exit conditions

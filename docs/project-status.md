@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
-**更新时间：2026-08-31**
-**当前基线：** `main`  `fa20153`
+**更新时间：2026-09-01**
+**当前基线：** `main`  `b244fa1`
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 ## 当前结论
@@ -23,7 +23,7 @@
 | Governance G1 | 仓库收敛与 Desktop 优先 | 已完成（2026-08-26） | `plans/g1-repo-convergence.md` |
 | Governance G2 | 桌面发布分发与版本更新 | 热修已合并；`v0.1.1` tag 已存在但 GitHub Release 仍为 Draft，待正式发布与安装/更新实测 | `plans/g2-desktop-release.md` |
 | Product P1 | 个人助理基础体验 | 进行中（切片 1/1.5/1.75 代码已合并；波次八、发布实测和后续规划待收口） | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`、`docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`、`docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`、`plans/desktop-parity.md`、`plans/p1-t1~t15-*.md` |
-| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | 进行中（A0 前置收口：cwd 热修已合并 PR #40，PreferencesStore 缺陷修复待 PR；A1+ 未开始） | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md` |
+| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | 进行中（A0 已收口（PR #40-#43）；A1 测试资产矩阵与 Desktop 测试约定已建立；A2/A3 待派发） | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`、`docs/testing/test-asset-matrix.md`、`docs/testing/desktop-test-conventions.md` |
 | Product P1 内部波次 B | 对话工作台能力 | 规划中（本次只建立文档，尚未实施） | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md` |
 | Product P1 独立专项 | 浏览器能力与安全边界 | 规划中（独立于波次 B，尚未实施） | `docs/superpowers/specs/2026-08-31-browser-capability.md`、`plans/browser-capability.en.md` |
 | Product P2 | 个人效率工作台 | 未排期 | `docs/positioning-and-roadmap.md` |
@@ -32,7 +32,7 @@
 
 ## 当前优先级
 
-1. **先完成规划前置与 P1 波次 A**：波次 A 负责建立模块/功能/详细交互三层全量测试资产、Desktop Mock/Electron 真链测试和 CI smoke；同时统一 primary/secondary 模型策略、修复偏好持久化缺陷、补齐所有来源的 token 用量查询和 Electron 排障关联。规划见 `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md` 与 `plans/p1-quality-model-usage.en.md`。A0 前置收口进行中：session cwd 兜底热修已合并（PR #40），PreferencesStore `subagents` 持久化缺陷修复与回归测试待 PR。
+1. **实施 P1 波次 A**：波次 A 负责建立模块/功能/详细交互全量测试资产、Desktop Mock/Electron 真链测试和 CI smoke；同时统一 primary/secondary 模型策略、补齐所有来源的 token 用量查询和 Electron 排障关联。规划见 `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md` 与 `plans/p1-quality-model-usage.en.md`。A0 前置收口已完成（PR #40-#43：cwd 兜底热修、PreferencesStore `subagents` 持久化 RED→GREEN 修复、状态文档事实收口）；A1 测试资产矩阵（22 模块码全覆盖）与 Desktop 测试约定已建立（`docs/testing/`）；下一步按 A1 契约并行派发 A2（Desktop Mock harness）与 A3（Electron 真链 harness）。
 2. **P1 波次 A 完成后实施波次 B**：参考 OpenCode、OpenHanako、Codex、Hermes Agent 和 Kimi Code，补齐会话回退/修改/重试/Fork、分支切换、线性时间线、压缩摘要正文和 durable session todo。规划见 `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md` 与 `plans/p1-conversation-workbench.en.md`。
 3. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
 4. **G2 发布事实单独收口**：`v0.1.1` tag 已存在，但 GitHub Release 仍为 Draft；正式发布、安装启动、更新链路和仓库外启动冒烟必须有独立证据，不能以 tag 或 CI 绿替代。
