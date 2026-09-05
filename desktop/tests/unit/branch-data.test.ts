@@ -37,13 +37,14 @@ describe("projectBranchEntries", () => {
     expect(assistant).toMatchObject({ type: "message", role: "assistant", entryId: "e-a1", turnId: "turn-e-u1", body: "第一答" });
   });
 
-  it("非 message 条目（compaction/label）渲染为状态事件行，不产生消息锚点", () => {
+  it("compaction 条目投影为压缩卡（B4）；其余非 message 条目为状态行，均不产生消息锚点", () => {
     const items = projectBranchEntries([
       entry({ entryId: "e-c1", type: "compaction", text: "压缩摘要" }),
       entry({ entryId: "e-u1", turnId: "turn-e-u1", role: "user", text: "问" }),
     ], AGENT);
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ type: "event", kind: "status", title: "上下文压缩" });
+    // 波次 B4：历史 compaction 条目 → 压缩卡（status=completed，summary 保留）
+    expect(items[0]).toMatchObject({ type: "compaction", status: "completed", summary: "压缩摘要" });
     expect(items[1]).toMatchObject({ type: "message", entryId: "e-u1" });
   });
 
@@ -111,7 +112,7 @@ describe("MockDataSource 分支场景（branch-demo）", () => {
     // 条目视图（当前分支根→叶）
     const entries = await source.getBranchEntries(BRANCH_DEMO_SESSION_ID);
     expect(entries.branchId).toBe("e-a2");
-    expect(entries.entries.map((item) => item.entryId)).toEqual(["e-u1", "e-a1", "e-u2", "e-a2"]);
+    expect(entries.entries.map((item) => item.entryId)).toEqual(["e-u1", "e-a1", "e-c1", "e-u2", "e-a2"]);
   });
 
   it("switchBranch：切换后 currentBranchId/entries/timeline 同步为新分支并广播事件", async () => {
@@ -171,7 +172,7 @@ describe("MockDataSource 分支场景（branch-demo）", () => {
     expect(newSessionId).not.toBe(BRANCH_DEMO_SESSION_ID);
     // 新会话可交互：树与条目齐备（fork 内容 = 当前分支条目）
     const forkEntries = await source.getBranchEntries(newSessionId);
-    expect(forkEntries.entries.map((item) => item.entryId)).toEqual(["e-u1", "e-a1", "e-u2", "e-a2"]);
+    expect(forkEntries.entries.map((item) => item.entryId)).toEqual(["e-u1", "e-a1", "e-c1", "e-u2", "e-a2"]);
     const forkTree = await source.getBranchTree(newSessionId);
     expect(forkTree.branches.length).toBeGreaterThanOrEqual(1);
     expect(updates).toContain("fork");

@@ -2,6 +2,7 @@ import {
   activityLogs,
   agents,
   auditLogs,
+  BRANCH_DEMO_COMPACTION_SUMMARY,
   BRANCH_DEMO_SESSION_ID,
   branchDemoBranches,
   errorGroups,
@@ -458,7 +459,12 @@ export class MockDataSource implements DesktopDataSource {
     const session = this.sessionFor(sessionId);
     this.emit(session, "session.compacting", {}, null);
     this.later(session, 600, () => {
-      this.emit(session, "session.compacted", { tokensBefore: 39200, tokensAfter: 18600 }, null);
+      // 波次 B4：completed 卡携带 summary 正文（服务端 payload 已含；tokensAfter 为估算值，UI 标「约」）
+      this.emit(session, "session.compacted", {
+        tokensBefore: 39200,
+        tokensAfter: 18600,
+        summary: BRANCH_DEMO_COMPACTION_SUMMARY,
+      }, null);
     });
   }
 
