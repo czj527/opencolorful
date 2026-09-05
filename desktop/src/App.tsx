@@ -27,7 +27,7 @@ import {
 } from "./data/source.js";
 import type { Agent, Thread } from "./mock-data.js";
 import { useLocalPrefs } from "./data/local-prefs.js";
-import { toUserError, type ErrorContext } from "./errors.js";
+import { CorrelatedError, correlationShortRef, localCorrelation, toUserError, type ErrorContext, type ErrorCorrelation } from "./errors.js";
 import { AgentProfilePage } from "./pages/AgentProfilePage.js";
 import { MemoryPage } from "./pages/MemoryPage.js";
 import { LogsPage } from "./pages/LogsPage.js";
@@ -101,6 +101,8 @@ export function App() {
   const touchedToolMode = useRef(false);
   // 连接状态（台账 #12）：数据源探活/请求结果驱动，断线时 Titlebar 离线指示
   const [connection, setConnection] = useState<ConnectionInfo | null>(null);
+  // A5：错误→日志页跳转中转——错误行/告警携带的诊断引用，日志页按其 traceId 预填活动过滤
+  const [logsFocus, setLogsFocus] = useState<ErrorCorrelation | null>(null);
   // T0 首启检测：无 Agent 或无已配置凭据的 Provider → 自动进入引导（可退出；状态派生自后端，不落库）
   const firstRun = useFirstRun(source);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -326,10 +328,11 @@ export function App() {
     if (text === "" || streaming) return;
     setChatError(null);
 
-    // 断线 / 离线时明确提示，不静默失败（仅 IPC 真实数据源；mock 模式仍可本地演示）
+    // 断线 / 离线时明确提示，不静默失败（仅 IPC 真实数据源；mock 模式仍可本地演示）。
+    // A5：本地诊断引用随错误透出（纯 IPC 失败无服务端 traceId → ipc- 短 id）
     const currentConnection = connection ?? source.info;
     if (currentConnection.mode === "ipc" && !currentConnection.connected) {
-      setChatError(userErrorNode(new Error("offline"), "send"));
+      setChatError(userErrorNode(new CorrelatedError("offline", localCorrelation()), "send"));
       return;
     }
 
@@ -449,25 +452,36 @@ export function App() {
       .finally(() => setConfirming(false));
   }
 
-  /** 把底层异常转成带下一步动作的中文错误节点 */
+  /** 把底层异常转成带下一步动作的中文错误节点；A5：携带诊断引用时附可复制的短引用 */
   function userErrorNode(cause: unknown, context: ErrorContext): React.ReactNode {
-    const { message, action } = toUserError(cause, context);
-    if (action === undefined) return message;
+    const { message, action, correlation } = toUserError(cause, context);
     return (
       <>
         {message}
-        <button
-          type="button"
-          className="inline-action"
-          onClick={() => {
-            setSettingsCategory(action.category);
-            setSettingsOpen(true);
-          }}
-        >
-          {action.label}
-        </button>
+        {action !== undefined && (
+          <button
+            type="button"
+            className="inline-action"
+            onClick={() => {
+              setSettingsCategory(action.category);
+              setSettingsOpen(true);
+            }}
+          >
+            {action.label}
+          </button>
+        )}
+        {correlation !== undefined && (
+          // 可人工复制的安全引用（完整 id 在 title 中）；不含任何请求/响应载荷
+          <code title={correlation.traceId}>引用 {correlationShortRef(correlation)}</code>
+        )}
       </>
     );
+  }
+
+  /** A5：错误行「在日志中查看」→ 切日志页并携带引用预填活动过滤 */
+  function openLogsWithReference(correlation: ErrorCorrelation) {
+    setLogsFocus(correlation);
+    setPage("logs");
   }
 
   /** 进入某个助理的档案页（T9：档案页目标由入口决定，不再有全局当前助理） */
@@ -742,7 +756,13 @@ export function App() {
                     )}
                   </div>
                 ) : (
-                  <ChatView source={source} threadId={threadId} onOpenDiff={onOpenDiff} onStreamingChange={setStreaming} />
+                  <ChatView
+                    source={source}
+                    threadId={threadId}
+                    onOpenDiff={onOpenDiff}
+                    onStreamingChange={setStreaming}
+                    onOpenLogs={openLogsWithReference}
+                  />
                 )}
               </div>
               {!showEmptyState && (
@@ -764,7 +784,7 @@ export function App() {
           {page === "memory" && memoryAgent !== undefined && (
             <div className="page-scroll"><MemoryPage source={source} agent={memoryAgent} agents={agents} onAgent={setMemoryAgentId} /></div>
           )}
-          {page === "logs" && <div className="page-scroll"><LogsPage source={source} /></div>}
+          {page === "logs" && <div className="page-scroll"><LogsPage source={source} focus={logsFocus} /></div>}
           {page === "profile" && profileAgent !== undefined && (
             <div className="page-scroll"><AgentProfilePage agent={profileAgent} source={source} /></div>
           )}

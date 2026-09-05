@@ -12,11 +12,12 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ChatEvent, ChatMessage, EventKind, TimelineItem } from "../mock-data.js";
 import { useLocalPrefs } from "../data/local-prefs.js";
 import type { DesktopDataSource } from "../data/source.js";
+import { correlationShortRef, type ErrorCorrelation } from "../errors.js";
 
 const eventIcons: Record<EventKind, LucideIcon> = {
   thinking: CircleCheck,
@@ -30,6 +31,13 @@ const eventIcons: Record<EventKind, LucideIcon> = {
 };
 
 const NEW_THREAD = "new";
+
+/** A5：错误状态行的 projector 标题（data/projector.ts markPromptFailed / error / turn.failed 分支） */
+const ERROR_ROW_TITLES: readonly string[] = ["运行错误", "发送失败"];
+
+function isErrorRow(item: TimelineItem): boolean {
+  return item.type === "event" && item.kind === "status" && ERROR_ROW_TITLES.includes(item.title);
+}
 
 const MessageRow = memo(function MessageRow({ message }: { readonly message: ChatMessage }) {
   const isUser = message.role === "user";
@@ -126,13 +134,22 @@ function EventDetail({ event, onOpenDiff }: { readonly event: ChatEvent; readonl
   return event.detail ? <p className="detail-text">{event.detail}</p> : null;
 }
 
-const EventRow = memo(function EventRow({ event, onOpenDiff }: { readonly event: ChatEvent; readonly onOpenDiff: () => void }) {
+interface EventRowProps {
+  readonly event: ChatEvent;
+  readonly onOpenDiff: () => void;
+  /** A5：仅错误状态行收到诊断引用与跳转动作（其余行传 null/undefined） */
+  readonly errorCorrelation?: ErrorCorrelation | null;
+  readonly onOpenLogs?: (correlation: ErrorCorrelation) => void;
+}
+
+const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, onOpenLogs }: EventRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [approval, setApproval] = useState<"pending" | "approved" | "denied">("pending");
   const Icon = eventIcons[event.kind];
   const hasDetail = Boolean(
     event.detail || event.tools?.length || event.files?.length || event.plan?.length || event.subagent || event.recalled?.length,
   );
+  const showCorrelation = errorCorrelation !== undefined && errorCorrelation !== null && onOpenLogs !== undefined;
 
   return (
     <article className={`event event-${event.kind}`}>
@@ -152,6 +169,16 @@ const EventRow = memo(function EventRow({ event, onOpenDiff }: { readonly event:
           {hasDetail && <ChevronRight size={13} className={expanded ? "is-rotated" : ""} />}
         </span>
       </button>
+      {showCorrelation && (
+        // A5：诊断引用行（复用 approval-actions 的缩进布局，不新增样式）；
+        // 引用仅含 id 与时间戳，完整 traceId 在 title 中可复制
+        <div className="approval-actions">
+          <code title={errorCorrelation.traceId}>诊断引用 {correlationShortRef(errorCorrelation)}</code>
+          <button type="button" className="inline-action" onClick={() => onOpenLogs(errorCorrelation)}>
+            在日志中查看
+          </button>
+        </div>
+      )}
       {event.approval && (
         approval === "pending" ? (
           <div className="approval-actions">
@@ -177,13 +204,26 @@ const EventRow = memo(function EventRow({ event, onOpenDiff }: { readonly event:
   );
 });
 
-export function Timeline({ items, onOpenDiff }: { readonly items: readonly TimelineItem[]; readonly onOpenDiff: () => void }) {
+interface TimelineProps {
+  readonly items: readonly TimelineItem[];
+  readonly onOpenDiff: () => void;
+  /** A5：错误行的诊断关联引用（未解析/无错误行为 null）；每行非错误项不传 */
+  readonly errorCorrelation?: ErrorCorrelation | null;
+  readonly onOpenLogs?: (correlation: ErrorCorrelation) => void;
+}
+
+export function Timeline({ items, onOpenDiff, errorCorrelation, onOpenLogs }: TimelineProps) {
   return (
     <div className="chat-column" aria-live="polite">
       {items.map((item) =>
         item.type === "message"
           ? <MessageRow key={item.id} message={item} />
-          : <EventRow key={item.id} event={item} onOpenDiff={onOpenDiff} />,
+          : <EventRow
+              key={item.id}
+              event={item}
+              onOpenDiff={onOpenDiff}
+              {...(isErrorRow(item) ? { errorCorrelation: errorCorrelation ?? null, onOpenLogs } : {})}
+            />,
       )}
     </div>
   );
@@ -195,13 +235,15 @@ interface ChatViewProps {
   readonly onOpenDiff: () => void;
   /** 快照 streaming 布尔的最小回传通道：仅布尔翻转时 App 壳重渲染（setState 本身稳定） */
   readonly onStreamingChange: (streaming: boolean) => void;
+  /** A5：错误行「在日志中查看」动作（App 负责跳转日志页并携带引用预填） */
+  readonly onOpenLogs?: (correlation: ErrorCorrelation) => void;
 }
 
 /**
  * 会话时间线容器：items/streaming 的 subscribeChat 订阅下沉在这里，
  * 流式重渲染留在聊天列内部，不波及 App 壳（App 只经 onStreamingChange 收到布尔翻转）。
  */
-export function ChatView({ source, threadId, onOpenDiff, onStreamingChange }: ChatViewProps) {
+export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOpenLogs }: ChatViewProps) {
   const [items, setItems] = useState<readonly TimelineItem[]>([]);
   const prefs = useLocalPrefs();
 
@@ -225,5 +267,44 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange }: Ch
     return true;
   }), [items, prefs.showThinking, prefs.showToolCalls]);
 
-  return <Timeline items={visible} onOpenDiff={onOpenDiff} />;
+  /* ---- A5：错误行诊断关联 ----
+   * 出现错误行后按会话解析一次关联引用：优先取该会话最新 failed 记录的 per-turn
+   * traceId（turn.started/turn.failed/provider.* 同 trace，服务端在 SSE 发出失败
+   * 终态前已 durable 落库，这里只读消费）；查询失败/无记录时回退会话 id——会话路由
+   * 自身以 sessionId 作为 traceId 盖章（routes/sessions.ts trace 三元组）。
+   * 引用只含 id 与时间戳，不含任何请求/响应载荷。
+   */
+  const errorRowId = useMemo(() => {
+    for (let index = visible.length - 1; index >= 0; index -= 1) {
+      const item = visible[index];
+      if (item !== undefined && isErrorRow(item)) return item.id;
+    }
+    return null;
+  }, [visible]);
+
+  const [correlation, setCorrelation] = useState<ErrorCorrelation | null>(null);
+  const resolvedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (threadId === NEW_THREAD || errorRowId === null) return;
+    if (resolvedFor.current === errorRowId) return;
+    resolvedFor.current = errorRowId;
+    let cancelled = false;
+    source.queryActivity({ sessionId: threadId, status: "failed" }, null, 10)
+      .then((result) => {
+        if (cancelled) return;
+        const trace = result.rows.find((row) => row.traceId !== "")?.traceId;
+        setCorrelation(trace !== undefined
+          ? { traceId: trace, origin: "server", at: new Date().toISOString() }
+          : { traceId: threadId, origin: "server", at: new Date().toISOString() });
+      })
+      .catch(() => {
+        if (!cancelled) setCorrelation({ traceId: threadId, origin: "server", at: new Date().toISOString() });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [source, threadId, errorRowId]);
+
+  return <Timeline items={visible} onOpenDiff={onOpenDiff} errorCorrelation={correlation} onOpenLogs={onOpenLogs} />;
 }

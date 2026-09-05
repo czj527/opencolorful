@@ -355,6 +355,29 @@ Known deviations recorded: MEM-04 has no Desktop flush UI (立即整理=deep-div
 Main-Agent review: diffs of all three lanes reviewed; A4e rescue fix applied by main agent; all suites re-run independently
 ```
 
+```text
+Date: 2026-09-02
+Task: A5 — Electron logging and diagnostic correlation
+Branch: p1-wave-a-a5-diagnostics (stacked on p1-wave-a-a4-regression)
+Child dispatch: 1 child agent, hit turn limit (100 turns) after completing the implementation and L5 tests, during final verification (load-flake triage); rescued by main agent — verified flakes transient (single-file reruns green), wrote the L6 end-to-end correlation spec, fixed one test-authoring defect (locator role: type=search → searchbox), completed CHANGELOG/matrix closure.
+Implementation (all within brief owns):
+  - errors.ts: ErrorCorrelation {traceId, origin: "server"|"local", at} + short-ref formatter + local fallback + CorrelatedError passthrough (message classification unchanged)
+  - electron/main.cjs: per-failed-API diagRef issuance (`ipc-` + 8 hex, health probe excluded from noise), synced to shell.log; embedded-server startup failure dialog now shows the ref
+  - data/ipc-source.ts: failure points throw CorrelatedError — session-scoped paths reuse the server-stamped sessionId traceId (origin=server); other failures use the main-process diagRef or renderer-local id (origin=local); bridge break falls back to local
+  - ChatView.tsx: error status rows (运行错误/发送失败) resolve correlation once per error row from queryActivity({sessionId, status:"failed"}) — latest failed record's per-turn traceId, falling back to the session id; rows show 诊断引用 + 在日志中查看
+  - App.tsx: error→logs navigation carrying the reference (logsFocus)
+  - LogsPage.tsx: traceId filter input (300ms debounce, client matchesFilter + server query param), prefill focus banner, source.ts ActivityFilter.traceId
+  - Tests: L5 in chat.mock/observability.mock (error-row reference render, navigation prefill, local-origin degradation, redaction assertions); L6 lane-a5-diagnostics.truechain.spec.ts (@a5) — stub error-401 → turn.failed row → reference → 在日志中查看 → logs prefilled → server activity?traceId=<ref> hits the failed record; fake key absence asserted at UI and server layers
+Redaction/channel boundaries (human-fixed): references contain id + timestamp only; no prompt/completion/key values in any persisted or displayed path (asserted in tests); diagnostic (shell.log/tail), activity, audit channels not mixed
+End-to-end correlation example (from @a5 run): UI error row 诊断引用 tr-608b3ef3 → full traceId 608b3ef34caf8d7f → GET /api/observability/activity?traceId=608b3ef34caf8d7f → turn.failed/failed record (turn, agent-server, 27ms)
+Verification (main agent, independent):
+  - desktop vitest 54/54 (50→54); desktop:build pass; @a5 1/1 (8.0s)
+  - Two transient load flakes during child verification (memory MAGENT-01, others) confirmed non-reproducible single-file
+  - CHANGELOG Added entry; matrix OBS-05 → PASS（L3/L6，2026-09-02）
+Commands: npm run test --workspace=@opencolorful/desktop; npm run desktop:build; npx playwright test --config desktop/tests/e2e/playwright.config.ts --grep @a5
+Main-Agent review: full diff reviewed; L6 spec authored and verified by main agent; child's last-mile verification completed by main agent
+```
+
 ## 8. Wave A exit conditions
 
 - The matrix covers all current modules, functions and detailed interactions, including known empty/error/recovery paths.

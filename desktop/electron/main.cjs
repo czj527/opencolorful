@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } = require("electron");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -32,6 +33,13 @@ function shellLog(level, message) {
   } catch {
     // 日志失败不影响主流程
   }
+}
+
+// A5 诊断关联：进程级失败签发短引用（ipc- + 8 位），随失败响应带给 renderer 的
+// 用户可见错误，shell.log 同步落一行可检索记录（client-events 在主进程侧不可达
+// 时本地引用的持久化兜底；引用只含 id，不含任何请求/响应载荷）
+function newDiagRef() {
+  return `ipc-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 // G2 T1：packaged 且无显式外部后端时，进程内启动内嵌 Agent Server；
@@ -74,12 +82,15 @@ async function maybeStartEmbeddedServer() {
   } catch (error) {
     embeddedServer = null;
     const message = error instanceof Error ? error.stack ?? error.message : String(error);
-    shellLog("error", `embedded server start failed: ${message}`);
+    // A5：启动失败随弹窗给出诊断引用（shell.log 中可检索同一 id）
+    const diagRef = newDiagRef();
+    shellLog("error", `embedded server start failed [${diagRef}]: ${message}`);
     // packaged 下后端不可用 = 全功能不可用；明确告知而不是静默降级为
     // "每个操作都莫名其妙失败"（v0.1.0 事故：缺包 + 端口被占时用户无任何线索）
     dialog.showErrorBox(
       "OpenColorful 后端启动失败",
       `内嵌服务未能启动，应用功能不可用。\n\n${error instanceof Error ? error.message : String(error)}\n\n` +
+      `诊断引用：${diagRef}\n` +
       `日志位置：${path.join(app.getPath("userData"), "logs", "shell.log")}`,
     );
   }
@@ -129,7 +140,17 @@ ipcMain.on("window:toggle-maximize", () => {
 ipcMain.on("window:close", () => mainWindow?.close());
 
 // 数据通道：API 代理 + SSE 订阅（renderer 沙箱，不直连网络）
-ipcMain.handle("desktop:api", (_event, request) => apiRequest(request));
+// A5：失败的 API 请求签发诊断引用（diagRef 随响应带回 renderer 的错误对象，
+// 同时落 shell.log 可检索）。health 巡检除外——离线期每 8s 一次会产生日志噪音。
+ipcMain.handle("desktop:api", async (_event, request) => {
+  const result = await apiRequest(request);
+  const diagPath = typeof request?.path === "string" ? request.path : "";
+  if (!result.ok && diagPath !== "/api/health") {
+    result.diagRef = newDiagRef();
+    shellLog("warn", `[${result.diagRef}] ${typeof request?.method === "string" ? request.method : "?"} ${diagPath} → ${result.status}`);
+  }
+  return result;
+});
 
 // 原生目录选择：T1 onboarding 需要用户指定助理工作目录；返回绝对路径或 null，不暴露完整 dialog 结果
 ipcMain.handle("desktop:pick-directory", async () => {

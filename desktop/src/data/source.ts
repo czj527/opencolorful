@@ -142,6 +142,8 @@ export interface ActivityFilter {
   readonly search?: string;
   readonly ownerAgentId?: string;
   readonly sessionId?: string;
+  /** A5：诊断关联跳转预填——服务端 activity?traceId= 精确过滤（routes/observability.ts） */
+  readonly traceId?: string;
 }
 
 export interface ActivityPageResult {

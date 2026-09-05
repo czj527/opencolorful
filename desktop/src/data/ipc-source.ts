@@ -1,3 +1,4 @@
+import { CorrelatedError, localCorrelation, type ErrorCorrelation } from "../errors.js";
 import type {
   Agent,
   ActivityLogRow,
@@ -99,6 +100,29 @@ function unwrap<T>(value: unknown, key: string): T {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
+}
+
+/* ---- A5 诊断关联：IPC 失败点签发/透传 correlation 引用 ----
+ *
+ * - 失败响应若带主进程 diagRef，优先复用它（同步落 shell.log，见 electron/main.cjs）；
+ *   这覆盖网络/502/服务端失败，即使路径带 sessionId 也不能被会话回退覆盖；
+ * - 没有 diagRef 时，会话路由才回退服务端以 sessionId 盖章的关联（routes/sessions.ts
+ *   的 trace 三元组）；其余失败回退 renderer 本地短 id。引用只含 id 与时间戳，
+ *   不含任何请求/响应载荷。
+ */
+
+const SESSION_PATH_RE = /^\/api\/sessions\/([^/]+)(?:\/|$)/;
+
+export function correlationForPath(path: string, diagRef: string | undefined): ErrorCorrelation {
+  const at = new Date().toISOString();
+  if (diagRef !== undefined && diagRef !== "") {
+    return { traceId: diagRef, origin: "local", at };
+  }
+  const sessionTrace = SESSION_PATH_RE.exec(path)?.[1];
+  if (sessionTrace !== undefined && sessionTrace !== "") {
+    return { traceId: sessionTrace, origin: "server", at };
+  }
+  return { traceId: crypto.randomUUID(), origin: "local", at };
 }
 
 function formatThreadTime(iso: string): string {
@@ -214,18 +238,32 @@ export class IpcDataSource implements DesktopDataSource {
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const result = await this.api.invoke(method, path, body);
+    let result: DesktopApiInvokeResult;
+    try {
+      result = await this.api.invoke(method, path, body);
+    } catch (cause) {
+      // 桥断裂（主进程不可达）：拿不到主进程 diagRef，本地短 id 兜底（A5）
+      throw new CorrelatedError(cause instanceof Error ? `请求失败：${cause.message}` : "请求失败", localCorrelation());
+    }
     if (!result.ok) {
       // 网络层失败（不可达/502）立即转离线，不等下一次巡检
       if (result.status === 0 || result.status === 502) this.setConnection(false);
       const data = result.data as { message?: string } | null;
-      throw new Error(data?.message ?? `请求失败（${result.status}）`);
+      // A5：主进程对失败的 IPC 请求签发诊断引用（落 shell.log）随响应带回，优先复用
+      const diagRef = (result as unknown as { diagRef?: unknown }).diagRef;
+      throw new CorrelatedError(
+        data?.message ?? `请求失败（${result.status}）`,
+        correlationForPath(path, typeof diagRef === "string" && diagRef !== "" ? diagRef : undefined),
+      );
     }
     this.setConnection(true);
     // api-proxy 对"HTTP 200 + 非 JSON 响应"的包装：显式抛错，不当空数据静默（台账 #8）
     const payload = result.data as { code?: unknown; message?: unknown } | null;
     if (payload !== null && typeof payload === "object" && payload.code === "INVALID_JSON") {
-      throw new Error(`服务返回了无法解析的响应：${typeof payload.message === "string" ? payload.message.slice(0, 120) : "未知内容"}`);
+      throw new CorrelatedError(
+        `服务返回了无法解析的响应：${typeof payload.message === "string" ? payload.message.slice(0, 120) : "未知内容"}`,
+        correlationForPath(path, undefined),
+      );
     }
     return result.data as T;
   }
@@ -671,6 +709,8 @@ export class IpcDataSource implements DesktopDataSource {
     if (filter.search !== undefined && filter.search !== "") params.set("search", filter.search);
     if (filter.ownerAgentId !== undefined && filter.ownerAgentId !== "") params.set("ownerAgentId", filter.ownerAgentId);
     if (filter.sessionId !== undefined && filter.sessionId !== "") params.set("sessionId", filter.sessionId);
+    // A5：诊断关联跳转预填（服务端 activity?traceId= 精确过滤）
+    if (filter.traceId !== undefined && filter.traceId !== "") params.set("traceId", filter.traceId);
     if (cursor !== null) params.set("cursor", cursor);
     params.set("limit", String(limit));
     const data = await this.request<unknown>("GET", `/api/observability/activity?${params.toString()}`);
