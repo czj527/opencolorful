@@ -299,6 +299,35 @@ Main-Agent review: B0 accepted; B1/B2 parallel dispatch approved with disjoint o
   (B1: src/pi-sdk only; B2: server/runtime/storage only; neither touches the other's files).
 ```
 
+### B1 implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B1 controlled PI session-tree adapter (branch p1-wave-b-b1-pi-adapter, PR #56)
+Commit(s): 6135873 (adapter), dc8a03b (tests), plus this docs-sync commit.
+Commands and exit codes: npx tsc --noEmit → 0; npx vitest run tests/contract/session-tree.test.ts
+  tests/contract/pi-sdk-adapter.test.ts → 16/16 passed; node scripts/verify-pi-sdk-imports.mjs → 0;
+  git diff --check → 0. Full integration gates are run by the main agent at merge.
+Evidence paths: src/pi-sdk/session-tree.ts; src/pi-sdk/index.ts (additive exports +
+  flattenMessageEntries extraction); tests/contract/session-tree.test.ts (7 tests).
+Observed result: frozen interface implemented with ZERO name/signature deviation. Verified PI
+  facts: createBranchedSession returns the new file path (undefined only in-memory), writes to the
+  source instance's sessionDir with header parentSession = source path, and DELAYS file creation
+  when the path has no assistant message — forkSessionToNewSession therefore force-flushes once
+  (source file never rewritten, proven byte-identical in tests). Reopen leaf = file-order last
+  entry behaviorally confirmed (test 6), proving the B0 §3.2.3 persistence-rule precondition.
+  Governance note: the first CI run failed docs-sync (production change without plans/ update);
+  this record is the required closeout.
+Unverified: none.
+Deviation and follow-up: fork maps unknown targetLeafEntryId to entry_not_found and empty source
+  to invalid_target (aligns B0 §3.4 instead of leaking PI raw errors); toolResult entries'
+  own text uses the existing 500-char truncation; branch_summary text is "" per §3.1. The
+  force-flush reaches PI's internal `flushed` flag the same way handle.persist() does — revisit
+  on PI SDK upgrades.
+Main-Agent review: diff independently reviewed (flattening extraction is faithful; existing
+  9/9 contract tests green); accepted. B2 may code against the exported adapter surface.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
