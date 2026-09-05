@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import type { ChatEvent, ChatMessage, SessionTodoItem, TimelineItem, ToolCall } from "../mock-data.js";
-=======
-import type { ChatEvent, ChatMessage, CompactionItem, CompactionStatus, TimelineItem, ToolCall } from "../mock-data.js";
->>>>>>> origin/main
+import type { ChatEvent, ChatMessage, CompactionItem, CompactionStatus, SessionTodoItem, TimelineItem, ToolCall } from "../mock-data.js";
 
 /** 平台事件 Envelope 的 renderer 侧最小形状（payload 防御式解析） */
 export interface LiveEnvelope {
@@ -66,13 +62,10 @@ export interface ProjectorState {
   readonly indexOf: Map<string, number>;
   /** 最后一条 message 型 item 的下标（-1 表示还没有）；事件追加不影响它 */
   lastMessageIndex: number;
-<<<<<<< HEAD
   /** 波次 B5b：durable session todo 只读投影（todo.updated 整表替换；空列表=清空） */
   todos: readonly SessionTodoItem[];
-=======
   /** 波次 B4：进行中压缩卡的 item id（session.compacting → session.compacted 配对；无进行中压缩时为 null） */
   activeCompactionId: string | null;
->>>>>>> origin/main
   /** items 自上次快照后被原地改动；snapshotOf 时重建数组以获得新引用（不可变契约） */
   dirty: boolean;
 }
@@ -81,11 +74,7 @@ export function createProjector(agentName: string): ProjectorState {
   return {
     items: [], streaming: false, activeStreamId: null, pendingPrompt: false,
     seenStreams: new Set(), agentName,
-<<<<<<< HEAD
-    indexOf: new Map(), lastMessageIndex: -1, todos: [], dirty: false,
-=======
-    indexOf: new Map(), lastMessageIndex: -1, activeCompactionId: null, dirty: false,
->>>>>>> origin/main
+    indexOf: new Map(), lastMessageIndex: -1, todos: [], activeCompactionId: null, dirty: false,
   };
 }
 
