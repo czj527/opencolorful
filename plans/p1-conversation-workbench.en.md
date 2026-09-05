@@ -426,6 +426,37 @@ Deviation and follow-up: the stale "no emitter" comment on todo.updated in event
 Main-Agent review: accepted pending CI; merged as #59 (c206e44).
 ```
 
+### B4 implementation record — 2026-09-05
+
+```text
+Date: 2026-09-05
+Task: B4 Desktop compaction summary card (worktree lane, branch p1-wave-b-b4-compaction)
+Commit(s): 86c81da (card + projection + tests). Note: the lane was implemented by the main
+  agent after the subagent platform went down mid-run (an orphaned first-run agent left a
+  clean partial data layer: projector + mock-data; reviewed, kept and completed by the
+  main agent rather than redone).
+Commands and exit codes: npx tsc --noEmit (root) → 0; desktop MAIN tsc --noEmit → 0
+  (mandatory gate); desktop tsconfig.tests tsc → 0; desktop full unit suite → 18 files /
+  92 tests passed; npx vite build → 0. True-chain compact lane deferred to B6/B7 evidence
+  (live + restart-replay summary identity) — see deviations.
+Evidence paths: desktop/src/components/{CompactionCard.tsx,CompactionCard.css},
+  desktop/src/data/projector.ts (compaction card state machine: compacting→completed/
+  aborted/failed, activeCompactionId pairing, history-entry isomorphism),
+  desktop/src/mock-data.ts (CompactionItem + demo compaction entry), desktop/src/data/mock-source.ts
+  (summary in compacted payload), tests: src/compaction-card.mock.test.tsx (4),
+  tests/unit/compaction-projection.test.ts (4), updated branch-data/desktop-projector
+  expectations.
+Observed result: frozen display rules implemented — tokens labeled 约 (server estimate),
+  long summaries collapsed by default with expand/collapse, no client-side truncation,
+  aborted (已中止) vs failed (error line) distinguishable, no-op/busy produce no card
+  (409 composer errors only), summary never logged (console assertion in tests); live
+  events and history compaction entries share one card structure.
+Unverified: Electron true-chain compact flow (live card + post-restart history identity).
+Deviation and follow-up: lane-b4 true-chain spec deferred to B6/B7 (B6 explicitly covers
+  "branch after compact" and B7 real-Desktop walkthrough); no server-side changes.
+Main-Agent review: self-implemented under platform outage; full local gates green.
+```
+
 ## 9. Wave B exit conditions
 
 - Edit-and-regenerate, retry and independent Fork preserve old branches/outputs and survive refresh/restart.
