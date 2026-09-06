@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-06**
-**当前基线：** `main`  `15036b7`（波次 B B0-B5b 与 B6/B7 收尾记录已合并；独立质量评估仍未通过）
+**当前基线：** `main`  `1d6d70d`（波次 B 收尾、独立质量评估报告、架构图谱与审计立即修复批次 #63-#66 已合并；B3 根因修复进行中）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -18,6 +18,8 @@
 - 主分支必须保持可安装、可构建、可测试；所有变更走 PR，不直推 `main`。
 - **G2 桌面发布分发与版本更新（2026-08-28 热修收口）**：T1 打包管线与内嵌后端、T2 应用内版本更新、T3 release workflow（PR #35-#38）。**v0.1.0 为不可用版本**——asar 缺 workspace 插件包导致安装版后端启动即崩，叠加 4310 端口被占时代理误连外来进程、draft 资产不完整两缺陷；热修（staging `file:` 依赖实拷 + `verify:pack` asar 断言 + probe 身份校验 + EADDRINUSE 随机端口回退 + 发布资产断言兜底，事故三教训见 `plans/g2-desktop-release.md` T4）后，`v0.1.1` tag 已存在且指向 `3ae674d`，但对应 GitHub Release 仍为 Draft，不能描述为正式发布。
 - **2026-09-06 独立交付质量评估**：A/B 代码均已合并，但当前不标记产品完成。已复现 P0 本机 HTTP/WS 信任边界不足、P0 v13/v14 迁移中断不可恢复；B3 分支真链重复运行 1/3 通过。Plugin import 检查是假通过；B4/B5 Electron 真链、安装/更新/恢复和人工体验仍待完成。完整报告见 `docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`。
+- **2026-09-06 审计立即修复批次（4/5 已合并，B3 进行中）**：#63 `verify-plugin-imports` 从"恒 exit 0 假门"（入口比较路径与 URL 恒不相等）修复为真实扫描并新增执行性回归；#64 v13/v14 表重建迁移事务化 + 临时表自清理 + 故障注入回归，升级中断后下次启动自恢复；#65 Agent 设置读取失败 fail-closed，不再静默降级为无沙箱运行；#66 本机 HTTP/WS 信任边界——启动令牌（env/文件/随机生成，`timingSafeEqual` 比较）、全局 Host/Origin/JSON Content-Type 校验、WS 握手来源校验，desktop/TUI/CLI 已接线，无 fail-open 测试开关。架构图谱与开发者看板随 #67 入库（`architecture:check` 接入质量门；过程中暴露的"PR 合并树基线导致生成物判定过期"属门禁正确行为，跨平台排序不确定性已修复）。批次期间 CI 唯一失败为 #66 首版与 #65 回归测试的令牌交互（真实语义冲突），评审修复后转绿；`detect-path-bins` 维持既有已知偶发记录，本批次无新增抖动实证。
+- **2026-09-06 B3 分支真链间歇性发送禁用（根因修复进行中）**：`BRANCH-03/04` 第二条基线消息发送时按钮长期 disabled，重复运行 1/3 通过；B3 合并点即存在，非 B4/B5b 回归。lane `p1-audit-fix-b3-send-disabled` 定位根因中，完成前立即修复清单不翻全部完成。
 
 ## 阶段状态
 
@@ -36,7 +38,7 @@
 
 ## 当前优先级
 
-1. **先处理独立质量评估阻断项**：修复本机 HTTP/WS 信任边界、v13/v14 迁移中断恢复、Plugin import 假通过和 B3 间歇性发送禁用；这些问题完成前不翻转 A/B 产品完成状态。
+1. **完成审计立即修复收尾**：5 项立即修复中 4 项已合并（#63-#66，见上方批次记录），B3 间歇性发送禁用根因修复进行中；完成后按审计报告"后续修复"队列推进（runtime single-flight、usage durable spool、Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、SSE 合批去重、B4/B5 Electron 真链、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注）。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **补齐波次 B 真链与人工验收**：补 compact/todo Electron 真链，执行独立报告中的 A/B 人工验收卡，确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
