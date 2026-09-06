@@ -19,6 +19,7 @@
 - **G2 桌面发布分发与版本更新（2026-08-28 热修收口）**：T1 打包管线与内嵌后端、T2 应用内版本更新、T3 release workflow（PR #35-#38）。**v0.1.0 为不可用版本**——asar 缺 workspace 插件包导致安装版后端启动即崩，叠加 4310 端口被占时代理误连外来进程、draft 资产不完整两缺陷；热修（staging `file:` 依赖实拷 + `verify:pack` asar 断言 + probe 身份校验 + EADDRINUSE 随机端口回退 + 发布资产断言兜底，事故三教训见 `plans/g2-desktop-release.md` T4）后，`v0.1.1` tag 已存在且指向 `3ae674d`，但对应 GitHub Release 仍为 Draft，不能描述为正式发布。
 - **2026-09-06 独立交付质量评估**：A/B 代码均已合并，但当前不标记产品完成。已复现 P0 本机 HTTP/WS 信任边界不足、P0 v13/v14 迁移中断不可恢复；B3 分支真链重复运行 1/3 通过。Plugin import 检查是假通过；B4/B5 Electron 真链、安装/更新/恢复和人工体验仍待完成。完整报告见 `docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`。
 - **2026-09-06 审计立即修复批次（5/5 全部完成：#63-#66、#69）**：#63 `verify-plugin-imports` 从"恒 exit 0 假门"（入口比较路径与 URL 恒不相等）修复为真实扫描并新增执行性回归；#64 v13/v14 表重建迁移事务化 + 临时表自清理 + 故障注入回归，升级中断后下次启动自恢复；#65 Agent 设置读取失败 fail-closed，不再静默降级为无沙箱运行；#66 本机 HTTP/WS 信任边界——启动令牌（env/文件/随机生成，`timingSafeEqual` 比较）、全局 Host/Origin/JSON Content-Type 校验、WS 握手来源校验，desktop/TUI/CLI 已接线，无 fail-open 测试开关；#69 B3 间歇性发送禁用根因修复（见下条）。架构图谱与开发者看板随 #67 入库（`architecture:check` 接入质量门；过程中暴露的"PR 合并树基线导致生成物判定过期"属门禁正确行为，跨平台排序不确定性已修复）。批次期间 CI 唯一失败为 #66 首版与 #65 回归测试的令牌交互（真实语义冲突），评审修复后转绿；`detect-path-bins` 维持既有已知偶发记录，本批次无新增抖动实证。
+- **2026-09-06 全量 desktop 真链套件本地复跑（#66 连带问题首次暴露）**：27 例 = 9 过 / 18 败；b3 lane 3/3 全过（含修复后的 BRANCH-03/04），a5 通过；**a4a/a4b/a4c/a4d/a4e 五个 lane 的 fixture 在 setup 阶段被 #66 信任边界 403 拒绝**（18 例中 12 例错误直接为 Node 侧写请求 `HTTP 403`，如"配置 stub Provider 应成功：HTTP 403"）——与 lane-b3 当时被挡完全同因，lane-b3 已在 #69 适配，其余五个 lane 未适配。CI 只跑 `@smoke` 覆盖不到全量 lane，故 #66-#69 的 CI 均未发现。**新增后续修复首项：五个 a4 lane fixture 令牌适配后全量真链复跑须 27/27**；在此之前"真链 26/27→27/27"与审计 AUTO_PASS 缺口不能宣称闭合。
 - **2026-09-06 B3 分支真链间歇性发送禁用——根因修复完成（#69）**：trace 实证为**测试时序缺陷**而非分支功能缺陷——`expectIdle` 在首轮 `createThread/updateModel/updateSettings` 的 API 阶段假通过（streaming 从未翻转），随后 `setThreadId` 触发空态↔会话态 Composer 换挂（同名可访问文本框），第二条基线消息的原子 fill 落在被卸载节点（失败 trace 中第二问文本仅存在于动作参数、从未进入任何 DOM 快照）。修复为两处基线 `expectIdle` 后等待当轮用户气泡；lane-b3 fixture 同步适配 #66 信任边界令牌（承接平台故障子代理的已提交工作，评审保留）。验证：同载荷加压 8 轮 0 次签名复现（6 过 + 2 次极端人工负载下的 fixture 拆卸 EBUSY 噪声，属另一层既有问题已记录）、lane-b3 全文件 3/3、desktop 双 tsc + vite 构建通过。产品侧"创建过渡期继续打字丢焦点"作为轻微 UX 现象记录于实施记录，不构成功能缺陷。
 
 ## 阶段状态
@@ -38,7 +39,7 @@
 
 ## 当前优先级
 
-1. **审计"后续修复"队列**：5 项立即修复已全部完成（#63-#66、#69，见上方批次记录）；下一批按审计报告 §10"后续修复"队列推进（runtime single-flight、usage durable spool、Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、SSE 合批去重、B4/B5 Electron 真链、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注），完成后补齐审计报告 §8 的人工验收卡执行。A/B 产品完成状态在人工与发布验收前不翻转。
+1. **a4 lane fixture 令牌适配（#66 连带收口，新增首项）**：lane-a4a/a4b/a4c/a4d/a4e 五个 fixture 按 #69 lane-b3 同法适配信任边界令牌，全量真链复跑须 27/27；其后按审计报告 §10"后续修复"队列推进（runtime single-flight、usage durable spool、Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、SSE 合批去重、B4/B5 Electron 真链、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注），并补齐审计报告 §8 人工验收卡执行。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **补齐波次 B 真链与人工验收**：补 compact/todo Electron 真链，执行独立报告中的 A/B 人工验收卡，确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
