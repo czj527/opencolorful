@@ -20,6 +20,7 @@ import path from "node:path";
 import { closeApp, firstWindow, launchApp } from "./fixtures/app.js";
 import type { LaneBackendHarness } from "./fixtures/lane-a4b/backend.js";
 import { test } from "./fixtures/lane-a4b/harness.js";
+import { serverAuthHeaders } from "./fixtures/server-token.js";
 import { ChatPO } from "./pages/chat-po.js";
 import { OnboardingPO } from "./pages/onboarding-po.js";
 
@@ -41,7 +42,7 @@ async function pinDefaultModelToStub(lane: LaneBackendHarness): Promise<void> {
   const provider = providers[0]!;
   const response = await fetch(`${lane.serverUrl}/api/settings/preferences`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...serverAuthHeaders(lane.homeDir) },
     body: JSON.stringify({ defaults: { model: { providerId: provider.providerId, modelId: provider.models[0]?.modelId ?? STUB_MODEL_ID } } }),
   });
   expect(response.ok, `PUT preferences 应成功：${response.status}`).toBe(true);

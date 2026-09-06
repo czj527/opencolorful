@@ -113,7 +113,7 @@ test.describe("@a4d MEM-05 记忆维护条真链", () => {
 
       /* ---- harness API POST deep-dive：服务端 202 queued（fire-and-forget 排队）---- */
       const post = await apiSend<DeepDiveResponseWire>(
-        harness.serverUrl,
+        harness,
         "POST",
         `/api/agents/${encodeURIComponent(agent.id)}/memory/deep-dive`,
       );

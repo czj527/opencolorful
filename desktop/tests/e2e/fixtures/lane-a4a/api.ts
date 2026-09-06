@@ -5,7 +5,12 @@
  * 供 lane 用例做前置数据准备（建助理/会话/Provider）与只读真值对照。
  * 写操作仅用于"准备隔离 home 内的测试前置数据"与"矩阵行链路中产品自身发出的写"的对照，
  * 不用于替产品执行它没有的入口（归档无 UI 入口，按矩阵用 API 归档属既定链路）。
+ *
+ * P0-1 信任边界：写请求（strict）必须携带本机服务令牌（<home>/runtime/server-token），
+ * 令牌缺失即抛错——绝不无凭据直呼（无任何跳过校验的旁路）。
  */
+
+import { serverAuthHeaders } from "../server-token.js";
 
 export interface ApiResult<T> {
   readonly status: number;
@@ -13,18 +18,28 @@ export interface ApiResult<T> {
   readonly json: T;
 }
 
+/** apiSend 所需的最小 harness 形状（共享 BackendHarness 满足，避免环依赖） */
+export interface BackendHarnessLike {
+  readonly serverUrl: string;
+  readonly homeDir: string;
+}
+
 export async function apiSend<T>(
-  serverUrl: string,
+  harness: BackendHarnessLike,
   method: "PUT" | "POST" | "DELETE",
   apiPath: string,
   body?: unknown,
 ): Promise<ApiResult<T>> {
-  const init: RequestInit = { method, signal: AbortSignal.timeout(15_000) };
+  const init: RequestInit = {
+    method,
+    headers: { ...serverAuthHeaders(harness.homeDir) },
+    signal: AbortSignal.timeout(15_000),
+  };
   if (body !== undefined) {
-    init.headers = { "content-type": "application/json" };
+    init.headers = { ...init.headers, "content-type": "application/json" };
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(`${serverUrl}${apiPath}`, init);
+  const response = await fetch(`${harness.serverUrl}${apiPath}`, init);
   const text = await response.text();
   let json: unknown = null;
   if (text !== "") {

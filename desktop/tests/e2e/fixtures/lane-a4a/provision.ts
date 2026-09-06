@@ -37,7 +37,7 @@ export async function configureStubProvider(harness: BackendHarness): Promise<St
       },
     ],
   };
-  const result = await apiSend<unknown>(harness.serverUrl, "PUT", "/api/settings/providers", {
+  const result = await apiSend<unknown>(harness, "PUT", "/api/settings/providers", {
     provider,
     apiKey: harness.fakeApiKey,
   });
@@ -56,7 +56,7 @@ export async function createAgentViaApi(
   name: string,
   options?: { readonly persona?: string; readonly defaultCwd?: string | null },
 ): Promise<CreatedAgent> {
-  const result = await apiSend<AgentViewWire>(harness.serverUrl, "POST", "/api/agents", {
+  const result = await apiSend<AgentViewWire>(harness, "POST", "/api/agents", {
     name,
     baseColor: {
       persona: options?.persona ?? `${name} 的底色描述（lane-a4a fixture）`,
@@ -94,7 +94,7 @@ export async function createSessionViaApi(
   if (options.toolMode !== undefined) body["toolMode"] = options.toolMode;
   if (options.workspaceConfirmed !== undefined) body["workspaceConfirmed"] = options.workspaceConfirmed;
   if (options.thinkingLevel !== undefined) body["thinkingLevel"] = options.thinkingLevel;
-  const result = await apiSend<SessionViewWire>(harness.serverUrl, "POST", "/api/sessions", body);
+  const result = await apiSend<SessionViewWire>(harness, "POST", "/api/sessions", body);
   expect(result.ok, `API 创建会话应成功：HTTP ${result.status}`).toBe(true);
   return { id: result.json.id, title: result.json.title };
 }

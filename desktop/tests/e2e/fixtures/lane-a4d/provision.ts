@@ -39,7 +39,7 @@ export async function configureStubProvider(harness: BackendHarness): Promise<St
       },
     ],
   };
-  const result = await apiSend<unknown>(harness.serverUrl, "PUT", "/api/settings/providers", {
+  const result = await apiSend<unknown>(harness, "PUT", "/api/settings/providers", {
     provider,
     apiKey: harness.fakeApiKey,
   });
@@ -49,7 +49,7 @@ export async function configureStubProvider(harness: BackendHarness): Promise<St
 
 /** POST /api/agents：不经引导直接创建助理（AGENT-01 的 API 面，L1/L3 已覆盖三文件落盘） */
 export async function createAgentViaApi(harness: BackendHarness, name: string): Promise<CreatedAgent> {
-  const result = await apiSend<AgentViewWire>(harness.serverUrl, "POST", "/api/agents", {
+  const result = await apiSend<AgentViewWire>(harness, "POST", "/api/agents", {
     name,
     baseColor: {
       persona: `${name} 的底色描述（lane-a4d fixture）`,
