@@ -26,6 +26,9 @@ const ignoredDirectories = new Set([
 
 const normalize = (value) => value.split(path.sep).join("/")
 const relative = (absolutePath) => normalize(path.relative(root, absolutePath))
+// 生成物必须跨平台逐字节一致：排序一律用码点比较。localeCompare 的结果随系统
+// locale / ICU 实现变化（Windows 生成的文件在 Linux CI 上会被判定 stale）。
+const byCodepoint = (left, right) => (left < right ? -1 : left > right ? 1 : 0)
 
 function readManifest() {
   return JSON.parse(readFileSync(manifestPath, "utf8"))
@@ -43,7 +46,9 @@ function walk(directory) {
   const files = []
   if (!existsSync(directory)) return files
 
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  // readdirSync 的目录项顺序随文件系统实现变化，跨平台确定输出必须先排序
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) => byCodepoint(left.name, right.name))
+  for (const entry of entries) {
     if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue
     const absolutePath = path.join(directory, entry.name)
     if (entry.isDirectory()) {
@@ -97,7 +102,7 @@ function sourceFilesForNode(node, allFiles, nodes) {
       path: relative(file),
       lines: lineCount(file),
     }))
-    .sort((left, right) => left.path.localeCompare(right.path))
+    .sort((left, right) => byCodepoint(left.path, right.path))
 }
 
 function resolveRelativeImport(importer, specifier) {
@@ -173,9 +178,17 @@ function collectObservedEdges(allFiles, nodes) {
     }
   }
 
-  return [...edgeMap.values()].sort((left, right) => (
-    left.from.localeCompare(right.from) || left.to.localeCompare(right.to)
-  ))
+  return [...edgeMap.values()]
+    .map((edge) => ({
+      ...edge,
+      // evidence 数组由 importer 遍历顺序决定，排序后跨平台一致
+      evidence: [...edge.evidence].sort((left, right) => (
+        byCodepoint(left.importer, right.importer) || byCodepoint(left.import, right.import)
+      )),
+    }))
+    .sort((left, right) => (
+      byCodepoint(left.from, right.from) || byCodepoint(left.to, right.to)
+    ))
 }
 
 function gitValue(args, fallback = "") {
@@ -349,7 +362,10 @@ function validateLocale(manifest, locale) {
 }
 
 function createGeneratedModel(manifest, locale, projectBoard) {
-  const allFiles = walk(root).filter((file) => isSourceFile(relative(file)))
+  const allFiles = walk(root)
+    .filter((file) => isSourceFile(relative(file)))
+    // importer 遍历顺序决定 evidence 归集，统一排序保证跨平台一致
+    .sort((left, right) => byCodepoint(relative(left), relative(right)))
   const mappedFiles = new Set()
   const nodes = manifest.nodes.map((node) => {
     const files = sourceFilesForNode(node, allFiles, manifest.nodes)
@@ -378,7 +394,7 @@ function createGeneratedModel(manifest, locale, projectBoard) {
 
   const missingReferences = [...manifestReferences(manifest), ...boardReferences(projectBoard)]
     .filter((reference) => !existsSync(path.join(root, reference.path)))
-    .sort((left, right) => left.path.localeCompare(right.path))
+    .sort((left, right) => byCodepoint(left.path, right.path))
 
   const totalLines = nodes.reduce((sum, node) => sum + node.totalLines, 0)
   const model = {

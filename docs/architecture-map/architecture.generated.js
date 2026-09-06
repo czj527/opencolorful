@@ -266,10 +266,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 216
         },
         {
-          "path": "desktop/src/components/timeline-scroll.ts",
-          "lines": 83
-        },
-        {
           "path": "desktop/src/components/TimelineNav.tsx",
           "lines": 68
         },
@@ -288,6 +284,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "path": "desktop/src/components/WorkspaceBanner.tsx",
           "lines": 26
+        },
+        {
+          "path": "desktop/src/components/timeline-scroll.ts",
+          "lines": 83
         },
         {
           "path": "desktop/src/data/ipc-source.ts",
@@ -413,16 +413,16 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 158
         },
         {
+          "path": "web/src/app/WorkspaceApp.tsx",
+          "lines": 571
+        },
+        {
           "path": "web/src/app/page-router.ts",
           "lines": 200
         },
         {
           "path": "web/src/app/state.ts",
           "lines": 99
-        },
-        {
-          "path": "web/src/app/WorkspaceApp.tsx",
-          "lines": 571
         },
         {
           "path": "web/src/components/AppShell.tsx",
@@ -473,10 +473,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 70
         },
         {
-          "path": "web/src/components/ui/index.ts",
-          "lines": 36
-        },
-        {
           "path": "web/src/components/ui/Select.tsx",
           "lines": 42
         },
@@ -499,6 +495,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "path": "web/src/components/ui/Tooltip.tsx",
           "lines": 45
+        },
+        {
+          "path": "web/src/components/ui/index.ts",
+          "lines": 36
         },
         {
           "path": "web/src/css-modules.d.ts",
@@ -533,36 +533,28 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 44
         },
         {
-          "path": "web/src/features/agents/decor-color.ts",
-          "lines": 53
-        },
-        {
           "path": "web/src/features/agents/DirectoryPicker.tsx",
           "lines": 121
-        },
-        {
-          "path": "web/src/features/agents/index.ts",
-          "lines": 24
         },
         {
           "path": "web/src/features/agents/TagInput.tsx",
           "lines": 115
         },
         {
+          "path": "web/src/features/agents/decor-color.ts",
+          "lines": 53
+        },
+        {
+          "path": "web/src/features/agents/index.ts",
+          "lines": 24
+        },
+        {
           "path": "web/src/features/chat/AgentSelector.tsx",
           "lines": 34
         },
         {
-          "path": "web/src/features/chat/chat-state.ts",
-          "lines": 707
-        },
-        {
           "path": "web/src/features/chat/ChatTimelineNav.tsx",
           "lines": 97
-        },
-        {
-          "path": "web/src/features/chat/commands.ts",
-          "lines": 96
         },
         {
           "path": "web/src/features/chat/ContextUsageRing.tsx",
@@ -581,6 +573,22 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 26
         },
         {
+          "path": "web/src/features/chat/ToolCallItem.tsx",
+          "lines": 71
+        },
+        {
+          "path": "web/src/features/chat/UiProjection.tsx",
+          "lines": 194
+        },
+        {
+          "path": "web/src/features/chat/chat-state.ts",
+          "lines": 707
+        },
+        {
+          "path": "web/src/features/chat/commands.ts",
+          "lines": 96
+        },
+        {
           "path": "web/src/features/chat/safe-markdown.tsx",
           "lines": 213
         },
@@ -591,14 +599,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "path": "web/src/features/chat/timeline-turns.ts",
           "lines": 86
-        },
-        {
-          "path": "web/src/features/chat/ToolCallItem.tsx",
-          "lines": 71
-        },
-        {
-          "path": "web/src/features/chat/UiProjection.tsx",
-          "lines": 194
         },
         {
           "path": "web/src/features/chat/use-chat-scroll.ts",
@@ -615,6 +615,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "path": "web/src/features/layout/useLayoutState.ts",
           "lines": 257
+        },
+        {
+          "path": "web/src/features/logs/LogsPage.tsx",
+          "lines": 136
         },
         {
           "path": "web/src/features/logs/activity-view.tsx",
@@ -637,10 +641,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 65
         },
         {
-          "path": "web/src/features/logs/LogsPage.tsx",
-          "lines": 136
-        },
-        {
           "path": "web/src/features/logs/performance-view.tsx",
           "lines": 95
         },
@@ -661,24 +661,12 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 345
         },
         {
-          "path": "web/src/features/plugins/index.ts",
-          "lines": 26
-        },
-        {
           "path": "web/src/features/plugins/InstalledView.tsx",
           "lines": 164
         },
         {
           "path": "web/src/features/plugins/PermissionsView.tsx",
           "lines": 128
-        },
-        {
-          "path": "web/src/features/plugins/plugin-format.ts",
-          "lines": 164
-        },
-        {
-          "path": "web/src/features/plugins/plugin-ui.tsx",
-          "lines": 86
         },
         {
           "path": "web/src/features/plugins/PluginDetailView.tsx",
@@ -697,24 +685,44 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 79
         },
         {
-          "path": "web/src/features/providers/provider-form.ts",
-          "lines": 78
+          "path": "web/src/features/plugins/index.ts",
+          "lines": 26
+        },
+        {
+          "path": "web/src/features/plugins/plugin-format.ts",
+          "lines": 164
+        },
+        {
+          "path": "web/src/features/plugins/plugin-ui.tsx",
+          "lines": 86
         },
         {
           "path": "web/src/features/providers/ProviderSettings.tsx",
           "lines": 205
         },
         {
+          "path": "web/src/features/providers/provider-form.ts",
+          "lines": 78
+        },
+        {
           "path": "web/src/features/sessions/NewSessionPage.tsx",
           "lines": 266
+        },
+        {
+          "path": "web/src/features/sessions/SessionSettingsPanel.tsx",
+          "lines": 127
         },
         {
           "path": "web/src/features/sessions/session-settings.ts",
           "lines": 88
         },
         {
-          "path": "web/src/features/sessions/SessionSettingsPanel.tsx",
-          "lines": 127
+          "path": "web/src/features/settings/SettingsNav.tsx",
+          "lines": 78
+        },
+        {
+          "path": "web/src/features/settings/SettingsPage.tsx",
+          "lines": 449
         },
         {
           "path": "web/src/features/settings/sections/AgentsSection.tsx",
@@ -761,20 +769,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 75
         },
         {
-          "path": "web/src/features/settings/SettingsNav.tsx",
-          "lines": 78
-        },
-        {
-          "path": "web/src/features/settings/SettingsPage.tsx",
-          "lines": 449
-        },
-        {
           "path": "web/src/features/settings/widgets/ComboInput.tsx",
           "lines": 93
-        },
-        {
-          "path": "web/src/features/settings/widgets/index.ts",
-          "lines": 16
         },
         {
           "path": "web/src/features/settings/widgets/SettingsRow.tsx",
@@ -789,6 +785,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 56
         },
         {
+          "path": "web/src/features/settings/widgets/index.ts",
+          "lines": 16
+        },
+        {
           "path": "web/src/features/skills/AgentSkillsSection.tsx",
           "lines": 307
         },
@@ -797,20 +797,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 164
         },
         {
-          "path": "web/src/features/skills/index.ts",
-          "lines": 23
-        },
-        {
           "path": "web/src/features/skills/InstalledSkillsView.tsx",
           "lines": 131
-        },
-        {
-          "path": "web/src/features/skills/skill-format.ts",
-          "lines": 82
-        },
-        {
-          "path": "web/src/features/skills/skill-ui.tsx",
-          "lines": 63
         },
         {
           "path": "web/src/features/skills/SkillBundlesView.tsx",
@@ -845,12 +833,16 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 117
         },
         {
-          "path": "web/src/features/subagents/subagent-format.ts",
-          "lines": 181
+          "path": "web/src/features/skills/index.ts",
+          "lines": 23
         },
         {
-          "path": "web/src/features/subagents/subagent-stream.ts",
-          "lines": 230
+          "path": "web/src/features/skills/skill-format.ts",
+          "lines": 82
+        },
+        {
+          "path": "web/src/features/skills/skill-ui.tsx",
+          "lines": 63
         },
         {
           "path": "web/src/features/subagents/SubagentCard.tsx",
@@ -863,6 +855,14 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "path": "web/src/features/subagents/SubagentTimeline.tsx",
           "lines": 389
+        },
+        {
+          "path": "web/src/features/subagents/subagent-format.ts",
+          "lines": 181
+        },
+        {
+          "path": "web/src/features/subagents/subagent-stream.ts",
+          "lines": 230
         },
         {
           "path": "web/src/features/subagents/use-subagent-panel.ts",
@@ -3235,7 +3235,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "scripts/generate-architecture-map.mjs",
-          "lines": 462
+          "lines": 478
         },
         {
           "path": "scripts/smoke-foundation.mjs",
@@ -3295,7 +3295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 16,
-      "totalLines": 2996
+      "totalLines": 3012
     }
   ],
   "edges": [
@@ -3395,11 +3395,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/agents.ts",
-          "import": "../../contracts/sandbox.js"
+          "import": "../../contracts/memory.js"
         },
         {
           "importer": "src/server/routes/agents.ts",
-          "import": "../../contracts/memory.js"
+          "import": "../../contracts/sandbox.js"
         },
         {
           "importer": "src/server/routes/directories.ts",
@@ -3428,11 +3428,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/session-service.js"
+          "import": "../runtime/prompt-service.js"
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/prompt-service.js"
+          "import": "../runtime/session-service.js"
         },
         {
           "importer": "src/server/routes/agent-events.ts",
@@ -3586,11 +3586,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "observedEvidence": [
         {
           "importer": "src/runtime/model-service.ts",
-          "import": "../observability/instrument.js"
+          "import": "../observability/audit-recorder.js"
         },
         {
           "importer": "src/runtime/model-service.ts",
-          "import": "../observability/audit-recorder.js"
+          "import": "../observability/instrument.js"
         },
         {
           "importer": "src/runtime/session-runtime.ts",
@@ -3680,11 +3680,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
-          "import": "../contracts/subagents.js"
+          "import": "../contracts/model-policy.js"
         },
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
-          "import": "../contracts/model-policy.js"
+          "import": "../contracts/subagents.js"
         }
       ]
     },
@@ -3774,11 +3774,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/plugins/grants/sandbox-bridge.ts",
-          "import": "../../../sandbox/preflight.js"
+          "import": "../../../sandbox/path-guard.js"
         },
         {
           "importer": "src/runtime/plugins/grants/sandbox-bridge.ts",
-          "import": "../../../sandbox/path-guard.js"
+          "import": "../../../sandbox/preflight.js"
         },
         {
           "importer": "src/runtime/plugins/installer/plugin-installer.ts",
@@ -3828,11 +3828,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/skills/composition.ts",
-          "import": "../../storage/skill-bundle-store.js"
+          "import": "../../storage/agent-skill-binding-store.js"
         },
         {
           "importer": "src/runtime/skills/composition.ts",
-          "import": "../../storage/agent-skill-binding-store.js"
+          "import": "../../storage/skill-bundle-store.js"
         }
       ]
     },
@@ -3906,11 +3906,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/skills/plugin/plugin-skill-bridge.ts",
-          "import": "../../plugins/paths.js"
+          "import": "../../plugins/contributions/shared.js"
         },
         {
           "importer": "src/runtime/skills/plugin/plugin-skill-bridge.ts",
-          "import": "../../plugins/contributions/shared.js"
+          "import": "../../plugins/paths.js"
         }
       ]
     },
@@ -5899,7 +5899,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 504,
     "mappedFileCount": 504,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113122,
+    "totalSourceLines": 113138,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 14
   },
@@ -5934,19 +5934,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/cli/commands/skills.ts",
-          "import": "../../config/paths.js"
-        },
-        {
-          "importer": "src/cli/commands/skills.ts",
           "import": "../../config/environment.js"
         },
         {
-          "importer": "src/cli/server-command.ts",
-          "import": "../config/paths.js"
+          "importer": "src/cli/commands/skills.ts",
+          "import": "../../config/paths.js"
         },
         {
           "importer": "src/cli/server-command.ts",
           "import": "../config/environment.js"
+        },
+        {
+          "importer": "src/cli/server-command.ts",
+          "import": "../config/paths.js"
         },
         {
           "importer": "src/cli/supervisor-command.ts",
@@ -5961,11 +5961,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/cli/server-command.ts",
-          "import": "../server/start.js"
+          "import": "../server/runtime-state.js"
         },
         {
           "importer": "src/cli/server-command.ts",
-          "import": "../server/runtime-state.js"
+          "import": "../server/start.js"
         }
       ]
     },
@@ -5974,6 +5974,18 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "to": "skills",
       "count": 7,
       "evidence": [
+        {
+          "importer": "src/cli/commands/skills.ts",
+          "import": "../../runtime/skills/errors.js"
+        },
+        {
+          "importer": "src/cli/commands/skills.ts",
+          "import": "../../runtime/skills/installer/risk.js"
+        },
+        {
+          "importer": "src/cli/commands/skills.ts",
+          "import": "../../runtime/skills/pack.js"
+        },
         {
           "importer": "src/cli/commands/skills.ts",
           "import": "../../runtime/skills/sources/linked-source-registry.js"
@@ -5988,19 +6000,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/cli/commands/skills.ts",
-          "import": "../../runtime/skills/pack.js"
-        },
-        {
-          "importer": "src/cli/commands/skills.ts",
-          "import": "../../runtime/skills/installer/risk.js"
-        },
-        {
-          "importer": "src/cli/commands/skills.ts",
           "import": "../../runtime/skills/validator.js"
-        },
-        {
-          "importer": "src/cli/commands/skills.ts",
-          "import": "../../runtime/skills/errors.js"
         }
       ]
     },
@@ -6168,11 +6168,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/memory/proposal-application.ts",
-          "import": "../../observability/instrument.js"
+          "import": "../../observability/audit-recorder.js"
         },
         {
           "importer": "src/runtime/memory/proposal-application.ts",
-          "import": "../../observability/audit-recorder.js"
+          "import": "../../observability/instrument.js"
         },
         {
           "importer": "src/runtime/memory/recall-service.ts",
@@ -6238,7 +6238,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/memory/agent/memory-agent-runner.ts",
-          "import": "../../../storage/memory/fact-store.js"
+          "import": "../../../storage/memory/batch-store.js"
         },
         {
           "importer": "src/runtime/memory/agent/memory-agent-runner.ts",
@@ -6246,11 +6246,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/memory/agent/memory-agent-runner.ts",
-          "import": "../../../storage/memory/journal-store.js"
+          "import": "../../../storage/memory/fact-store.js"
         },
         {
           "importer": "src/runtime/memory/agent/memory-agent-runner.ts",
-          "import": "../../../storage/memory/batch-store.js"
+          "import": "../../../storage/memory/journal-store.js"
         },
         {
           "importer": "src/runtime/memory/agent/memory-agent-runner.ts",
@@ -6343,11 +6343,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
-          "import": "../contracts/subagents.js"
+          "import": "../contracts/model-policy.js"
         },
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
-          "import": "../contracts/model-policy.js"
+          "import": "../contracts/subagents.js"
         }
       ]
     },
@@ -6407,11 +6407,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/pi-sdk/skill-loader.ts",
-          "import": "../runtime/skills/resolver.js"
+          "import": "../runtime/skills/path-safety.js"
         },
         {
           "importer": "src/pi-sdk/skill-loader.ts",
-          "import": "../runtime/skills/path-safety.js"
+          "import": "../runtime/skills/resolver.js"
         },
         {
           "importer": "src/pi-sdk/skill-loader.ts",
@@ -6449,6 +6449,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
+          "import": "../runtime/subagents/delegation-policy.js"
+        },
+        {
+          "importer": "src/pi-sdk/subagent-tools-context.ts",
           "import": "../runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.js"
         },
         {
@@ -6470,10 +6474,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
           "import": "../runtime/subagents/runtime/types.js"
-        },
-        {
-          "importer": "src/pi-sdk/subagent-tools-context.ts",
-          "import": "../runtime/subagents/delegation-policy.js"
         },
         {
           "importer": "src/pi-sdk/subagent-tools-context.ts",
@@ -6527,11 +6527,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/plugins/contributions/background-contribution.ts",
-          "import": "../../../contracts/plugin-protocol.js"
+          "import": "../../../contracts/observability.js"
         },
         {
           "importer": "src/runtime/plugins/contributions/background-contribution.ts",
-          "import": "../../../contracts/observability.js"
+          "import": "../../../contracts/plugin-protocol.js"
         }
       ]
     },
@@ -6558,11 +6558,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/plugins/grants/sandbox-bridge.ts",
-          "import": "../../../sandbox/preflight.js"
+          "import": "../../../sandbox/path-guard.js"
         },
         {
           "importer": "src/runtime/plugins/grants/sandbox-bridge.ts",
-          "import": "../../../sandbox/path-guard.js"
+          "import": "../../../sandbox/preflight.js"
         },
         {
           "importer": "src/runtime/plugins/installer/plugin-installer.ts",
@@ -6597,11 +6597,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/plugins/contributions/config-contribution.ts",
-          "import": "../../../observability/instrument.js"
+          "import": "../../../observability/audit-recorder.js"
         },
         {
           "importer": "src/runtime/plugins/contributions/config-contribution.ts",
-          "import": "../../../observability/audit-recorder.js"
+          "import": "../../../observability/instrument.js"
         },
         {
           "importer": "src/runtime/plugins/contributions/custom-activity-contribution.ts",
@@ -6620,7 +6620,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/platform/plugin-facade.ts",
-          "import": "../storage/plugin-registry-store.js"
+          "import": "../storage/plugin-binding-store.js"
+        },
+        {
+          "importer": "src/platform/plugin-facade.ts",
+          "import": "../storage/plugin-config-store.js"
         },
         {
           "importer": "src/platform/plugin-facade.ts",
@@ -6628,11 +6632,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/platform/plugin-facade.ts",
-          "import": "../storage/plugin-binding-store.js"
-        },
-        {
-          "importer": "src/platform/plugin-facade.ts",
-          "import": "../storage/plugin-config-store.js"
+          "import": "../storage/plugin-registry-store.js"
         },
         {
           "importer": "src/runtime/plugins/contributions/config-contribution.ts",
@@ -6724,11 +6724,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/agents.ts",
-          "import": "../../contracts/sandbox.js"
+          "import": "../../contracts/memory.js"
         },
         {
           "importer": "src/server/routes/agents.ts",
-          "import": "../../contracts/memory.js"
+          "import": "../../contracts/sandbox.js"
         },
         {
           "importer": "src/server/routes/directories.ts",
@@ -6743,15 +6743,15 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/server/app.ts",
+          "import": "../config/agent-store.js"
+        },
+        {
+          "importer": "src/server/app.ts",
           "import": "../config/paths.js"
         },
         {
           "importer": "src/server/app.ts",
           "import": "../config/preferences-store.js"
-        },
-        {
-          "importer": "src/server/app.ts",
-          "import": "../config/agent-store.js"
         },
         {
           "importer": "src/server/app.ts",
@@ -6786,15 +6786,15 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/memory.ts",
+          "import": "../../runtime/memory/proposal-application.js"
+        },
+        {
+          "importer": "src/server/routes/memory.ts",
           "import": "../../runtime/memory/resolver.js"
         },
         {
           "importer": "src/server/routes/memory.ts",
           "import": "../../runtime/memory/scheduler.js"
-        },
-        {
-          "importer": "src/server/routes/memory.ts",
-          "import": "../../runtime/memory/proposal-application.js"
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
@@ -6806,11 +6806,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/start.ts",
-          "import": "../runtime/memory/memory-ticker.js"
+          "import": "../runtime/memory/background-review.js"
         },
         {
           "importer": "src/server/start.ts",
-          "import": "../runtime/memory/background-review.js"
+          "import": "../runtime/memory/memory-ticker.js"
         }
       ]
     },
@@ -6821,11 +6821,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/server/app.ts",
-          "import": "../observability/instrument.js"
+          "import": "../observability/audit-recorder.js"
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../observability/audit-recorder.js"
+          "import": "../observability/instrument.js"
         },
         {
           "importer": "src/server/observability/client-events.ts",
@@ -6860,6 +6860,14 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
+          "import": "../../pi-sdk/agent-session.js"
+        },
+        {
+          "importer": "src/server/routes/runtime-bootstrap.ts",
+          "import": "../../pi-sdk/index.js"
+        },
+        {
+          "importer": "src/server/routes/runtime-bootstrap.ts",
           "import": "../../pi-sdk/memory-tools.js"
         },
         {
@@ -6868,19 +6876,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
-          "import": "../../pi-sdk/todo-tools.js"
-        },
-        {
-          "importer": "src/server/routes/runtime-bootstrap.ts",
-          "import": "../../pi-sdk/agent-session.js"
-        },
-        {
-          "importer": "src/server/routes/runtime-bootstrap.ts",
           "import": "../../pi-sdk/subagent-tools-context.js"
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
-          "import": "../../pi-sdk/index.js"
+          "import": "../../pi-sdk/todo-tools.js"
         },
         {
           "importer": "src/server/routes/subagent-ability-tools.ts",
@@ -6907,15 +6907,15 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/plugins.ts",
-          "import": "../../runtime/plugins/sources/source-adapter.js"
-        },
-        {
-          "importer": "src/server/routes/plugins.ts",
           "import": "../../platform/plugin-facade.js"
         },
         {
           "importer": "src/server/routes/plugins.ts",
           "import": "../../runtime/plugins/grants/grant-service.js"
+        },
+        {
+          "importer": "src/server/routes/plugins.ts",
+          "import": "../../runtime/plugins/sources/source-adapter.js"
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
@@ -6946,11 +6946,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/session-service.js"
+          "import": "../runtime/prompt-service.js"
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/prompt-service.js"
+          "import": "../runtime/session-service.js"
         },
         {
           "importer": "src/server/routes/agent-events.ts",
@@ -6977,11 +6977,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/skills/core/skill-core-service.js"
+          "import": "../runtime/skills/core/skill-admin-service.js"
         },
         {
           "importer": "src/server/app.ts",
-          "import": "../runtime/skills/core/skill-admin-service.js"
+          "import": "../runtime/skills/core/skill-core-service.js"
         },
         {
           "importer": "src/server/routes/messages.ts",
@@ -6993,11 +6993,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/skill-admin.ts",
-          "import": "../../runtime/skills/core/skill-core-service.js"
+          "import": "../../runtime/skills/core/skill-admin-service.js"
         },
         {
           "importer": "src/server/routes/skill-admin.ts",
-          "import": "../../runtime/skills/core/skill-admin-service.js"
+          "import": "../../runtime/skills/core/skill-core-service.js"
         },
         {
           "importer": "src/server/routes/skills.ts",
@@ -7020,6 +7020,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/memory.ts",
+          "import": "../../storage/memory/batch-store.js"
+        },
+        {
+          "importer": "src/server/routes/memory.ts",
           "import": "../../storage/memory/event-store.js"
         },
         {
@@ -7032,15 +7036,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/memory.ts",
-          "import": "../../storage/memory/batch-store.js"
+          "import": "../../storage/memory/recall-store.js"
         },
         {
           "importer": "src/server/routes/memory.ts",
           "import": "../../storage/memory/recovery-store.js"
-        },
-        {
-          "importer": "src/server/routes/memory.ts",
-          "import": "../../storage/memory/recall-store.js"
         },
         {
           "importer": "src/server/routes/observability.ts",
@@ -7063,7 +7063,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
-          "import": "../../runtime/subagents/runtime/parent-session-adapter.js"
+          "import": "../../runtime/subagents/composition.js"
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
@@ -7071,7 +7071,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
-          "import": "../../runtime/subagents/composition.js"
+          "import": "../../runtime/subagents/runtime/parent-session-adapter.js"
         },
         {
           "importer": "src/server/routes/runtime-bootstrap.ts",
@@ -7102,7 +7102,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/model-policy.ts",
-          "import": "../contracts/model-policy.js"
+          "import": "../contracts/api-error.js"
         },
         {
           "importer": "src/runtime/model-policy.ts",
@@ -7110,7 +7110,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/model-policy.ts",
-          "import": "../contracts/api-error.js"
+          "import": "../contracts/model-policy.js"
         },
         {
           "importer": "src/runtime/model-policy.ts",
@@ -7168,11 +7168,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/runtime/model-service.ts",
-          "import": "../observability/instrument.js"
+          "import": "../observability/audit-recorder.js"
         },
         {
           "importer": "src/runtime/model-service.ts",
-          "import": "../observability/audit-recorder.js"
+          "import": "../observability/instrument.js"
         },
         {
           "importer": "src/runtime/session-runtime.ts",
@@ -7381,11 +7381,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/skills/plugin/plugin-skill-bridge.ts",
-          "import": "../../plugins/paths.js"
+          "import": "../../plugins/contributions/shared.js"
         },
         {
           "importer": "src/runtime/skills/plugin/plugin-skill-bridge.ts",
-          "import": "../../plugins/contributions/shared.js"
+          "import": "../../plugins/paths.js"
         }
       ]
     },
@@ -7420,11 +7420,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/runtime/skills/composition.ts",
-          "import": "../../storage/skill-bundle-store.js"
+          "import": "../../storage/agent-skill-binding-store.js"
         },
         {
           "importer": "src/runtime/skills/composition.ts",
-          "import": "../../storage/agent-skill-binding-store.js"
+          "import": "../../storage/skill-bundle-store.js"
         }
       ]
     },
@@ -7474,19 +7474,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/runtime/subagents/context-resolver.ts",
-          "import": "../../contracts/subagents.js"
+          "import": "../../contracts/skill-protocol.js"
         },
         {
           "importer": "src/runtime/subagents/context-resolver.ts",
-          "import": "../../contracts/skill-protocol.js"
-        },
-        {
-          "importer": "src/runtime/subagents/delegation-policy.ts",
           "import": "../../contracts/subagents.js"
         },
         {
           "importer": "src/runtime/subagents/delegation-policy.ts",
           "import": "../../contracts/skill-protocol.js"
+        },
+        {
+          "importer": "src/runtime/subagents/delegation-policy.ts",
+          "import": "../../contracts/subagents.js"
         },
         {
           "importer": "src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.ts",
@@ -7532,11 +7532,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "evidence": [
         {
           "importer": "src/runtime/subagents/composition.ts",
-          "import": "../../observability/audit-recorder.js"
+          "import": "../../observability/activity-recorder.js"
         },
         {
           "importer": "src/runtime/subagents/composition.ts",
-          "import": "../../observability/activity-recorder.js"
+          "import": "../../observability/audit-recorder.js"
         },
         {
           "importer": "src/runtime/subagents/observability/subagent-observability-projector.ts",
@@ -7662,11 +7662,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/supervisor/start.ts",
-          "import": "../observability/observability-context.js"
+          "import": "../observability/instrument.js"
         },
         {
           "importer": "src/supervisor/start.ts",
-          "import": "../observability/instrument.js"
+          "import": "../observability/observability-context.js"
         },
         {
           "importer": "src/supervisor/start.ts",
