@@ -36,6 +36,8 @@ export class LaneB3BackendHarness {
   private serverPort = 0;
   private stubPort = 0;
   private disposed = false;
+  /** P0-1 信任边界：服务端启动令牌（<home>/runtime/server-token），Node 侧写请求必带 */
+  private serverToken: string | null = null;
 
   constructor(readonly label: string) {
     this.runRoot = fs.mkdtempSync(path.join(this.tmpRoot(), "oc-e2e-"));
@@ -77,6 +79,31 @@ export class LaneB3BackendHarness {
 
   private get stubBase(): string {
     return `http://127.0.0.1:${this.stubPort}`;
+  }
+
+  /**
+   * 只读本机服务访问令牌（与 desktop/electron/token-source.cjs 同一路径、同一优先级语义）。
+   * 服务端由 resolveServerToken 生成并落盘 <home>/runtime/server-token；缺失返回 null
+   * （此时写请求会被信任边界 403，测试应显式失败而非静默绕过——无任何跳过校验的开关）。
+   */
+  private readServerToken(): string | null {
+    try {
+      const raw = fs.readFileSync(path.join(this.homeDir, "runtime", "server-token"), "utf8").trim();
+      return raw === "" ? null : raw;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 信任边界写请求头（Authorization: Bearer）；令牌缺失时抛错，绝不无凭据直呼 */
+  private authHeaders(): Record<string, string> {
+    if (this.serverToken === null) {
+      this.serverToken = this.readServerToken();
+    }
+    if (this.serverToken === null) {
+      throw new Error("缺少本机服务访问令牌（<home>/runtime/server-token 不存在），Node 侧写请求拒绝发出");
+    }
+    return { authorization: `Bearer ${this.serverToken}` };
   }
 
   get started(): boolean {
@@ -174,6 +201,18 @@ export class LaneB3BackendHarness {
   async apiGet<T>(apiPath: string): Promise<T> {
     const response = await fetch(`${this.serverUrl}${apiPath}`, { signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error(`GET ${apiPath} → HTTP ${response.status}`);
+    return await response.json() as T;
+  }
+
+  /** Node 侧 JSON 写请求（POST/PUT）：信任边界 strict 模式要求携带本机服务令牌 */
+  async apiSend<T>(method: "POST" | "PUT", apiPath: string, body?: unknown): Promise<T> {
+    const response = await fetch(`${this.serverUrl}${apiPath}`, {
+      method,
+      headers: { "content-type": "application/json", ...this.authHeaders() },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`${method} ${apiPath} → HTTP ${response.status}`);
     return await response.json() as T;
   }
 

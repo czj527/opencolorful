@@ -54,12 +54,10 @@ async function pinDefaultModelToStub(lane: LaneB3BackendHarness): Promise<void> 
   const providers = await lane.apiGet<Array<{ providerId: string; models: Array<{ modelId: string }> }>>("/api/settings/providers");
   expect(providers.length, "引导后应至少一个自定义 Provider").toBeGreaterThanOrEqual(1);
   const provider = providers[0]!;
-  const response = await fetch(`${lane.serverUrl}/api/settings/preferences`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ defaults: { model: { providerId: provider.providerId, modelId: provider.models[0]?.modelId ?? STUB_MODEL_ID } } }),
+  // P0-1 信任边界：Agent Server 写请求 strict 模式必须携带本机服务令牌（fixture 只读 server-token 文件）
+  await lane.apiSend("PUT", "/api/settings/preferences", {
+    defaults: { model: { providerId: provider.providerId, modelId: provider.models[0]?.modelId ?? STUB_MODEL_ID } },
   });
-  expect(response.ok, `PUT preferences 应成功：${response.status}`).toBe(true);
 }
 
 /** 引导建助理 + 固定默认模型；返回已就绪的页面与 PO（会话尚未创建） */
