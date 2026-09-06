@@ -260,10 +260,17 @@ export function createTrustBoundaryMiddleware(options: TrustBoundaryOptions) {
       }
     } else {
       if (!hasValidToken) {
-        if (origin !== undefined && origin !== "" && !originIsLocal) {
-          return reject(context, 403, ORIGIN_REJECT_MESSAGE);
+        if (origin !== undefined && origin !== "") {
+          if (!originIsLocal) {
+            // 跨站浏览器写请求必带非本机 Origin：主防线，拒绝。
+            return reject(context, 403, ORIGIN_REJECT_MESSAGE);
+          }
+          // 本机 Origin 且无令牌 → 放行：Supervisor 同源浏览器 UI 不持有令牌，
+          // 信任级别等同"可读令牌文件的本地进程"（与设计文档/接线注释一致）。
+        } else {
+          // 无 Origin 的 Node 端脚本写请求：既非浏览器同源形态也无凭据 → 拒绝。
+          return reject(context, 403, TOKEN_REJECT_MESSAGE);
         }
-        return reject(context, 403, TOKEN_REJECT_MESSAGE);
       }
     }
     await next();

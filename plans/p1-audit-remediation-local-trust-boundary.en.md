@@ -108,3 +108,8 @@ clients — with fail-closed semantics everywhere (no bypass switches).
 - **Supervisor control-plane writes** accept local-Origin tokenless requests (see §7.2) — deliberate, does not weaken the agent-server data plane; noted for the reviewer.
 - **Dev-mode token discovery:** the desktop main process and vite proxy locate the token via `OPENCOLORFUL_HOME` (or `~/.opencolorful`); pointing the server and the client at different homes in dev requires sharing `OPENCOLORFUL_SERVER_TOKEN` explicitly (packaged/true-chain paths are self-consistent).
 - **Windows file mode:** 0600 is best-effort (`fs.chmodSync`); the strict mode assertion is POSIX-only in tests.
+
+## 10. Review fixes (post-audit of this implementation)
+
+- **R1 (defect, fixed):** the origin-guard branch rejected **all** token-less writes, contradicting its own documented semantics ("valid token **or** local Origin") — the local-Origin same-origin browser path was de-facto broken and masked in e2e by the Playwright token header. Implementation corrected to the ruled 4-case matrix (token → pass; evil Origin → 403; local Origin → pass; no Origin → 403 token message). Strict mode and the WS branch untouched.
+- **R2 (coverage gap, fixed):** origin-guard had zero tests. Added `trust boundary：supervisor origin-guard 模式（写请求）` in `tests/integration/trust-boundary.test.ts`: a real supervisor (random port, isolated home, real spawned agent server) asserted with browser-form (local Origin, no token → 2xx), evil Origin (403), Origin-less Node-side (403), and token (pass regardless of Origin) writes.

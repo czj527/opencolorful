@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { PLATFORM_VERSION } from "../../src/index.js";
@@ -16,6 +16,8 @@ import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { startForegroundServer, type RunningServer } from "../../src/server/start.js";
+import { startSupervisor, type RunningSupervisor } from "../../src/supervisor/start.js";
+import type { SupervisorStatusResponse } from "../../src/supervisor/types.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { serverTokenFilePath } from "../../src/server/trust-boundary.js";
 
@@ -363,4 +365,101 @@ describe("trust boundary：令牌解析与持久化", () => {
       delete process.env.OPENCOLORFUL_SERVER_TOKEN;
     }
   });
+});
+
+describe("trust boundary：supervisor origin-guard 模式（写请求）", () => {
+  // 真实 Supervisor（随机端口 + 隔离 home，拉起真实 Agent Server 子进程），
+  // 逐条验证 origin-guard 写请求语义——尤其"本机 Origin 无令牌放行"这条
+  // 真实浏览器同源路径（评审修复：原实现两个无令牌子分支都拒绝，与设计矛盾）。
+  const CLI_ENTRY = path.resolve(import.meta.dirname, "../../src/cli/main.ts");
+
+  let supervisor: RunningSupervisor | null = null;
+  let supervisorPort = 0;
+  let supervisorHome = "";
+
+  async function freePort(): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address();
+        if (address && typeof address === "object") {
+          resolve(address.port);
+        } else {
+          reject(new Error("无法获取端口"));
+        }
+        probe.close();
+      });
+      probe.on("error", reject);
+    });
+  }
+
+  async function waitForAgentOnline(timeoutMs = 20_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
+      const body = (await response.json()) as SupervisorStatusResponse;
+      if (body.agentServer.status === "online") return;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error("等待 agent server online 超时");
+  }
+
+  function postSupervisor(pathname: string, headers: Record<string, string>): Promise<Response> {
+    return fetch(`http://127.0.0.1:${supervisorPort}${pathname}`, { method: "POST", headers });
+  }
+
+  beforeAll(async () => {
+    supervisorHome = fs.mkdtempSync(path.join(os.tmpdir(), "opencolorful-supervisor-guard-"));
+    const paths = getRuntimePaths({ OPENCOLORFUL_HOME: supervisorHome });
+    supervisorPort = await freePort();
+    supervisor = await startSupervisor({
+      paths,
+      supervisorPort,
+      agentServerPort: await freePort(),
+      entryScript: CLI_ENTRY,
+    });
+    await waitForAgentOnline();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (supervisor !== null) {
+      await supervisor.stop().catch(() => {});
+      supervisor = null;
+    }
+    // Windows 子进程句柄释放有延迟：重试清理，失败仅告警
+    try {
+      fs.rmSync(supervisorHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 200 });
+    } catch {
+      console.warn(`清理临时目录失败（可手动删除）: ${supervisorHome}`);
+    }
+  });
+
+  it("浏览器同源形态：本机 Origin、无令牌写控制面 → 2xx（端到端语义）", async () => {
+    // Origin 恰为 Supervisor 自身源、不带任何令牌——同源浏览器 UI 的真实请求形态
+    const response = await postSupervisor("/api/supervisor/stop", {
+      origin: `http://127.0.0.1:${supervisorPort}`,
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ status: "stopped" });
+  }, 30_000);
+
+  it("恶意 Origin 无令牌 → 403（跨站主防线）", async () => {
+    const response = await postSupervisor("/api/supervisor/start", { origin: "https://evil.example" });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("无 Origin 无令牌 → 403（Node 端脚本写须持令牌）", async () => {
+    const response = await postSupervisor("/api/supervisor/start", {});
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("带有效令牌 → 2xx（令牌优先，恶意 Origin 亦放行）", async () => {
+    const response = await postSupervisor("/api/supervisor/start", {
+      "origin": "https://evil.example",
+      "x-oc-token": supervisor!.token,
+    });
+    expect(response.status).toBe(201);
+  }, 30_000);
 });
