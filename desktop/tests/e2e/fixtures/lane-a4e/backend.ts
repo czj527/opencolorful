@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ARTIFACTS_DIR, REPO_ROOT, stripCredentialEnv } from "../backend.js";
+import { serverAuthHeaders } from "../server-token.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const BOOTSTRAP_PATH = path.join(here, "server-bootstrap.ts");
@@ -195,11 +196,12 @@ export class LaneA4eBackendHarness {
     return await response.json() as T;
   }
 
-  /** Node 侧 JSON 请求（POST/PUT，用于 fixture 前置数据准备） */
+  /** Node 侧 JSON 请求（POST/PUT，用于 fixture 前置数据准备）。
+   * P0-1 信任边界：strict 模式写请求必须携带本机服务令牌；缺失即抛错，绝不无凭据直呼。 */
   async apiSend(method: "POST" | "PUT", apiPath: string, body?: unknown): Promise<{ ok: boolean; status: number; json: any }> {
     const response = await fetch(`${this.serverUrl}${apiPath}`, {
       method,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...serverAuthHeaders(this.homeDir) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(10_000),
     });

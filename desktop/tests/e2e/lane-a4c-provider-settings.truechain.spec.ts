@@ -20,6 +20,7 @@ import { closeApp, firstWindow, launchApp } from "./fixtures/app.js";
 import { test } from "./fixtures/harness.js";
 import { ProvidersPO } from "./fixtures/lane-a4c/providers-po.js";
 import { SettingsPO } from "./fixtures/lane-a4c/settings-po.js";
+import { serverAuthHeaders } from "./fixtures/server-token.js";
 import { OnboardingPO } from "./pages/onboarding-po.js";
 
 /* ---- 服务端真值的只读读取形状（对齐 src/pi-sdk/types.ts 与 routes/providers.ts） ---- */
@@ -45,15 +46,16 @@ function asModels(payload: unknown): ModelWire[] {
   return Array.isArray(list) ? (list as ModelWire[]) : [];
 }
 
-/** 把全局默认模型固定到指定 Provider/模型（与冒烟/其他 lane 同法：模型确定性由 fixture 显式固定） */
+/** 把全局默认模型固定到指定 Provider/模型（与冒烟/其他 lane 同法：模型确定性由 fixture 显式固定）。
+ * PUT 是写请求：信任边界 strict 要求本机服务令牌（缺失即抛错，无旁路）。 */
 async function pinDefaultModel(
-  harness: { serverUrl: string },
+  harness: { serverUrl: string; homeDir: string },
   providerId: string,
   modelId: string,
 ): Promise<void> {
   const response = await fetch(`${harness.serverUrl}/api/settings/preferences`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...serverAuthHeaders(harness.homeDir) },
     body: JSON.stringify({ defaults: { model: { providerId, modelId } } }),
     signal: AbortSignal.timeout(10_000),
   });

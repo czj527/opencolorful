@@ -149,7 +149,7 @@ test.describe("@a4a WS-02/WS-03 工作区横幅真链", () => {
       toolMode: "all",
       workspaceConfirmed: false,
     });
-    const result = await apiSend<unknown>(harness.serverUrl, "PUT", `/api/sessions/${encodeURIComponent(session.id)}/settings`, {
+    const result = await apiSend<unknown>(harness, "PUT", `/api/sessions/${encodeURIComponent(session.id)}/settings`, {
       workspaceCwd: otherDir,
     });
     expect(result.status, "未确认的 cwd 变更必须被拒绝").toBe(400);

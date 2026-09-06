@@ -18,6 +18,7 @@ import { closeApp, firstWindow, launchApp } from "./fixtures/app.js";
 import { test } from "./fixtures/harness.js";
 import type { SessionViewWire } from "./fixtures/lane-a4a/api.js";
 import { configureStubProvider, createAgentViaApi, createSessionViaApi } from "./fixtures/lane-a4a/provision.js";
+import { serverAuthHeaders } from "./fixtures/server-token.js";
 import { LaneSidebarPO } from "./fixtures/lane-a4a/pages/l6-sidebar.js";
 
 test.describe("@a4a SESS-03/04/05 会话生命周期真链", () => {
@@ -111,8 +112,10 @@ test.describe("@a4a SESS-03/04/05 会话生命周期真链", () => {
       /* ---- API 归档（矩阵链路：归档无 Desktop UI 入口）---- */
       const archived = await harness.apiGet<SessionViewWire>(`/api/sessions/${encodeURIComponent(session.id)}`);
       expect(archived.archived).toBe(false);
+      // DELETE 是写请求：信任边界 strict 要求本机服务令牌（缺失即抛错，无旁路）
       const deleteResult = await fetch(`${harness.serverUrl}/api/sessions/${encodeURIComponent(session.id)}`, {
         method: "DELETE",
+        headers: { ...serverAuthHeaders(harness.homeDir) },
         signal: AbortSignal.timeout(10_000),
       });
       expect(deleteResult.ok, `DELETE 归档应成功：HTTP ${deleteResult.status}`).toBe(true);
@@ -161,7 +164,7 @@ test.describe("@a4a SESS-03/04/05 会话生命周期真链", () => {
     const stub = await configureStubProvider(harness);
     const defaultResponse = await fetch(`${harness.serverUrl}/api/settings/preferences`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...serverAuthHeaders(harness.homeDir) },
       body: JSON.stringify({ defaults: { model: { providerId: stub.providerId, modelId: stub.modelId } } }),
       signal: AbortSignal.timeout(10_000),
     });
