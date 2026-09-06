@@ -58,7 +58,7 @@ describe("TUI smoke test", () => {
     });
 
     try {
-      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`);
+      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`, server.token);
 
       // 健康检查
       const health = await api.getHealth();
@@ -101,7 +101,7 @@ describe("TUI smoke test", () => {
 
       const compactResponse = await fetch(
         `http://127.0.0.1:${server.port}/api/sessions/${session.id}/compact`,
-        { method: "POST" },
+        { method: "POST", headers: { "x-oc-token": server.token } },
       );
       expect(compactResponse.status).toBe(409);
       expect(await compactResponse.json()).toMatchObject({ code: "CONFLICT" });
@@ -137,7 +137,7 @@ describe("TUI smoke test", () => {
     });
 
     try {
-      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`);
+      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`, server.token);
       const session = await api.createSession("Abort 测试", process.cwd());
 
       const runtime = await SessionRuntime.create({

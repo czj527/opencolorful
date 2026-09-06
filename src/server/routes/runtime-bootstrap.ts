@@ -348,7 +348,11 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
         : undefined;
       const tools = fileTools.length > 0 ? [...fileTools] : undefined;
 
-      // 构建沙箱上下文：当 session 绑定 Agent 且 paths/agentStore 可用时
+      // 构建沙箱上下文：当 session 绑定 Agent 且 paths/agentStore 可用时。
+      // P1 审计修复（fail-closed）：设置承载沙箱能力（extraReadPaths/protectedPaths），
+      // 读取失败时不得静默降级为"无沙箱运行"——必须拒绝启动 Runtime，由路由映射为
+      // 稳定错误响应（不回显内部路径/异常细节）。边界：agentStore/paths 未注入
+      // （组合根缺省，测试/特殊部署形态）不属于"读取失败"，维持原状不在此 fail-closed。
       let agentSettings: import("../../contracts/agent-settings.js").AgentSettingsV2 | undefined;
       let agentHomeDir: string | undefined;
       let platformHome: string | undefined;
@@ -358,7 +362,10 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
           agentHomeDir = path.join(paths.agents, view.agentId);
           platformHome = paths.home;
         } catch {
-          // 读取 Agent 设置失败时降级运行，不启用沙箱
+          throw new EnsureRuntimeError(
+            createApiError("SESSION_ERROR", "Agent 设置读取失败，已拒绝启动运行时"),
+            500,
+          );
         }
       }
 

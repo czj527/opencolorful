@@ -30,6 +30,7 @@ import { MemoryWatermarkStore } from "../../src/storage/memory/recovery-store.js
 import { MemoryPolicy } from "../../src/runtime/memory/memory-policy.js";
 import { ProposalApplication } from "../../src/runtime/memory/proposal-application.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const openDatabases: Database.Database[] = [];
@@ -72,12 +73,12 @@ describe("P0-1 fail-closed 审计接入（复现级测试）", () => {
       database: closedDb,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ protectedPaths: ["C:\\secrets"] }),
@@ -96,7 +97,7 @@ describe("P0-1 fail-closed 审计接入（复现级测试）", () => {
       database: closedDb,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
@@ -104,7 +105,7 @@ describe("P0-1 fail-closed 审计接入（复现级测试）", () => {
     const session = ctx.sessionService.create({ title: "工作区会话", cwd: process.cwd() });
     const newCwd = path.join(ctx.dir, "workspace-new");
     fs.mkdirSync(newCwd, { recursive: true });
-    const response = await app.request(`http://x/api/sessions/${session.id}/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions/${session.id}/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workspaceCwd: newCwd, workspaceConfirmed: true }),
@@ -139,12 +140,12 @@ describe("P0-1 fail-closed 审计接入（复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ protectedPaths: ["C:\\secrets"] }),
@@ -166,12 +167,12 @@ describe("Phase 11 第三轮复审（评审 P0 复现级测试）", () => {
     const rejectingAudit = {
       appendStrict: () => ({ kind: "rejected", eventName: "audit.sandbox.policy_changed", reason: "事件未注册或版本不符" }),
     } as unknown as AuditRecorder;
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: rejectingAudit,
     });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ protectedPaths: ["C:\secrets"] }),
@@ -183,8 +184,8 @@ describe("Phase 11 第三轮复审（评审 P0 复现级测试）", () => {
 
   it("P0：audit 未配置（undefined）→ 沙箱设置同样被拒绝（不再静默放行）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const { app } = createTrustedServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ protectedPaths: ["C:\secrets"] }),
@@ -196,11 +197,11 @@ describe("Phase 11 第三轮复审（评审 P0 复现级测试）", () => {
 
   it("P0：Session 工作目录变更在 audit 未配置时同样 503（不再走非审计路径）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const { app } = createTrustedServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
     const session = ctx.sessionService.create({ title: "无审计会话", cwd: process.cwd() });
     const newCwd = path.join(ctx.dir, "workspace-noaudit");
     fs.mkdirSync(newCwd, { recursive: true });
-    const response = await app.request(`http://x/api/sessions/${session.id}/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions/${session.id}/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workspaceCwd: newCwd, workspaceConfirmed: true }),
@@ -272,12 +273,12 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0-1a：Agent 创建带 defaultCwd+sandbox，audit 拒绝 → 503 且完全不落盘（原实现 201+落盘+audit 0 条）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: rejectingAuditStub(),
     });
-    const response = await app.request(`http://x/api/agents`, {
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "高风险创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
@@ -289,8 +290,8 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0-1a：Agent 创建带 defaultCwd+sandbox，audit 未配置 → 503", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
-    const response = await app.request(`http://x/api/agents`, {
+    const { app } = createTrustedServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "高风险创建2", baseColor: {}, sandbox: { protectedPaths: ["secrets/"] } }),
@@ -302,8 +303,8 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0-1a：纯身份创建（无工作区/沙箱字段）不受影响 → 201", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
-    const response = await app.request(`http://x/api/agents`, {
+    const { app } = createTrustedServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "普通创建", baseColor: {} }),
@@ -313,8 +314,8 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0-1b：Session 创建 audit 未配置 → 503 且无会话落盘（原实现 201）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
-    const response = await app.request(`http://x/api/sessions`, {
+    const { app } = createTrustedServerApp({ agentStore: ctx.agentStore, sessionService: ctx.sessionService });
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "无审计会话创建", cwd: process.cwd() }),
@@ -325,14 +326,14 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0-1b：Session 创建 audit 拒绝 → 503", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: {
         appendStrict: () => ({ kind: "rejected", eventName: "audit.session.workspace_bound", reason: "ledger 版本不符" }),
       } as unknown as AuditRecorder,
     });
-    const response = await app.request(`http://x/api/sessions`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "拒绝审计会话", cwd: process.cwd() }),
@@ -347,12 +348,12 @@ describe("Phase 11 第四轮复审（评审 P0/P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ defaultCwd: "C:\\work", protectedPaths: ["secrets/"] }),
@@ -555,12 +556,12 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/agents`, {
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: "a1", name: "冲突创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
@@ -587,12 +588,12 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
     const originalCreate = failingService.create;
     failingService.create = () => { throw new Error("disk full"); };
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         agentStore: ctx.agentStore,
         sessionService: ctx.sessionService,
         audit,
       });
-      const response = await app.request(`http://x/api/sessions`, {
+      const response = await app.request(`http://127.0.0.1/api/sessions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "失败会话", cwd: process.cwd() }),
@@ -622,7 +623,7 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
     const originalUpdate = failingStore.update;
     failingStore.update = () => { throw new Error("disk full"); };
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         agentStore: ctx.agentStore,
         sessionService: ctx.sessionService,
         audit,
@@ -630,7 +631,7 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
         paths: ctx.paths,
         database: ctx.database,
       });
-      const response = await app.request(`http://x/api/preferences/observability`, {
+      const response = await app.request(`http://127.0.0.1/api/preferences/observability`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ diagnosticLevel: "warn" }),
@@ -654,12 +655,12 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/agents`, {
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "scope 测试", baseColor: {}, sandbox: { protectedPaths: ["secrets/"] } }),
@@ -682,12 +683,12 @@ describe("Phase 11 第五轮复审（评审 P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/sessions`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "scope 会话", cwd: process.cwd() }),
@@ -778,12 +779,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0：Agent 创建 completed 审计失败 → 503 + Agent 被补偿删除（原实现 503 但 Agent 落盘）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: terminalFailingAudit(),
     });
-    const response = await app.request(`http://x/api/agents`, {
+    const response = await app.request(`http://127.0.0.1/api/agents`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "补偿创建", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
@@ -797,12 +798,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0：Session 创建 completed 审计失败 → 503 + Session 被补偿移除（原实现 500 但 Session 保留）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: terminalFailingAudit(),
     });
-    const response = await app.request(`http://x/api/sessions`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "补偿会话", cwd: process.cwd() }),
@@ -813,12 +814,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
 
   it("P0：Agent 设置 completed 审计失败 → 503 + 设置恢复为原值（原实现 503 但修改仍落盘）", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: terminalFailingAudit(),
     });
-    const response = await app.request(`http://x/api/agents/a1/settings`, {
+    const response = await app.request(`http://127.0.0.1/api/agents/a1/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ defaultCwd: "C:\\work" }),
@@ -831,7 +832,7 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
   it("P0：偏好修改 completed 审计失败 → 503 + 偏好恢复为原值（原实现 400 但 diagnosticLevel 已改）", async () => {
     const ctx = createContext();
     const preferencesStore = new PreferencesStore(ctx.paths.preferences);
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: terminalFailingAudit(),
@@ -839,7 +840,7 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
       paths: ctx.paths,
       database: ctx.database,
     });
-    const response = await app.request(`http://x/api/preferences/observability`, {
+    const response = await app.request(`http://127.0.0.1/api/preferences/observability`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...defaultObservabilityPreferences(), diagnosticLevel: "error" }),
@@ -855,12 +856,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/sessions`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "生命周期会话", cwd: process.cwd() }),
@@ -885,12 +886,12 @@ describe("Phase 11 第六轮复审（评审 P0/P1 复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
-    const response = await app.request(`http://x/api/sessions`, {
+    const response = await app.request(`http://127.0.0.1/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "绑定会话", cwd: process.cwd(), agentId: "a1" }),
@@ -1020,13 +1021,13 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
     vi.spyOn(ctx.sessionService, "updateSettings").mockImplementation(() => {
       throw new Error("settings write failed");
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
     });
 
-    const response = await app.request("http://x/api/sessions", {
+    const response = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "失败会话", cwd: process.cwd(), toolMode: "read-only" }),
@@ -1043,7 +1044,7 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
     const previous = preferencesStore.get().observability ?? defaultObservabilityPreferences();
     const next = { ...previous, diagnosticLevel: "error" as const, emergencySpoolBudgetBytes: previous.emergencySpoolBudgetBytes + 1024 };
     const applySpy = vi.spyOn(instrument, "applyObservabilityPreferences");
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit: terminalFailingAudit(),
@@ -1052,7 +1053,7 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
       database: ctx.database,
     });
 
-    const response = await app.request("http://x/api/preferences/observability", {
+    const response = await app.request("http://127.0.0.1/api/preferences/observability", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(next),
@@ -1075,7 +1076,7 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
@@ -1084,7 +1085,7 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
       database: ctx.database,
     });
 
-    const response = await app.request("http://x/api/preferences/observability", {
+    const response = await app.request("http://127.0.0.1/api/preferences/observability", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(next),
@@ -1101,14 +1102,14 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
       database: ctx.database,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: "test", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       agentStore: ctx.agentStore,
       sessionService: ctx.sessionService,
       audit,
       paths: ctx.paths,
       database: ctx.database,
     });
-    const createdResponse = await app.request("http://x/api/agents", {
+    const createdResponse = await app.request("http://127.0.0.1/api/agents", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "双动作", baseColor: {}, defaultCwd: "C:\\work", sandbox: { protectedPaths: ["secrets/"] } }),
@@ -1116,7 +1117,7 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
     expect(createdResponse.status).toBe(201);
     const created = await createdResponse.json() as { identity: { id: string } };
 
-    const allResponse = await app.request(`http://x/api/observability/audit?ownerAgentId=${created.identity.id}`);
+    const allResponse = await app.request(`http://127.0.0.1/api/observability/audit?ownerAgentId=${created.identity.id}`);
     expect(allResponse.status).toBe(200);
     const all = await allResponse.json() as { items: Array<{ eventName: string; operationId: string | null }> };
     expect(all.items).toHaveLength(4);
@@ -1135,15 +1136,15 @@ describe("Phase 11 第七轮自修复（复现级测试）", () => {
     }
 
     const firstOperation = [...byOperation.keys()][0]!;
-    const operationResponse = await app.request(`http://x/api/observability/audit?operationId=${firstOperation}`);
+    const operationResponse = await app.request(`http://127.0.0.1/api/observability/audit?operationId=${firstOperation}`);
     const operationPage = await operationResponse.json() as { items: unknown[] };
     expect(operationPage.items).toHaveLength(2);
     const eventName = all.items[0]!.eventName;
-    const eventResponse = await app.request(`http://x/api/observability/audit?eventName=${eventName}`);
+    const eventResponse = await app.request(`http://127.0.0.1/api/observability/audit?eventName=${eventName}`);
     const eventPage = await eventResponse.json() as { items: Array<{ eventName: string }> };
     expect(eventPage.items).toHaveLength(1);
     expect(eventPage.items[0]?.eventName).toBe(eventName);
-    const missingResponse = await app.request("http://x/api/observability/audit?operationId=definitely-missing");
+    const missingResponse = await app.request("http://127.0.0.1/api/observability/audit?operationId=definitely-missing");
     const missingPage = await missingResponse.json() as { items: unknown[] };
     expect(missingPage.items).toHaveLength(0);
   });

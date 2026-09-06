@@ -9,13 +9,18 @@
 //   不得 import packages/ 的实现细节（dist 深路径）。
 // ═══════════════════════════════════════════════════════════════
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 
 const IMPORT_PATTERN = /(?:from\s+|import\s*(?:\(\s*)?)["']([^"']+)["']/g;
 
 function collectTypeScriptFiles(dir, out = []) {
+  // 目录不存在时静默跳过（与 verify-pi-sdk-imports.mjs 一致），
+  // 避免扫描无 src/ 的仓库根或插件包时以 ENOENT 崩溃。
+  if (!existsSync(dir)) {
+    return out;
+  }
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     const stat = statSync(full);
@@ -78,8 +83,12 @@ export function findPluginImportViolations(projectRoot) {
   return violations;
 }
 
-const invokedPath = fileURLToPath(import.meta.url);
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === import.meta.url) {
+// CLI 入口判断：仅当本模块作为脚本被直接执行时才运行扫描
+// （比较 argv[1] 的 file URL 与本模块 URL；此前误比磁盘路径与 file:// 字符串，恒为假）。
+if (
+  process.argv[1] !== undefined &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
   const projectRoot = process.argv[2] ?? process.cwd();
   const violations = findPluginImportViolations(projectRoot);
   if (violations.length > 0) {

@@ -50,14 +50,14 @@ describe("TUI real runtime", () => {
     });
 
     try {
-      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`);
+      const api = new TuiApiClient(`http://127.0.0.1:${server.port}`, server.token);
 
       // 配置一个 Provider
       const putResp = await fetch(
         `http://127.0.0.1:${server.port}/api/settings/providers`,
         {
           method: "PUT",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", authorization: `Bearer ${server.token}` },
           body: JSON.stringify({
             provider: {
               providerId: "tui-test",

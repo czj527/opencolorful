@@ -3,7 +3,10 @@
 /**
  * 主进程 API 代理：renderer 不直连 Server（无 CORS），统一经主进程 Node fetch。
  * 只允许 /api/ 开头的路径；优先 Supervisor 4311，降级 Agent Server 4310。
+ * P0-1 信任边界：写请求须携带本机服务访问令牌（token-source.cjs 只读解析）。
  */
+
+const { resolveToken, invalidateToken } = require("./token-source.cjs");
 
 const DEFAULT_BASES = ["http://127.0.0.1:4311", "http://127.0.0.1:4310"];
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "DELETE"]);
@@ -58,9 +61,13 @@ async function apiRequest(request) {
 
   let response;
   try {
+    const headers = request.body !== undefined ? { "content-type": "application/json" } : {};
+    // P0-1：受信客户端统一附加令牌（主进程是唯一可信持钥点，renderer 沙箱不见令牌）
+    const token = resolveToken();
+    if (token !== null) headers.authorization = `Bearer ${token}`;
     response = await fetch(base + path, {
       method,
-      headers: request.body !== undefined ? { "content-type": "application/json" } : undefined,
+      headers,
       body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
       signal: AbortSignal.timeout(30000),
     });
@@ -68,6 +75,9 @@ async function apiRequest(request) {
     activeBase = null;
     return { ok: false, status: 0, data: { code: "NETWORK", message: `网络请求失败：${cause instanceof Error ? cause.message : String(cause)}`, retryable: true }, base };
   }
+
+  // 403 可能是服务端重新生成了令牌（令牌文件被删后重启）——丢弃缓存自愈
+  if (response.status === 403) invalidateToken();
 
   const text = await response.text();
   let data = null;

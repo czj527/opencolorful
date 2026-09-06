@@ -9,6 +9,7 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -31,10 +32,10 @@ afterEach(() => {
 describe("session rename", () => {
   it("renames an active session and updates both index and JSONL", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createTrustedServerApp({ sessionService: ctx.service });
     const created = ctx.service.create({ title: "旧标题", cwd: process.cwd() });
 
-    const resp = await app.request(`http://local/api/sessions/${created.id}/title`, {
+    const resp = await app.request(`http://127.0.0.1/api/sessions/${created.id}/title`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "  新标题  " }),
@@ -56,12 +57,12 @@ describe("session rename", () => {
 
   it("renames an inactive session without booting a full runtime", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createTrustedServerApp({ sessionService: ctx.service });
     const created = ctx.service.create({ title: "未激活", cwd: process.cwd() });
     const sessionPath = created.path;
     ctx.service.closeAll();
 
-    const resp = await app.request(`http://local/api/sessions/${created.id}/title`, {
+    const resp = await app.request(`http://127.0.0.1/api/sessions/${created.id}/title`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "已改名" }),
@@ -80,10 +81,10 @@ describe("session rename", () => {
 
   it("rejects empty title", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createTrustedServerApp({ sessionService: ctx.service });
     const created = ctx.service.create({ title: "有标题", cwd: process.cwd() });
 
-    const resp = await app.request(`http://local/api/sessions/${created.id}/title`, {
+    const resp = await app.request(`http://127.0.0.1/api/sessions/${created.id}/title`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "   " }),
@@ -98,9 +99,9 @@ describe("session rename", () => {
 
   it("returns 404 for non-existent session", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createTrustedServerApp({ sessionService: ctx.service });
 
-    const resp = await app.request(`http://local/api/sessions/${crypto.randomUUID()}/title`, {
+    const resp = await app.request(`http://127.0.0.1/api/sessions/${crypto.randomUUID()}/title`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "新标题" }),
@@ -113,12 +114,12 @@ describe("session rename", () => {
 
   it("allows renaming an archived session", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({ sessionService: ctx.service });
+    const { app } = createTrustedServerApp({ sessionService: ctx.service });
     const created = ctx.service.create({ title: "归档前", cwd: process.cwd() });
 
-    await app.request(`http://local/api/sessions/${created.id}`, { method: "DELETE" });
+    await app.request(`http://127.0.0.1/api/sessions/${created.id}`, { method: "DELETE" });
 
-    const resp = await app.request(`http://local/api/sessions/${created.id}/title`, {
+    const resp = await app.request(`http://127.0.0.1/api/sessions/${created.id}/title`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "归档后" }),

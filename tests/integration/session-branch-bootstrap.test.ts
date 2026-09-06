@@ -15,6 +15,7 @@ import { createServerApp } from "../../src/server/app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PluginFacade } from "../../src/platform/plugin-facade.js";
 import { SHOWCASE_SOURCE_DIR } from "./plugin-main-session.fixture.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // P1 波次B B2 修复验证：分支路由（regenerate/switch）复用共享 Runtime
@@ -107,7 +108,7 @@ async function createForkableWorld(): Promise<{
   agentStore.create({ id: "agent-b2", name: "B2 测试助手", baseColor: blankBaseColor, defaultCwd: process.cwd() });
   const promptService = new PromptService();
   const replayStore = new EventReplayStore();
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     paths,
     database,
     sessionService,
@@ -118,7 +119,7 @@ async function createForkableWorld(): Promise<{
     pluginFacade: facade,
   });
 
-  const createRes = await app.request("http://local/api/sessions", {
+  const createRes = await app.request("http://127.0.0.1/api/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "工具面会话", cwd: process.cwd(), agentId: "agent-b2" }),
@@ -127,7 +128,7 @@ async function createForkableWorld(): Promise<{
   const created = (await createRes.json()) as { id: string };
 
   // 经 messages 路由跑一轮 turn（建立可 regenerate 的用户条目）
-  const promptRes = await app.request(`http://local/api/sessions/${created.id}/messages`, {
+  const promptRes = await app.request(`http://127.0.0.1/api/sessions/${created.id}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ content: "第一版提问" }),
@@ -184,7 +185,7 @@ describe("分支路由复用共享 Runtime Bootstrap（B2 修复回归）", () =
     const agentStore2 = new AgentStore(paths.agents);
     const promptService2 = new PromptService();
     const replayStore2 = new EventReplayStore();
-    const { app: app2 } = createServerApp({
+    const { app: app2 } = createTrustedServerApp({
       paths,
       database: database2,
       sessionService: sessionService2,
@@ -196,7 +197,7 @@ describe("分支路由复用共享 Runtime Bootstrap（B2 修复回归）", () =
     });
 
     // 首个动作 = regenerate（无任何 messages 调用先行）
-    const regenerateRes = await app2.request(`http://local/api/sessions/${world.sessionId}/regenerate`, {
+    const regenerateRes = await app2.request(`http://127.0.0.1/api/sessions/${world.sessionId}/regenerate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ targetEntryId: world.firstUserEntryId, text: "重启后重试提问" }),
@@ -249,7 +250,7 @@ describe("分支路由复用共享 Runtime Bootstrap（B2 修复回归）", () =
     });
     const sessionService2 = new SessionService(paths, new SessionIndex(database2));
     const promptService2 = new PromptService();
-    const { app: app2 } = createServerApp({
+    const { app: app2 } = createTrustedServerApp({
       paths,
       database: database2,
       sessionService: sessionService2,
@@ -261,14 +262,14 @@ describe("分支路由复用共享 Runtime Bootstrap（B2 修复回归）", () =
     });
 
     // messages 路径（ensureRuntime 懒创建）+ 二次 prompt（签名一致不重建）
-    const first = await app2.request(`http://local/api/sessions/${world.sessionId}/messages`, {
+    const first = await app2.request(`http://127.0.0.1/api/sessions/${world.sessionId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "重启后首条" }),
     });
     expect(first.status).toBe(202);
     await waitIdle(promptService2, world.sessionId);
-    const second = await app2.request(`http://local/api/sessions/${world.sessionId}/messages`, {
+    const second = await app2.request(`http://127.0.0.1/api/sessions/${world.sessionId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "第二条" }),

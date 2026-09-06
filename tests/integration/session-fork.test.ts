@@ -12,6 +12,7 @@ import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { createServerApp } from "../../src/server/app.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // P1 波次B B2：Fork 成独立会话（plans/p1-conversation-workbench.en.md §3.2.2）。
@@ -47,7 +48,7 @@ function createContext(): TestContext {
   const service = new SessionService(paths, index);
   const replayStore = new EventReplayStore();
   const promptService = new PromptService();
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     paths,
     sessionService: service,
     promptService,

@@ -8,17 +8,27 @@ import path from "node:path";
 import { PLATFORM_VERSION } from "../index.js";
 import type { ProcessController } from "./process-controller.js";
 import type { SupervisorStatusResponse } from "./types.js";
+import { createTrustBoundaryMiddleware, generateServerToken } from "../server/trust-boundary.js";
 
 export interface SupervisorAppOptions {
   readonly controller: ProcessController;
   readonly supervisorPort: number;
   readonly agentServerPort: number;
   readonly webDistDir?: string;
+  /**
+   * P0-1 信任边界：与 Agent Server 共享同一令牌来源（env > <runtime>/server-token）。
+   * startSupervisor 注入；缺省（测试/内联装配）时生成随机临时令牌并经 result.token 暴露。
+   */
+  readonly trustBoundary?: {
+    readonly token: string;
+  };
 }
 
 export interface SupervisorAppResult {
   readonly app: Hono;
   readonly nodeWebSocket: ReturnType<typeof createNodeWebSocket>;
+  /** 本实例的访问令牌（转发上游注入 / 测试接线用；绝不写入日志） */
+  readonly token: string;
 }
 
 function sanitizeLogContent(content: string): string {
@@ -60,6 +70,13 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
   const nodeWebSocket = createNodeWebSocket({ app });
   const { controller, supervisorPort, agentServerPort } = options;
   const startedAt = Date.now();
+  const trustToken = options.trustBoundary?.token ?? generateServerToken();
+
+  // ── P0-1 信任边界（origin-guard 模式）：先于一切路由 ──
+  // Host（DNS-rebinding）+ 写请求「有效令牌 或 本机 Origin」+ WS 握手规则。
+  // 不做令牌强校验：浏览器经 Supervisor 同源访问时不持有令牌（数据面的令牌
+  // 强校验在 Agent Server；本代理只向已通过本层校验的请求注入令牌）。
+  app.use("*", createTrustBoundaryMiddleware({ token: trustToken, mode: "origin-guard" }));
 
   // --- Supervisor API ---
 
@@ -168,7 +185,11 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
   // --- WS 代理到 Agent Server ---
   app.get("/ws", nodeWebSocket.upgradeWebSocket(() => ({
     onOpen(_evt, clientWs) {
-      const upstream = new UpstreamWebSocket(`ws://127.0.0.1:${agentServerPort}/ws`);
+      // P0-1：上游握手无 Origin（Node 端 ws 客户端），必须携带 ?token= 通过
+      // Agent Server 的 WS 信任边界；该 URL 不落任何日志。
+      const upstreamUrl = new URL(`ws://127.0.0.1:${agentServerPort}/ws`);
+      upstreamUrl.searchParams.set("token", trustToken);
+      const upstream = new UpstreamWebSocket(upstreamUrl);
       const pending: string[] = [];
       let upstreamOpen = false;
 
@@ -211,6 +232,11 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
     for (const [name, value] of context.req.raw.headers.entries()) {
       if (["host", "connection", "content-length"].includes(name.toLowerCase())) continue;
       headers.set(name, value);
+    }
+    // P0-1：向已通过本层信任边界（令牌或本机 Origin）的请求注入服务令牌——
+    // 数据面的令牌强校验在 Agent Server；客户端已自带令牌时不覆盖。
+    if (!headers.has("authorization") && !headers.has("x-oc-token")) {
+      headers.set("authorization", `Bearer ${trustToken}`);
     }
 
     const method = context.req.method;
@@ -260,5 +286,5 @@ export function createSupervisorApp(options: SupervisorAppOptions): SupervisorAp
     context.json({ code: "NOT_FOUND", message: "资源不存在" }, 404),
   );
 
-  return { app, nodeWebSocket };
+  return { app, nodeWebSocket, token: trustToken };
 }

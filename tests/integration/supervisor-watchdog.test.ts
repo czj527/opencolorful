@@ -255,7 +255,7 @@ describe("supervisor watchdog", () => {
 
     await controller.startAgentServer();
 
-    const onlineResponse = await app.request("http://127.0.0.1/api/supervisor/status");
+    const onlineResponse = await app.request("http://127.0.0.1/api/supervisor/status", { headers: { host: "127.0.0.1" } });
     expect(onlineResponse.status).toBe(200);
     const onlineBody = (await onlineResponse.json()) as SupervisorStatusResponse;
     expect(onlineBody.agentServer.watchdog).toBeDefined();
@@ -269,7 +269,7 @@ describe("supervisor watchdog", () => {
     const deadline = Date.now() + 5_000;
     let errorBody: SupervisorStatusResponse | undefined;
     while (Date.now() < deadline) {
-      const response = await app.request("http://127.0.0.1/api/supervisor/status");
+      const response = await app.request("http://127.0.0.1/api/supervisor/status", { headers: { host: "127.0.0.1" } });
       const body = (await response.json()) as SupervisorStatusResponse;
       if (body.agentServer.status === "error" && body.agentServer.watchdog?.nextRetryAt !== null) {
         errorBody = body;

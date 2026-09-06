@@ -17,6 +17,7 @@ import { getCatalogEntry } from "../../src/observability/event-catalog.js";
 import { instrument } from "../../src/observability/instrument.js";
 import { createServerApp } from "../../src/server/app.js";
 import { PLATFORM_VERSION } from "../../src/index.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 11 T6：查询/实时流/client-events API
@@ -50,7 +51,7 @@ function makeFixture() {
     spoolRoot: path.join(paths.logs, "emergency"),
   });
   instrument.init(context);
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     version: PLATFORM_VERSION,
     pid: process.pid,
     startedAt: Date.now(),
@@ -145,7 +146,7 @@ describe("T6 查询端点", () => {
     if (r1.kind !== "accepted" || r2.kind !== "accepted") throw new Error("seed failed");
     db.prepare("INSERT INTO observability_trace_links (source_trace_id, target_trace_id, relation, created_at) VALUES (?, ?, ?, ?)")
       .run("trace-linked-a", "trace-linked-b", "delegated_to", "2026-08-01T00:00:00.000Z");
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -188,7 +189,7 @@ describe("T6 查询端点", () => {
     for (let i = 0; i < 5; i += 1) {
       fs.writeFileSync(path.join(logDir, `2026-08-01_boot_0.jsonl`), `${JSON.stringify({ seq: i, message: `line-${i}` })}\n`, { flag: "a" });
     }
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -203,7 +204,7 @@ describe("T6 查询端点", () => {
 
   it("Phase 11 第三轮：diagnostic tail 拒绝路径穿越进程名（P1-2 复现级测试）", async () => {
     const { paths } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -225,7 +226,7 @@ describe("T6 查询端点", () => {
 describe("T6 operator SSE（重连不重不漏 / gap / spool import 高水位）", () => {
   it("sinceId 回放 → 新行推送 → 重连不重复", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -278,7 +279,7 @@ describe("T9 retention / audit reset / export 端点", () => {
       database: db,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -327,7 +328,7 @@ describe("T9 retention / audit reset / export 端点", () => {
       scope: { ownerAgentId: "a1" },
       payload: { summaryCode: "sandbox_path_denied", attributes: { operation: "read", level: "BLOCKED" } },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -357,7 +358,7 @@ describe("T9 retention / audit reset / export 端点", () => {
 
   it("export 生成 bundle：manifest 隐私标志、路径防穿越（不含用户输入）", async () => {
     const { db, paths } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -394,7 +395,7 @@ describe("T6 client-events 安全矩阵", () => {
 
   it("恶意/异常输入全部拒绝：Origin、Content-Type、大小、未知事件、缺 message", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -430,7 +431,7 @@ describe("T6 client-events 安全矩阵", () => {
 
   it("合法上报 → 202 + 平台重新盖章（忽略客户端权威字段）+ 敏感内容脱敏", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -466,7 +467,7 @@ describe("T6 client-events 安全矩阵", () => {
 
   it("双层限速：第 61 个请求（同客户端）→ 429，且不落库", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -494,7 +495,7 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
     const lines: string[] = [];
     for (let i = 0; i < 5000; i += 1) lines.push(JSON.stringify({ seq: i, padding: "p".repeat(180) }));
     fs.writeFileSync(file, `${lines.join("\n")}\n`, "utf8");
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -512,7 +513,7 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
 
   it("P1-11：SSE 优先读 Last-Event-ID 头（重连语义），旧数据行补发", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -532,7 +533,7 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
 
   it("P1-11：activity 游标早于 retention 删除的最小 id → 发送 reset 控制事件", async () => {
     const { db } = makeFixture();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -566,7 +567,7 @@ describe("Phase 11 复审修复（评审 P1-7 / P1-11 / P2-12 复现级测试）
       database: db,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -603,7 +604,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
       database: db,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -641,7 +642,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
   it("Agent 关键活动埋点：create/name/base-color/archive 全部进入 activity 时间线", async () => {
     const { directory, paths, db } = makeFixture();
     const agentStore = new AgentStore(path.join(directory, "agents"));
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -694,7 +695,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
     } catch {
       junctionOk = false; // 环境不支持 junction → 跳过（非回归）
     }
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -720,7 +721,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
     } catch {
       symlinkOk = false;
     }
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -741,7 +742,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
       database: db,
       producer: { component: "agent-server", processType: "server", processId: "1", bootId: "boot", appVersion: PLATFORM_VERSION, hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),
@@ -765,7 +766,7 @@ describe("Phase 11 第三轮复审（评审 P1-4 复现级测试）", () => {
   it("P1-5：偏好 PUT 在 audit 未配置时 fail-closed → 503 且设置未保存", async () => {
     const { paths, db } = makeFixture();
     const preferencesStore = new PreferencesStore(paths.preferences);
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: PLATFORM_VERSION,
       pid: process.pid,
       startedAt: Date.now(),

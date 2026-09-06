@@ -123,10 +123,11 @@ describe("real provider and PI tools", () => {
     });
     servers.push(server);
     const baseUrl = `http://127.0.0.1:${server.port}`;
+    const authHeaders = { authorization: `Bearer ${server.token}` };
 
     const providerResponse = await fetch(`${baseUrl}/api/settings/providers`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({
         provider: {
           providerId: "fixture-provider",
@@ -151,7 +152,7 @@ describe("real provider and PI tools", () => {
 
     const createResponse = await fetch(`${baseUrl}/api/sessions`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({
         title: "真实工具测试",
         cwd: workspace,
@@ -163,7 +164,7 @@ describe("real provider and PI tools", () => {
     const session = (await createResponse.json()) as { id: string };
     const modelResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/model`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({ providerId: "fixture-provider", modelId: "fixture-model" }),
     });
     expect(modelResponse.status).toBe(200);
@@ -176,7 +177,7 @@ describe("real provider and PI tools", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     const promptResponse = await fetch(`${baseUrl}/api/sessions/${session.id}/messages`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...authHeaders },
       body: JSON.stringify({ content: "读取 target.txt" }),
     });
     expect(promptResponse.status).toBe(202);
@@ -224,7 +225,7 @@ describe("real provider and PI tools", () => {
       `${restartedBaseUrl}/api/sessions/${session.id}/messages`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${restarted.token}` },
         body: JSON.stringify({ content: "继续对话" }),
       },
     );

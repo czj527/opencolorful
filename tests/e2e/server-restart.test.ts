@@ -53,6 +53,7 @@ async function sendPromptAndCollect(
   baseUrl: string,
   sessionId: string,
   content: string,
+  token: string,
 ): Promise<{ streamId: string; events: PlatformEventEnvelope[] }> {
   const abortController = new AbortController();
   const eventsResponsePromise = fetch(`${baseUrl}/api/sessions/${sessionId}/events`, {
@@ -63,7 +64,7 @@ async function sendPromptAndCollect(
   await new Promise((resolve) => setTimeout(resolve, 20));
   const promptResponse = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({ content }),
   });
   expect(promptResponse.status).toBe(202);
@@ -150,7 +151,7 @@ describe("server restart recovery", () => {
     const session = { id: sessionHandle.id };
 
     try {
-      await sendPromptAndCollect(base1, session.id, "第一条消息");
+      await sendPromptAndCollect(base1, session.id, "第一条消息", server1.token);
       const beforeRestart = await (await fetch(`${base1}/api/sessions/${session.id}`)).json() as {
         messages: string[];
         model: { providerId: string; modelId: string } | null;
@@ -191,7 +192,7 @@ describe("server restart recovery", () => {
       expect(reopened.messages).toEqual(["第一条消息", "已收到您的消息"]);
       expect(reopened.model).toEqual({ providerId: "faux", modelId: "faux-1" });
 
-      await sendPromptAndCollect(base2, session.id, "继续消息");
+      await sendPromptAndCollect(base2, session.id, "继续消息", server2.token);
       const continued = await (await fetch(`${base2}/api/sessions/${session.id}`)).json() as {
         messages: string[];
       };

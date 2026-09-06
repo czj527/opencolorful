@@ -6,6 +6,7 @@ import type { RuntimePaths } from "../config/paths.js";
 import { PLATFORM_VERSION } from "../index.js";
 import { ProcessController } from "./process-controller.js";
 import { createSupervisorApp } from "./app.js";
+import { resolveServerToken } from "../server/trust-boundary.js";
 import { SUPERVISOR_DEFAULT_PORT } from "./types.js";
 import { openMetadataDatabase } from "../storage/database.js";
 import { ObservabilityContext } from "../observability/observability-context.js";
@@ -23,6 +24,8 @@ export interface StartSupervisorOptions {
 export interface RunningSupervisor {
   readonly port: number;
   readonly agentServerPort: number;
+  /** 本实例访问令牌（与 Agent Server 共享同一来源；绝不写入日志） */
+  readonly token: string;
   readonly controller: ProcessController;
   stop(): Promise<void>;
 }
@@ -93,11 +96,16 @@ export async function startSupervisor(options: StartSupervisorOptions): Promise<
     ...(options.entryScript !== undefined ? { entryScript: options.entryScript } : {}),
   });
 
+  // ── P0-1 信任边界：supervisor 与 agent server 共享同一令牌（env > 令牌文件 >
+  // 生成落盘）。这里先解析落盘，随后拉起的 agent server 子进程经 env/文件读到
+  // 同一枚令牌，两端校验一致。
+  const serverToken = resolveServerToken(process.env, paths.runtime);
   const { app, nodeWebSocket } = createSupervisorApp({
     controller,
     supervisorPort,
     agentServerPort,
     ...(webDistDir !== undefined ? { webDistDir } : {}),
+    trustBoundary: { token: serverToken },
   });
 
   const server = await new Promise<ServerType>((resolve, reject) => {
@@ -130,6 +138,7 @@ export async function startSupervisor(options: StartSupervisorOptions): Promise<
   return {
     port: supervisorPort,
     agentServerPort,
+    token: serverToken,
     controller,
     async stop() {
       if (stopped) return;
