@@ -1,7 +1,7 @@
 # P1 波次 A：质量体系、两档模型与统一用量
 
 **日期：2026-08-31**  
-**状态：已完成（2026-09-05，A0-A9 全部实施合并并验收）**  
+**状态：工程实现已合并；独立质量评估未通过（2026-09-06）**
 **实施计划：** [`plans/p1-quality-model-usage.en.md`](../../../plans/p1-quality-model-usage.en.md)  
 **上游路线：** [`docs/positioning-and-roadmap.md`](../../positioning-and-roadmap.md) §五 P1  
 **当前状态：** [`docs/project-status.md`](../../project-status.md)
@@ -82,3 +82,26 @@ OpenColorful 已有较完整的 Server、PI Runtime、Memory、Subagent、Electr
 - OpenCode / Codex：Plan/todo、会话工作流和工程化测试思路，具体对话能力在波次 B 处理。
 
 本 Feature Spec 只定义目标和产品约束；实现顺序、文件归属、命令和实施记录以英文计划为准。
+
+## 八、独立交付质量复核（2026-09-06）
+
+波次 A0-A9 的代码已经合并，但本次独立复核不将其判定为产品完成：
+
+- 常规 TypeScript、根测试、Web 测试/构建、Desktop 测试/构建和 Web Playwright 通过。
+- `scripts/verify-plugin-imports.mjs` 直接执行时返回 exit 0，但 CLI 入口判断错误，实际没有执行扫描，属于治理门禁假通过。
+- v13/v14 SQLite 表重建在故障注入中断后无法重试，属于已复现的迁移恢复阻断项。
+- 本机 HTTP/WS 信任边界探针发现恶意 Origin 的简单写请求和 WebSocket 握手均可达，属于已复现的安全阻断项。
+- 人工体验尚未完成，安装/更新/恢复尚未完成。
+
+当前状态：
+
+```text
+AUTO_PASS：未达成
+HUMAN_PENDING：是
+HUMAN_PASS：否
+RELEASE_PENDING：是
+RELEASE_PASS：否
+```
+
+完整证据、人工验收卡和修复优先级见
+[`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`](../../audits/2026-09-06-wave-a-b-delivery-quality.zh.md)。
