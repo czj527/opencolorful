@@ -203,7 +203,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "desktop/src/App.tsx",
-          "lines": 875
+          "lines": 881
         },
         {
           "path": "desktop/src/components/AgentChip.tsx",
@@ -227,7 +227,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/Composer.tsx",
-          "lines": 216
+          "lines": 218
         },
         {
           "path": "desktop/src/components/Dock.tsx",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10550
+      "totalLines": 10558
     },
     {
       "id": "web-client",
@@ -5915,7 +5915,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 506,
     "mappedFileCount": 506,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113695,
+    "totalSourceLines": 113703,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 14
   },
