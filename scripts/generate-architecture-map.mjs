@@ -465,6 +465,14 @@ if (checkOnly) {
   const current = existsSync(generatedPath) ? readFileSync(generatedPath, "utf8") : ""
   if (current !== output) {
     console.error("Architecture map is stale. Run: npm run architecture:map")
+    // 临时诊断：输出首个差异位置与上下文（跨平台差异定位用，定位后移除）
+    const max = Math.max(current.length, output.length)
+    let firstDiffAt = 0
+    while (firstDiffAt < max && current[firstDiffAt] === output[firstDiffAt]) firstDiffAt += 1
+    const start = Math.max(0, firstDiffAt - 120)
+    console.error(`[debug] platform=${process.platform} currentLen=${current.length} outputLen=${output.length} firstDiffAt=${firstDiffAt}`)
+    console.error(`[debug] current: ${JSON.stringify(current.slice(start, firstDiffAt + 120))}`)
+    console.error(`[debug] output : ${JSON.stringify(output.slice(start, firstDiffAt + 120))}`)
     process.exitCode = 1
   } else {
     console.log(`Architecture map is current (${model.generated.nodeCount} nodes, ${model.generated.sourceFileCount} source files).`)
