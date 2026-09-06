@@ -12,6 +12,7 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
 import type { PlatformEventEnvelope } from "../../src/contracts/events.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -88,12 +89,12 @@ describe("SSE event replay", () => {
     const run = runtime.prompt("reconnect");
     await run.completed;
 
-    const { app } = createServerApp({ promptService, replayStore });
+    const { app } = createTrustedServerApp({ promptService, replayStore });
 
     // SSE 端点返回有效的 text/event-stream 响应
     const controller = new AbortController();
     const response = await app.request(
-      "http://local/api/sessions/session-sse/events?sinceSeq=0",
+      "http://127.0.0.1/api/sessions/session-sse/events?sinceSeq=0",
       {
         headers: { "accept": "text/event-stream" },
         signal: controller.signal,
@@ -154,10 +155,10 @@ describe("SSE event replay", () => {
       }
     }
 
-    const { app } = createServerApp({ promptService, replayStore });
+    const { app } = createTrustedServerApp({ promptService, replayStore });
     const controller = new AbortController();
     const response = await app.request(
-      "http://local/api/sessions/session-cursor/events",
+      "http://127.0.0.1/api/sessions/session-cursor/events",
       {
         headers: {
           accept: "text/event-stream",
@@ -211,13 +212,13 @@ describe("SSE event replay", () => {
 
     const replayStore = new RacingReplayStore();
     replayStore.publish({ ...liveEvent, eventId: "race-1", sequence: 1 });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       promptService: new PromptService(),
       replayStore,
     });
     const controller = new AbortController();
     const response = await app.request(
-      "http://local/api/sessions/session-race/events",
+      "http://127.0.0.1/api/sessions/session-race/events",
       { headers: { accept: "text/event-stream" }, signal: controller.signal },
     );
     const reader = response.body!.getReader();
@@ -390,10 +391,10 @@ describe("SSE event replay", () => {
     const idx = new SessionIndex(db);
     const { SessionService: Svc } = await import("../../src/runtime/session-service.js");
     const sessionService = new Svc(paths, idx);
-    const { app } = createServerApp({ promptService, replayStore, sessionService });
+    const { app } = createTrustedServerApp({ promptService, replayStore, sessionService });
 
     const response = await app.request(
-      "http://local/api/sessions/missing-session/events",
+      "http://127.0.0.1/api/sessions/missing-session/events",
       { headers: { "accept": "text/event-stream" } },
     );
     expect(response.status).toBe(404);

@@ -11,6 +11,7 @@ import { SessionService } from "../../src/runtime/session-service.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -32,7 +33,7 @@ describe("messages route model policy", () => {
       listProviders: () => [{ providerId: "configured", credentialConfigured: true }],
       resolveModel: () => { throw new Error("must not resolve a model"); },
     };
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       paths,
       database,
       sessionService,
@@ -43,7 +44,7 @@ describe("messages route model policy", () => {
     const session = sessionService.create({ title: "未选模型", cwd: process.cwd() });
 
     try {
-      const response = await app.request(`http://local/api/sessions/${session.id}/messages`, {
+      const response = await app.request(`http://127.0.0.1/api/sessions/${session.id}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ content: "不得静默使用 faux" }),

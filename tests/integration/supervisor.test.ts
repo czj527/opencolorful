@@ -87,7 +87,7 @@ describe("supervisor", () => {
     });
     const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
 
-    const response = await app.request("http://127.0.0.1/api/supervisor/status");
+    const response = await app.request("http://127.0.0.1/api/supervisor/status", { headers: { host: "127.0.0.1" } });
     expect(response.status).toBe(200);
     const body = (await response.json()) as SupervisorStatusResponse;
     expect(body.agentServer.status).toBe("stopped");
@@ -187,7 +187,7 @@ describe("supervisor", () => {
     const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
 
     // No log file yet
-    const empty = await app.request("http://127.0.0.1/api/supervisor/logs");
+    const empty = await app.request("http://127.0.0.1/api/supervisor/logs", { headers: { host: "127.0.0.1" } });
     expect(empty.status).toBe(200);
     const emptyBody = (await empty.json()) as { logs: string; truncated: boolean; status: string };
     expect(emptyBody.logs).toBe("");
@@ -195,7 +195,7 @@ describe("supervisor", () => {
 
     // Start server to generate logs
     await controller.startAgentServer();
-    const logsResponse = await app.request("http://127.0.0.1/api/supervisor/logs");
+    const logsResponse = await app.request("http://127.0.0.1/api/supervisor/logs", { headers: { host: "127.0.0.1" } });
     expect(logsResponse.status).toBe(200);
 
     await controller.stopAgentServer();
@@ -220,6 +220,7 @@ describe("supervisor", () => {
     // Stop agent server
     const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, {
       method: "POST",
+      headers: { "x-oc-token": supervisorInstance.token },
     });
     expect(stopResponse.status).toBe(200);
 
@@ -245,6 +246,7 @@ describe("supervisor", () => {
     // Start
     let response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, {
       method: "POST",
+      headers: { "x-oc-token": supervisorInstance.token },
     });
     expect(response.status).toBe(201);
     const startBody = (await response.json()) as { status: string; pid: number; port: number };
@@ -253,6 +255,7 @@ describe("supervisor", () => {
     // Restart
     response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/restart`, {
       method: "POST",
+      headers: { "x-oc-token": supervisorInstance.token },
     });
     expect(response.status).toBe(200);
     const restartBody = (await response.json()) as { status: string; pid: number; port: number };
@@ -261,6 +264,7 @@ describe("supervisor", () => {
     // Stop
     response = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, {
       method: "POST",
+      headers: { "x-oc-token": supervisorInstance.token },
     });
     expect(response.status).toBe(200);
   }, 60_000);
@@ -299,11 +303,11 @@ describe("supervisor", () => {
 
     await waitForAgentOnline(supervisorPort);
 
-    const first = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST" });
+    const first = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST", headers: { "x-oc-token": supervisorInstance.token } });
     expect(first.status).toBe(201);
     const firstBody = (await first.json()) as { status: string; pid: number };
 
-    const second = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST" });
+    const second = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/start`, { method: "POST", headers: { "x-oc-token": supervisorInstance.token } });
     expect(second.status).toBe(201);
     const secondBody = (await second.json()) as { status: string; pid: number };
     expect(secondBody.pid).toBe(firstBody.pid);
@@ -339,7 +343,7 @@ describe("supervisor", () => {
     }
 
     // 显式 stop：应取消已排期的重试并把期望态置为 stopped
-    const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, { method: "POST" });
+    const stopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/stop`, { method: "POST", headers: { "x-oc-token": supervisorInstance.token } });
     expect(stopResponse.status).toBe(200);
 
     const afterStopResponse = await fetch(`http://127.0.0.1:${supervisorPort}/api/supervisor/status`);
@@ -369,11 +373,11 @@ describe("supervisor", () => {
     const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
 
     // 非 API 路径且未托管 Web → 404
-    const response = await app.request("http://127.0.0.1/nonexistent-page");
+    const response = await app.request("http://127.0.0.1/nonexistent-page", { headers: { host: "127.0.0.1" } });
     expect(response.status).toBe(404);
 
     // Agent 未启动时未知 API 路径被代理并返回 502
-    const apiResponse = await app.request("http://127.0.0.1/api/unknown");
+    const apiResponse = await app.request("http://127.0.0.1/api/unknown", { headers: { host: "127.0.0.1" } });
     expect(apiResponse.status).toBe(502);
   });
 
@@ -417,13 +421,13 @@ describe("supervisor", () => {
       webDistDir: webDist,
     });
 
-    const indexResponse = await app.request("http://127.0.0.1/");
+    const indexResponse = await app.request("http://127.0.0.1/", { headers: { host: "127.0.0.1" } });
     expect(indexResponse.status).toBe(200);
     const html = await indexResponse.text();
     expect(html).toContain("opencolorful web");
 
     // SPA fallback：非 API 路径也返回 index.html
-    const spaResponse = await app.request("http://127.0.0.1/sessions/abc");
+    const spaResponse = await app.request("http://127.0.0.1/sessions/abc", { headers: { host: "127.0.0.1" } });
     expect(spaResponse.status).toBe(200);
     expect(await spaResponse.text()).toContain("opencolorful web");
   });
@@ -440,20 +444,20 @@ describe("supervisor", () => {
     const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: agentPort });
 
     // Agent 未启动时代理返回 502
-    const downResponse = await app.request("http://127.0.0.1/api/health");
+    const downResponse = await app.request("http://127.0.0.1/api/health", { headers: { host: "127.0.0.1" } });
     expect(downResponse.status).toBe(502);
     const downBody = (await downResponse.json()) as { code: string };
     expect(downBody.code).toBe("AGENT_UNREACHABLE");
 
     // 启动 Agent 后代理转发成功
     await controller.startAgentServer();
-    const upResponse = await app.request("http://127.0.0.1/api/health");
+    const upResponse = await app.request("http://127.0.0.1/api/health", { headers: { host: "127.0.0.1" } });
     expect(upResponse.status).toBe(200);
     const upBody = (await upResponse.json()) as { status: string };
     expect(upBody.status).toBe("ok");
 
     // Session API 也通过代理
-    const sessionsResponse = await app.request("http://127.0.0.1/api/sessions");
+    const sessionsResponse = await app.request("http://127.0.0.1/api/sessions", { headers: { host: "127.0.0.1" } });
     expect(sessionsResponse.status).toBe(200);
 
     await controller.stopAgentServer();
@@ -471,7 +475,7 @@ describe("supervisor", () => {
     const controller = new ProcessController({ paths, agentServerPort: 0, supervisorPort: 0 });
     const { app } = createSupervisorApp({ controller, supervisorPort: 0, agentServerPort: 0 });
 
-    const response = await app.request("http://127.0.0.1/api/supervisor/logs");
+    const response = await app.request("http://127.0.0.1/api/supervisor/logs", { headers: { host: "127.0.0.1" } });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { logs: string };
     expect(body.logs).not.toContain("sk-abc123def456ghi789");

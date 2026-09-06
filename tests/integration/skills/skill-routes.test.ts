@@ -7,6 +7,7 @@ import { createServerApp } from "../../../src/server/app.js";
 import type { SkillRef } from "../../../src/contracts/skill-protocol.js";
 import { skillRefKey } from "../../../src/contracts/skill-protocol.js";
 import { cleanupT6Harnesses, createT6Harness, ingestManagedSkill, packSkillZip, type T6Harness } from "../../unit/skills/t6-harness.js";
+import { createTrustedServerApp } from "../../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 13 T6 Skill Server API（plans/phase-13.md §14.1 / §18.5）
@@ -24,7 +25,7 @@ afterEach(() => {
 
 function setup(): { app: ReturnType<typeof createServerApp>["app"]; harness: T6Harness } {
   harness = createT6Harness();
-  const { app } = createServerApp({ skillCoreService: harness.core });
+  const { app } = createTrustedServerApp({ skillCoreService: harness.core });
   return { app, harness };
 }
 
@@ -34,7 +35,7 @@ function jsonRequest(
   options: { method?: string; body?: unknown } = {},
 ): Promise<Response> {
   return Promise.resolve(
-    app.request(`http://local${url}`, {
+    app.request(`http://127.0.0.1${url}`, {
       method: options.method ?? "GET",
       ...(options.body !== undefined
         ? {

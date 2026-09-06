@@ -17,6 +17,7 @@ import { parseSessionSettings } from "../../src/contracts/session-settings.js";
 import { ToolPolicy } from "../../src/runtime/tool-policy.js";
 import type { ModelService } from "../../src/runtime/model-service.js";
 import { instrument } from "../../src/observability/instrument.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -51,7 +52,7 @@ describe("session settings", () => {
 
   it("persists and recovers toolMode via updateSettings", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
@@ -59,7 +60,7 @@ describe("session settings", () => {
       }),
     });
 
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "工具会话", cwd: process.cwd() }),
@@ -69,7 +70,7 @@ describe("session settings", () => {
 
     // 设置 read-only
     const updateResp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -91,7 +92,7 @@ describe("session settings", () => {
   it("creates session in all mode without confirmation and runtime degrades to read-only", async () => {
     const ctx = createContext();
     const promptService = new PromptService();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       promptService,
       audit: new AuditRecorder({
@@ -99,7 +100,7 @@ describe("session settings", () => {
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "未确认 all", cwd: process.cwd(), toolMode: "all" }),
@@ -125,7 +126,7 @@ describe("session settings", () => {
   it("confirms all mode and exposes full tools after invalidating runtime", async () => {
     const ctx = createContext();
     const promptService = new PromptService();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       promptService,
       audit: new AuditRecorder({
@@ -133,7 +134,7 @@ describe("session settings", () => {
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "待确认", cwd: process.cwd(), toolMode: "all" }),
@@ -155,7 +156,7 @@ describe("session settings", () => {
     promptService.register(runtime);
 
     const resp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -180,14 +181,14 @@ describe("session settings", () => {
 
   it("accepts all mode with cwd and workspaceConfirmed", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "已确认", cwd: process.cwd() }),
@@ -195,7 +196,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string };
 
     const resp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -217,14 +218,14 @@ describe("session settings", () => {
 
   it("allows switching from read-only to all without reconfirmation and degrades tools", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "切换 all", cwd: process.cwd() }),
@@ -232,7 +233,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string; workspaceCwd: string };
 
     const resp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -254,14 +255,14 @@ describe("session settings", () => {
 
   it("requires reconfirmation when an all-mode workspace changes", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -275,7 +276,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string };
 
     const response = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -290,14 +291,14 @@ describe("session settings", () => {
 
   it("allows a read-only workspace change without write confirmation", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "只读工作区", cwd: process.cwd() }),
@@ -305,7 +306,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string };
 
     const response = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -337,14 +338,14 @@ describe("session settings", () => {
 
   it("persists a valid thinking level and rejects an unknown level", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "思考级别", cwd: process.cwd() }),
@@ -352,7 +353,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string };
 
     const updateResp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -363,7 +364,7 @@ describe("session settings", () => {
     expect(await updateResp.json()).toMatchObject({ thinkingLevel: "high" });
 
     const invalidResp = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -391,7 +392,7 @@ describe("session settings", () => {
       sessionHandle: session,
     });
     promptService.register(runtime);
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       promptService,
       audit: new AuditRecorder({
@@ -400,7 +401,7 @@ describe("session settings", () => {
       }),    });
 
     const response = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -418,7 +419,7 @@ describe("session settings", () => {
   it("archived session settings are preserved but session is not listed", async () => {
     const ctx = createContext();
     const promptService = new PromptService();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       promptService,
       paths: ctx.paths,
@@ -426,7 +427,7 @@ describe("session settings", () => {
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),    });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "待归档", cwd: process.cwd() }),
@@ -434,7 +435,7 @@ describe("session settings", () => {
     const session = (await createResp.json()) as { id: string };
 
     await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -443,17 +444,17 @@ describe("session settings", () => {
     );
 
     const delResp = await app.request(
-      `http://local/api/sessions/${session.id}`,
+      `http://127.0.0.1/api/sessions/${session.id}`,
       { method: "DELETE" },
     );
     expect(delResp.status).toBe(200);
 
     // 归档后默认列表不包含
-    const list = (await (await app.request("http://local/api/sessions")).json()) as unknown[];
+    const list = (await (await app.request("http://127.0.0.1/api/sessions")).json()) as unknown[];
     expect(list.length).toBe(0);
 
     const promptResponse = await app.request(
-      `http://local/api/sessions/${session.id}/messages`,
+      `http://127.0.0.1/api/sessions/${session.id}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -469,14 +470,14 @@ describe("session settings", () => {
 
   it("rejects directory switch without re-confirmation in all mode", async () => {
     const ctx = createContext();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "目录切换", cwd: process.cwd() }),
@@ -485,7 +486,7 @@ describe("session settings", () => {
 
     // Step 1: 设为 all + 确认目录 A
     const r1 = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -502,7 +503,7 @@ describe("session settings", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "switched-"));
     temporaryDirectories.push(tmpDir);
     const r2 = await app.request(
-      `http://local/api/sessions/${session.id}/settings`,
+      `http://127.0.0.1/api/sessions/${session.id}/settings`,
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -526,14 +527,14 @@ describe("session settings", () => {
       defaults: { thinkingLevel: "high", toolMode: "off", model: null } as never,
     });
 
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       preferencesStore,
       audit: new AuditRecorder({
         database: ctx.database,
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),    });
-    const createResp = await app.request("http://local/api/sessions", {
+    const createResp = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "应用默认", cwd: process.cwd() }),
@@ -562,7 +563,7 @@ describe("session settings", () => {
       resolveModel: (providerId: string, modelId: string) => ({ providerId, modelId }),
     } as unknown as ModelService;
 
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       modelService,
       preferencesStore,
@@ -571,7 +572,7 @@ describe("session settings", () => {
         producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
       }),
     });
-    const response = await app.request("http://local/api/sessions", {
+    const response = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "默认模型", cwd: process.cwd() }),
@@ -601,7 +602,7 @@ describe("session settings", () => {
     const warnSpy = vi.spyOn(instrument, "warn").mockImplementation(() => {});
 
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         sessionService: ctx.service,
         modelService,
         preferencesStore,
@@ -610,7 +611,7 @@ describe("session settings", () => {
           producer: { component: "unit-test", processType: "server", processId: "1", bootId: "boot-test", appVersion: "0.0.0-test", hostPlatform: "win32" },
         }),
       });
-      const response = await app.request("http://local/api/sessions", {
+      const response = await app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ title: "不可用默认模型", cwd: process.cwd() }),
@@ -639,7 +640,7 @@ describe("session settings", () => {
     const ctx = createContext();
     const preferencesStore = new PreferencesStore(ctx.paths.preferences);
 
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       sessionService: ctx.service,
       preferencesStore,
       audit: new AuditRecorder({
@@ -648,7 +649,7 @@ describe("session settings", () => {
       }),    });
 
     // 创建一个 session 并显式设置 thinkingLevel=low
-    const created = await app.request("http://local/api/sessions", {
+    const created = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -660,7 +661,7 @@ describe("session settings", () => {
     const session = (await created.json()) as { id: string };
 
     // 先确认创建时已写入显式 thinkingLevel=low
-    const initialResp = await app.request(`http://local/api/sessions/${session.id}`);
+    const initialResp = await app.request(`http://127.0.0.1/api/sessions/${session.id}`);
     const initialView = (await initialResp.json()) as { thinkingLevel: string };
     expect(initialView.thinkingLevel).toBe("low");
 
@@ -670,7 +671,7 @@ describe("session settings", () => {
     });
 
     // 重新读取现有 session：显式值 low 应保留
-    const getResp = await app.request(`http://local/api/sessions/${session.id}`);
+    const getResp = await app.request(`http://127.0.0.1/api/sessions/${session.id}`);
     const view = (await getResp.json()) as { thinkingLevel: string };
     expect(view.thinkingLevel).toBe("low");
 

@@ -23,6 +23,7 @@ import {
   buildPluginTurnSnapshotFactory,
 } from "../../src/server/routes/messages.js";
 import { SHOWCASE_SOURCE_DIR } from "./plugin-main-session.fixture.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const openDatabases: Array<import("better-sqlite3").Database> = [];
@@ -503,7 +504,7 @@ describe("Phase 12 主会话插件工具（P0-1/P0-2/P1-2 闭环，生产接线�
     const session = sessionService.create({ title: "插件绑定会话", cwd: process.cwd(), agentId: "agent-a" });
     session.selectModel("faux", "faux-1");
 
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       paths: fixture.paths,
       sessionService,
       promptService,

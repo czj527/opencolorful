@@ -16,8 +16,8 @@ export class TuiApp {
   private state: AppState = { name: "connecting" };
   private running = true;
 
-  constructor(baseUrl: string) {
-    this.api = new TuiApiClient(baseUrl);
+  constructor(baseUrl: string, token?: string | null) {
+    this.api = new TuiApiClient(baseUrl, token);
     this.events = new TuiEventClient(this.api);
     this.rl = readline.createInterface({
       input: process.stdin,

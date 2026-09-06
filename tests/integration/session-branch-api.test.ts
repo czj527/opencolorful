@@ -13,6 +13,7 @@ import { createServerApp } from "../../src/server/app.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { getLeafEntryId } from "../../src/pi-sdk/index.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // P1 波次B B2：会话分支 API 集成测试（regenerate / 分支切换 / 树与条目视图 / 视图扩展）。
@@ -48,7 +49,7 @@ function createContext(): TestContext {
   const service = new SessionService(paths, index);
   const replayStore = new EventReplayStore();
   const promptService = new PromptService();
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     paths,
     sessionService: service,
     promptService,

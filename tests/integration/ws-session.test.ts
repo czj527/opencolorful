@@ -80,9 +80,10 @@ async function createWsRuntime(
 
 async function connectWs(
   port: number,
+  token: string,
 ): Promise<{ ws: WebSocket; received: string[]; close: () => void }> {
   const received: string[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
 
   await new Promise<void>((resolve, reject) => {
     ws.on("open", resolve);
@@ -123,7 +124,7 @@ describe("WebSocket session control", () => {
     let client: Awaited<ReturnType<typeof connectWs>> | undefined;
 
     try {
-      client = await connectWs(server.port);
+      client = await connectWs(server.port, server.token);
       client.ws.send(JSON.stringify({
         protocolVersion: 1,
         requestId: "before-runtime",
@@ -152,7 +153,7 @@ describe("WebSocket session control", () => {
     const server = await startWsServer(paths, { replayStore, promptService, registry });
 
     try {
-      const { ws, received, close } = await connectWs(server.port);
+      const { ws, received, close } = await connectWs(server.port, server.token);
 
       // 订阅 session
       ws.send(JSON.stringify({
@@ -199,8 +200,8 @@ describe("WebSocket session control", () => {
 
     try {
       // 客户端 A 订阅，客户端 B 不订阅
-      const clientA = await connectWs(server.port);
-      const clientB = await connectWs(server.port);
+      const clientA = await connectWs(server.port, server.token);
+      const clientB = await connectWs(server.port, server.token);
 
       clientA.ws.send(JSON.stringify({
         protocolVersion: 1,
@@ -240,7 +241,7 @@ describe("WebSocket session control", () => {
     const server = await startWsServer(paths, { replayStore, promptService, registry });
 
     try {
-      const { ws, received, close } = await connectWs(server.port);
+      const { ws, received, close } = await connectWs(server.port, server.token);
 
       // 发起一个慢速 prompt
       runtime.prompt("slow test");
@@ -283,7 +284,7 @@ describe("WebSocket session control", () => {
     const server = await startWsServer(paths, { replayStore, promptService, registry });
 
     try {
-      const { ws, received, close } = await connectWs(server.port);
+      const { ws, received, close } = await connectWs(server.port, server.token);
 
       // 必须先订阅才能 resume
       ws.send(JSON.stringify({
@@ -326,7 +327,7 @@ describe("WebSocket session control", () => {
 
     try {
       expect(registry.clientCount).toBe(0);
-      const { ws, close } = await connectWs(server.port);
+      const { ws, close } = await connectWs(server.port, server.token);
 
       ws.send(JSON.stringify({
         protocolVersion: 1,
@@ -353,7 +354,7 @@ describe("WebSocket session control", () => {
   it("stops promptly while a WebSocket client is still connected", async () => {
     const { paths, replayStore, promptService, registry } = createWsContext();
     const server = await startWsServer(paths, { replayStore, promptService, registry });
-    const client = await connectWs(server.port);
+    const client = await connectWs(server.port, server.token);
 
     const stopPromise = server.stop();
     const stoppedPromptly = await Promise.race([

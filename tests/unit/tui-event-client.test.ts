@@ -37,7 +37,7 @@ describe("TuiEventClient", () => {
     ]));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new TuiEventClient(new TuiApiClient("http://local"));
+    const client = new TuiEventClient(new TuiApiClient("http://127.0.0.1"));
     const events: TuiEvent[] = [];
     client.connect("session-1", (event) => events.push(event));
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -57,14 +57,14 @@ describe("TuiEventClient", () => {
       .mockResolvedValue(responseFromChunks([]));
     vi.stubGlobal("fetch", fetchMock);
 
-    const client = new TuiEventClient(new TuiApiClient("http://local"));
+    const client = new TuiEventClient(new TuiApiClient("http://127.0.0.1"));
     client.connect("session-1", () => {});
     await new Promise((resolve) => setTimeout(resolve, 350));
     client.disconnect();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [url, options] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
-    expect(url).toBe("http://local/api/sessions/session-1/events");
+    expect(url).toBe("http://127.0.0.1/api/sessions/session-1/events");
     expect(new Headers(options.headers).get("Last-Event-ID")).toBe("stream-7:9");
   });
 });

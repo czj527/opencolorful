@@ -40,6 +40,7 @@ import { MemoryFactStore } from "../storage/memory/fact-store.js";
 import path from "node:path";
 
 import { createServerApp, type ServerAppOptions } from "./app.js";
+import { resolveServerToken } from "./trust-boundary.js";
 import {
   acquireServerLock,
   markServerStopped,
@@ -67,6 +68,8 @@ export interface StartServerOptions {
 export interface RunningServer {
   readonly host: string;
   readonly port: number;
+  /** 本实例访问令牌（受信客户端接线用；绝不写入日志/运行态文件） */
+  readonly token: string;
   stop(): Promise<void>;
 }
 
@@ -107,12 +110,17 @@ export async function startForegroundServer(options: StartServerOptions): Promis
       ? await buildProductionResources(options.paths, options.version)
       : undefined;
     const appOptions = options.appOptions ?? productionResources!.appOptions;
+    // ── P0-1 信任边界：启动时解析令牌（env > <runtime>/server-token > 生成并落盘）──
+    // 绑定 host 参与 Host 头校验（DNS-rebinding 防御）。
+    const serverToken = resolveServerToken(process.env, options.paths.runtime);
     const { app, nodeWebSocket } = createServerApp({
       version: options.version,
       pid: process.pid,
       startedAt,
       paths: options.paths,
       ...appOptions,
+      // 启动入口始终以自身解析结果为准，不接受 appOptions 覆盖信任边界
+      trustBoundary: { token: serverToken, bindHost: options.host },
     });
     const started = await new Promise<{ server: ServerType; port: number }>((resolve, reject) => {
       let settled = false;
@@ -149,6 +157,7 @@ export async function startForegroundServer(options: StartServerOptions): Promis
     return {
       host: options.host,
       port: started.port,
+      token: serverToken,
       async stop() {
         if (stopped) {
           return;

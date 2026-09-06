@@ -27,6 +27,7 @@ import {
   requireTodoContext,
   todoSessionContexts,
 } from "../../src/pi-sdk/todo-tools.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // 波次 B5a：todo_write 工具 → store → todo.updated 事件 → 恢复 全链路
@@ -408,7 +409,7 @@ describe("bootstrap todo 接线（B5a）", () => {
       database,
       producer: { component: "integration-test", processType: "server", processId: "1", bootId: "boot-todo", appVersion: "0.1.0", hostPlatform: process.platform },
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       paths,
       database,
       sessionService,
@@ -419,7 +420,7 @@ describe("bootstrap todo 接线（B5a）", () => {
     });
 
     // 绑定 Agent 的会话：经 messages 路由触发 ensureRuntime（faux 分支）
-    const createRes = await app.request("http://local/api/sessions", {
+    const createRes = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "接线会话", cwd: dir, agentId: "agent-todo" }),
@@ -427,7 +428,7 @@ describe("bootstrap todo 接线（B5a）", () => {
     expect(createRes.status).toBe(201);
     const created = (await createRes.json()) as { id: string };
 
-    const promptRes = await app.request(`http://local/api/sessions/${created.id}/messages`, {
+    const promptRes = await app.request(`http://127.0.0.1/api/sessions/${created.id}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "你好" }),

@@ -24,6 +24,7 @@ import { PreferencesStore } from "../../src/config/preferences-store.js";
 import { defaultMemoryAgentSettings } from "../../src/contracts/memory.js";
 import { createServerApp } from "../../src/server/app.js";
 import { AgentStore } from "../../src/config/agent-store.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const openDatabases: import("better-sqlite3").Database[] = [];
@@ -72,7 +73,7 @@ function createApp() {
     publish: () => {},
   });
 
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     version: "test",
     pid: 1,
     startedAt: Date.now(),
@@ -104,7 +105,7 @@ describe("memory admin API", () => {
   it("enabled=false → deep-dive 返回 503 已关闭", async () => {
     const ctx = createApp();
     await ctx.preferencesStore.update({ memory: { ...defaultMemoryAgentSettings(), enabled: false } } as never);
-    const deep = await ctx.app.request(`http://x/api/agents/a1/memory/deep-dive`, { method: "POST" });
+    const deep = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/deep-dive`, { method: "POST" });
     expect(deep.status).toBe(503);
     const body = await deep.json() as { status: string };
     expect(body.status).toBe("disabled");
@@ -112,7 +113,7 @@ describe("memory admin API", () => {
 
   it("deep-dive 排队返回 202；rollback 缺少 run 返回 400", async () => {
     const ctx = createApp();
-    const base = `http://x/api/agents/a1/memory`;
+    const base = `http://127.0.0.1/api/agents/a1/memory`;
     const deep = await ctx.app.request(`${base}/deep-dive`, { method: "POST" });
     expect(deep.status).toBe(202);
     const rollback = await ctx.app.request(`${base}/deep-dive/rollback`, { method: "POST" });
@@ -121,7 +122,7 @@ describe("memory admin API", () => {
 
   it("per-agent 记忆设置：GET 回退全局默认，PUT 覆盖并持久化", async () => {
     const ctx = createApp();
-    const base = `http://x/api/agents/a1/memory`;
+    const base = `http://127.0.0.1/api/agents/a1/memory`;
     const get1 = await ctx.app.request(`${base}/settings`);
     const body1 = await get1.json() as { settings: { dailyRunTime: string } };
     expect(body1.settings.dailyRunTime).toBe("03:00");
@@ -148,13 +149,13 @@ describe("memory admin API", () => {
 
   it("全局记忆默认：GET/PUT /api/preferences/memory", async () => {
     const ctx = createApp();
-    const put = await ctx.app.request(`http://x/api/preferences/memory`, {
+    const put = await ctx.app.request(`http://127.0.0.1/api/preferences/memory`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...defaultMemoryAgentSettings(), minIdleMinutes: 45 }),
     });
     expect(put.status).toBe(200);
-    const get = await ctx.app.request(`http://x/api/preferences/memory`);
+    const get = await ctx.app.request(`http://127.0.0.1/api/preferences/memory`);
     const body = await get.json() as { settings: { minIdleMinutes: number } };
     expect(body.settings.minIdleMinutes).toBe(45);
   });
@@ -173,7 +174,7 @@ describe("memory admin API", () => {
     insert.run(crypto.randomUUID(), String(fact.id), "2026-07-30T10:00:00.000Z");
     insert.run(crypto.randomUUID(), String(fact.id), "2026-08-01T10:00:00.000Z");
 
-    const res = await ctx.app.request(`http://x/api/agents/a1/memory/timeline`);
+    const res = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/timeline`);
     expect(res.status).toBe(200);
     const body = await res.json() as { facts: Array<{ id: number; retentionStrength: number; activationStrength: number; hitDates: number }> };
     const row = body.facts.find((f) => f.id === fact.id);
@@ -189,13 +190,13 @@ describe("memory admin API", () => {
     fs.writeFileSync(path.join(runsDir, "run.json"), JSON.stringify({ runId: "run-test-1", status: "completed", batchIds: ["b1"] }));
     fs.writeFileSync(path.join(runsDir, "REPORT.md"), "# 整理报告\n- create_fact 已应用\n");
 
-    const ok = await ctx.app.request(`http://x/api/agents/a1/memory/runs/run-test-1`);
+    const ok = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/runs/run-test-1`);
     expect(ok.status).toBe(200);
     const body = await ok.json() as { run: { status: string }; report: string };
     expect(body.run.status).toBe("completed");
     expect(body.report).toContain("create_fact");
 
-    const missing = await ctx.app.request(`http://x/api/agents/a1/memory/runs/run-nope`);
+    const missing = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/runs/run-nope`);
     expect(missing.status).toBe(404);
   });
 });
@@ -204,7 +205,7 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
   it("迟滞阈值乱序（{mediumDown:90, mediumUp:10, permanentUp:5}）→ 400；顺序合法 → 200", async () => {
     const ctx = createApp();
     // per-Agent PUT：乱序阈值必须被拒绝（TypeBox 无法表达跨字段约束）
-    const badAgent = await ctx.app.request(`http://x/api/agents/a1/memory/settings`, {
+    const badAgent = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -216,7 +217,7 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
     expect((await badAgent.json() as { message: string }).message).toContain("迟滞阈值");
 
     // 全局 PUT 同样拒绝
-    const badGlobal = await ctx.app.request(`http://x/api/preferences/memory`, {
+    const badGlobal = await ctx.app.request(`http://127.0.0.1/api/preferences/memory`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -227,7 +228,7 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
     expect(badGlobal.status).toBe(400);
 
     // 合法排序（mediumDown < mediumUp < permanentUp）→ 200
-    const good = await ctx.app.request(`http://x/api/agents/a1/memory/settings`, {
+    const good = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/settings`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -240,7 +241,7 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
 
   it("Agent PUT 携带乱序 memory 阈值 → 400", async () => {
     const ctx = createApp();
-    const response = await ctx.app.request(`http://x/api/agents/a1`, {
+    const response = await ctx.app.request(`http://127.0.0.1/api/agents/a1`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -257,7 +258,7 @@ describe("Memory 设置校验（评审 P1#7a 复现级测试）", () => {
 describe("pinned memory 写端点", () => {
   it("POST 创建 → GET 可见 → DELETE 删除 → GET 消失", async () => {
     const ctx = createApp();
-    const base = `http://x/api/agents/a1/memory/pinned`;
+    const base = `http://127.0.0.1/api/agents/a1/memory/pinned`;
 
     const post = await ctx.app.request(base, {
       method: "POST",
@@ -286,7 +287,7 @@ describe("pinned memory 写端点", () => {
 
   it("POST content 为空或超长 → 400", async () => {
     const ctx = createApp();
-    const base = `http://x/api/agents/a1/memory/pinned`;
+    const base = `http://127.0.0.1/api/agents/a1/memory/pinned`;
 
     const empty = await ctx.app.request(base, {
       method: "POST",
@@ -308,7 +309,7 @@ describe("pinned memory 写端点", () => {
   it("DELETE 不存在或不属于当前 Agent → 404", async () => {
     const ctx = createApp();
     // 先创建一条属于 a1 的 pinned，再用另一个不存在的 Agent 删除
-    const post = await ctx.app.request(`http://x/api/agents/a1/memory/pinned`, {
+    const post = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/pinned`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "归属校验" }),
@@ -316,13 +317,13 @@ describe("pinned memory 写端点", () => {
     const postBody = await post.json() as { pinned: { id: string } };
     const pinnedId = postBody.pinned.id;
 
-    const missingAgent = await ctx.app.request(`http://x/api/agents/no-such-agent/memory/pinned/${pinnedId}`, { method: "DELETE" });
+    const missingAgent = await ctx.app.request(`http://127.0.0.1/api/agents/no-such-agent/memory/pinned/${pinnedId}`, { method: "DELETE" });
     expect(missingAgent.status).toBe(404);
 
-    const missingPin = await ctx.app.request(`http://x/api/agents/a1/memory/pinned/not-exist`, { method: "DELETE" });
+    const missingPin = await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/pinned/not-exist`, { method: "DELETE" });
     expect(missingPin.status).toBe(404);
 
     // 清理
-    await ctx.app.request(`http://x/api/agents/a1/memory/pinned/${pinnedId}`, { method: "DELETE" });
+    await ctx.app.request(`http://127.0.0.1/api/agents/a1/memory/pinned/${pinnedId}`, { method: "DELETE" });
   });
 });

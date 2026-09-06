@@ -38,11 +38,14 @@ async function freePort(): Promise<number> {
 }
 
 async function api(pathname: string, init?: { method?: string; body?: unknown }): Promise<Response> {
+  // P0-1 信任边界：直连 Supervisor 的 Node 侧调用须携带服务令牌（写请求校验）
+  const headers: Record<string, string> = {};
+  if (supervisor !== null) headers["x-oc-token"] = supervisor.token;
+  if (init?.body !== undefined) headers["content-type"] = "application/json";
   const response = await fetch(`http://127.0.0.1:${supervisorPort}${pathname}`, {
     method: init?.method ?? "GET",
-    ...(init?.body !== undefined
-      ? { headers: { "content-type": "application/json" }, body: JSON.stringify(init.body) }
-      : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
   return response;
 }

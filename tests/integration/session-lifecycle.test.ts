@@ -12,6 +12,7 @@ import { SessionRuntime } from "../../src/runtime/session-runtime.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -80,29 +81,29 @@ describe("session lifecycle", () => {
     const created = context.service.create({ title: "唯一运行态", cwd: process.cwd() });
     expect(context.service.open(created.id)).toBe(created);
 
-    const { app } = createServerApp({ sessionService: context.service });
-    expect((await (await app.request("http://local/api/sessions")).json() as unknown[]).length).toBe(1);
+    const { app } = createTrustedServerApp({ sessionService: context.service });
+    expect((await (await app.request("http://127.0.0.1/api/sessions")).json() as unknown[]).length).toBe(1);
 
-    const archiveResponse = await app.request(`http://local/api/sessions/${created.id}`, {
+    const archiveResponse = await app.request(`http://127.0.0.1/api/sessions/${created.id}`, {
       method: "DELETE",
     });
     expect(archiveResponse.status).toBe(200);
-    expect((await app.request(`http://local/api/sessions/${created.id}`)).status).toBe(200);
-    expect(await (await app.request("http://local/api/sessions")).json()).toEqual([]);
+    expect((await app.request(`http://127.0.0.1/api/sessions/${created.id}`)).status).toBe(200);
+    expect(await (await app.request("http://127.0.0.1/api/sessions")).json()).toEqual([]);
 
     // includeArchived 可见已归档会话
-    const withArchived = await (await app.request("http://local/api/sessions?includeArchived=true")).json() as { archived: boolean }[];
+    const withArchived = await (await app.request("http://127.0.0.1/api/sessions?includeArchived=true")).json() as { archived: boolean }[];
     expect(withArchived).toHaveLength(1);
     expect(withArchived[0]!.archived).toBe(true);
 
     // unarchive 恢复会话
-    const unarchiveResponse = await app.request(`http://local/api/sessions/${created.id}/unarchive`, {
+    const unarchiveResponse = await app.request(`http://127.0.0.1/api/sessions/${created.id}/unarchive`, {
       method: "POST",
     });
     expect(unarchiveResponse.status).toBe(200);
     const restored = await unarchiveResponse.json() as { archived: boolean };
     expect(restored.archived).toBe(false);
-    expect((await (await app.request("http://local/api/sessions")).json() as unknown[]).length).toBe(1);
+    expect((await (await app.request("http://127.0.0.1/api/sessions")).json() as unknown[]).length).toBe(1);
 
     context.service.closeAll();
     context.database.close();

@@ -11,6 +11,7 @@ import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -39,7 +40,7 @@ function createTestContext(): TestContext {
   const index = new SessionIndex(database);
   const sessionService = new SessionService(paths, index);
   const agentStore = new AgentStore(paths.agents);
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     sessionService,
     agentStore,
     paths,
@@ -74,7 +75,7 @@ describe("Session-Agent binding", () => {
   it("creates session without agentId (NULL agent)", async () => {
     const ctx = createTestContext();
     try {
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "无Agent会话", cwd: process.cwd() }),
@@ -95,7 +96,7 @@ describe("Session-Agent binding", () => {
     const ctx = createTestContext();
     try {
       // 先创建 Agent
-      const agentRes = await ctx.app.request("http://local/api/agents", {
+      const agentRes = await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "bind-me", name: "绑定助手", baseColor: blankBaseColor }),
@@ -105,7 +106,7 @@ describe("Session-Agent binding", () => {
       const agentId = agentView.identity.id;
 
       // 创建绑定到该 Agent 的会话
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Agent会话", cwd: process.cwd(), agentId }),
@@ -125,7 +126,7 @@ describe("Session-Agent binding", () => {
   it("returns 404 when creating session with non-existent agentId", async () => {
     const ctx = createTestContext();
     try {
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "坏Agent会话", cwd: process.cwd(), agentId: "no-such-agent" }),
@@ -141,7 +142,7 @@ describe("Session-Agent binding", () => {
   it("returns 400 for invalid agentId format in session creation", async () => {
     const ctx = createTestContext();
     try {
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "坏格式", cwd: process.cwd(), agentId: "INVALID!" }),
@@ -158,36 +159,36 @@ describe("Session-Agent binding", () => {
     const ctx = createTestContext();
     try {
       // 创建两个 Agent
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "agent-x", name: "X", baseColor: blankBaseColor }),
       });
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "agent-y", name: "Y", baseColor: blankBaseColor }),
       });
 
       // 创建会话：一个无 Agent，一个绑定 agent-x，一个绑定 agent-y
-      await ctx.app.request("http://local/api/sessions", {
+      await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "无Agent", cwd: process.cwd() }),
       });
-      await ctx.app.request("http://local/api/sessions", {
+      await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "X会话", cwd: process.cwd(), agentId: "agent-x" }),
       });
-      await ctx.app.request("http://local/api/sessions", {
+      await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Y会话", cwd: process.cwd(), agentId: "agent-y" }),
       });
 
       // listByAgent("agent-x") 只返回 1 条
-      const xRes = await ctx.app.request("http://local/api/agents/agent-x/sessions");
+      const xRes = await ctx.app.request("http://127.0.0.1/api/agents/agent-x/sessions");
       expect(xRes.status).toBe(200);
       const xSessions = (await xRes.json()) as { title: string; agentId: string | null }[];
       expect(xSessions.length).toBe(1);
@@ -195,7 +196,7 @@ describe("Session-Agent binding", () => {
       expect(xSessions[0]!.agentId).toBe("agent-x");
 
       // listByAgent("agent-y") 只返回 1 条
-      const yRes = await ctx.app.request("http://local/api/agents/agent-y/sessions");
+      const yRes = await ctx.app.request("http://127.0.0.1/api/agents/agent-y/sessions");
       expect(yRes.status).toBe(200);
       const ySessions = (await yRes.json()) as { title: string; agentId: string | null }[];
       expect(ySessions.length).toBe(1);
@@ -209,13 +210,13 @@ describe("Session-Agent binding", () => {
     const ctx = createTestContext();
     try {
       // 先创建 Agent 和绑定会话
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "recover-me", name: "恢复测试", baseColor: blankBaseColor }),
       });
 
-      const createRes = await ctx.app.request("http://local/api/sessions", {
+      const createRes = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "恢复会话", cwd: process.cwd(), agentId: "recover-me" }),
@@ -254,13 +255,13 @@ describe("Session-Agent binding", () => {
     const ctx = createTestContext();
     try {
       // 创建 Agent 和绑定会话
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "list-me", name: "列表恢复", baseColor: blankBaseColor }),
       });
 
-      const createRes = await ctx.app.request("http://local/api/sessions", {
+      const createRes = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "列表会话", cwd: process.cwd(), agentId: "list-me" }),
@@ -323,13 +324,13 @@ describe("Session-Agent binding", () => {
   it("creates session without cwd falling back to per-agent workspace", async () => {
     const ctx = createTestContext();
     try {
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "no-cwd", name: "无目录助理", baseColor: blankBaseColor }),
       });
 
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "兜底会话", agentId: "no-cwd" }),
@@ -347,14 +348,14 @@ describe("Session-Agent binding", () => {
   it("creates session without cwd using agent defaultCwd when configured", async () => {
     const ctx = createTestContext();
     try {
-      await ctx.app.request("http://local/api/agents", {
+      await ctx.app.request("http://127.0.0.1/api/agents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "has-cwd", name: "有目录助理", baseColor: blankBaseColor }),
       });
       ctx.agentStore.saveSettings("has-cwd", { defaultCwd: process.cwd() });
 
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "默认目录会话", agentId: "has-cwd" }),
@@ -370,7 +371,7 @@ describe("Session-Agent binding", () => {
   it("returns 400 when cwd is missing and no agentId is bound", async () => {
     const ctx = createTestContext();
     try {
-      const res = await ctx.app.request("http://local/api/sessions", {
+      const res = await ctx.app.request("http://127.0.0.1/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "无目录无归属" }),
