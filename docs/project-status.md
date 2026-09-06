@@ -1,8 +1,11 @@
 # OpenColorful 当前项目状态
 
-**更新时间：2026-09-05**
-**当前基线：** `main`  `4eed54c`（波次 B B0-B5b 全部实施合并）
+**更新时间：2026-09-06**
+**当前基线：** `main`  `15036b7`（波次 B B0-B5b 与 B6/B7 收尾记录已合并；独立质量评估仍未通过）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
+
+**开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
+验收清单和架构跳转。看板是本文件、阶段计划和独立质量评估的开发者投影，不取代这些事实来源。
 
 ## 当前结论
 
@@ -14,6 +17,7 @@
 - **P1 切片 1.75 记忆激活已全部合并（2026-08-28，PR #31-#33）**：T12 记忆使用规则四条契约（openhanako 模式，规则段移出注入预算）；T13 五工具 WHEN/SKIP 引导（hermes schema 模式）；T14 后台复盘服务（每轮 turn.completed 一次 utility LLM 调用 → journal 意图 actor=background_review，审批仍归记忆 Agent；`reviewEnabled` 设置 + 档案页开关；schema v13 迁移）；T15 行为级闭环测试（复盘意图→审批→search_memory 召回全链路，逐步断言中间态）。规格 `docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`，lane log 见 `plans/p1-t12-t13/t14/t15-*.md`。**待作者真实日用观察** remember/复盘触发率与记忆质量，作为切片 2 记忆方向（衰减/有效性窗口/复盘意图强度分档）立项依据。
 - 主分支必须保持可安装、可构建、可测试；所有变更走 PR，不直推 `main`。
 - **G2 桌面发布分发与版本更新（2026-08-28 热修收口）**：T1 打包管线与内嵌后端、T2 应用内版本更新、T3 release workflow（PR #35-#38）。**v0.1.0 为不可用版本**——asar 缺 workspace 插件包导致安装版后端启动即崩，叠加 4310 端口被占时代理误连外来进程、draft 资产不完整两缺陷；热修（staging `file:` 依赖实拷 + `verify:pack` asar 断言 + probe 身份校验 + EADDRINUSE 随机端口回退 + 发布资产断言兜底，事故三教训见 `plans/g2-desktop-release.md` T4）后，`v0.1.1` tag 已存在且指向 `3ae674d`，但对应 GitHub Release 仍为 Draft，不能描述为正式发布。
+- **2026-09-06 独立交付质量评估**：A/B 代码均已合并，但当前不标记产品完成。已复现 P0 本机 HTTP/WS 信任边界不足、P0 v13/v14 迁移中断不可恢复；B3 分支真链重复运行 1/3 通过。Plugin import 检查是假通过；B4/B5 Electron 真链、安装/更新/恢复和人工体验仍待完成。完整报告见 `docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`。
 
 ## 阶段状态
 
@@ -23,8 +27,8 @@
 | Governance G1 | 仓库收敛与 Desktop 优先 | 已完成（2026-08-26） | `plans/g1-repo-convergence.md` |
 | Governance G2 | 桌面发布分发与版本更新 | 热修已合并；`v0.1.1` tag 已存在但 GitHub Release 仍为 Draft，待正式发布与安装/更新实测 | `plans/g2-desktop-release.md` |
 | Product P1 | 个人助理基础体验 | 进行中（切片 1/1.5/1.75 代码已合并；波次八、发布实测和后续规划待收口） | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`、`docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`、`docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`、`plans/desktop-parity.md`、`plans/p1-t1~t15-*.md` |
-| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | **已完成（2026-09-05）**：A0-A9 全部实施合并（PR #40-#43、#44、#45、#51、#52、#53）。A1 矩阵 92 行 0 FAIL；A2 Mock 65 例 + A3 真链 24 例 + CI Desktop smoke；A4 六 lane 全回归；A5 排障关联；A6/A7 两档模型统一（selectPrimary/selectSecondary）；A8 统一用量（schema v14 + 摄取/查询/Desktop 全局用量页）；A9 集成质量门全绿（根 2233 例、Desktop 真链 24/24、Web Playwright 60/60）。评审线程全部带证据解决；Desktop 测试已接入根质量门 | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`（含 A9/收口记录）、`docs/testing/test-asset-matrix.md`、`docs/testing/desktop-test-conventions.md` |
-| Product P1 内部波次 B | 对话工作台能力 | 进行中（2026-09-05 B0-B5b 全部实施合并 PR #55-#61：regenerate 统一原语/分支头持久化/Fork/分支切换器与线性时间线/压缩摘要卡/durable todo 后端与桌面卡。B6 集成门：web 60/60、desktop 单测 102/102、根 2274/2275+1 计时抖动（单跑通过）、真链 26/27；显式遗留：lane-b3 BRANCH-03/04 发送禁用缺陷（B3 合并即存在，根因待查）、compact/todo 真链 spec、web todo.updated 事件类型——故不标已完成） | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md`（§3 冻结契约 + B0-B6 记录） |
+| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | **工程实现已合并；独立质量评估未通过**（2026-09-06）：A0-A9 已合并（PR #40-#54），常规类型检查、根测试、Web、Desktop Mock/构建和 Web Playwright 通过；但 Plugin import 检查是假通过，v13/v14 迁移中断恢复失败，人工验收和发布验证未完成。状态：`HUMAN_PENDING`、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md` |
+| Product P1 内部波次 B | 对话工作台能力 | **工程实现基本完成；独立质量评估未通过**（2026-09-06）：B0-B5b 已合并（PR #55-#61，B6/B7 收尾记录在 #62）。Web Playwright 60/60、Desktop 单测 102/102、B 聚焦测试 52/52；Desktop 真链 26/27，B3 `BRANCH-03/04` 重复 3 次仅 1 次通过；B4/B5 Electron 真链、人工验收和发布验证未完成。状态：`HUMAN_PENDING`、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md` |
 | Product P1 独立专项 | 浏览器能力与安全边界 | 规划中（独立于波次 B，尚未实施） | `docs/superpowers/specs/2026-08-31-browser-capability.md`、`plans/browser-capability.en.md` |
 | Product P2 | 个人效率工作台 | 未排期 | `docs/positioning-and-roadmap.md` |
 | Product P3 | 扩展生态与连接能力 | 未排期 | `docs/positioning-and-roadmap.md` |
@@ -32,11 +36,11 @@
 
 ## 当前优先级
 
-1. **波次 B 收尾**：B0-B5b 已全部合并（#55-#61，用户可见能力见 CHANGELOG）。剩余：修复 lane-b3 BRANCH-03/04 发送禁用缺陷（B3 合并即存在，非 B4/B5b 回归）、补 compact/todo 两条 Electron 真链 spec、web 端 `todo.updated` 事件类型声明；三项完成后按 B7 验收翻状态。集成门实测见英文计划 B6 记录。
-2. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
-3. **G2 发布事实单独收口**：`v0.1.1` tag 已存在，但 GitHub Release 仍为 Draft（含一个只有 blockmap 的孤儿草稿）；正式发布、安装启动、更新链路和仓库外启动冒烟必须有独立证据，不能以 tag 或 CI 绿替代。
-4. **五天真实日用后置**：在波次 B 关键能力、Desktop 真实交互验收和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务；所有未实现能力和验收缺口继续在权威计划中显式记录。
-5. **保持 `main` 在干净环境可复现安装、类型检查、测试、Web 构建和 Desktop 构建**，所有变更走 PR，不直推 `main`。
+1. **先处理独立质量评估阻断项**：修复本机 HTTP/WS 信任边界、v13/v14 迁移中断恢复、Plugin import 假通过和 B3 间歇性发送禁用；这些问题完成前不翻转 A/B 产品完成状态。
+2. **补齐波次 B 真链与人工验收**：补 compact/todo Electron 真链，执行独立报告中的 A/B 人工验收卡，确认错误、恢复、长期使用和用户可理解性。
+3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
+4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
+5. **五天真实日用后置**：在安全、迁移、B3 稳定性、Desktop 真实交互和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务。
 
 ## 状态更新规则
 
@@ -44,3 +48,4 @@
 - 阶段进行中：实时任务写在计划的实施记录中，不把每个小任务复制到本文件。
 - 阶段完成：写入真实提交、质量门结果、浏览器验收和已知偏差，再更新本文件。
 - 阶段取消或改向：保留原计划和原因，在本文件记录新的决策链接。
+- 独立质量评估必须把代码合并、自动化通过、人工体验和发布验证分开记录；发现阻断项时，历史实施记录不回写为“未发生”，而是在当前状态和独立报告中明确覆盖。

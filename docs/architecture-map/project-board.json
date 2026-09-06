@@ -1,0 +1,738 @@
+{
+  "version": 1,
+  "title": "OpenColorful 项目看板",
+  "sourceOfTruth": "项目状态和阶段事实仍以 docs/project-status.md、对应计划与独立质量评估为准。本文件是面向开发者的状态投影和工作入口。",
+  "updatedAt": "2026-09-06",
+  "baseline": {
+    "branch": "main",
+    "commit": "15036b7",
+    "label": "B0-B5b 与 B6/B7 收尾记录已合并；独立质量评估仍未通过"
+  },
+  "health": {
+    "label": "当前不宜宣称产品完成",
+    "tone": "risk",
+    "summary": "代码已经积累到可以做真实交付验证的阶段，但安全边界、迁移恢复、Wave B 稳定性、人工体验和发布链路仍需要先收口。",
+    "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
+  },
+  "signals": [
+    {
+      "label": "当前主线",
+      "value": "P1 个人助理基础体验",
+      "detail": "切片 1、1.5、1.75 的工程实现已合并，当前进入质量收口和真实使用准备。",
+      "source": "docs/positioning-and-roadmap.md"
+    },
+    {
+      "label": "当前活动波次",
+      "value": "P1 内部波次 B",
+      "detail": "对话工作台实现基本完成，但真链、人工验收和发布验证还没有闭环。",
+      "source": "docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md"
+    },
+    {
+      "label": "当前门槛",
+      "value": "独立质量评估未通过",
+      "detail": "A/B 代码合并和常规自动化通过，不能替代安全、迁移、真实桌面和安装发布证据。",
+      "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
+    },
+    {
+      "label": "下一次真实反馈",
+      "value": "5 天日用",
+      "detail": "在阻断项、真实链路、安装更新和人工验收完成后，再用连续日用观察产品质量。",
+      "source": "docs/project-status.md"
+    }
+  ],
+  "focus": [
+    {
+      "number": "01",
+      "title": "先修阻断项",
+      "detail": "安全边界、v13/v14 迁移恢复、Plugin import 检查和 B3 间歇性失败必须先处理。",
+      "cardId": "quality-blockers"
+    },
+    {
+      "number": "02",
+      "title": "再补真实证据",
+      "detail": "补齐 Wave B 的 compact / todo Electron 真链，并执行 A/B 人工验收卡。",
+      "cardId": "wave-b-evidence"
+    },
+    {
+      "number": "03",
+      "title": "最后做发布判断",
+      "detail": "v0.1.1 仍需要仓库外安装、启动、更新、重启和数据恢复实测。",
+      "cardId": "release-verification"
+    }
+  ],
+  "columns": [
+    {
+      "id": "now",
+      "label": "现在要做",
+      "tone": "red",
+      "description": "不解决就不应该把 A/B 标成完成的事情。",
+      "cards": [
+        {
+          "id": "quality-blockers",
+          "type": "阻断项",
+          "priority": "P0",
+          "state": "阻塞",
+          "title": "修复独立质量评估阻断项",
+          "summary": "集中处理本机 HTTP/WS 信任边界、v13/v14 迁移中断恢复、Plugin import 检查假通过和 B3 间歇性发送禁用。",
+          "detail": "这张卡是当前项目的总闸门。常规类型检查、根测试、Web、Desktop Mock 和构建通过后，仍不能跳过这些独立评估发现。",
+          "tags": [
+            "A/B",
+            "安全",
+            "迁移",
+            "稳定性"
+          ],
+          "modules": [
+            "host-safety",
+            "storage",
+            "plugin-runtime",
+            "session-runtime",
+            "cli-governance"
+          ],
+          "checklist": [
+            {
+              "label": "本机 HTTP / WS 信任边界",
+              "done": false
+            },
+            {
+              "label": "v13 / v14 迁移中断后的可恢复路径",
+              "done": false
+            },
+            {
+              "label": "Plugin import 检查的真实负例",
+              "done": false
+            },
+            {
+              "label": "B3 BRANCH-03/04 重复运行稳定",
+              "done": false
+            }
+          ],
+          "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md",
+          "references": [
+            {
+              "label": "当前项目状态",
+              "path": "docs/project-status.md"
+            },
+            {
+              "label": "A 波次计划",
+              "path": "plans/p1-quality-model-usage.en.md"
+            },
+            {
+              "label": "B 波次计划",
+              "path": "plans/p1-conversation-workbench.en.md"
+            }
+          ]
+        },
+        {
+          "id": "wave-b-evidence",
+          "type": "真实验证",
+          "priority": "P1",
+          "state": "进行中",
+          "title": "补齐 Wave B 真链与人工验收",
+          "summary": "补 compact / todo Electron 真链，重复验证分支切换后的发送路径，并执行独立报告中的 A/B 人工验收卡。",
+          "detail": "工程实现基本完成不等于对话工作台交付完成。这里需要把自动化、真实桌面操作、错误恢复和用户可理解性放在同一张证据表里。",
+          "tags": [
+            "Wave B",
+            "Desktop",
+            "人工验收"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "session-runtime",
+            "pi-adapter",
+            "storage",
+            "server"
+          ],
+          "checklist": [
+            {
+              "label": "compact live / replay identity",
+              "done": false
+            },
+            {
+              "label": "durable todo true-chain",
+              "done": false
+            },
+            {
+              "label": "BRANCH-03/04 重复运行通过",
+              "done": false
+            },
+            {
+              "label": "A/B 人工验收卡完成",
+              "done": false
+            }
+          ],
+          "source": "plans/p1-conversation-workbench.en.md",
+          "references": [
+            {
+              "label": "Wave B 规格",
+              "path": "docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md"
+            },
+            {
+              "label": "独立质量评估",
+              "path": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
+            }
+          ]
+        },
+        {
+          "id": "release-verification",
+          "type": "发布验证",
+          "priority": "P1",
+          "state": "待验证",
+          "title": "完成 v0.1.1 安装与更新实测",
+          "summary": "验证仓库外安装启动、更新、重启安装、数据恢复和发布资产完整性；Git tag 和 CI 绿不能替代这些证据。",
+          "detail": "v0.1.1 的热修已经合并并打 tag，但 GitHub Release 仍是 Draft。发布判断必须建立在安装包真实行为上。",
+          "tags": [
+            "G2",
+            "v0.1.1",
+            "Release"
+          ],
+          "modules": [
+            "desktop-shell",
+            "supervisor",
+            "cli-governance",
+            "host-safety"
+          ],
+          "checklist": [
+            {
+              "label": "全新安装后启动",
+              "done": false
+            },
+            {
+              "label": "应用内更新",
+              "done": false
+            },
+            {
+              "label": "重启安装与数据恢复",
+              "done": false
+            },
+            {
+              "label": "发布资产和 Draft Release 清理",
+              "done": false
+            }
+          ],
+          "source": "plans/g2-desktop-release.md",
+          "references": [
+            {
+              "label": "发布说明",
+              "path": "docs/release.md"
+            },
+            {
+              "label": "当前项目状态",
+              "path": "docs/project-status.md"
+            }
+          ]
+        },
+        {
+          "id": "five-day-use",
+          "type": "产品观察",
+          "priority": "P1",
+          "state": "等待前置",
+          "title": "准备 5 天真实日用",
+          "summary": "在安全、迁移、稳定性、Desktop 真实交互和有效发布链路完成后，连续使用产品，记录真实问题和质量变化。",
+          "detail": "五天日用是重要证据，但不能用它替代安全阻断项和发布链路验证。它应该在前置问题收口后开始。",
+          "tags": [
+            "P1",
+            "真实使用",
+            "反馈"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "session-runtime",
+            "memory",
+            "observability"
+          ],
+          "checklist": [
+            {
+              "label": "前置阻断项全部关闭",
+              "done": false
+            },
+            {
+              "label": "完成 A/B 人工验收",
+              "done": false
+            },
+            {
+              "label": "使用固定反馈记录模板",
+              "done": false
+            }
+          ],
+          "source": "docs/project-status.md",
+          "references": [
+            {
+              "label": "产品路线",
+              "path": "docs/positioning-and-roadmap.md"
+            },
+            {
+              "label": "开发流程",
+              "path": "docs/development.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validation",
+      "label": "代码已合并，等待确认",
+      "tone": "amber",
+      "description": "工程实现和自动化证据已经积累，但还没有满足真实交付条件。",
+      "cards": [
+        {
+          "id": "wave-b-implementation",
+          "type": "工程状态",
+          "priority": "P1",
+          "state": "待人工验收",
+          "title": "P1 内部波次 B：对话工作台",
+          "summary": "B0-B5b 已合并，B6/B7 已记录收尾事实；Web Playwright 60/60、Desktop 单测 102/102，但 Desktop 真链和人工验收没有闭环。",
+          "detail": "这里记录“代码现在是什么状态”，具体阻断工作在“现在要做”列，避免把实现状态和验收状态混在一起。",
+          "tags": [
+            "Wave B",
+            "Desktop",
+            "Web"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "server",
+            "session-runtime",
+            "pi-adapter",
+            "storage"
+          ],
+          "checklist": [
+            {
+              "label": "工程实现合并",
+              "done": true
+            },
+            {
+              "label": "聚焦自动化测试",
+              "done": true
+            },
+            {
+              "label": "Desktop 真链稳定",
+              "done": false
+            },
+            {
+              "label": "人工验收与发布验证",
+              "done": false
+            }
+          ],
+          "source": "docs/project-status.md",
+          "references": [
+            {
+              "label": "Wave B 计划",
+              "path": "plans/p1-conversation-workbench.en.md"
+            },
+            {
+              "label": "Wave B 规格",
+              "path": "docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md"
+            }
+          ]
+        },
+        {
+          "id": "wave-a-implementation",
+          "type": "工程状态",
+          "priority": "P1",
+          "state": "待人工验收",
+          "title": "P1 内部波次 A：质量体系、模型与用量",
+          "summary": "A0-A9 已合并，常规类型检查、根测试、Web、Desktop Mock / 构建和 Web Playwright 通过，但独立质量评估未通过。",
+          "detail": "Plugin import 假通过、迁移恢复和人工验收仍是当前收口内容，不能只看 CI 结果。",
+          "tags": [
+            "Wave A",
+            "模型",
+            "用量"
+          ],
+          "modules": [
+            "plugin-runtime",
+            "storage",
+            "observability",
+            "server"
+          ],
+          "checklist": [
+            {
+              "label": "工程实现合并",
+              "done": true
+            },
+            {
+              "label": "常规自动化通过",
+              "done": true
+            },
+            {
+              "label": "迁移恢复和 Plugin 检查",
+              "done": false
+            },
+            {
+              "label": "人工验收和发布验证",
+              "done": false
+            }
+          ],
+          "source": "docs/project-status.md",
+          "references": [
+            {
+              "label": "A 波次计划",
+              "path": "plans/p1-quality-model-usage.en.md"
+            },
+            {
+              "label": "独立质量评估",
+              "path": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
+            }
+          ]
+        },
+        {
+          "id": "p1-slice-15",
+          "type": "已实现待观察",
+          "priority": "P1",
+          "state": "待日用观察",
+          "title": "P1 切片 1.5：可用性攻坚",
+          "summary": "会话中心 IA、SSE 渲染性能、设置页收敛和 Supervisor 自动拉起已合并，等待波次八验收和后续真实使用观察。",
+          "detail": "切片 1.5 的后续重点是确认流畅度、零死控件、IA 自洽和环境问题是否在真实操作中成立。",
+          "tags": [
+            "P1",
+            "可用性",
+            "Desktop"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "supervisor",
+            "session-runtime"
+          ],
+          "checklist": [
+            {
+              "label": "代码和自动化合并",
+              "done": true
+            },
+            {
+              "label": "波次八人工回归",
+              "done": false
+            },
+            {
+              "label": "真实日用观察",
+              "done": false
+            }
+          ],
+          "source": "docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md",
+          "references": [
+            {
+              "label": "切片 1.5 计划",
+              "path": "plans/p1-t7-sse-perf.md"
+            },
+            {
+              "label": "当前项目状态",
+              "path": "docs/project-status.md"
+            }
+          ]
+        },
+        {
+          "id": "p1-slice-175",
+          "type": "已实现待观察",
+          "priority": "P1",
+          "state": "待日用观察",
+          "title": "P1 切片 1.75：记忆激活",
+          "summary": "记忆规则、工具引导、后台复盘和行为级闭环测试已合并，下一步是观察 remember / 复盘触发率与记忆质量。",
+          "detail": "真实使用反馈将决定切片 2 是否引入衰减、有效性窗口和复盘意图强度分档。",
+          "tags": [
+            "P1",
+            "Memory",
+            "真实使用"
+          ],
+          "modules": [
+            "memory",
+            "session-runtime",
+            "observability",
+            "storage"
+          ],
+          "checklist": [
+            {
+              "label": "行为级闭环测试",
+              "done": true
+            },
+            {
+              "label": "真实触发率观察",
+              "done": false
+            },
+            {
+              "label": "切片 2 方向决策",
+              "done": false
+            }
+          ],
+          "source": "docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md",
+          "references": [
+            {
+              "label": "记忆架构",
+              "path": "docs/memory-architecture.md"
+            },
+            {
+              "label": "切片 1.75 计划",
+              "path": "plans/p1-t14-background-review.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "planned",
+      "label": "接下来规划",
+      "tone": "violet",
+      "description": "已经有方向或规格，但不应抢跑到当前收口工作之前。",
+      "cards": [
+        {
+          "id": "browser-capability",
+          "type": "专项规划",
+          "priority": "P1",
+          "state": "规划中",
+          "title": "浏览器能力与安全边界",
+          "summary": "先做安全契约和威胁模型，再做只读 Inspect、Desktop Browser Panel、受控动作和人工元素选取，最后再评估 Agent / Plan / Cron 接线。",
+          "detail": "这是独立专项，不与 Wave B 混做。它的第一步是边界和威胁模型，而不是直接接入浏览器自动化。",
+          "tags": [
+            "P1",
+            "安全",
+            "浏览器"
+          ],
+          "modules": [
+            "host-safety",
+            "server",
+            "desktop-renderer",
+            "contracts"
+          ],
+          "checklist": [
+            {
+              "label": "安全契约和威胁模型",
+              "done": false
+            },
+            {
+              "label": "只读 Inspect",
+              "done": false
+            },
+            {
+              "label": "受控动作",
+              "done": false
+            }
+          ],
+          "source": "docs/superpowers/specs/2026-08-31-browser-capability.md",
+          "references": [
+            {
+              "label": "专项规格",
+              "path": "docs/superpowers/specs/2026-08-31-browser-capability.md"
+            },
+            {
+              "label": "开发流程",
+              "path": "docs/development.md"
+            }
+          ]
+        },
+        {
+          "id": "p2-workbench",
+          "type": "产品路线",
+          "priority": "P2",
+          "state": "未排期",
+          "title": "个人效率工作台",
+          "summary": "把用户项目、任务、资料、日程与 Agent 会话和工作空间连接起来。",
+          "detail": "P2 是产品方向，不是当前波次的隐含需求。开始前要从路线图重新立项并拆出明确切片。",
+          "tags": [
+            "P2",
+            "工作台",
+            "路线"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "session-runtime",
+            "storage"
+          ],
+          "checklist": [
+            {
+              "label": "完成 P1 质量收口",
+              "done": false
+            },
+            {
+              "label": "明确首个垂直切片",
+              "done": false
+            }
+          ],
+          "source": "docs/positioning-and-roadmap.md",
+          "references": [
+            {
+              "label": "产品定位与路线",
+              "path": "docs/positioning-and-roadmap.md"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "done",
+      "label": "已完成 / 已归档",
+      "tone": "green",
+      "description": "有真实提交和质量证据的历史工作，不再作为当前实施指令。",
+      "cards": [
+        {
+          "id": "g0-governance",
+          "type": "治理轨道",
+          "priority": "G0",
+          "state": "已完成",
+          "title": "G0：CI/CD 与公开协作",
+          "summary": "GitHub Actions 三 job、分支保护和 Dependabot 收敛已完成，治理规则已经生效。",
+          "detail": "后续治理改动应在现有护栏上增量演进，不重新打开已经完成的 G0 计划。",
+          "tags": [
+            "G0",
+            "仓库治理",
+            "CI"
+          ],
+          "modules": [
+            "cli-governance"
+          ],
+          "checklist": [
+            {
+              "label": "三类 CI 检查",
+              "done": true
+            },
+            {
+              "label": "分支保护",
+              "done": true
+            },
+            {
+              "label": "Dependabot 存量清零",
+              "done": true
+            }
+          ],
+          "source": "plans/g0-ci-linux-fixes.md",
+          "references": [
+            {
+              "label": "CI/CD 说明",
+              "path": "docs/ci-cd.md"
+            },
+            {
+              "label": "文档治理",
+              "path": "docs/document-governance.md"
+            }
+          ]
+        },
+        {
+          "id": "g1-convergence",
+          "type": "治理轨道",
+          "priority": "G1",
+          "state": "已完成",
+          "title": "G1：仓库收敛与 Desktop 优先",
+          "summary": "Desktop 成为唯一产品前端，Web 冻结为运维 / 测试面，单人 + AI agent 协作护栏和编号规则完成收敛。",
+          "detail": "后续功能规划默认以 Desktop 为产品入口，不要因为 Web 仍存在就重新把两套界面当成同等产品面。",
+          "tags": [
+            "G1",
+            "Desktop",
+            "仓库结构"
+          ],
+          "modules": [
+            "desktop-shell",
+            "desktop-renderer",
+            "web-client",
+            "cli-governance"
+          ],
+          "checklist": [
+            {
+              "label": "唯一产品前端",
+              "done": true
+            },
+            {
+              "label": "Web 运维 / 测试定位",
+              "done": true
+            },
+            {
+              "label": "编号与文档收敛",
+              "done": true
+            }
+          ],
+          "source": "plans/g1-repo-convergence.md",
+          "references": [
+            {
+              "label": "当前项目状态",
+              "path": "docs/project-status.md"
+            },
+            {
+              "label": "仓库布局",
+              "path": "docs/repository-layout.md"
+            }
+          ]
+        },
+        {
+          "id": "p1-foundation-slices",
+          "type": "产品切片",
+          "priority": "P1",
+          "state": "已完成",
+          "title": "P1 切片 1：个人助理基础体验",
+          "summary": "Onboarding、目录选择、Agent 身份、会话表单、档案页、记忆日用写操作和错误恢复文案已经合并。",
+          "detail": "切片代码已完成，但整体 P1 仍受后续波次的质量评估、人工验收和发布验证约束。",
+          "tags": [
+            "P1",
+            "个人助理",
+            "Desktop"
+          ],
+          "modules": [
+            "desktop-renderer",
+            "session-runtime",
+            "memory",
+            "host-safety"
+          ],
+          "checklist": [
+            {
+              "label": "四步 onboarding",
+              "done": true
+            },
+            {
+              "label": "Agent 身份和档案",
+              "done": true
+            },
+            {
+              "label": "记忆日用写操作",
+              "done": true
+            }
+          ],
+          "source": "docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md",
+          "references": [
+            {
+              "label": "P1 切片计划",
+              "path": "plans/p1-personal-assistant.en.md"
+            },
+            {
+              "label": "当前项目状态",
+              "path": "docs/project-status.md"
+            }
+          ]
+        },
+        {
+          "id": "platform-history",
+          "type": "历史归档",
+          "priority": "Phase 0-14",
+          "state": "已归档",
+          "title": "平台底座 Phase 0-14",
+          "summary": "平台底座实施已经全部完成并合入 main，历史证据保留在 plans/phase-00.md 至 plans/phase-14.md。",
+          "detail": "这些计划只用于查历史证据，不再作为当前实施指令或待办清单。",
+          "tags": [
+            "历史",
+            "平台底座"
+          ],
+          "modules": [
+            "contracts",
+            "server",
+            "session-runtime",
+            "storage",
+            "supervisor"
+          ],
+          "checklist": [
+            {
+              "label": "Phase 0-14 归档",
+              "done": true
+            },
+            {
+              "label": "当前状态移除活动指令",
+              "done": true
+            }
+          ],
+          "source": "docs/project-status.md",
+          "references": [
+            {
+              "label": "计划目录",
+              "path": "plans/README.md"
+            },
+            {
+              "label": "架构说明",
+              "path": "docs/architecture.md"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

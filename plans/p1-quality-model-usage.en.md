@@ -1,6 +1,6 @@
 # P1 Wave A: Quality System, Two-Tier Models, and Unified Usage
 
-**Status:** 已完成（2026-09-05）  
+**Status:** engineering implementation merged; independent quality review not passed (2026-09-06)
 **Date:** 2026-08-31  
 **Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`](../docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md)  
 **Current status:** [`docs/project-status.md`](../docs/project-status.md)  
@@ -681,3 +681,45 @@ Known explicit remainders (not Wave A blockers): SUB-04/USAGE-02 L6 true-chain r
 - Desktop diagnostics correlate at least one real failure from visible UI to runtime records without sensitive data.
 - Remaining unsupported features are explicit backlog/spec items rather than implicit assumptions.
 - No Wave A completion claim is made from planning, code merge or CI success alone; real Desktop interaction evidence is required.
+
+## 9. Independent delivery quality review — 2026-09-06
+
+The implementation of A0-A9 is merged on `main` (`15036b7`), but the independent closeout review does not grant product or release completion.
+
+Independent commands on the current HEAD:
+
+```text
+node scripts/verify-pi-sdk-imports.mjs              -> 0
+node scripts/verify-plugin-imports.mjs              -> 0, invalid pass
+npx tsc --noEmit -p tsconfig.json                   -> 0
+npx tsc -p tsconfig.build.json                      -> 0
+npx vitest run                                      -> 2275/2275
+npm run test --workspace=web                        -> 428/428
+npm run web:build                                   -> 0, chunk warning
+npm run desktop:test                                -> 102/102
+npm run desktop:build                               -> 0
+cd web; npx playwright test                         -> 60/60
+Desktop Electron true-chain full suite              -> 26/27
+v13/v14 interrupted migration fault injection       -> failed on retry
+HTTP/WS Origin/Host/Content-Type probe              -> failed trust-boundary expectation
+```
+
+Confirmed findings:
+
+1. `verify-plugin-imports.mjs` compares a filesystem path with a `file://` URL in its CLI guard, so direct execution exits successfully without scanning.
+2. v13/v14 table-rebuild migrations leave temporary tables after interruption and cannot be retried.
+3. A real isolated server accepted a cross-site `text/plain` Session creation request and an evil-Origin WebSocket handshake.
+
+The following statuses remain separate:
+
+```text
+AUTO_PASS: not achieved
+HUMAN_PENDING: yes
+HUMAN_PASS: no
+RELEASE_PENDING: yes
+RELEASE_PASS: no
+```
+
+This review is recorded in
+[`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`](../docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md).
+The implementation history above remains historical evidence and is not rewritten to hide newly discovered findings.

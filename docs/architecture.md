@@ -1,5 +1,31 @@
 # OpenColorful 架构说明
 
+## 可交互架构地图
+
+仓库提供一份可直接打开的 [Architecture Atlas](architecture-map/index.html)，用于从
+系统层、关键调用流程、边界规则下钻到真实源码文件。它不是第二份架构事实源：
+
+- `docs/architecture-map/architecture.manifest.json` 维护模块职责、所有权、不变量、
+  关键流程、已知缺口和关键文件锚点；
+- `docs/architecture-map/architecture.zh-CN.json` 维护与架构 ID 对齐的中文展示说明；
+- `docs/architecture-map/project-board.json` 维护面向开发者的项目状态看板投影；
+- `docs/architecture-map/architecture.generated.js` 由
+  `npm run architecture:map` 生成，补充当前生产文件覆盖率、行数和观察到的 import
+  证据，不得手工编辑；
+- `docs/architecture-map/index.html`、`app.js`、`styles.css` 只负责展示和交互。
+
+新增或移动生产模块后运行：
+
+```powershell
+npm run architecture:map
+npm run architecture:check
+```
+
+`architecture:check` 已接入根质量门。它会在架构 manifest 未覆盖生产源文件、引用的
+文件不存在、中文展示层缺失、项目看板引用失效或生成数据过期时失败。模块边界、不变量
+或产品语义改变时，仍必须同步更新本文件、中文展示层、项目看板、专题架构文档或对应
+Feature Spec；架构地图只负责帮助开发者理解、排序工作和导航。
+
 ## 架构状态
 
 Phase 0、1、2 已于 2026-07-22 完成。Phase 3 已完成：Supervisor 进程管理（Agent Server 生命周期控制、Web 静态资源托管、HTTP/SSE/WS 透明代理、健康检查 PID 验证、串行化 start、进程树清理）、React Web 工作台（三栏布局、per-stream 事件游标、安全 Markdown 渲染、A2UI/TokUI 白名单投影）、真实 Provider 驱动的 10 个 Playwright 浏览器用例（首屏、表单配置、工具调用、Abort、重启恢复、桌面与窄屏布局）。

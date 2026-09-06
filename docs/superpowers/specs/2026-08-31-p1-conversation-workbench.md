@@ -1,7 +1,7 @@
 # P1 波次 B：对话工作台能力
 
 **日期：2026-08-31**  
-**状态：进行中（2026-09-05 B0 产品语义已冻结；B1-B7 未实施）**  
+**状态：工程实现基本完成；独立质量评估未通过（2026-09-06）**
 **实施计划：** [`plans/p1-conversation-workbench.en.md`](../../../plans/p1-conversation-workbench.en.md)  
 **上游路线：** [`docs/positioning-and-roadmap.md`](../../positioning-and-roadmap.md) §五 P1/P2  
 **当前状态：** [`docs/project-status.md`](../../project-status.md)
@@ -94,3 +94,26 @@ Todo 属于会话，仅由第一方工具在轮次执行中写入（会话单飞
 - Kimi Code Web：压缩摘要正文、时间线和 plan 的用户交互参考。
 
 本 Feature Spec 定义产品语义；实现任务、文件边界和验证命令以英文实施计划为准。
+
+## 八、独立交付质量复核（2026-09-06）
+
+B0-B5b 的代码已经合并，B6/B7 已留下集成门记录，但当前不能标记波次 B 为产品完成：
+
+- Desktop 全量真链为 26/27。
+- B3 `BRANCH-03/04` 单独运行可通过，但重复 3 次仅 1 次通过；失败时第二条基线消息的发送按钮长期 disabled。
+- B4 压缩摘要和 B5 Todo 尚无 Electron 真链证据，当前只有 Mock、投影、后端和恢复测试。
+- Web `KNOWN_EVENT_TYPES` 尚未同步 `todo.updated` 和 branch 事件。
+- 人工验收、安装/更新/恢复验收尚未完成。
+
+当前状态：
+
+```text
+AUTO_PASS：未达成
+HUMAN_PENDING：是
+HUMAN_PASS：否
+RELEASE_PENDING：是
+RELEASE_PASS：否
+```
+
+完整证据、人工验收卡和后续修复计划见
+[`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`](../../audits/2026-09-06-wave-a-b-delivery-quality.zh.md)。
