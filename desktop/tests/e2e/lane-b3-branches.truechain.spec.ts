@@ -165,10 +165,18 @@ test.describe("@b3 branches/workbench lane", () => {
       await chat.fill(question1);
       await chat.send();
       await chat.expectIdle(60_000);
+      // expectIdle 存在已知盲区：turn 尚在 createThread/updateModel/updateSettings 的
+      // API 阶段时 streaming 从未翻转为 true，expectIdle 会假通过；随后 setThreadId 触发
+      // 空态↔会话态 Composer 换挂（同名可访问文本框），紧跟其后的 fill 原子写入可能落在
+      // 被卸载节点上丢事件（P1-1 间歇性发送禁用的根因，trace 实证 question2 从未进 DOM）。
+      // 等首轮用户气泡出现 = 视图已完成换挂且 turn 已被接受，之后才能 fill 第二问。
+      await chat.expectMessageVisible(question1, 30_000);
       await lane.setStub({ mode: "fast", text: FAST_REPLY });
       await chat.fill(question2);
       await chat.send();
       await chat.expectIdle(30_000);
+      // 同理：等第二问气泡出现（turn 已接受）再做服务端真值读取与 retry，避免假空闲竞态
+      await chat.expectMessageVisible(question2, 30_000);
 
       // 重试（助手结果，取第一轮的助手条目）→ 新分支只含第一轮（共 2 分支）
       const sessions = await lane.apiGet<SessionListItem[]>("/api/sessions");
