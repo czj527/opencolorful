@@ -10,6 +10,7 @@ import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { PluginFacade } from "../../src/platform/plugin-facade.js";
 import { PluginRegistryStore } from "../../src/storage/plugin-registry-store.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const openDatabases: Array<import("better-sqlite3").Database> = [];
@@ -144,7 +145,7 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       { sourceType: "local", ref: pluginDir },
       [{ pluginId: "example.route", capability: "tool.register", decision: "allowed" as const }],
     );
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: "0.1.0",
       pid: process.pid,
       startedAt: Date.now(),
@@ -153,12 +154,12 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       audit: fixture.audit,
       pluginFacade: facade,
     });
-    const list = await app.request("http://local/api/plugins");
+    const list = await app.request("http://127.0.0.1/api/plugins");
     expect(list.status).toBe(200);
     const body = await list.json() as Array<{ pluginId: string }>;
     expect(body.some((item) => item.pluginId === "example.route")).toBe(true);
 
-    const inspect = await app.request("http://local/api/plugins/inspect", {
+    const inspect = await app.request("http://127.0.0.1/api/plugins/inspect", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sourceRef: { sourceType: "local", ref: pluginDir } }),
@@ -315,7 +316,7 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       audit: fixture.audit,
       hostVersion: "0.1.0",
     });
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: "0.1.0",
       pid: process.pid,
       startedAt: Date.now(),
@@ -325,7 +326,7 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       pluginFacade: facade,
     });
     // B2：来源搜索（local 来源无 baseDir → 空结果，端点 200）
-    const search = await app.request("http://local/api/plugin-sources/search", {
+    const search = await app.request("http://127.0.0.1/api/plugin-sources/search", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sourceType: "local", query: "" }),
@@ -333,9 +334,9 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
     expect(search.status).toBe(200);
     expect(await search.json()).toEqual([]);
     // B3：dev surface 列表与 describe-surface 端点存在（非 404）
-    const surfaces = await app.request("http://local/api/plugins/dev/surfaces");
+    const surfaces = await app.request("http://127.0.0.1/api/plugins/dev/surfaces");
     expect(surfaces.status).toBe(200);
-    const describe = await app.request("http://local/api/plugins/dev/unknown/describe-surface", {
+    const describe = await app.request("http://127.0.0.1/api/plugins/dev/unknown/describe-surface", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ surfaceId: "x" }),
@@ -410,7 +411,7 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       { sourceType: "local", ref: pluginDir },
       [{ pluginId: "example.routes2", capability: "tool.register", decision: "allowed" as const }],
     );
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       version: "0.1.0",
       pid: process.pid,
       startedAt: Date.now(),
@@ -419,14 +420,14 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
       audit: fixture.audit,
       pluginFacade: facade,
     });
-    const asset = await app.request("http://local/api/plugins/example.routes2/assets/skills/hello.md");
+    const asset = await app.request("http://127.0.0.1/api/plugins/example.routes2/assets/skills/hello.md");
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("# Hello");
     // URL 规范在客户端就把 .. 解析掉（404 或 400 都代表拒绝；facade 层另有穿越断言）
-    const escape = await app.request("http://local/api/plugins/example.routes2/assets/../manifest.json");
+    const escape = await app.request("http://127.0.0.1/api/plugins/example.routes2/assets/../manifest.json");
     expect([400, 404]).toContain(escape.status);
     // Secret 写入 + 落盘（listSecretNames 反映激活时声明的 Secret 名，用 hasSecret 验证 store 值）
-    const saved = await app.request("http://local/api/plugins/example.routes2/secrets", {
+    const saved = await app.request("http://127.0.0.1/api/plugins/example.routes2/secrets", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ secretName: "api-key", value: "sk-test-123" }),
@@ -434,7 +435,7 @@ describe("Phase 12 组合根 PluginFacade（T10 接线）", () => {
     expect(saved.status).toBe(200);
     expect(facade.hostApi.secrets.hasSecret("example.routes2", "api-key")).toBe(true);
     expect(fixture.database.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event_name LIKE 'audit.plugin.secret_change_%'").get()).toMatchObject({ n: 2 });
-    const removed = await app.request("http://local/api/plugins/example.routes2/secrets/api-key", { method: "DELETE" });
+    const removed = await app.request("http://127.0.0.1/api/plugins/example.routes2/secrets/api-key", { method: "DELETE" });
     expect(removed.status).toBe(200);
     expect(facade.hostApi.secrets.hasSecret("example.routes2", "api-key")).toBe(false);
   });

@@ -15,6 +15,7 @@ import { PromptService } from "../../src/runtime/prompt-service.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { createServerApp } from "../../src/server/app.js";
 import type { SessionRuntime } from "../../src/runtime/session-runtime.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const openDatabases: import("better-sqlite3").Database[] = [];
@@ -59,7 +60,7 @@ function runtimeSystemPrompt(promptService: PromptService, sessionId: string): s
 }
 
 async function postMessage(app: ReturnType<typeof createServerApp>["app"], sessionId: string): Promise<Response> {
-  return app.request(`http://x/api/sessions/${sessionId}/messages`, {
+  return app.request(`http://127.0.0.1/api/sessions/${sessionId}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ content: "hi" }),
@@ -73,7 +74,7 @@ describe("injectBudgetChars 接线（评审 P1#7b 复现级测试）", () => {
     preferencesStore.update({ memory: { ...defaultMemoryAgentSettings(), injectBudgetChars: 250 } } as never);
     const promptService = new PromptService();
     const replayStore = new EventReplayStore();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       promptService,
       sessionService: ctx.sessionService,
       replayStore,
@@ -99,7 +100,7 @@ describe("injectBudgetChars 接线（评审 P1#7b 复现级测试）", () => {
     const ctx = createContext();
     const promptService = new PromptService();
     const replayStore = new EventReplayStore();
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       promptService,
       sessionService: ctx.sessionService,
       replayStore,

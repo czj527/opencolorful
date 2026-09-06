@@ -14,6 +14,7 @@ import { createServerApp } from "../../../src/server/app.js";
 import { SessionService } from "../../../src/runtime/session-service.js";
 import { PromptService } from "../../../src/runtime/prompt-service.js";
 import { SessionIndex } from "../../../src/storage/session-index.js";
+import { createTrustedServerApp } from "../../fixtures/trusted-app.js";
 
 // ═══════════════════════════════════════════════════════════════
 // Phase 13 T10 组合根验收（plans/phase-13.md §20.1）
@@ -162,7 +163,7 @@ describe("Phase 13 T10 组合根验收", () => {
     const session = sessionService.create({ title: "Skill 会话", cwd: process.cwd(), agentId: "agent-a" });
     session.selectModel("faux", "faux-1");
 
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       paths: fixture.paths,
       sessionService,
       promptService,

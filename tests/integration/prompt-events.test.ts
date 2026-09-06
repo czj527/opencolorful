@@ -16,6 +16,7 @@ import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import { UsageRecorder } from "../../src/runtime/usage-recorder.js";
 import { UsageStore } from "../../src/storage/usage-store.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -187,8 +188,8 @@ describe("prompt event normalization", () => {
     const { runtime } = await createRuntime({ response: "route reply", tokensPerSecond: 10 });
     const promptService = new PromptService();
     promptService.register(runtime);
-    const { app } = createServerApp({ promptService });
-    const response = await app.request("http://local/api/sessions/session-prompt/messages", {
+    const { app } = createTrustedServerApp({ promptService });
+    const response = await app.request("http://127.0.0.1/api/sessions/session-prompt/messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content: "route prompt" }),
@@ -196,13 +197,13 @@ describe("prompt event normalization", () => {
     expect(response.status).toBe(202);
     const { streamId } = (await response.json()) as { streamId: string };
     expect(
-      await app.request("http://local/api/sessions/session-prompt/abort", {
+      await app.request("http://127.0.0.1/api/sessions/session-prompt/abort", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ streamId: "stale-stream" }),
       }),
     ).toHaveProperty("status", 200);
-    expect((await app.request("http://local/api/sessions/session-prompt/abort", {
+    expect((await app.request("http://127.0.0.1/api/sessions/session-prompt/abort", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ streamId }),

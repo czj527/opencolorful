@@ -9,6 +9,7 @@ import { getRuntimePaths } from "../../src/config/paths.js";
 import { createServerApp } from "../../src/server/app.js";
 import { startForegroundServer } from "../../src/server/start.js";
 import { readRuntimeState } from "../../src/server/runtime-state.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -20,7 +21,7 @@ afterEach(() => {
 
 describe("server health", () => {
   it("returns a stable health response without starting a listener", async () => {
-    const { app } = createServerApp({ version: PLATFORM_VERSION, pid: 1234, startedAt: Date.now() });
+    const { app } = createTrustedServerApp({ version: PLATFORM_VERSION, pid: 1234, startedAt: Date.now() });
     const response = await app.request("http://127.0.0.1/api/health");
 
     expect(response.status).toBe(200);

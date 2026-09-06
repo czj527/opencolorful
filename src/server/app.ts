@@ -34,6 +34,7 @@ import { registerSkillRoutes } from "./routes/skills.js";
 import { registerSkillAdminRoutes } from "./routes/skill-admin.js";
 import { ClientRegistry } from "./ws/client-registry.js";
 import { SessionHandler } from "./ws/session-handler.js";
+import { createTrustBoundaryMiddleware, generateServerToken } from "./trust-boundary.js";
 
 export interface ServerAppOptions {
   readonly version?: string;
@@ -72,11 +73,22 @@ export interface ServerAppOptions {
   readonly subagent?: import("./routes/subagents.js").SubagentRouteDeps & {
     readonly composition?: import("../runtime/subagents/composition.js").SubagentRuntimeComposition;
   };
+  /**
+   * P0-1 审计修复：本机 HTTP/WS 信任边界。startForegroundServer 以启动时解析的
+   * 令牌注入（env > 令牌文件 > 生成落盘）；缺省（测试/内联装配）时生成随机临时
+   * 令牌并经 ServerAppResult.token 暴露给调用方。没有绕过校验的开关。
+   */
+  readonly trustBoundary?: {
+    readonly token: string;
+    readonly bindHost?: string;
+  };
 }
 
 export interface ServerAppResult {
   readonly app: Hono;
   readonly nodeWebSocket: ReturnType<typeof createNodeWebSocket>;
+  /** 本实例的访问令牌（受信客户端据此携带 Authorization / X-OC-Token / WS ?token=） */
+  readonly token: string;
 }
 
 export function createServerApp(options: ServerAppOptions = {}): ServerAppResult {
@@ -84,6 +96,14 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   const pid = options.pid ?? process.pid;
   const startedAt = options.startedAt ?? Date.now();
   const app = new Hono();
+  const trustToken = options.trustBoundary?.token ?? generateServerToken();
+
+  // ── P0-1 信任边界：必须先于一切路由与埋点中间件 ──
+  // Host（DNS-rebinding）/ 写请求令牌 / JSON Content-Type / Origin 规则 / WS 握手。
+  app.use("*", createTrustBoundaryMiddleware({
+    token: trustToken,
+    ...(options.trustBoundary?.bindHost !== undefined ? { bindHost: options.trustBoundary.bindHost } : {}),
+  }));
 
   // Phase 11 API 埋点中间件：请求计时 → diagnostic（debug）；5xx/异常 → api.request.failed。
   // 不记录请求体/响应体；跳过 WS 与 SSE 长连接（计时无意义）。
@@ -296,5 +316,5 @@ export function createServerApp(options: ServerAppOptions = {}): ServerAppResult
   }
 
   app.notFound((context) => context.json({ code: "NOT_FOUND", message: "资源不存在" }, 404));
-  return { app, nodeWebSocket };
+  return { app, nodeWebSocket, token: trustToken };
 }

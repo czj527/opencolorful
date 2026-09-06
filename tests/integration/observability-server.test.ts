@@ -136,7 +136,7 @@ describe("T4 一次 Turn 的 trace 还原", () => {
 
       const accepted = await fetch(`${baseUrl}/api/sessions/${sessionId}/messages`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", authorization: `Bearer ${server.token}` },
         body: JSON.stringify({ content: "hello t4" }),
       });
       expect(accepted.status).toBe(202);

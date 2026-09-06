@@ -12,7 +12,7 @@ import { EventReplayStore } from "../../src/runtime/event-replay-store.js";
 import { PromptService } from "../../src/runtime/prompt-service.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
-import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import {
   createRuntimeBootstrap,
@@ -80,7 +80,7 @@ interface BootstrapWorld {
   promptService: PromptService;
   replayStore: EventReplayStore;
   agentStore: AgentStore;
-  app: ReturnType<typeof createServerApp>["app"];
+  app: ReturnType<typeof createTrustedServerApp>["app"];
   sessionId: string;
   agentId: string;
 }
@@ -117,7 +117,7 @@ async function createAgentBoundWorld(): Promise<BootstrapWorld> {
     baseColor: blankBaseColor,
     sandbox: { protectedPaths: ["secrets/"] },
   });
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     paths,
     database,
     sessionService,
@@ -126,7 +126,7 @@ async function createAgentBoundWorld(): Promise<BootstrapWorld> {
     agentStore,
     audit,
   });
-  const createRes = await app.request("http://local/api/sessions", {
+  const createRes = await app.request("http://127.0.0.1/api/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: "设置读取失败回归会话", agentId: "agent-fc" }),
@@ -179,7 +179,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
   it("同一失败经 messages 路由映射为 500 稳定错误响应，且重试仍拒绝", async () => {
     const world = await createAgentBoundWorld();
     const failingStore = new SettingsReadFailureAgentStore(world.paths.agents);
-    const { app: failingApp } = createServerApp({
+    const { app: failingApp } = createTrustedServerApp({
       paths: world.paths,
       database: world.database,
       sessionService: world.sessionService,
@@ -191,7 +191,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const res = await failingApp.request(
-        `http://local/api/sessions/${world.sessionId}/messages`,
+        `http://127.0.0.1/api/sessions/${world.sessionId}/messages`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -211,7 +211,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
   it("getSettings 正常：Agent 绑定 Session 行为与修复前一致（Runtime 创建 + turn 完成）", async () => {
     const world = await createAgentBoundWorld();
     const promptRes = await world.app.request(
-      `http://local/api/sessions/${world.sessionId}/messages`,
+      `http://127.0.0.1/api/sessions/${world.sessionId}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -250,7 +250,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
     const replayStore = new EventReplayStore();
     // agentStore 存在且 getSettings 坏——只有 Agent 绑定会话才允许触发 fail-closed
     const failingStore = new SettingsReadFailureAgentStore(paths.agents);
-    const { app } = createServerApp({
+    const { app } = createTrustedServerApp({
       paths,
       database,
       sessionService,
@@ -259,7 +259,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
       agentStore: failingStore,
       audit,
     });
-    const createRes = await app.request("http://local/api/sessions", {
+    const createRes = await app.request("http://127.0.0.1/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "无绑定会话", cwd: home }),
@@ -268,7 +268,7 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
     const created = (await createRes.json()) as { id: string };
 
     const promptRes = await app.request(
-      `http://local/api/sessions/${created.id}/messages`,
+      `http://127.0.0.1/api/sessions/${created.id}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },

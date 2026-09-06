@@ -11,6 +11,7 @@ import { SessionService } from "../../src/runtime/session-service.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { SessionIndex } from "../../src/storage/session-index.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,7 +24,7 @@ function createContext() {
   const sessionService = new SessionService(paths, index);
   const promptService = new PromptService();
   const replayStore = new EventReplayStore();
-  const { app } = createServerApp({
+  const { app } = createTrustedServerApp({
     paths,
     sessionService,
     promptService,
@@ -46,7 +47,7 @@ describe("compact route", () => {
 
     expect(context.promptService.hasRuntime(created.id)).toBe(false);
 
-    const response = await context.app.request(`http://local/api/sessions/${created.id}/compact`, {
+    const response = await context.app.request(`http://127.0.0.1/api/sessions/${created.id}/compact`, {
       method: "POST",
     });
 
@@ -66,7 +67,7 @@ describe("compact route", () => {
 
     // 先用一条消息触发懒重建，并借极小的 tokensPerSecond 制造生成窗口
     const messageResponse = await context.app.request(
-      `http://local/api/sessions/${created.id}/messages`,
+      `http://127.0.0.1/api/sessions/${created.id}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -88,7 +89,7 @@ describe("compact route", () => {
     // 并接受两种合法结果：若恰好落在窗口内则 409 SESSION_BUSY；若已结束则 200/409（无需压缩）。
     // 为保证确定性，另行构造一个明确的 busy 场景见下一个测试。
     const compactResponse = await context.app.request(
-      `http://local/api/sessions/${created.id}/compact`,
+      `http://127.0.0.1/api/sessions/${created.id}/compact`,
       { method: "POST" },
     );
     expect([200, 409]).toContain(compactResponse.status);
@@ -105,7 +106,7 @@ describe("compact route", () => {
 
     // 触发懒重建
     const messageResponse = await context.app.request(
-      `http://local/api/sessions/${created.id}/messages`,
+      `http://127.0.0.1/api/sessions/${created.id}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -120,7 +121,7 @@ describe("compact route", () => {
     context.promptService.isBusy = () => true;
     try {
       const compactResponse = await context.app.request(
-        `http://local/api/sessions/${created.id}/compact`,
+        `http://127.0.0.1/api/sessions/${created.id}/compact`,
         { method: "POST" },
       );
       expect(compactResponse.status).toBe(409);
@@ -142,7 +143,7 @@ describe("compact route", () => {
     created.selectModel("faux", "faux-1");
     context.sessionService.archive(created.id);
 
-    const response = await context.app.request(`http://local/api/sessions/${created.id}/compact`, {
+    const response = await context.app.request(`http://127.0.0.1/api/sessions/${created.id}/compact`, {
       method: "POST",
     });
     expect(response.status).toBe(409);
@@ -157,7 +158,7 @@ describe("compact route", () => {
   it("returns 404 for a missing session", async () => {
     const context = createContext();
     const response = await context.app.request(
-      "http://local/api/sessions/00000000-0000-4000-8000-000000000099/compact",
+      "http://127.0.0.1/api/sessions/00000000-0000-4000-8000-000000000099/compact",
       { method: "POST" },
     );
     expect(response.status).toBe(404);
@@ -174,7 +175,7 @@ describe("compact route", () => {
 
     // 发一条消息让会话有内容，并触发懒重建挂上 replayStore
     const messageResponse = await context.app.request(
-      `http://local/api/sessions/${created.id}/messages`,
+      `http://127.0.0.1/api/sessions/${created.id}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -187,7 +188,7 @@ describe("compact route", () => {
     await new Promise((resolve) => setTimeout(resolve, 800));
 
     const compactResponse = await context.app.request(
-      `http://local/api/sessions/${created.id}/compact`,
+      `http://127.0.0.1/api/sessions/${created.id}/compact`,
       { method: "POST" },
     );
 

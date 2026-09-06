@@ -11,6 +11,7 @@ import { ModelService } from "../../src/runtime/model-service.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 const API_KEY = "integration-secret-key";
@@ -68,9 +69,9 @@ describe("provider settings", () => {
     const paths = createPaths();
     const { audit: firstAudit, close: closeFirst } = makeAudit(paths);
     const firstService = await ModelService.create(paths, new ProviderStore(paths.providerSettings), firstAudit);
-    const { app: firstApp } = createServerApp({ modelService: firstService });
+    const { app: firstApp } = createTrustedServerApp({ modelService: firstService });
 
-    const putResponse = await firstApp.request("http://local/api/settings/providers", {
+    const putResponse = await firstApp.request("http://127.0.0.1/api/settings/providers", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: providerInput(), apiKey: API_KEY }),
@@ -92,14 +93,14 @@ describe("provider settings", () => {
 
     const { audit: reopenedAudit, close: closeReopened } = makeAudit(paths);
     const reopenedService = await ModelService.create(paths, new ProviderStore(paths.providerSettings), reopenedAudit);
-    const { app: reopenedApp } = createServerApp({ modelService: reopenedService });
-    const providers = await (await reopenedApp.request("http://local/api/settings/providers")).json();
+    const { app: reopenedApp } = createTrustedServerApp({ modelService: reopenedService });
+    const providers = await (await reopenedApp.request("http://127.0.0.1/api/settings/providers")).json();
     expect(providers).toEqual([
       expect.objectContaining({ providerId: "local-openai", credentialConfigured: true }),
     ]);
     closeReopened();
 
-    const models = await (await reopenedApp.request("http://local/api/models")).json();
+    const models = await (await reopenedApp.request("http://127.0.0.1/api/models")).json();
     expect(models).toEqual([
       expect.objectContaining({
         providerId: "local-openai",
@@ -125,9 +126,9 @@ describe("provider settings", () => {
   ])("rejects %s without leaking submitted secrets", async (_name, provider) => {
     const paths = createPaths();
     const service = await ModelService.create(paths, new ProviderStore(paths.providerSettings));
-    const { app } = createServerApp({ modelService: service });
+    const { app } = createTrustedServerApp({ modelService: service });
 
-    const response = await app.request("http://local/api/settings/providers", {
+    const response = await app.request("http://127.0.0.1/api/settings/providers", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider, apiKey: API_KEY }),

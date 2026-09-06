@@ -37,13 +37,22 @@ export interface AbortResult {
 }
 
 export class TuiApiClient {
-  constructor(private readonly baseUrl: string) {}
+  /**
+   * @param token 可选本机服务访问令牌（P0-1 信任边界）。CLI 侧经
+   * readPresentServerToken（env > 令牌文件）只读解析后传入；写请求依赖它通过
+   * 服务端校验。令牌不落日志、不进错误消息。
+   */
+  constructor(
+    private readonly baseUrl: string,
+    private readonly token?: string | null,
+  ) {}
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
       headers: {
         "content-type": "application/json",
+        ...(this.token ? { "x-oc-token": this.token } : {}),
         ...options.headers,
       },
     });

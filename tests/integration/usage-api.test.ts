@@ -9,6 +9,7 @@ import type { UsageCallStatus, UsageRole, UsageSource } from "../../src/contract
 import { openMetadataDatabase } from "../../src/storage/database.js";
 import { UsageStore } from "../../src/storage/usage-store.js";
 import { createServerApp } from "../../src/server/app.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,7 +19,7 @@ function createContext() {
   const paths = getRuntimePaths({ OPENCOLORFUL_HOME: directory });
   const database = openMetadataDatabase(paths.database);
   const usageStore = new UsageStore(database);
-  const { app } = createServerApp({ usageStore });
+  const { app } = createTrustedServerApp({ usageStore });
   return { paths, database, usageStore, app };
 }
 
@@ -79,7 +80,7 @@ describe("usage API", () => {
   describe("GET /api/sessions/:id/usage", () => {
     it("returns zeroed structure for a session with no records", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/sessions/session-empty/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/session-empty/usage");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.sessionId).toBe("session-empty");
@@ -95,7 +96,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { sessionId: "s1", turnId: "t1", input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 180 });
       insertRecord(usageStore, { sessionId: "s1", turnId: "t2", input: 200, output: 80, cacheRead: 40, cacheWrite: 20, totalTokens: 340 });
 
-      const response = await app.request("http://local/api/sessions/s1/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/s1/usage");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.totals).toEqual({ input: 300, output: 130, cacheRead: 60, cacheWrite: 30, totalTokens: 520 });
@@ -109,7 +110,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertRecord(usageStore, { sessionId: "s1", turnId: "t1", input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 });
 
-      const response = await app.request("http://local/api/sessions/s1/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/s1/usage");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.cacheHitRate).toBeNull();
       database.close();
@@ -132,7 +133,7 @@ describe("usage API", () => {
         createdAt: "2026-07-25T12:00:00.000Z",
       });
 
-      const response = await app.request("http://local/api/sessions/s1/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/s1/usage");
       const body = (await response.json()) as Record<string, unknown>;
       const context = body.context as { tokens: number; contextWindow: number; percent: number };
       expect(context.tokens).toBe(8000);
@@ -145,7 +146,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertRecord(usageStore, { sessionId: "s1", turnId: "t1" });
 
-      const response = await app.request("http://local/api/sessions/s1/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/s1/usage");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.context).toBeNull();
       database.close();
@@ -160,7 +161,7 @@ describe("usage API", () => {
       // 派生子代理调用（source=subagent，缺省 role=secondary）
       insertRecord(usageStore, { sessionId: "s1", turnId: null, source: "subagent", runId: "run-1", agentId: "agent-x", createdAt: now });
 
-      const response = await app.request("http://local/api/sessions/s1/usage");
+      const response = await app.request("http://127.0.0.1/api/sessions/s1/usage");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(2);
@@ -173,7 +174,7 @@ describe("usage API", () => {
   describe("GET /api/usage/summary", () => {
     it("returns empty structure when no records exist", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary");
+      const response = await app.request("http://127.0.0.1/api/usage/summary");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.days).toBe(30);
@@ -197,7 +198,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { sessionId: "s1", turnId: "t1", createdAt: today });
       insertRecord(usageStore, { sessionId: "s2", turnId: "t2", createdAt: today });
 
-      const response = await app.request("http://local/api/usage/summary");
+      const response = await app.request("http://127.0.0.1/api/usage/summary");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.days).toBe(30);
@@ -212,7 +213,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertRecord(usageStore, { createdAt: new Date().toISOString() });
 
-      const response = await app.request("http://local/api/usage/summary?days=7");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=7");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.days).toBe(7);
@@ -221,7 +222,7 @@ describe("usage API", () => {
 
     it("returns 400 for days=0", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?days=0");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=0");
       expect(response.status).toBe(400);
       const body = (await response.json()) as { code: string; message: string };
       expect(body.code).toBe("INVALID_INPUT");
@@ -231,21 +232,21 @@ describe("usage API", () => {
 
     it("returns 400 for days=366", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?days=366");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=366");
       expect(response.status).toBe(400);
       database.close();
     });
 
     it("returns 400 for non-integer days", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?days=abc");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=abc");
       expect(response.status).toBe(400);
       database.close();
     });
 
     it("returns 400 for float days", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?days=7.5");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=7.5");
       expect(response.status).toBe(400);
       database.close();
     });
@@ -256,7 +257,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { turnId: "t1", createdAt: `${today}T08:00:00.000Z` });
       insertRecord(usageStore, { turnId: "t2", createdAt: `${today}T12:00:00.000Z` });
 
-      const response = await app.request("http://local/api/usage/summary?days=1");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=1");
       const body = (await response.json()) as Record<string, unknown>;
       const byDay = body.byDay as Array<{ date: string; input: number; totalTokens: number }>;
       expect(byDay.length).toBe(1);
@@ -273,7 +274,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { turnId: "t2", provider: "faux", model: "faux-1", createdAt: now });
       insertRecord(usageStore, { turnId: "t3", provider: "other", model: "other-1", createdAt: now });
 
-      const response = await app.request("http://local/api/usage/summary?days=1");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=1");
       const body = (await response.json()) as Record<string, unknown>;
       const byModel = body.byModel as Array<{ provider: string; model: string; totalTokens: number }>;
       expect(byModel.length).toBe(2);
@@ -291,7 +292,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { turnId: "t-old", createdAt: old.toISOString() });
       insertRecord(usageStore, { turnId: "t-new", createdAt: new Date().toISOString() });
 
-      const response = await app.request("http://local/api/usage/summary?days=5");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=5");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(1);
       database.close();
@@ -362,7 +363,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?source=utility");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=utility");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(0);
@@ -376,7 +377,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?source=main");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=main");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(2);
       expect(body.calls).toBe(2);
@@ -389,7 +390,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?source=subagent");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=subagent");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.turns).toBe(0);
       expect(body.calls).toBe(2);
@@ -402,7 +403,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?role=secondary");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?role=secondary");
       const body = (await response.json()) as Record<string, unknown>;
       // main 缺省 role=primary，其余缺省 secondary
       expect(body.calls).toBe(3);
@@ -415,7 +416,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?role=primary");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?role=primary");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(2);
       expect(body.turns).toBe(2);
@@ -427,7 +428,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?agentId=agent-explorer");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?agentId=agent-explorer");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(1);
       expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 200 });
@@ -440,7 +441,7 @@ describe("usage API", () => {
       // 另一会话的行不应计入
       insertRecord(usageStore, { sessionId: "s-other", turnId: "turn-other", totalTokens: 999 });
 
-      const response = await app.request("http://local/api/usage/summary?sessionId=s-mix");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?sessionId=s-mix");
       const body = (await response.json()) as Record<string, unknown>;
       // s-mix：main×2 + subagent×2（utility 无会话归属）
       expect(body.calls).toBe(4);
@@ -452,7 +453,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?providerId=other");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?providerId=other");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(1);
       expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 200 });
@@ -465,7 +466,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?modelId=faux-2");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?modelId=faux-2");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(1);
       expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 300 });
@@ -476,13 +477,13 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const trimmed = await app.request("http://local/api/usage/summary?agentId=%20agent-planner%20");
+      const trimmed = await app.request("http://127.0.0.1/api/usage/summary?agentId=%20agent-planner%20");
       expect(trimmed.status).toBe(200);
       const trimmedBody = (await trimmed.json()) as Record<string, unknown>;
       expect(trimmedBody.calls).toBe(1);
       expect(trimmedBody.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 300 });
 
-      const empty = await app.request("http://local/api/usage/summary?agentId=");
+      const empty = await app.request("http://127.0.0.1/api/usage/summary?agentId=");
       expect(empty.status).toBe(200);
       const emptyBody = (await empty.json()) as Record<string, unknown>;
       // 空串视为未提供：返回全部 5 行
@@ -492,7 +493,7 @@ describe("usage API", () => {
 
     it("returns 400 for invalid source", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?source=unknown");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=unknown");
       expect(response.status).toBe(400);
       const body = (await response.json()) as { code: string; message: string };
       expect(body.code).toBe("INVALID_INPUT");
@@ -502,7 +503,7 @@ describe("usage API", () => {
 
     it("returns 400 for invalid role", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?role=admin");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?role=admin");
       expect(response.status).toBe(400);
       const body = (await response.json()) as { code: string; message: string };
       expect(body.code).toBe("INVALID_INPUT");
@@ -512,7 +513,7 @@ describe("usage API", () => {
 
     it("returns 400 for invalid days combined with valid filter", async () => {
       const { app, database } = createContext();
-      const response = await app.request("http://local/api/usage/summary?source=utility&days=999");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=utility&days=999");
       expect(response.status).toBe(400);
       const body = (await response.json()) as { code: string; message: string };
       expect(body.code).toBe("INVALID_INPUT");
@@ -524,7 +525,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?source=subagent&sessionId=s-mix");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=subagent&sessionId=s-mix");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(2);
       expect(body.turns).toBe(0);
@@ -536,7 +537,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary?source=utility&providerId=faux");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?source=utility&providerId=faux");
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(1);
       expect(body.totals).toEqual({ input: 100, output: 50, cacheRead: 20, cacheWrite: 10, totalTokens: 400 });
@@ -551,7 +552,7 @@ describe("usage API", () => {
       insertRecord(usageStore, { source: "utility", sessionId: null, turnId: null, callId: "call-1", provider: "other", model: "other-1", totalTokens: 350, createdAt: now });
       insertRecord(usageStore, { source: "main", sessionId: "s1", turnId: "t2", totalTokens: 400, status: "failed", createdAt: now });
 
-      const response = await app.request("http://local/api/usage/summary?days=1");
+      const response = await app.request("http://127.0.0.1/api/usage/summary?days=1");
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.calls).toBe(4);
@@ -585,7 +586,7 @@ describe("usage API", () => {
       const { app, usageStore, database } = createContext();
       insertMixedRecords(usageStore, "s-mix");
 
-      const response = await app.request("http://local/api/usage/summary");
+      const response = await app.request("http://127.0.0.1/api/usage/summary");
       const body = (await response.json()) as Record<string, unknown>;
       // 既有字段零变化：键集合包含旧字段且形状不变
       expect(Object.keys(body)).toEqual(

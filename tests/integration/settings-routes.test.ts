@@ -15,6 +15,7 @@ import { SessionIndex } from "../../src/storage/session-index.js";
 import { SessionService } from "../../src/runtime/session-service.js";
 import { createServerApp } from "../../src/server/app.js";
 import { AuditRecorder } from "../../src/observability/audit-recorder.js";
+import { createTrustedServerApp } from "../fixtures/trusted-app.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -71,13 +72,13 @@ describe("preferences routes", () => {
   it("GET /api/settings/preferences returns defaults and layout", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const resp = await app.request("http://local/api/settings/preferences");
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences");
       expect(resp.status).toBe(200);
       const body = (await resp.json()) as { version: number; layout: Record<string, unknown> };
       expect(body.version).toBe(2);
@@ -98,13 +99,13 @@ describe("preferences routes", () => {
   it("PUT /api/settings/preferences updates layout and re-reads it", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ layout: { leftSidebarWidth: 360, focusMode: true } }),
@@ -127,7 +128,7 @@ describe("preferences routes", () => {
   it("preserves memory and observability when patching unrelated sections", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
@@ -144,7 +145,7 @@ describe("preferences routes", () => {
       };
       ctx.preferencesStore.update({ memory, observability });
 
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -176,13 +177,13 @@ describe("preferences routes", () => {
   it("PUT /api/settings/preferences validates tool mode", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ defaults: { toolMode: "danger" } }),
@@ -200,13 +201,13 @@ describe("preferences routes", () => {
   it("rejects all as a global default because workspace confirmation is session-scoped", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ defaults: { toolMode: "all" } }),
@@ -224,20 +225,20 @@ describe("preferences routes", () => {
     const ctx = await createContext();
     try {
       // 先写入一个合法默认
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const ok = await app.request("http://local/api/settings/providers", {
+      const ok = await app.request("http://127.0.0.1/api/settings/providers", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider: providerInput(), apiKey: "secret" }),
       });
       expect(ok.status).toBe(200);
 
-      const setDefault = await app.request("http://local/api/settings/preferences", {
+      const setDefault = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -247,7 +248,7 @@ describe("preferences routes", () => {
       expect(setDefault.status).toBe(200);
 
       // 然后尝试写入一个不存在的模型引用 → 应该 400 且不修改文档
-      const bad = await app.request("http://local/api/settings/preferences", {
+      const bad = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -268,20 +269,20 @@ describe("preferences routes", () => {
   it("PUT subagents.defaultModel persists through route → file → reopen", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
-      const ok = await app.request("http://local/api/settings/providers", {
+      const ok = await app.request("http://127.0.0.1/api/settings/providers", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider: providerInput(), apiKey: "secret" }),
       });
       expect(ok.status).toBe(200);
 
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -298,7 +299,7 @@ describe("preferences routes", () => {
       });
 
       // 无关 section 的后续写入不得丢弃 subagents（路由 merge + store update 全链路）
-      const unrelated = await app.request("http://local/api/settings/preferences", {
+      const unrelated = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ layout: { focusMode: true } }),
@@ -321,14 +322,14 @@ describe("preferences routes", () => {
   it("PUT /api/settings/preferences persists showToolCalls and showThinking", async () => {
     const ctx = await createContext();
     try {
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
 
       // 写入新的 appearance 值
-      const resp = await app.request("http://local/api/settings/preferences", {
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -356,18 +357,18 @@ describe("preferences routes", () => {
     const ctx = await createContext();
     try {
       // 写入一个 Provider + API key
-      const { app } = createServerApp({
+      const { app } = createTrustedServerApp({
         modelService: ctx.modelService,
         sessionService: ctx.sessionService,
         preferencesStore: ctx.preferencesStore,
       });
-      await app.request("http://local/api/settings/providers", {
+      await app.request("http://127.0.0.1/api/settings/providers", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider: providerInput(), apiKey: "super-secret-key" }),
       });
 
-      const resp = await app.request("http://local/api/settings/preferences");
+      const resp = await app.request("http://127.0.0.1/api/settings/preferences");
       const text = await resp.text();
       expect(text).not.toContain("super-secret-key");
       expect(text).not.toContain("apiKey");
