@@ -35,6 +35,7 @@
 | `docs/logging-architecture.md` | 日志架构权威（三通道、trace、持久化、隐私与保留） | 开发或评审日志/插件/subagent 时读 |
 | `docs/memory-architecture.md` | 记忆架构权威 | 开发或评审记忆功能时读 |
 | `docs/architecture.md` | 架构说明（平台层技术栈/模块边界/事件协议） | 改平台层时读 |
+| `docs/architecture-map/` | 可交互架构地图；manifest 维护语义，zh-CN 词典维护中文解释，project-board 维护开发看板，生成器维护文件覆盖率与导入证据 | 理解模块关系、查看当前状态、跳转源码或新增模块时读 |
 | `docs/development.md` | 开发流程规范——部分已被本文件简化 | 改流程前读 |
 | `docs/product.md` | 产品说明（旧定位，已过时，以 roadmap 为准） | 参考历史 |
 | `plans/phase-00~14.md` | 平台底座阶段计划，**已全部归档** | 仅查历史证据时读 |

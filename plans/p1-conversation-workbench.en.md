@@ -1,6 +1,6 @@
 # P1 Wave B: Conversation Workbench
 
-**Status:** 进行中（B0 semantics frozen 2026-09-05; B1-B7 not started）  
+**Status:** engineering implementation mostly complete; independent quality review not passed (2026-09-06)
 **Date:** 2026-08-31  
 **Authoritative product spec:** [`docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`](../docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md)  
 **Current status:** [`docs/project-status.md`](../docs/project-status.md)  
@@ -530,3 +530,41 @@ Main-Agent review: gates executed personally; evidence above is first-hand, not 
 - Durable session todo has a real writer, persistence, event/replay, projection and recovery path.
 - Migration, concurrency, multi-client and failure evidence is complete.
 - Plan remains Planning until the main Agent has independently verified all evidence; planning, code merge or CI success alone never marks the wave complete.
+
+## 10. Independent delivery quality review — 2026-09-06
+
+B0-B5b is merged on `main` (`15036b7`) and B6/B7 recorded the first integration gate, but the independent review keeps Wave B open.
+
+Current evidence:
+
+```text
+web Playwright                                  -> 60/60
+Desktop unit suite                              -> 102/102
+B-focused integration set                       -> 52/52
+Desktop Electron true-chain full suite          -> 26/27
+B3 BRANCH-03/04 single run                      -> pass
+B3 BRANCH-03/04 repeat-each=3                   -> 1/3 pass, 2/3 fail
+```
+
+The B3 failure is intermittent rather than stable: the second baseline message reaches `ChatPO.send()` with a disabled Send button. It is recorded as a reproduced flakiness/UI-state defect with an open root cause, not dismissed as harmless test noise and not overstated as a deterministic product failure.
+
+Unclosed evidence:
+
+1. No Electron true-chain spec proves the B4 live compaction card and post-restart history identity.
+2. No Electron true-chain spec proves the B5 real `todo_write` call, live card, and restart recovery.
+3. The Web SSE client has not declared `todo.updated` or the new branch events.
+4. Human acceptance and installation/update/recovery acceptance are pending.
+
+Wave B statuses:
+
+```text
+AUTO_PASS: not achieved
+HUMAN_PENDING: yes
+HUMAN_PASS: no
+RELEASE_PENDING: yes
+RELEASE_PASS: no
+```
+
+The full evidence and human acceptance cards are recorded in
+[`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`](../docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md).
+Historical B6/B7 implementation records are retained as historical records; this review supersedes only the current delivery status.

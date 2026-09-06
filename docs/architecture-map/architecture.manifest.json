@@ -1,0 +1,1894 @@
+{
+  "version": 1,
+  "title": "OpenColorful / Architecture Atlas",
+  "subtitle": "A living map of the local-first assistant platform",
+  "sourceOfTruth": "This manifest owns semantic module responsibilities, invariants, critical flows, and the files that anchor each boundary. Generated file inventory and import evidence are derived from the repository.",
+  "status": {
+    "label": "P1 Wave B in progress",
+    "tone": "active",
+    "summary": "The repository is on the conversation workbench closeout lane. B0-B5b are implemented; B6 recorded bounded defects and deferred true-chain evidence.",
+    "source": "docs/project-status.md",
+    "sourceLabel": "Open current project status"
+  },
+  "layers": [
+    {
+      "id": "surfaces",
+      "label": "Product surfaces",
+      "description": "Where a person or operator enters the platform.",
+      "tone": "cyan"
+    },
+    {
+      "id": "boundary",
+      "label": "Process and protocol boundary",
+      "description": "Stable cross-process vocabulary and transport adapters.",
+      "tone": "violet"
+    },
+    {
+      "id": "runtime",
+      "label": "Agent runtime",
+      "description": "Session execution, memory, skills, plugins, subagents, and observability.",
+      "tone": "green"
+    },
+    {
+      "id": "persistence",
+      "label": "Persistence and host services",
+      "description": "Durable facts, credentials, process lifecycle, and local safety boundaries.",
+      "tone": "amber"
+    },
+    {
+      "id": "extension",
+      "label": "Extension packages",
+      "description": "Public plugin protocol and runtime packages used by external integrations.",
+      "tone": "coral"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "desktop-shell",
+      "label": "Desktop Electron shell",
+      "shortLabel": "Desktop shell",
+      "layer": "surfaces",
+      "status": "active",
+      "roots": [
+        "desktop/electron/",
+        "desktop/scripts/"
+      ],
+      "purpose": "Owns the native window, preload capability boundary, supervisor proxy, SSE proxy, update flow, and packaged application lifecycle.",
+      "owns": [
+        "Electron main process and window lifecycle",
+        "Preload-exposed shell operations",
+        "Local server proxy and restart-aware connection",
+        "Packaged release staging and verification"
+      ],
+      "invariants": [
+        "Renderer never receives runtime credentials, arbitrary filesystem access, or direct Agent APIs.",
+        "The packaged server and plugin workspace dependencies must be verified before release.",
+        "Supervisor identity is checked before a proxy adopts a process."
+      ],
+      "docs": [
+        {
+          "label": "Desktop layout and isolation",
+          "path": "docs/repository-layout.md"
+        },
+        {
+          "label": "Release train",
+          "path": "docs/release.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "desktop/electron/main.cjs",
+          "label": "Electron entry"
+        },
+        {
+          "path": "desktop/electron/preload.cjs",
+          "label": "Preload boundary"
+        },
+        {
+          "path": "desktop/electron/api-proxy.cjs",
+          "label": "HTTP proxy"
+        },
+        {
+          "path": "desktop/scripts/verify-pack.mjs",
+          "label": "Package verifier"
+        }
+      ],
+      "layout": {
+        "x": 30,
+        "y": 70,
+        "w": 190,
+        "h": 86
+      }
+    },
+    {
+      "id": "desktop-renderer",
+      "label": "Desktop React workbench",
+      "shortLabel": "Desktop UI",
+      "layer": "surfaces",
+      "status": "active",
+      "roots": [
+        "desktop/src/"
+      ],
+      "purpose": "The product frontend: session-centric conversation, branch navigation, compaction and todo projections, memory, logs, usage, settings, and agent identity.",
+      "owns": [
+        "DesktopDataSource consumer model",
+        "Renderer state and projector",
+        "Conversation and workbench components",
+        "Mock scenarios and renderer-level acceptance"
+      ],
+      "invariants": [
+        "UI is read-only for session todo in Wave B; the first-party tool is the writer.",
+        "Renderer talks to the backend through the data source and preload bridge.",
+        "Live events and reload/restart state must converge to the same projection."
+      ],
+      "docs": [
+        {
+          "label": "Desktop design baseline",
+          "path": "docs/design.md"
+        },
+        {
+          "label": "Wave B semantics",
+          "path": "docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "desktop/src/App.tsx",
+          "label": "Renderer root"
+        },
+        {
+          "path": "desktop/src/data/projector.ts",
+          "label": "Event projector"
+        },
+        {
+          "path": "desktop/src/components/ChatView.tsx",
+          "label": "Conversation surface"
+        },
+        {
+          "path": "desktop/src/data/ipc-source.ts",
+          "label": "Real data source"
+        }
+      ],
+      "layout": {
+        "x": 250,
+        "y": 70,
+        "w": 210,
+        "h": 86
+      }
+    },
+    {
+      "id": "web-client",
+      "label": "Web operator and test client",
+      "shortLabel": "Web client",
+      "layer": "surfaces",
+      "status": "operator",
+      "roots": [
+        "web/src/"
+      ],
+      "purpose": "Browser-facing operational and protocol client. It is not the primary product frontend after G1.",
+      "owns": [
+        "HTTP/SSE/WS client adapters",
+        "Web workspace, settings, plugin, skill, memory, logs, and subagent views",
+        "Browser E2E-compatible client surface"
+      ],
+      "invariants": [
+        "Web remains a client of the Server API; it does not import PI SDK internals.",
+        "New SSE event types must be admitted by the known-event registry.",
+        "User-facing changes need Web component coverage and browser evidence when in scope."
+      ],
+      "docs": [
+        {
+          "label": "Repository convergence",
+          "path": "plans/g1-repo-convergence.md"
+        },
+        {
+          "label": "Architecture boundary",
+          "path": "docs/architecture.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "web/src/lib/api-client.ts",
+          "label": "HTTP client"
+        },
+        {
+          "path": "web/src/lib/sse-client.ts",
+          "label": "SSE client"
+        },
+        {
+          "path": "web/src/app/WorkspaceApp.tsx",
+          "label": "Workspace root"
+        }
+      ],
+      "layout": {
+        "x": 490,
+        "y": 70,
+        "w": 210,
+        "h": 86
+      }
+    },
+    {
+      "id": "tui-client",
+      "label": "TUI protocol client",
+      "shortLabel": "TUI",
+      "layer": "surfaces",
+      "status": "stable",
+      "roots": [
+        "src/tui/"
+      ],
+      "purpose": "Terminal client that consumes Server protocols and remains independent from PI SDK imports.",
+      "owns": [
+        "HTTP/SSE/WS client protocol",
+        "Terminal event rendering",
+        "Structured summaries for non-Web clients"
+      ],
+      "invariants": [
+        "TUI never bypasses Server to mutate Session state.",
+        "TUI does not import PI packages or src/pi-sdk."
+      ],
+      "docs": [
+        {
+          "label": "Server-first architecture",
+          "path": "docs/architecture.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/tui/event-client.ts",
+          "label": "TUI event client"
+        },
+        {
+          "path": "src/tui/render-event.ts",
+          "label": "TUI renderer"
+        }
+      ],
+      "layout": {
+        "x": 730,
+        "y": 70,
+        "w": 180,
+        "h": 86
+      }
+    },
+    {
+      "id": "contracts",
+      "label": "Platform contracts",
+      "shortLabel": "Contracts",
+      "layer": "boundary",
+      "status": "stable",
+      "roots": [
+        "src/contracts/"
+      ],
+      "purpose": "The cross-module and cross-process vocabulary: API inputs, events, session branches, memory, plugins, skills, subagents, observability, usage, and UI messages.",
+      "owns": [
+        "TypeBox schemas and platform types",
+        "PlatformEventEnvelope",
+        "Stable error and command vocabulary",
+        "Plugin protocol re-exports used by the host"
+      ],
+      "invariants": [
+        "Cross-process inputs are parsed, not trusted through type assertions.",
+        "Protocol version stays explicit and compatible.",
+        "Platform interfaces do not expose PI private types."
+      ],
+      "docs": [
+        {
+          "label": "Architecture and event protocol",
+          "path": "docs/architecture.md"
+        },
+        {
+          "label": "Document governance",
+          "path": "docs/document-governance.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/contracts/events.ts",
+          "label": "Event envelope"
+        },
+        {
+          "path": "src/contracts/session-branch.ts",
+          "label": "Wave B branch contract"
+        },
+        {
+          "path": "src/contracts/plugin-protocol.ts",
+          "label": "Plugin host vocabulary"
+        },
+        {
+          "path": "src/contracts/usage.ts",
+          "label": "Usage contract"
+        }
+      ],
+      "layout": {
+        "x": 30,
+        "y": 244,
+        "w": 210,
+        "h": 86
+      }
+    },
+    {
+      "id": "server",
+      "label": "HTTP / SSE / WS server",
+      "shortLabel": "Server boundary",
+      "layer": "boundary",
+      "status": "stable",
+      "roots": [
+        "src/server/"
+      ],
+      "purpose": "Owns authentication boundary, input validation, route composition, event streams, WebSocket sessions, and transport projection.",
+      "owns": [
+        "Hono application and route registration",
+        "Session, message, branch, agent, memory, plugin, skill, subagent and usage routes",
+        "SSE replay subscription and WebSocket control",
+        "Runtime bootstrap composition root"
+      ],
+      "invariants": [
+        "Routes parse and delegate; Agent business logic lives in Runtime and Services.",
+        "Events are written to Replay Store before broadcast.",
+        "Loopback binding and stable ApiError behavior remain the default boundary."
+      ],
+      "docs": [
+        {
+          "label": "Server-first and API boundary",
+          "path": "docs/architecture.md"
+        },
+        {
+          "label": "Development quality gates",
+          "path": "docs/development.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/server/app.ts",
+          "label": "Hono app"
+        },
+        {
+          "path": "src/server/start.ts",
+          "label": "Server composition"
+        },
+        {
+          "path": "src/server/routes/messages.ts",
+          "label": "Prompt route"
+        },
+        {
+          "path": "src/server/sse/session-events.ts",
+          "label": "SSE projection"
+        }
+      ],
+      "layout": {
+        "x": 270,
+        "y": 244,
+        "w": 220,
+        "h": 86
+      }
+    },
+    {
+      "id": "ui-projection",
+      "label": "A2UI / TokUI projection",
+      "shortLabel": "UI projection",
+      "layer": "boundary",
+      "status": "stable",
+      "roots": [
+        "src/ui-projection/"
+      ],
+      "purpose": "Projects structured platform events into bounded UI protocols. It is a one-way projection, never an alternate runtime.",
+      "owns": [
+        "A2UI catalog and action validation",
+        "TokUI policy and streaming projection",
+        "Safe structured UI message payloads"
+      ],
+      "invariants": [
+        "Only the local fixed catalog and named handlers are accepted.",
+        "Raw HTML, scripts, javascript URLs, and arbitrary executable widgets are rejected.",
+        "Actions return to Server for validation."
+      ],
+      "docs": [
+        {
+          "label": "UI protocol section",
+          "path": "docs/architecture.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/ui-projection/a2ui/project.ts",
+          "label": "A2UI projector"
+        },
+        {
+          "path": "src/ui-projection/a2ui/action.ts",
+          "label": "A2UI action gate"
+        },
+        {
+          "path": "src/ui-projection/tokui/policy.ts",
+          "label": "TokUI policy"
+        }
+      ],
+      "layout": {
+        "x": 520,
+        "y": 244,
+        "w": 210,
+        "h": 86
+      }
+    },
+    {
+      "id": "supervisor",
+      "label": "Supervisor process host",
+      "shortLabel": "Supervisor",
+      "layer": "persistence",
+      "status": "stable",
+      "roots": [
+        "src/supervisor/"
+      ],
+      "purpose": "Starts, monitors, health-checks, proxies, and stops the Agent Server while hosting the built client surface.",
+      "owns": [
+        "Agent Server lifecycle",
+        "PID and identity verification",
+        "Port selection and restart behavior",
+        "Static Web asset hosting and transparent proxying"
+      ],
+      "invariants": [
+        "A health response must identify the expected child process before adoption.",
+        "Windows child process trees are cleaned up on stop.",
+        "Desktop and CLI both use the same local lifecycle concepts."
+      ],
+      "docs": [
+        {
+          "label": "Desktop release and supervisor",
+          "path": "docs/release.md"
+        },
+        {
+          "label": "Phase 3 implementation",
+          "path": "plans/phase-03.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/supervisor/start.ts",
+          "label": "Supervisor start"
+        },
+        {
+          "path": "src/supervisor/process-controller.ts",
+          "label": "Process control"
+        }
+      ],
+      "layout": {
+        "x": 760,
+        "y": 244,
+        "w": 210,
+        "h": 86
+      }
+    },
+    {
+      "id": "session-runtime",
+      "label": "Session and execution runtime",
+      "shortLabel": "Session runtime",
+      "layer": "runtime",
+      "status": "active",
+      "roots": [
+        "src/runtime/"
+      ],
+      "purpose": "The central orchestration layer: session lifecycle, prompt execution, model policy, tool policy, events, branches, usage, memory, plugins, skills, and subagent composition.",
+      "owns": [
+        "SessionRuntime and SessionService",
+        "Prompt and abort/compact execution",
+        "Branch regenerate, fork, switch, and current-head recovery",
+        "Event mapping and replay publishing",
+        "Runtime composition for memory, skills, plugins, and subagents"
+      ],
+      "invariants": [
+        "Runtime owns Agent behavior; transport routes remain thin.",
+        "Session identity is a stable ID, never a file path.",
+        "The same runtime composition must be used after restart and branch actions.",
+        "Wave B branch and todo semantics remain append-only JSONL plus SQLite metadata/state."
+      ],
+      "docs": [
+        {
+          "label": "Core architecture",
+          "path": "docs/architecture.md"
+        },
+        {
+          "label": "Conversation workbench semantics",
+          "path": "docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md"
+        },
+        {
+          "label": "Memory architecture",
+          "path": "docs/memory-architecture.md"
+        },
+        {
+          "label": "Logging architecture",
+          "path": "docs/logging-architecture.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/runtime/session-runtime.ts",
+          "label": "Session runtime"
+        },
+        {
+          "path": "src/runtime/session-service.ts",
+          "label": "Session service"
+        },
+        {
+          "path": "src/runtime/prompt-service.ts",
+          "label": "Prompt service"
+        },
+        {
+          "path": "src/runtime/event-replay-store.ts",
+          "label": "Replay store"
+        },
+        {
+          "path": "src/runtime/event-mapper.ts",
+          "label": "Event mapper"
+        }
+      ],
+      "layout": {
+        "x": 30,
+        "y": 408,
+        "w": 230,
+        "h": 102
+      }
+    },
+    {
+      "id": "pi-adapter",
+      "label": "PI SDK adapter boundary",
+      "shortLabel": "PI adapter",
+      "layer": "runtime",
+      "status": "stable",
+      "roots": [
+        "src/pi-sdk/"
+      ],
+      "purpose": "The only direct import boundary to PI SDK. It turns PI sessions, models, tools, and events into OpenColorful platform interfaces.",
+      "owns": [
+        "AgentSession and SessionManager adapters",
+        "ModelRuntime and provider integration",
+        "Session tree and branch primitives",
+        "First-party tool factories"
+      ],
+      "invariants": [
+        "Only src/pi-sdk may import @earendil-works/pi-*.",
+        "No PI private deep imports or duplicated Agent Loop implementation.",
+        "Platform interfaces do not leak PI private types."
+      ],
+      "docs": [
+        {
+          "label": "PI boundary rule",
+          "path": "AGENTS.md"
+        },
+        {
+          "label": "Wave B adapter contract",
+          "path": "plans/p1-conversation-workbench.en.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/pi-sdk/index.ts",
+          "label": "Adapter exports"
+        },
+        {
+          "path": "src/pi-sdk/agent-session.ts",
+          "label": "Agent session adapter"
+        },
+        {
+          "path": "src/pi-sdk/session-tree.ts",
+          "label": "Branch adapter"
+        },
+        {
+          "path": "src/pi-sdk/model-runtime.ts",
+          "label": "Model runtime"
+        }
+      ],
+      "layout": {
+        "x": 300,
+        "y": 408,
+        "w": 220,
+        "h": 102
+      }
+    },
+    {
+      "id": "memory",
+      "label": "Memory subsystem",
+      "shortLabel": "Memory",
+      "layer": "runtime",
+      "status": "active",
+      "roots": [
+        "src/runtime/memory/"
+      ],
+      "purpose": "Builds, injects, recalls, reviews, and applies memory with explicit policy and durable files/stores.",
+      "owns": [
+        "Memory agent and tool surface",
+        "Recall and injection policy",
+        "Background review and activation updates",
+        "Compile, summary, scheduler, and branch-aware reads"
+      ],
+      "invariants": [
+        "Memory is policy-governed and bounded; it is not an unconstrained self-modification loop.",
+        "Background review is advisory and must remain observable.",
+        "Memory content and operational logs have separate privacy boundaries."
+      ],
+      "docs": [
+        {
+          "label": "Memory architecture",
+          "path": "docs/memory-architecture.md"
+        },
+        {
+          "label": "Memory activation slice",
+          "path": "docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/runtime/memory/recall-service.ts",
+          "label": "Recall service"
+        },
+        {
+          "path": "src/runtime/memory/memory-injection.ts",
+          "label": "Prompt injection"
+        },
+        {
+          "path": "src/runtime/memory/background-review.ts",
+          "label": "Background review"
+        },
+        {
+          "path": "src/runtime/memory/compile-pipeline.ts",
+          "label": "Compile pipeline"
+        }
+      ],
+      "layout": {
+        "x": 560,
+        "y": 408,
+        "w": 210,
+        "h": 102
+      }
+    },
+    {
+      "id": "skills",
+      "label": "Skills subsystem",
+      "shortLabel": "Skills",
+      "layer": "runtime",
+      "status": "stable",
+      "roots": [
+        "src/runtime/skills/"
+      ],
+      "purpose": "Discovers, validates, trusts, installs, binds, snapshots, loads, and safely executes Skills from built-in, workspace, archive, Git, HTTP, plugin, OpenClaw, and Hermes sources.",
+      "owns": [
+        "Skill catalog and source adapters",
+        "Manifest validation, readiness and risk assessment",
+        "Agent/session binding, snapshots and activation grants",
+        "Content loading, installation operations and script execution",
+        "Plugin and ecosystem compatibility bridges"
+      ],
+      "invariants": [
+        "A Skill is not executable merely because it was discovered; readiness, trust, risk and policy gates still apply.",
+        "Turn and Subagent Skill visibility is snapshot-based and bounded.",
+        "Plugin-provided Skills follow plugin lifecycle and fail closed when their source is disabled or removed.",
+        "Session files and external paths are validated against ownership and trusted roots."
+      ],
+      "docs": [
+        {
+          "label": "Skill author guide",
+          "path": "docs/plugin-development.md"
+        },
+        {
+          "label": "Skill implementation history",
+          "path": "plans/phase-13.md"
+        },
+        {
+          "label": "Security policy",
+          "path": "SECURITY.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/runtime/skills/composition.ts",
+          "label": "Skills composition root"
+        },
+        {
+          "path": "src/runtime/skills/catalog/skill-catalog.ts",
+          "label": "Skill catalog"
+        },
+        {
+          "path": "src/runtime/skills/validator.ts",
+          "label": "Manifest validator"
+        },
+        {
+          "path": "src/runtime/skills/snapshot/skill-snapshot.ts",
+          "label": "Turn snapshot"
+        },
+        {
+          "path": "src/runtime/skills/plugin/plugin-skill-bridge.ts",
+          "label": "Plugin bridge"
+        },
+        {
+          "path": "src/runtime/skills/plugin/skill-script-runner.ts",
+          "label": "Script runner"
+        }
+      ],
+      "layout": {
+        "x": 810,
+        "y": 408,
+        "w": 210,
+        "h": 102
+      }
+    },
+    {
+      "id": "subagents",
+      "label": "Subagent runtime",
+      "shortLabel": "Subagents",
+      "layer": "runtime",
+      "status": "stable",
+      "roots": [
+        "src/runtime/subagents/"
+      ],
+      "purpose": "Runs delegated work with parent-session control, mailbox delivery, artifact/transcript stores, policy leases, recovery, and observability.",
+      "owns": [
+        "Subagent thread/run lifecycle",
+        "Parent mailbox and result delivery",
+        "Transcript replay and artifact files",
+        "Workspace leases, recovery, and usage ingestion"
+      ],
+      "invariants": [
+        "Parent and child identities remain explicit.",
+        "Delivery and notification are separate concerns.",
+        "Capability and workspace policy are revalidated at execution boundaries."
+      ],
+      "docs": [
+        {
+          "label": "Subagent architecture",
+          "path": "plans/phase-14.md"
+        },
+        {
+          "label": "Logging architecture",
+          "path": "docs/logging-architecture.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/runtime/subagents/composition.ts",
+          "label": "Subagent composition"
+        },
+        {
+          "path": "src/runtime/subagents/runtime/runtime-host.ts",
+          "label": "Runtime host"
+        },
+        {
+          "path": "src/runtime/subagents/mailbox/parent-mailbox-delivery-coordinator.ts",
+          "label": "Mailbox delivery"
+        },
+        {
+          "path": "src/runtime/subagents/transcript/replay-store.ts",
+          "label": "Transcript replay"
+        }
+      ],
+      "layout": {
+        "x": 810,
+        "y": 408,
+        "w": 210,
+        "h": 102
+      }
+    },
+    {
+      "id": "storage",
+      "label": "SQLite metadata and state",
+      "shortLabel": "SQLite",
+      "layer": "persistence",
+      "status": "active",
+      "roots": [
+        "src/storage/"
+      ],
+      "purpose": "Stores session metadata, branch heads, todo state, provider settings, plugin/skill registries, usage, observability, and platform state. It does not own message bodies.",
+      "owns": [
+        "SQLite connection and migrations",
+        "Session index and branch metadata",
+        "Session todos and durable event-related state",
+        "Provider, plugin, skill, usage, and observability stores"
+      ],
+      "invariants": [
+        "PI JSONL is the message and branch-history fact source.",
+        "SQLite never becomes a second message-body store.",
+        "Migrations are idempotent and recovery behavior is tested."
+      ],
+      "docs": [
+        {
+          "label": "Data ownership",
+          "path": "docs/architecture.md"
+        },
+        {
+          "label": "Migration conventions",
+          "path": "docs/migrations/README.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/storage/database.ts",
+          "label": "Database open"
+        },
+        {
+          "path": "src/storage/migrations.ts",
+          "label": "Schema migration"
+        },
+        {
+          "path": "src/storage/session-index.ts",
+          "label": "Session metadata"
+        },
+        {
+          "path": "src/storage/session-todos.ts",
+          "label": "Durable todos"
+        }
+      ],
+      "layout": {
+        "x": 30,
+        "y": 590,
+        "w": 230,
+        "h": 102
+      }
+    },
+    {
+      "id": "host-safety",
+      "label": "Config, sandbox and host safety",
+      "shortLabel": "Host safety",
+      "layer": "persistence",
+      "status": "stable",
+      "roots": [
+        "src/config/",
+        "src/sandbox/",
+        "src/platform/"
+      ],
+      "purpose": "Defines local data paths, environment isolation, sandbox boundaries, directory selection, and host-level safety helpers.",
+      "owns": [
+        "OPENCOLORFUL_HOME and runtime paths",
+        "Provider credential separation",
+        "Sandbox policy and tool grants",
+        "Native directory selection and path guards"
+      ],
+      "invariants": [
+        "Credentials stay in AuthStorage or dedicated secret stores.",
+        "Default network binding is loopback.",
+        "Paths are resolved through the central path contract."
+      ],
+      "docs": [
+        {
+          "label": "Infrastructure decisions",
+          "path": "docs/infrastructure-decisions.md"
+        },
+        {
+          "label": "Security policy",
+          "path": "SECURITY.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/config/paths.ts",
+          "label": "Runtime paths"
+        },
+        {
+          "path": "src/sandbox/sandbox-service.ts",
+          "label": "Sandbox service"
+        },
+        {
+          "path": "src/platform/folder-picker.ts",
+          "label": "Native folder picker"
+        }
+      ],
+      "layout": {
+        "x": 300,
+        "y": 590,
+        "w": 220,
+        "h": 102
+      }
+    },
+    {
+      "id": "observability",
+      "label": "Observability and usage",
+      "shortLabel": "Observability",
+      "layer": "runtime",
+      "status": "stable",
+      "roots": [
+        "src/observability/"
+      ],
+      "purpose": "Captures activities, audits, diagnostics, traces, retention, safe values, support bundles, and usage evidence without leaking secrets.",
+      "owns": [
+        "Activity, audit, diagnostic and emergency channels",
+        "Trace context and event catalog",
+        "Redaction, retention and support bundle policy",
+        "Runtime usage recording and query surfaces"
+      ],
+      "invariants": [
+        "Sensitive values are redacted before storage or projection.",
+        "Audit terminal state reflects the real domain outcome.",
+        "Operational evidence must be inspectable without becoming message content."
+      ],
+      "docs": [
+        {
+          "label": "Logging architecture",
+          "path": "docs/logging-architecture.md"
+        },
+        {
+          "label": "Usage contract",
+          "path": "src/contracts/usage.ts"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/observability/instrument.ts",
+          "label": "Instrumentation"
+        },
+        {
+          "path": "src/observability/safe-value.ts",
+          "label": "Redaction"
+        },
+        {
+          "path": "src/observability/retention.ts",
+          "label": "Retention"
+        },
+        {
+          "path": "src/runtime/usage-recorder.ts",
+          "label": "Usage recorder"
+        }
+      ],
+      "layout": {
+        "x": 560,
+        "y": 590,
+        "w": 210,
+        "h": 102
+      }
+    },
+    {
+      "id": "plugin-runtime",
+      "label": "Plugin runtime and host",
+      "shortLabel": "Plugin runtime",
+      "layer": "extension",
+      "status": "active",
+      "roots": [
+        "src/runtime/plugins/",
+        "src/platform/plugin-facade.ts"
+      ],
+      "purpose": "Loads, validates, grants, hosts, observes, and adapts plugin contributions from local, zip, Git, npm, OpenClaw, and Hermes sources.",
+      "owns": [
+        "Plugin source adapters and installer",
+        "Capability grants, bindings, policy snapshots and host broker",
+        "Node/Python/MCP/JSON-RPC carriers",
+        "Routes, tools, providers, surfaces, secrets, skills, and background contributions"
+      ],
+      "invariants": [
+        "Plugin execution is bounded by explicit capability policy.",
+        "Secret contribution uses dedicated stores and redaction.",
+        "Compatibility adapters normalize external ecosystems instead of leaking their formats inward."
+      ],
+      "docs": [
+        {
+          "label": "Plugin author guide",
+          "path": "docs/plugin-development.md"
+        },
+        {
+          "label": "Plugin implementation history",
+          "path": "plans/phase-12.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/platform/plugin-facade.ts",
+          "label": "Host facade"
+        },
+        {
+          "path": "src/runtime/plugins/registry/plugin-registry.ts",
+          "label": "Plugin registry"
+        },
+        {
+          "path": "src/runtime/plugins/grants/execution-snapshot.ts",
+          "label": "Policy snapshot"
+        },
+        {
+          "path": "src/runtime/plugins/runtimes/runtime-host.ts",
+          "label": "Runtime host"
+        }
+      ],
+      "packageName": null,
+      "layout": {
+        "x": 810,
+        "y": 590,
+        "w": 210,
+        "h": 102
+      }
+    },
+    {
+      "id": "plugin-protocol",
+      "label": "@opencolorful/plugin-protocol",
+      "shortLabel": "Plugin protocol",
+      "layer": "extension",
+      "status": "stable",
+      "roots": [
+        "packages/plugin-protocol/src/"
+      ],
+      "packageName": "@opencolorful/plugin-protocol",
+      "purpose": "Public schemas and normalized vocabulary for manifests, permissions, contributions, IPC, compatibility, and snapshots.",
+      "owns": [
+        "Manifest and compatibility schemas",
+        "Contribution and permission contracts",
+        "IPC and normalized plugin snapshots"
+      ],
+      "invariants": [
+        "Protocol package remains free of host implementation details.",
+        "Schema changes require compatibility tests and package build verification."
+      ],
+      "docs": [
+        {
+          "label": "Plugin development",
+          "path": "docs/plugin-development.md"
+        },
+        {
+          "label": "Package boundary",
+          "path": "docs/repository-layout.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "packages/plugin-protocol/src/index.ts",
+          "label": "Protocol exports"
+        },
+        {
+          "path": "packages/plugin-protocol/src/manifest.ts",
+          "label": "Manifest schema"
+        },
+        {
+          "path": "packages/plugin-protocol/src/contribution.ts",
+          "label": "Contribution schema"
+        }
+      ],
+      "layout": {
+        "x": 30,
+        "y": 750,
+        "w": 230,
+        "h": 92
+      }
+    },
+    {
+      "id": "plugin-sdk",
+      "label": "@opencolorful/plugin-sdk",
+      "shortLabel": "Plugin SDK",
+      "layer": "extension",
+      "status": "stable",
+      "roots": [
+        "packages/plugin-sdk/src/"
+      ],
+      "packageName": "@opencolorful/plugin-sdk",
+      "purpose": "Author-facing definitions, validation helpers, errors, and scaffolding for plugins.",
+      "owns": [
+        "definePlugin",
+        "Plugin author errors and validation",
+        "Scaffold generation"
+      ],
+      "invariants": [
+        "SDK consumes the public protocol, not private host internals.",
+        "Generated scaffolds remain compatible with the runtime package."
+      ],
+      "docs": [
+        {
+          "label": "Plugin author guide",
+          "path": "docs/plugin-development.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "packages/plugin-sdk/src/define.ts",
+          "label": "Plugin definition"
+        },
+        {
+          "path": "packages/plugin-sdk/src/scaffold.ts",
+          "label": "Scaffold"
+        }
+      ],
+      "layout": {
+        "x": 300,
+        "y": 750,
+        "w": 210,
+        "h": 92
+      }
+    },
+    {
+      "id": "plugin-package-runtime",
+      "label": "@opencolorful/plugin-runtime + components",
+      "shortLabel": "Plugin packages",
+      "layer": "extension",
+      "status": "stable",
+      "roots": [
+        "packages/plugin-runtime/src/",
+        "packages/plugin-components/src/"
+      ],
+      "packageName": "@opencolorful/plugin-runtime",
+      "packageNames": [
+        "@opencolorful/plugin-runtime",
+        "@opencolorful/plugin-components"
+      ],
+      "purpose": "Runtime-side plugin server helpers and bounded UI/host contribution components.",
+      "owns": [
+        "Plugin runtime server",
+        "Host and UI contribution helpers",
+        "Package-level compatibility surfaces"
+      ],
+      "invariants": [
+        "Package APIs remain explicit and versionable.",
+        "Components do not take ownership of the host shell or permission lifecycle."
+      ],
+      "docs": [
+        {
+          "label": "Repository package layout",
+          "path": "docs/repository-layout.md"
+        },
+        {
+          "label": "Plugin author guide",
+          "path": "docs/plugin-development.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "packages/plugin-runtime/src/server.ts",
+          "label": "Plugin runtime server"
+        },
+        {
+          "path": "packages/plugin-components/src/host.ts",
+          "label": "Host contribution helpers"
+        },
+        {
+          "path": "packages/plugin-components/src/ui.ts",
+          "label": "UI contribution helpers"
+        }
+      ],
+      "layout": {
+        "x": 550,
+        "y": 750,
+        "w": 240,
+        "h": 92
+      }
+    },
+    {
+      "id": "cli-governance",
+      "label": "CLI and repository checks",
+      "shortLabel": "CLI / checks",
+      "layer": "persistence",
+      "status": "stable",
+      "roots": [
+        "src/cli/",
+        "src/index.ts",
+        "scripts/"
+      ],
+      "purpose": "Provides command-line lifecycle entry points plus the repository's import, package, document, smoke, and release checks.",
+      "owns": [
+        "ocf CLI commands",
+        "PI/plugin import boundary checks",
+        "Document governance and package verification",
+        "Web/server smoke and release utilities"
+      ],
+      "invariants": [
+        "Quality commands run separately and preserve exit codes.",
+        "Governance checks are part of the same quality story as product code.",
+        "Generated architecture data is stale when the manifest scan no longer matches it."
+      ],
+      "docs": [
+        {
+          "label": "Agent workflow",
+          "path": "docs/development.md"
+        },
+        {
+          "label": "CI/CD",
+          "path": "docs/ci-cd.md"
+        }
+      ],
+      "keyFiles": [
+        {
+          "path": "src/cli/main.ts",
+          "label": "CLI entry"
+        },
+        {
+          "path": "src/index.ts",
+          "label": "Package entry"
+        },
+        {
+          "path": "scripts/generate-architecture-map.mjs",
+          "label": "Architecture generator"
+        },
+        {
+          "path": "scripts/verify-document-governance.mjs",
+          "label": "Document governance"
+        }
+      ],
+      "layout": {
+        "x": 800,
+        "y": 750,
+        "w": 220,
+        "h": 92
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "desktop-shell",
+      "to": "supervisor",
+      "label": "starts / proxies",
+      "kind": "transport",
+      "evidence": [
+        "desktop/electron/main.cjs",
+        "desktop/electron/api-proxy.cjs"
+      ]
+    },
+    {
+      "from": "desktop-renderer",
+      "to": "desktop-shell",
+      "label": "preload / IPC",
+      "kind": "boundary",
+      "evidence": [
+        "desktop/src/data/ipc-source.ts",
+        "desktop/electron/preload.cjs"
+      ]
+    },
+    {
+      "from": "desktop-renderer",
+      "to": "server",
+      "label": "HTTP / SSE / WS",
+      "kind": "transport",
+      "evidence": [
+        "desktop/src/data/ipc-source.ts",
+        "desktop/electron/api-proxy.cjs",
+        "desktop/electron/sse-proxy.cjs"
+      ]
+    },
+    {
+      "from": "web-client",
+      "to": "server",
+      "label": "HTTP / SSE / WS",
+      "kind": "transport",
+      "evidence": [
+        "web/src/lib/api-client.ts",
+        "web/src/lib/sse-client.ts",
+        "web/src/lib/ws-client.ts"
+      ]
+    },
+    {
+      "from": "tui-client",
+      "to": "server",
+      "label": "Server protocol",
+      "kind": "transport",
+      "evidence": [
+        "src/tui/event-client.ts",
+        "src/tui/api-client.ts"
+      ]
+    },
+    {
+      "from": "server",
+      "to": "contracts",
+      "label": "parse / emit",
+      "kind": "contract",
+      "evidence": [
+        "src/server/app.ts",
+        "src/server/routes/messages.ts",
+        "src/server/sse/session-events.ts"
+      ]
+    },
+    {
+      "from": "server",
+      "to": "session-runtime",
+      "label": "delegate",
+      "kind": "runtime",
+      "evidence": [
+        "src/server/routes/messages.ts",
+        "src/server/routes/runtime-bootstrap.ts"
+      ]
+    },
+    {
+      "from": "server",
+      "to": "ui-projection",
+      "label": "structured UI events",
+      "kind": "projection",
+      "evidence": [
+        "src/server/routes/events.ts",
+        "src/ui-projection/a2ui/project.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "pi-adapter",
+      "label": "Agent session",
+      "kind": "adapter",
+      "evidence": [
+        "src/runtime/session-runtime.ts",
+        "src/pi-sdk/agent-session.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "storage",
+      "label": "metadata / todo / usage",
+      "kind": "persistence",
+      "evidence": [
+        "src/runtime/session-service.ts",
+        "src/storage/session-index.ts",
+        "src/storage/session-todos.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "memory",
+      "label": "recall / review",
+      "kind": "runtime",
+      "evidence": [
+        "src/server/routes/runtime-bootstrap.ts",
+        "src/runtime/memory/recall-service.ts",
+        "src/runtime/memory/background-review.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "skills",
+      "label": "skill snapshot / tools",
+      "kind": "runtime",
+      "evidence": [
+        "src/server/routes/runtime-bootstrap.ts",
+        "src/runtime/skills/composition.ts",
+        "src/pi-sdk/skill-loader.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "subagents",
+      "label": "delegation",
+      "kind": "runtime",
+      "evidence": [
+        "src/server/routes/runtime-bootstrap.ts",
+        "src/runtime/subagents/composition.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "plugin-runtime",
+      "label": "host contributions",
+      "kind": "extension",
+      "evidence": [
+        "src/server/routes/runtime-bootstrap.ts",
+        "src/platform/plugin-facade.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "observability",
+      "label": "activity / audit / usage",
+      "kind": "telemetry",
+      "evidence": [
+        "src/runtime/usage-recorder.ts",
+        "src/observability/instrument.ts"
+      ]
+    },
+    {
+      "from": "session-runtime",
+      "to": "host-safety",
+      "label": "paths / policy",
+      "kind": "safety",
+      "evidence": [
+        "src/config/paths.ts",
+        "src/sandbox/sandbox-service.ts"
+      ]
+    },
+    {
+      "from": "pi-adapter",
+      "to": "contracts",
+      "label": "stable platform types",
+      "kind": "contract",
+      "evidence": [
+        "src/pi-sdk/types.ts",
+        "src/pi-sdk/session-tree.ts"
+      ]
+    },
+    {
+      "from": "plugin-sdk",
+      "to": "plugin-protocol",
+      "label": "consume schemas",
+      "kind": "package",
+      "evidence": [
+        "packages/plugin-sdk/src/define.ts"
+      ]
+    },
+    {
+      "from": "plugin-package-runtime",
+      "to": "plugin-protocol",
+      "label": "consume schemas",
+      "kind": "package",
+      "evidence": [
+        "packages/plugin-runtime/src/index.ts",
+        "packages/plugin-components/src/index.ts"
+      ]
+    },
+    {
+      "from": "plugin-runtime",
+      "to": "plugin-protocol",
+      "label": "normalize host boundary",
+      "kind": "package",
+      "evidence": [
+        "src/contracts/plugin-protocol.ts",
+        "src/runtime/plugins/contributions/host-api.ts"
+      ]
+    },
+    {
+      "from": "plugin-runtime",
+      "to": "host-safety",
+      "label": "grants / sandbox",
+      "kind": "safety",
+      "evidence": [
+        "src/runtime/plugins/grants/effective-policy.ts",
+        "src/runtime/plugins/grants/sandbox-bridge.ts"
+      ]
+    },
+    {
+      "from": "skills",
+      "to": "storage",
+      "label": "catalog / bindings",
+      "kind": "persistence",
+      "evidence": [
+        "src/runtime/skills/composition.ts",
+        "src/storage/skill-bundle-store.ts",
+        "src/storage/session-skill-binding-store.ts"
+      ]
+    },
+    {
+      "from": "skills",
+      "to": "host-safety",
+      "label": "trust / sandbox",
+      "kind": "safety",
+      "evidence": [
+        "src/runtime/skills/sources/trust-config.ts",
+        "src/runtime/skills/plugin/skill-script-runner.ts"
+      ]
+    },
+    {
+      "from": "skills",
+      "to": "plugin-runtime",
+      "label": "plugin Skill bridge",
+      "kind": "extension",
+      "evidence": [
+        "src/runtime/skills/plugin/plugin-skill-bridge.ts",
+        "src/runtime/plugins/contributions/skill-bundle.ts"
+      ]
+    },
+    {
+      "from": "cli-governance",
+      "to": "supervisor",
+      "label": "lifecycle commands",
+      "kind": "host",
+      "evidence": [
+        "src/cli/supervisor-command.ts"
+      ]
+    },
+    {
+      "from": "supervisor",
+      "to": "server",
+      "label": "child process",
+      "kind": "transport",
+      "evidence": [
+        "src/supervisor/start.ts",
+        "src/supervisor/app.ts"
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "prompt-stream",
+      "label": "Prompt → streamed answer",
+      "summary": "The normal conversation path: a client sends a command, the Server delegates to the Session Runtime, PI emits normalized events, Replay stores them, and the client projects the stream.",
+      "nodes": [
+        "desktop-renderer",
+        "server",
+        "contracts",
+        "session-runtime",
+        "pi-adapter",
+        "storage",
+        "desktop-renderer"
+      ],
+      "steps": [
+        {
+          "label": "Send",
+          "node": "desktop-renderer",
+          "detail": "Composer sends through DesktopDataSource; Web and TUI are alternate clients.",
+          "files": [
+            "desktop/src/data/ipc-source.ts",
+            "desktop/src/components/Composer.tsx"
+          ]
+        },
+        {
+          "label": "Validate and route",
+          "node": "server",
+          "detail": "HTTP route parses the prompt and selects the existing runtime composition.",
+          "files": [
+            "src/server/routes/messages.ts",
+            "src/server/routes/runtime-bootstrap.ts"
+          ]
+        },
+        {
+          "label": "Execute",
+          "node": "session-runtime",
+          "detail": "SessionRuntime runs the turn, maps events, applies policy, and records usage.",
+          "files": [
+            "src/runtime/session-runtime.ts",
+            "src/runtime/prompt-service.ts",
+            "src/runtime/event-mapper.ts"
+          ]
+        },
+        {
+          "label": "Delegate to PI",
+          "node": "pi-adapter",
+          "detail": "Only this boundary imports the PI SDK and exposes stable platform types.",
+          "files": [
+            "src/pi-sdk/agent-session.ts",
+            "src/pi-sdk/model-runtime.ts"
+          ]
+        },
+        {
+          "label": "Persist and replay",
+          "node": "storage",
+          "detail": "Message and branch history remain in PI JSONL; metadata and replay state use SQLite-backed stores.",
+          "files": [
+            "src/storage/session-index.ts",
+            "src/runtime/event-replay-store.ts"
+          ]
+        },
+        {
+          "label": "Project",
+          "node": "desktop-renderer",
+          "detail": "The client adopts the stream and projects events into conversation, tools, memory, and workbench surfaces.",
+          "files": [
+            "desktop/src/data/projector.ts",
+            "desktop/src/components/ChatView.tsx"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "wave-b-branch",
+      "label": "Wave B: regenerate / branch / fork",
+      "summary": "Wave B uses PI tree primitives behind a stable API. Old branches remain in JSONL; the selected branch head and todo state are durable SQLite metadata.",
+      "nodes": [
+        "desktop-renderer",
+        "server",
+        "session-runtime",
+        "pi-adapter",
+        "storage",
+        "desktop-renderer"
+      ],
+      "steps": [
+        {
+          "label": "Choose a turn",
+          "node": "desktop-renderer",
+          "detail": "Timeline and branch switcher use stable entryId, branchId, and turnId anchors.",
+          "files": [
+            "desktop/src/components/BranchSwitcher.tsx",
+            "desktop/src/components/TimelineNav.tsx"
+          ]
+        },
+        {
+          "label": "Apply semantics",
+          "node": "server",
+          "detail": "Server returns stable 400/404/409 errors and never silently aborts a running turn.",
+          "files": [
+            "src/server/routes/session-branches.ts",
+            "src/contracts/session-branch.ts"
+          ]
+        },
+        {
+          "label": "Create or switch",
+          "node": "session-runtime",
+          "detail": "Regenerate shares the normal prompt path; fork uses a detached manager; branch switch persists the selected head.",
+          "files": [
+            "src/runtime/session-runtime.ts",
+            "src/runtime/session-service.ts"
+          ]
+        },
+        {
+          "label": "Use PI tree",
+          "node": "pi-adapter",
+          "detail": "The adapter hides PI SessionManager and AgentSession tree primitives.",
+          "files": [
+            "src/pi-sdk/session-tree.ts"
+          ]
+        },
+        {
+          "label": "Recover",
+          "node": "storage",
+          "detail": "JSONL remains append-only; SQLite stores branch head and session-owned todo state.",
+          "files": [
+            "src/storage/session-index.ts",
+            "src/storage/session-todos.ts",
+            "src/storage/migrations.ts"
+          ]
+        },
+        {
+          "label": "Re-project",
+          "node": "desktop-renderer",
+          "detail": "Live events and restart/replay state must converge to the same desktop view.",
+          "files": [
+            "desktop/src/data/projector.ts",
+            "desktop/src/data/ipc-source.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "memory-cycle",
+      "label": "Memory activation cycle",
+      "summary": "Memory remains a bounded subsystem around the conversation loop: policy decides what is injected, tools and recall expose controlled access, and background review produces advisory intent.",
+      "nodes": [
+        "session-runtime",
+        "memory",
+        "storage",
+        "observability",
+        "session-runtime"
+      ],
+      "steps": [
+        {
+          "label": "Resolve policy",
+          "node": "session-runtime",
+          "detail": "The runtime decides when memory context and tools are available.",
+          "files": [
+            "src/runtime/memory/memory-policy.ts",
+            "src/runtime/memory/resolver.ts"
+          ]
+        },
+        {
+          "label": "Recall and write intent",
+          "node": "memory",
+          "detail": "Memory tools, injection, recall, and background review operate through explicit contracts.",
+          "files": [
+            "src/runtime/memory/recall-service.ts",
+            "src/pi-sdk/memory-tools.ts",
+            "src/runtime/memory/background-review.ts"
+          ]
+        },
+        {
+          "label": "Persist facts",
+          "node": "storage",
+          "detail": "Memory stores and files retain durable state while session messages remain PI JSONL-owned.",
+          "files": [
+            "src/runtime/memory/memory-files.ts",
+            "src/storage/database.ts"
+          ]
+        },
+        {
+          "label": "Record evidence",
+          "node": "observability",
+          "detail": "Memory activity and audit outcomes remain inspectable without leaking sensitive content.",
+          "files": [
+            "src/observability/instrument.ts",
+            "src/observability/safe-value.ts"
+          ]
+        },
+        {
+          "label": "Feed the next turn",
+          "node": "session-runtime",
+          "detail": "The next prompt receives only the policy-approved, bounded memory projection.",
+          "files": [
+            "src/runtime/memory/memory-injection.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "plugin-lifecycle",
+      "label": "Plugin lifecycle",
+      "summary": "External plugin formats are normalized into a host-owned capability system, then executed through bounded carriers and observed through the same platform services.",
+      "nodes": [
+        "plugin-package-runtime",
+        "plugin-protocol",
+        "plugin-sdk",
+        "plugin-runtime",
+        "host-safety",
+        "observability"
+      ],
+      "steps": [
+        {
+          "label": "Author",
+          "node": "plugin-sdk",
+          "detail": "A plugin author uses definePlugin and the public protocol types.",
+          "files": [
+            "packages/plugin-sdk/src/define.ts",
+            "packages/plugin-sdk/src/scaffold.ts"
+          ]
+        },
+        {
+          "label": "Validate",
+          "node": "plugin-protocol",
+          "detail": "Manifest, permissions, contributions, compatibility, and IPC schemas are checked.",
+          "files": [
+            "packages/plugin-protocol/src/manifest.ts",
+            "packages/plugin-protocol/src/permission.ts"
+          ]
+        },
+        {
+          "label": "Host",
+          "node": "plugin-runtime",
+          "detail": "The host installs sources, resolves grants, loads runtimes, and exposes bounded contributions.",
+          "files": [
+            "src/platform/plugin-facade.ts",
+            "src/runtime/plugins/registry/plugin-registry.ts",
+            "src/runtime/plugins/contributions/host-api.ts"
+          ]
+        },
+        {
+          "label": "Enforce",
+          "node": "host-safety",
+          "detail": "Capability snapshots, sandbox bridges, path guards, and secret stores constrain execution.",
+          "files": [
+            "src/runtime/plugins/grants/execution-snapshot.ts",
+            "src/runtime/plugins/grants/sandbox-bridge.ts"
+          ]
+        },
+        {
+          "label": "Observe",
+          "node": "observability",
+          "detail": "Plugin activity, audit and diagnostics use the shared safe-value and trace model.",
+          "files": [
+            "src/observability/extension-port.ts",
+            "src/observability/audit-recorder.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skill-lifecycle",
+      "label": "Skill lifecycle",
+      "summary": "A Skill moves from source discovery through validation and readiness gates to a bounded per-turn snapshot. Installation, binding and script execution remain policy-controlled.",
+      "nodes": [
+        "skills",
+        "storage",
+        "host-safety",
+        "session-runtime",
+        "skills"
+      ],
+      "steps": [
+        {
+          "label": "Discover sources",
+          "node": "skills",
+          "detail": "The composition root scans built-in, workspace, managed, ecosystem and plugin sources into one catalog.",
+          "files": [
+            "src/runtime/skills/composition.ts",
+            "src/runtime/skills/sources/factory.ts",
+            "src/runtime/skills/catalog/scan.ts"
+          ]
+        },
+        {
+          "label": "Validate and assess",
+          "node": "skills",
+          "detail": "Manifest, compatibility, readiness, risk and trust determine whether a candidate can be used.",
+          "files": [
+            "src/runtime/skills/validator.ts",
+            "src/runtime/skills/readiness.ts",
+            "src/runtime/skills/installer/risk.ts"
+          ]
+        },
+        {
+          "label": "Persist bindings",
+          "node": "storage",
+          "detail": "Bundles, agent bindings, session bindings, activation grants and operations are stored durably.",
+          "files": [
+            "src/storage/skill-bundle-store.ts",
+            "src/storage/agent-skill-binding-store.ts",
+            "src/storage/skill-activation-grant-store.ts"
+          ]
+        },
+        {
+          "label": "Enforce trust and execution",
+          "node": "host-safety",
+          "detail": "Trusted roots, path safety, sandbox ports and confirmation tokens gate content and scripts.",
+          "files": [
+            "src/runtime/skills/sources/trust-config.ts",
+            "src/runtime/skills/path-safety.ts",
+            "src/runtime/skills/plugin/skill-script-runner.ts"
+          ]
+        },
+        {
+          "label": "Freeze per turn",
+          "node": "session-runtime",
+          "detail": "The prompt path receives a bounded Skill snapshot; a later catalog mutation cannot silently expand the active turn.",
+          "files": [
+            "src/runtime/skills/snapshot/skill-snapshot.ts",
+            "src/runtime/skills/core/skill-core-service.ts",
+            "src/pi-sdk/skill-loader.ts"
+          ]
+        },
+        {
+          "label": "Load on demand",
+          "node": "skills",
+          "detail": "Content reads consume the frozen snapshot and activation overlay instead of arbitrary filesystem paths.",
+          "files": [
+            "src/runtime/skills/content/skill-content-service.ts",
+            "src/runtime/skills/content/load-handle.ts",
+            "src/runtime/skills/confirmation/confirmation-token.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "desktop-startup",
+      "label": "Desktop startup and release",
+      "summary": "Electron launches the local Supervisor, which hosts the Server and client assets. The preload and proxy keep the renderer behind an explicit capability boundary.",
+      "nodes": [
+        "desktop-shell",
+        "supervisor",
+        "server",
+        "desktop-renderer"
+      ],
+      "steps": [
+        {
+          "label": "Launch",
+          "node": "desktop-shell",
+          "detail": "Electron creates the window and starts the local connection strategy.",
+          "files": [
+            "desktop/electron/main.cjs",
+            "desktop/electron/auto-update.cjs"
+          ]
+        },
+        {
+          "label": "Host",
+          "node": "supervisor",
+          "detail": "Supervisor starts or adopts the expected Agent Server and serves the built client.",
+          "files": [
+            "src/supervisor/start.ts",
+            "src/supervisor/app.ts"
+          ]
+        },
+        {
+          "label": "Serve",
+          "node": "server",
+          "detail": "The Hono server owns runtime state and protocol endpoints.",
+          "files": [
+            "src/server/start.ts",
+            "src/server/app.ts"
+          ]
+        },
+        {
+          "label": "Render",
+          "node": "desktop-renderer",
+          "detail": "The renderer receives only shell operations and backend data through the approved data source.",
+          "files": [
+            "desktop/electron/preload.cjs",
+            "desktop/src/data/ipc-source.ts"
+          ]
+        }
+      ]
+    }
+  ],
+  "knownGaps": [
+    {
+      "severity": "high",
+      "title": "Wave B true-chain evidence is not complete",
+      "detail": "Compact live/replay identity and durable todo true-chain coverage are still deferred to the closeout evidence; the architecture map records them as implemented code plus incomplete verification.",
+      "path": "plans/p1-conversation-workbench.en.md"
+    },
+    {
+      "severity": "medium",
+      "title": "BRANCH-03/04 send-disabled defect remains bounded",
+      "detail": "The post-branch-switch send path remains a known defect from B3/B6 and must not be silently represented as complete.",
+      "path": "docs/project-status.md"
+    },
+    {
+      "severity": "medium",
+      "title": "Web event allowlist follow-up",
+      "detail": "The Web protocol client still needs the additive todo.updated event declaration tracked in the Wave B closeout.",
+      "path": "plans/p1-conversation-workbench.en.md"
+    }
+  ],
+  "rules": [
+    {
+      "label": "PI boundary",
+      "detail": "Only src/pi-sdk imports @earendil-works/pi-*."
+    },
+    {
+      "label": "Server-first",
+      "detail": "Desktop, Web, and TUI consume HTTP/SSE/WS or the explicit Electron bridge; they do not mutate Runtime state directly."
+    },
+    {
+      "label": "Data ownership",
+      "detail": "PI JSONL owns message bodies and branch history. SQLite owns metadata, indexes, platform state, branch heads, todos, usage, and registries."
+    },
+    {
+      "label": "Replay before broadcast",
+      "detail": "An event is durable in the Replay Store before it is sent to SSE or WebSocket subscribers."
+    },
+    {
+      "label": "Host-owned extension points",
+      "detail": "Plugins contribute through bounded contracts; the host retains layout, permissions, lifecycle, and security policy."
+    }
+  ]
+}

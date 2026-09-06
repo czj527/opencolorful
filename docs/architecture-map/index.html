@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>OpenColorful 架构地图</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./index.html" aria-label="OpenColorful 架构地图">
+          <span class="brand-mark" aria-hidden="true">OC</span>
+          <span>
+            <strong>OpenColorful 架构地图</strong>
+            <small>真实代码 · 可追溯的理解路径</small>
+          </span>
+        </a>
+        <div class="topbar-meta">
+          <span id="generated-meta" class="mono"></span>
+          <button id="theme-toggle" class="icon-button" type="button" title="切换主题" aria-label="切换主题">◐</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="intro">
+          <div>
+            <p id="hero-eyebrow" class="eyebrow"></p>
+            <h1 id="hero-title"></h1>
+            <p id="hero-copy" class="intro-copy"></p>
+          </div>
+          <div id="status-card" class="status-card"></div>
+        </section>
+
+        <section class="toolbar" aria-label="架构地图工具栏">
+          <nav id="view-tabs" class="view-tabs" aria-label="架构阅读视图">
+            <button class="view-tab is-active" data-view="atlas" type="button">总览</button>
+            <button class="view-tab" data-view="guide" type="button">怎么读</button>
+            <button class="view-tab" data-view="flows" type="button">关键流程</button>
+            <button class="view-tab" data-view="modules" type="button">模块工作台</button>
+            <button class="view-tab" data-view="board" type="button">项目看板</button>
+            <button class="view-tab" data-view="boundaries" type="button">边界规则</button>
+            <button class="view-tab" data-view="sources" type="button">源文件索引</button>
+          </nav>
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="global-search" type="search" autocomplete="off">
+          </label>
+        </section>
+
+        <section id="atlas-view" class="view-panel" data-view-panel="atlas">
+          <div class="atlas-layout">
+            <aside class="filter-rail">
+              <div class="rail-heading">
+                <span id="layers-label" class="eyebrow"></span>
+                <button id="clear-filters" class="text-button" type="button"></button>
+              </div>
+              <div id="layer-filters" class="layer-filters"></div>
+              <div class="rail-divider"></div>
+              <div class="coverage-mini">
+                <span id="coverage-label" class="eyebrow"></span>
+                <strong id="coverage-count"></strong>
+                <p id="coverage-copy"></p>
+              </div>
+              <div id="gap-mini" class="gap-mini"></div>
+            </aside>
+            <div class="atlas-main">
+              <div class="section-heading">
+                <div>
+                  <span id="map-eyebrow" class="eyebrow"></span>
+                  <h2 id="map-title"></h2>
+                </div>
+                <span id="map-hint" class="hint"></span>
+              </div>
+              <div class="map-viewport">
+                <div id="map-canvas" class="map-canvas">
+                  <svg id="edge-layer" class="edge-layer" viewBox="0 0 1040 880" role="img"></svg>
+                  <div id="node-layer" class="node-layer"></div>
+                </div>
+              </div>
+              <div id="atlas-footnote" class="atlas-footnote"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="guide-view" class="view-panel is-hidden" data-view-panel="guide">
+          <div class="content-heading">
+            <div>
+              <span id="guide-eyebrow" class="eyebrow"></span>
+              <h2 id="guide-title"></h2>
+              <p id="guide-intro"></p>
+            </div>
+          </div>
+          <section class="guide-section">
+            <div class="subsection-heading">
+              <span class="eyebrow">A / 基础模型</span>
+              <h3 id="principles-title"></h3>
+            </div>
+            <div id="principle-list" class="principle-list"></div>
+          </section>
+          <section class="guide-section guide-path-section">
+            <div class="subsection-heading">
+              <span class="eyebrow">B / 阅读路径</span>
+              <h3 id="path-title"></h3>
+            </div>
+            <div id="reading-path" class="reading-path"></div>
+          </section>
+          <section class="guide-section question-section">
+            <div class="subsection-heading">
+              <span class="eyebrow">C / 开发判断</span>
+              <h3 id="question-title"></h3>
+            </div>
+            <ul id="question-list" class="question-list"></ul>
+          </section>
+        </section>
+
+        <section id="flows-view" class="view-panel is-hidden" data-view-panel="flows">
+          <div class="content-heading">
+            <div>
+              <span id="flows-eyebrow" class="eyebrow"></span>
+              <h2 id="flows-title"></h2>
+              <p id="flows-intro"></p>
+            </div>
+          </div>
+          <div id="flow-list" class="flow-list"></div>
+        </section>
+
+        <section id="modules-view" class="view-panel is-hidden" data-view-panel="modules">
+          <div class="content-heading">
+            <div>
+              <span id="modules-eyebrow" class="eyebrow"></span>
+              <h2 id="modules-title"></h2>
+              <p id="modules-intro"></p>
+            </div>
+          </div>
+          <div class="module-workbench">
+            <aside class="module-rail">
+              <div class="module-rail-heading">
+                <strong id="module-choose"></strong>
+                <span id="module-count" class="mono"></span>
+              </div>
+              <p id="module-choose-hint" class="rail-copy"></p>
+              <div id="module-list" class="module-list"></div>
+            </aside>
+            <div id="module-board" class="module-board"></div>
+          </div>
+        </section>
+
+        <section id="board-view" class="view-panel is-hidden" data-view-panel="board">
+          <div class="content-heading">
+            <div>
+              <span id="board-eyebrow" class="eyebrow"></span>
+              <h2 id="board-title"></h2>
+              <p id="board-intro"></p>
+            </div>
+            <span id="board-updated" class="count-chip"></span>
+          </div>
+          <div id="board-header" class="board-header"></div>
+          <section class="board-section">
+            <div class="subsection-heading">
+              <span class="eyebrow">A / 当前判断</span>
+              <h3 id="board-signals-title"></h3>
+            </div>
+            <div id="board-signals" class="board-signals"></div>
+          </section>
+          <section class="board-section">
+            <div class="subsection-heading">
+              <span class="eyebrow">B / 下一步</span>
+              <h3 id="board-focus-title"></h3>
+            </div>
+            <div id="board-focus" class="board-focus"></div>
+          </section>
+          <section class="board-section board-workspace-section">
+            <div class="board-section-heading">
+              <div>
+                <span class="eyebrow">C / 工作区</span>
+                <h3 id="board-columns-title"></h3>
+              </div>
+              <div id="board-filters" class="board-filters" aria-label="看板筛选"></div>
+            </div>
+            <div id="board-columns" class="board-columns"></div>
+          </section>
+          <p id="board-source-truth" class="board-source-truth"></p>
+        </section>
+
+        <section id="boundaries-view" class="view-panel is-hidden" data-view-panel="boundaries">
+          <div class="content-heading">
+            <div>
+              <span id="boundaries-eyebrow" class="eyebrow"></span>
+              <h2 id="boundaries-title"></h2>
+              <p id="boundaries-intro"></p>
+            </div>
+          </div>
+          <div id="boundary-list" class="boundary-list"></div>
+          <div class="known-gaps">
+            <div class="content-heading compact">
+              <div>
+                <span id="gaps-eyebrow" class="eyebrow"></span>
+                <h2 id="gaps-title"></h2>
+              </div>
+            </div>
+            <div id="known-gap-list" class="gap-list"></div>
+          </div>
+        </section>
+
+        <section id="sources-view" class="view-panel is-hidden" data-view-panel="sources">
+          <div class="content-heading source-heading">
+            <div>
+              <span id="sources-eyebrow" class="eyebrow"></span>
+              <h2 id="sources-title"></h2>
+              <p id="sources-intro"></p>
+            </div>
+            <span id="source-count" class="count-chip"></span>
+          </div>
+          <div id="source-list" class="source-list"></div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>OpenColorful · 架构地图</span>
+        <a id="footer-cooperation" href="../../AGENTS.md"></a>
+        <a id="footer-architecture" href="../architecture.md"></a>
+        <a id="footer-maintenance" href="./README.md"></a>
+      </footer>
+    </div>
+    <script src="./architecture.generated.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
