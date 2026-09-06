@@ -103,7 +103,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "desktop/electron/api-proxy.cjs",
-          "lines": 85
+          "lines": 95
         },
         {
           "path": "desktop/electron/auto-update.cjs",
@@ -122,6 +122,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 134
         },
         {
+          "path": "desktop/electron/token-source.cjs",
+          "lines": 46
+        },
+        {
           "path": "desktop/scripts/dev.mjs",
           "lines": 54
         },
@@ -138,8 +142,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 90
         }
       ],
-      "fileCount": 9,
-      "totalLines": 897
+      "fileCount": 10,
+      "totalLines": 953
     },
     {
       "id": "desktop-renderer",
@@ -956,7 +960,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/tui/api-client.ts",
-          "lines": 161
+          "lines": 170
         },
         {
           "path": "src/tui/app.ts",
@@ -972,7 +976,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 4,
-      "totalLines": 809
+      "totalLines": 818
     },
     {
       "id": "contracts",
@@ -1172,7 +1176,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/server/app.ts",
-          "lines": 301
+          "lines": 321
         },
         {
           "path": "src/server/observability/client-events.ts",
@@ -1220,7 +1224,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/server/routes/runtime-bootstrap.ts",
-          "lines": 854
+          "lines": 861
         },
         {
           "path": "src/server/routes/sandbox.ts",
@@ -1268,7 +1272,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/server/start.ts",
-          "lines": 627
+          "lines": 636
+        },
+        {
+          "path": "src/server/trust-boundary.ts",
+          "lines": 280
         },
         {
           "path": "src/server/ws/client-registry.ts",
@@ -1283,8 +1291,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 170
         }
       ],
-      "fileCount": 28,
-      "totalLines": 7171
+      "fileCount": 29,
+      "totalLines": 7487
     },
     {
       "id": "ui-projection",
@@ -1407,7 +1415,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/supervisor/app.ts",
-          "lines": 265
+          "lines": 291
         },
         {
           "path": "src/supervisor/log-filter.ts",
@@ -1419,7 +1427,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/supervisor/start.ts",
-          "lines": 145
+          "lines": 154
         },
         {
           "path": "src/supervisor/types.ts",
@@ -1427,7 +1435,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 5,
-      "totalLines": 1184
+      "totalLines": 1219
     },
     {
       "id": "session-runtime",
@@ -2395,7 +2403,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/storage/migrations.ts",
-          "lines": 1027
+          "lines": 1154
         },
         {
           "path": "src/storage/plugin-binding-store.ts",
@@ -2443,7 +2451,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 24,
-      "totalLines": 4808
+      "totalLines": 4935
     },
     {
       "id": "host-safety",
@@ -3255,7 +3263,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "scripts/verify-plugin-imports.mjs",
-          "lines": 92
+          "lines": 101
         },
         {
           "path": "scripts/verify-plugin-package.mjs",
@@ -3267,7 +3275,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/cli/chat-command.ts",
-          "lines": 10
+          "lines": 15
         },
         {
           "path": "src/cli/commands/plugins.ts",
@@ -3295,7 +3303,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 16,
-      "totalLines": 3012
+      "totalLines": 3026
     }
   ],
   "edges": [
@@ -3943,11 +3951,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         "src/supervisor/start.ts",
         "src/supervisor/app.ts"
       ],
-      "observedImports": 1,
+      "observedImports": 3,
       "observedEvidence": [
+        {
+          "importer": "src/supervisor/app.ts",
+          "import": "../server/trust-boundary.js"
+        },
         {
           "importer": "src/supervisor/process-controller.ts",
           "import": "../server/runtime-state.js"
+        },
+        {
+          "importer": "src/supervisor/start.ts",
+          "import": "../server/trust-boundary.js"
         }
       ]
     }
@@ -5896,10 +5912,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "generatedFrom": "docs/architecture-map/architecture.manifest.json",
     "generatedBy": "scripts/generate-architecture-map.mjs",
     "nodeCount": 21,
-    "sourceFileCount": 504,
-    "mappedFileCount": 504,
+    "sourceFileCount": 506,
+    "mappedFileCount": 506,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113138,
+    "totalSourceLines": 113695,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 14
   },
@@ -5918,13 +5934,17 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "cli-governance",
       "to": "host-safety",
-      "count": 8,
+      "count": 9,
       "evidence": [
         {
           "importer": "src/cli/chat-command.ts",
           "import": "../config/environment.js"
         },
         {
+          "importer": "src/cli/chat-command.ts",
+          "import": "../config/paths.js"
+        },
+        {
           "importer": "src/cli/commands/plugins.ts",
           "import": "../../config/environment.js"
         },
@@ -5946,10 +5966,6 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "importer": "src/cli/server-command.ts",
-          "import": "../config/paths.js"
-        },
-        {
-          "importer": "src/cli/supervisor-command.ts",
           "import": "../config/paths.js"
         }
       ]
@@ -5957,8 +5973,12 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "cli-governance",
       "to": "server",
-      "count": 2,
+      "count": 3,
       "evidence": [
+        {
+          "importer": "src/cli/chat-command.ts",
+          "import": "../server/trust-boundary.js"
+        },
         {
           "importer": "src/cli/server-command.ts",
           "import": "../server/runtime-state.js"
@@ -7677,11 +7697,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "supervisor",
       "to": "server",
-      "count": 1,
+      "count": 3,
       "evidence": [
+        {
+          "importer": "src/supervisor/app.ts",
+          "import": "../server/trust-boundary.js"
+        },
         {
           "importer": "src/supervisor/process-controller.ts",
           "import": "../server/runtime-state.js"
+        },
+        {
+          "importer": "src/supervisor/start.ts",
+          "import": "../server/trust-boundary.js"
         }
       ]
     },
