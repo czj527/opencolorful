@@ -474,6 +474,18 @@ h3 { margin: 0; font-size: 16px; }
 .board-inspector-empty { padding: 22px; border: 1px dashed var(--line-strong); color: var(--ink-faint); font-size: 11px; }
 .board-source-truth { margin: 17px 0 0; color: var(--ink-faint); font-size: 11px; line-height: 1.65; }
 
+.dev-todo-intro { min-height: 0; margin-top: 0; }
+.dev-todo-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.dev-todo-card { display: flex; flex-direction: column; gap: 11px; padding: 17px 19px; border: 1px solid var(--line); border-left: 3px solid var(--cyan); background: var(--bg-raised); }
+.dev-todo-card-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+.dev-todo-card-head strong { font-size: 12.5px; }
+.dev-todo-card-head small { display: block; margin-top: 4px; color: var(--ink-faint); font-size: 10px; }
+.dev-todo-progress { flex-shrink: 0; padding: 3px 8px; border: 1px solid var(--line-strong); color: var(--ink-faint); font-size: 10px; white-space: nowrap; }
+.dev-todo-items { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+.dev-todo-items li { display: flex; gap: 9px; color: var(--ink-soft); font-size: 11.5px; line-height: 1.55; }
+.dev-todo-items li span { color: var(--amber); flex-shrink: 0; }
+.dev-todo-card .card-open { margin-top: auto; align-self: flex-start; }
+
 .boundary-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .boundary-card { min-height: 164px; padding: 19px; border: 1px solid var(--line); border-left: 3px solid var(--violet); background: var(--bg-raised); }
 .boundary-card h3 { margin: 15px 0 12px; }

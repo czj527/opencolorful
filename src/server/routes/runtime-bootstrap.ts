@@ -219,6 +219,13 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
   const runtimeSystemPrompt = new Map<string, string | undefined>();
   // P0-2：插件状态签名（绑定/授权修订/版本/运行实例），变化时重建 Runtime（下一 turn 生效）
   const pluginSignatures = new Map<string, string>();
+  // P1 审计修复（§10-1）：per-session single-flight。ensureRuntime 的"检查→创建"
+  // 横跨 await SessionRuntime.create 异步间隙，messages/compact/regenerate/branch
+  // switch 四个入口可并发进入同一会话的装配——PromptService.register 是直接
+  // Map.set，输家会静默覆盖赢家 Runtime（旧实例上下文无人 dispose，泄漏）。
+  // 修复：同一会话的并发调用共享同一个 in-flight Promise（首位调用者装配，
+  // 其余 await 同一结果），结束（成功或失败）即移除条目，保证失败可重试。
+  const ensureInFlight = new Map<string, Promise<void>>();
 
   /**
    * P0-2：Agent 的插件状态签名——enabled 绑定的 pluginId、active 版本、状态、
@@ -307,7 +314,8 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
   // 懒重建 runtime：无 runtime 时按 messages 路由同款逻辑创建；
   // 已有 runtime 且 Agent profile 变更时先 invalidate 再重建。
   // 失败抛 EnsureRuntimeError，由调用方映射为 HTTP 响应。
-  async function ensureRuntime(sessionId: string): Promise<void> {
+  // 并发进入由外层 ensureRuntime 的 per-session single-flight 串行化。
+  async function ensureRuntimeOnce(sessionId: string): Promise<void> {
     const createRuntime = async (systemPrompt: string | undefined) => {
       const snapshotFactory = pluginSnapshotFactory();
       // 仅在需要创建/重建 runtime 时才要求 sessionService 与 paths 存在
@@ -846,6 +854,23 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
         }
       }
     }
+  }
+
+  /**
+   * 对外入口：per-session single-flight 包装。
+   * 同一会话的并发调用共享同一个装配 Promise；不同会话互不阻塞。
+   * 条目在装配结束时移除——失败后的下一次调用是全新尝试（可重试语义不变）。
+   */
+  function ensureRuntime(sessionId: string): Promise<void> {
+    const inFlight = ensureInFlight.get(sessionId);
+    if (inFlight !== undefined) {
+      return inFlight;
+    }
+    const pending = ensureRuntimeOnce(sessionId).finally(() => {
+      ensureInFlight.delete(sessionId);
+    });
+    ensureInFlight.set(sessionId, pending);
+    return pending;
   }
 
   return {
