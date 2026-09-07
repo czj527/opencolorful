@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-06**
-**当前基线：** `main`  `a726090`（审计立即修复 5/5 完成收口 #70——B3 根因修复 #69 与收口文档 #68 已在批次内；a4 fixture 令牌适配完成后本条随之推进）
+**当前基线：** `main`  `1a2418a`（#71 a4 五 lane fixture 令牌适配已合并，全量真链 27/27 闭合；B4/B5 Electron 真链 lane 完成后本条随之推进）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -22,6 +22,7 @@
 - **2026-09-06 全量 desktop 真链套件本地复跑（#66 连带问题首次暴露）**：27 例 = 9 过 / 18 败；b3 lane 3/3 全过（含修复后的 BRANCH-03/04），a5 通过；**a4a/a4b/a4c/a4d/a4e 五个 lane 的 fixture 在 setup 阶段被 #66 信任边界 403 拒绝**（18 例中 12 例错误直接为 Node 侧写请求 `HTTP 403`，如"配置 stub Provider 应成功：HTTP 403"）——与 lane-b3 当时被挡完全同因，lane-b3 已在 #69 适配，其余五个 lane 未适配。CI 只跑 `@smoke` 覆盖不到全量 lane，故 #66-#69 的 CI 均未发现。**新增后续修复首项：五个 a4 lane fixture 令牌适配后全量真链复跑须 27/27**；在此之前"真链 26/27→27/27"与审计 AUTO_PASS 缺口不能宣称闭合。
 - **2026-09-06 B3 分支真链间歇性发送禁用——根因修复完成（#69）**：trace 实证为**测试时序缺陷**而非分支功能缺陷——`expectIdle` 在首轮 `createThread/updateModel/updateSettings` 的 API 阶段假通过（streaming 从未翻转），随后 `setThreadId` 触发空态↔会话态 Composer 换挂（同名可访问文本框），第二条基线消息的原子 fill 落在被卸载节点（失败 trace 中第二问文本仅存在于动作参数、从未进入任何 DOM 快照）。修复为两处基线 `expectIdle` 后等待当轮用户气泡；lane-b3 fixture 同步适配 #66 信任边界令牌（承接平台故障子代理的已提交工作，评审保留）。验证：同载荷加压 8 轮 0 次签名复现（6 过 + 2 次极端人工负载下的 fixture 拆卸 EBUSY 噪声，属另一层既有问题已记录）、lane-b3 全文件 3/3、desktop 双 tsc + vite 构建通过。产品侧"创建过渡期继续打字丢焦点"作为轻微 UX 现象记录于实施记录，不构成功能缺陷。
 - **2026-09-06 a4 五 lane fixture 令牌适配——全量真链复跑 27/27 闭合（#71）**：lane-a4a/a4b/a4c/a4d/a4e 的 Node 侧写请求（provision `apiSend`、spec 内裸 `fetch` PUT/DELETE、a4e `lane.apiSend`）按 #69 lane-b3 同法适配 #66 信任边界——新增共享 `fixtures/server-token.ts`（只读 `<home>/runtime/server-token`，缺失即抛错，无任何跳过校验旁路），a4a/a4d `apiSend` 签名改为接收 harness 以获取 homeDir。涉及 11 文件 7 处写请求调用点（a4b×2/a4c×1 偏好固定、a4a 归档 DELETE 与偏好 PUT、a4d deep-dive POST、a4e preferences PUT）；a4b/a4c/a5/smoke 的其余调用均为读请求或 stub/代理控制面（`__a4b__`/`__b3__`），不在信任边界范围。验证：全量真链套件 27/27（8.2 分钟，此前 9/27）、desktop 双 tsc + vite 构建通过。经验教训：首跑 1/26 全线早退系新 worktree 未构建 renderer `dist/`（Electron 加载失败），与令牌无关——fresh worktree 跑 e2e 前必须先 `npm run build:protocol` + desktop 构建。
+- **2026-09-06 B4/B5 Electron 真链补齐 + 订阅重放缺陷修复（#72）**：审计 §7.3 四条证据缺口以 lane-b45 全部闭合——①真实 Electron 中 `/compact` 触发 pi 压缩（stub 文本回复即摘要），live 压缩卡 completed 态含摘要正文与 tokens 前后；②重启后历史压缩卡（type=compaction 条目）摘要一致（tokens 属 live 卡专有，历史条目视图不携带——按投影契约断言）；③stub 流式 `tool_calls(todo_write)` 真实驱动 SessionTodoCard（计数 1/3，in_progress 项渲染 activeForm）；④重启后从 `SessionView.todos`（SQLite 真值）恢复卡片与计数。**真链暴露并修复一个产品缺陷**：会话 SSE 端点对无 cursor 的首次订阅从 seq 0 全量重放历史，重启打开会话时压缩控制事件（绕过 prompt 流收养门）与 REST 快照各投影一张卡＝双卡；修复为**显式 cursor（Last-Event-ID/`?sinceSeq=`）才补发缓存**（重放=断线补发机制，历史由 REST 快照承担），防丢事件窗口的订阅先行+缓冲不变；集成测试改写 race 例为显式 cursor 并新增"无 cursor 首订只收实时"回归。验证：lane-b45 两例绿、全量真链 29/29（6.1 分钟；首轮 5 例尾段超时经单例复跑与第二轮全绿定性为负载噪声，b3 `setStub` 控制面 5s 超时与 EBUSY 同层记录）、`sse-replay` 集成 11/11、desktop 构建 + `npm run check` 通过。既有边界：todo"断线 Replay"由重启路径（重订阅+快照种子）覆盖，Replay Store 断线补发语义仍由 B5 单测承担。
 
 ## 阶段状态
 
@@ -40,8 +41,8 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配已完成，全量真链 27/27 闭合）：runtime single-flight、usage durable spool、Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、SSE 合批去重、B4/B5 Electron 真链、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行。A/B 产品完成状态在人工与发布验收前不翻转。
-2. **补齐波次 B 真链与人工验收**：补 compact/todo Electron 真链，执行独立报告中的 A/B 人工验收卡，确认错误、恢复、长期使用和用户可理解性。
+1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72 已完成）：runtime single-flight、usage durable spool、Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、SSE 合批去重、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行。A/B 产品完成状态在人工与发布验收前不翻转。
+2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
 5. **五天真实日用后置**：在安全、迁移、B3 稳定性、Desktop 真实交互和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务。

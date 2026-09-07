@@ -218,7 +218,7 @@ describe("SSE event replay", () => {
     });
     const controller = new AbortController();
     const response = await app.request(
-      "http://127.0.0.1/api/sessions/session-race/events",
+      "http://127.0.0.1/api/sessions/session-race/events?sinceSeq=0",
       { headers: { accept: "text/event-stream" }, signal: controller.signal },
     );
     const reader = response.body!.getReader();
@@ -241,6 +241,52 @@ describe("SSE event replay", () => {
 
     expect(body).toContain("race-1");
     expect(body).toContain("race-2");
+  });
+
+  it("does not replay cached events on first subscription without an explicit cursor (history is the REST snapshot's job)", async () => {
+    const cached = {
+      protocolVersion: 1,
+      eventId: "noreplay-1",
+      sessionId: "session-noreplay",
+      streamId: "stream-noreplay",
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      type: "message.delta",
+      payload: { role: "assistant", delta: "cached" },
+    } as PlatformEventEnvelope;
+    const replayStore = new EventReplayStore();
+    replayStore.publish(cached);
+    const { app } = createTrustedServerApp({
+      promptService: new PromptService(),
+      replayStore,
+    });
+    const controller = new AbortController();
+    const response = await app.request(
+      "http://127.0.0.1/api/sessions/session-noreplay/events",
+      { headers: { accept: "text/event-stream" }, signal: controller.signal },
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let body = "";
+    // 缓存事件不得在首订出现；随后的实时事件必须到达（订阅先行，无丢事件窗口）
+    replayStore.publish({ ...cached, eventId: "noreplay-2", sequence: 2, payload: { role: "assistant", delta: "live" } });
+    try {
+      const deadline = Date.now() + 300;
+      while (Date.now() < deadline && !body.includes("noreplay-2")) {
+        const read = await Promise.race([
+          reader.read(),
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 20)),
+        ]);
+        if (read === undefined || read.done) continue;
+        body += decoder.decode(read.value, { stream: true });
+      }
+    } finally {
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    }
+
+    expect(body).not.toContain("noreplay-1");
+    expect(body).toContain("noreplay-2");
   });
 
   it("reports reset when cache overflows for a stream", async () => {

@@ -9,6 +9,15 @@ import { instrument } from "../../observability/instrument.js";
 interface ReplayCursor {
   readonly streamId?: string;
   readonly sequence: number;
+  /**
+   * 是否携带显式重放游标（Last-Event-ID 头 / sinceSeq 查询参数）。
+   * 重放是**断线补发机制**——只有显式带游标的订阅才补发历史；首次订阅不重放，
+   * 历史由 REST 快照承担（GET /api/sessions/:id 的 entries/messageEntries）。
+   * 否则"打开会话"会把快照与重放各呈现一遍（B4 压缩卡双卡根因：desktop 真链
+   * lane-b45 实证——prompt 流有收养门丢弃重放，绕过收养门的压缩控制事件
+   * 会与历史卡重复投影）。
+   */
+  readonly explicit: boolean;
 }
 
 function parseReplayCursor(context: Context): ReplayCursor {
@@ -18,7 +27,7 @@ function parseReplayCursor(context: Context): ReplayCursor {
     const sequence = Number(separator === -1 ? lastEventId : lastEventId.slice(separator + 1));
     if (Number.isInteger(sequence) && sequence >= 0) {
       const streamId = separator > 0 ? lastEventId.slice(0, separator) : undefined;
-      return streamId === undefined ? { sequence } : { streamId, sequence };
+      return streamId === undefined ? { sequence, explicit: true } : { streamId, sequence, explicit: true };
     }
   }
 
@@ -26,11 +35,11 @@ function parseReplayCursor(context: Context): ReplayCursor {
   if (sinceSeq !== undefined) {
     const seq = Number(sinceSeq);
     if (Number.isInteger(seq) && seq >= 0) {
-      return { sequence: seq };
+      return { sequence: seq, explicit: true };
     }
   }
 
-  return { sequence: 0 };
+  return { sequence: 0, explicit: false };
 }
 
 async function writeEvent(
@@ -98,9 +107,12 @@ export async function createSessionEventStream(
     });
     instrument.sseConnected(sessionId);
 
-    const sessionStreams = cursor.streamId === undefined
-      ? replayStore.listSessionStreams(sessionId)
-      : [cursor.streamId];
+    // 显式游标（断线补发）才重放缓存；首次订阅只发实时，历史由 REST 快照承担
+    const sessionStreams = !cursor.explicit
+      ? []
+      : cursor.streamId === undefined
+        ? replayStore.listSessionStreams(sessionId)
+        : [cursor.streamId];
     try {
       for (const streamId of sessionStreams) {
         if (aborted) break;
