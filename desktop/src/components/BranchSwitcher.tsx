@@ -55,16 +55,22 @@ export function BranchSwitcher({ source, sessionId, running, onForked }: BranchS
   const [switching, setSwitching] = useState(false);
   const [forking, setForking] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // P1 审计修复（§10-5）：树刷新代次——branches.changed 事件、弹层打开、手动刷新
+  // 可能触发并发 GET；响应落地时校验代次，过期响应不 setState（含换会话/卸载）。
+  const refreshGeneration = useRef(0);
 
   const refreshTree = useCallback(() => {
+    const generation = ++refreshGeneration.current;
     setLoading(true);
     setLoadError(null);
     source.getBranchTree(sessionId)
       .then((next) => {
+        if (generation !== refreshGeneration.current) return;
         setTree(next);
         setLoading(false);
       })
       .catch((cause: unknown) => {
+        if (generation !== refreshGeneration.current) return;
         setLoadError(cause instanceof Error ? cause.message : "分支树加载失败");
         setLoading(false);
       });
@@ -79,7 +85,11 @@ export function BranchSwitcher({ source, sessionId, running, onForked }: BranchS
     const unsubscribe = source.subscribeBranchState?.(sessionId, (update: BranchStateUpdate | null) => {
       if (update !== null && update.kind === "branchesChanged") refreshTree();
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe?.();
+      // 换会话/卸载后，旧会话在途的树响应不得再 setState
+      refreshGeneration.current += 1;
+    };
   }, [source, sessionId, refreshTree]);
 
   // 点击弹层外部关闭

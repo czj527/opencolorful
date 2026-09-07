@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-07**
-**当前基线：** `main`  `8886096`（#76 Fork 对账与孤儿清理已合并，全量真链 29/29；#77 Desktop 设置失败回滚完成后本条随之推进）
+**当前基线：** `main`  `89dd6b4`（#77 Desktop 设置失败回滚已合并，全量真链 29/29；#78 分支请求 generation/token 完成后本条随之推进）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -31,6 +31,8 @@
 - **2026-09-07 Fork JSONL/SQLite 对账与孤儿清理（#76）**：审计 §10-3 修复——`forkSession` 先写 JSONL（`forkSessionToNewSession`）后写 SQLite（`index.create`），索引失败直接抛错并遗留刚创建的 fork JSONL（`create()` 同型场景有完整补偿，Fork 路径没有），跨进程崩溃残留更无任何清理路径；修复两层——①同进程补偿：`index.create` 失败时经 `removeSessionFile`（路径护栏）删除 fork 产物，清理再失败以 `AggregateError` 同时携带两错；②启动对账：新增 `SessionService.reconcileOrphanForks()`（start.ts 构造后接线），扫描受控平面 sessions 目录（全局 `sessions/` + `agents/<id>/sessions/`，不递归——subagent 线程在 `subagents/` 子目录不在范围），删除条件三重保守（路径与会话 id 双查无索引行 + header `type:"session"` + `parentSession` 仍被索引），**索引整体缺失/损坏时条件三永不成立、零删除**——JSONL 作为消息正文唯一事实源不因库损坏被误清；非法/截断首行视为非 Fork 残留，删除失败 `session.fork_orphan_remove_failed` 诊断。新增 `session-fork-reconcile` 集成 7 例，判别性实证两轮（禁用补偿删除恰 2 例失败；放宽 parentSession 门恰 3 例保守性用例失败）。验证：新用例 7/7、相邻 fork/branch 回归 14/14、`npm run check` 全绿、全量真链 29/29。
 - **2026-09-07 Desktop 设置失败回滚（#77）**：审计 §10-4 修复——会话设置三处乐观更新（`changeModel`/`changeThinkingLevel`/`changeToolMode`，既有会话分支）写服务端失败后只弹错误提示，本地状态停留在服务端已拒绝的新值上（UI 与服务端真值背离直至重开会话）；修复为失败时重拉服务端真值（`getSessionSettings`）恢复本地状态——选择重拉而非盲回旧值：快速连续修改（A→B）时 A 失败的盲回滚会连 B 的成功结果一起冲掉，真值收敛在两种时序下都正确；重拉也失败（连接已断）保留显示值由错误提示兜底，下次加载自然对账。`confirmWorkspace`/`switchToReadOnly` 本就只在成功 `.then` 里应用，无需改动。新增 `desktop/src/settings-rollback.mock.test.tsx` 5 例（完整 App 壳 + 生产 MockDataSource + `overrideSource` Proxy 注入，DOM 耦合测试按规则放 `src/`）：工具模式/思考级别/模型三处失败收敛回真值、成功路径保持新值且恰好调用一次、错误行稳定文案呈现；断言面向收敛终态（同步 reject 时乐观帧与回滚帧合并同批渲染，UI 从不显示被拒值）。判别性实证：注释三处回滚调用后恰 4/5 失败（成功路径用例不受影响）。验证：desktop 单测 110/110、`npm run check` 全绿、全量真链 29/29。
 
+- **2026-09-07 分支请求 generation/token（#78）**：审计 §10-5 修复——分支视图 GET 无并发守卫，慢的旧响应可覆盖新响应：①数据面 `IpcDataSource.reloadBranchEntries` 三个触发源并发（switchBranch 兜底重载 / SSE `session.branch.switched` 事件重载 / turn 终态挂起重载），各自整表 `seedItems` 重投影，旧分支慢响应落地覆盖新分支条目；②视图面 `BranchSwitcher.refreshTree`（branches.changed 事件、弹层打开、手动刷新并发），`setTree` 取最后落地者而非最新请求者。修复为 per-scope 代次计数（channel 级 `branchGeneration` + 组件级 `refreshGeneration` ref），每次发出前递增、响应落地校验、过期整包丢弃（不 seed 不 notify / 不 setState），换会话/卸载 cleanup 递增保证旧会话在途响应永不 setState；不引入 AbortController（幂等 GET，守卫只管状态应用）。新增 `desktop/src/data/branch-generation.test.ts` 3 例（可控 deferred entries 桩：并发重载旧代次丢弃/快速连续切换/单次放行）+ `desktop/src/branch-tree-race.mock.test.tsx` 3 例（BranchSwitcher 直接渲染：同实例事件刷新并发/无并发语义不变/换会话不串；树内容断言在展开菜单内——trigger 只显示计数）。判别实证：注释两处代次校验恰 3/6 失败（3 例无并发对照全过）。验证：desktop 单测 116/116、`npm run check` 全绿、全量真链 29/29。
+
 ## 阶段状态
 
 | 阶段 | 主题 | 状态 | 权威记录 |
@@ -48,7 +50,7 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77 已完成）：分支请求 generation/token、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
+1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78 已完成）：web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
