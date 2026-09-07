@@ -1268,7 +1268,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/server/sse/session-events.ts",
-          "lines": 148
+          "lines": 160
         },
         {
           "path": "src/server/start.ts",
@@ -1292,7 +1292,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 29,
-      "totalLines": 7487
+      "totalLines": 7499
     },
     {
       "id": "ui-projection",
@@ -5915,7 +5915,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 506,
     "mappedFileCount": 506,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113695,
+    "totalSourceLines": 113707,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 14
   },
