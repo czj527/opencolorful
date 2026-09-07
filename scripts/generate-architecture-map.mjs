@@ -325,6 +325,10 @@ function validateLocale(manifest, locale) {
   for (const key of projectBoardCopyKeys) {
     requireValue(locale.meta?.projectBoard?.[key], `meta.projectBoard.${key}`)
   }
+  const devTodoCopy = locale.meta?.projectBoard?.devTodo
+  for (const key of ["title", "intro", "openCard", "assignee", "empty"]) {
+    requireValue(devTodoCopy?.[key], `meta.projectBoard.devTodo.${key}`)
+  }
   for (const layer of manifest.layers) {
     requireValue(locale.layers?.[layer.id]?.label, `layers.${layer.id}.label`)
     requireValue(locale.layers?.[layer.id]?.description, `layers.${layer.id}.description`)

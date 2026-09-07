@@ -471,6 +471,55 @@
     renderBoardFocus()
     renderBoardFilters()
     renderBoardColumns()
+    renderDevTodo()
+  }
+
+  /**
+   * 开发者待办聚合：把"需要开发者本人完成"的看板卡片（人工验收、审计修复
+   * 队列、发布实测）的未完成清单项摊平成一张可点击的待办表。数据仍然来自
+   * project-board.json 单一来源，这里只做视图聚合，不复制事实。
+   */
+  function renderDevTodo() {
+    $("#dev-todo-title").textContent = copy.meta.projectBoard.devTodo.title
+    $("#dev-todo-intro").textContent = copy.meta.projectBoard.devTodo.intro
+    const devCards = allBoardCards().filter((card) => {
+      if (["已完成", "已归档"].includes(card.state)) return false
+      if ((card.tags || []).includes("开发者必做")) return true
+      return ["审计修复", "发布验证"].includes(card.type)
+    })
+    const items = devCards.flatMap((card) => {
+      const open = (card.checklist || []).filter((item) => !item.done)
+      const total = card.checklist?.length || 0
+      const done = total - open.length
+      return open.map((item) => ({ card, item, total, done }))
+    })
+    if (items.length === 0) {
+      $("#dev-todo-list").innerHTML = `<p class="empty-state">${esc(copy.meta.projectBoard.devTodo.empty)}</p>`
+      return
+    }
+    const byCard = new Map()
+    for (const entry of items) {
+      if (!byCard.has(entry.card.id)) byCard.set(entry.card.id, [])
+      byCard.get(entry.card.id).push(entry)
+    }
+    $("#dev-todo-list").innerHTML = [...byCard.values()].map((entries) => {
+      const { card } = entries[0]
+      return `
+        <article class="dev-todo-card" data-card="${esc(card.id)}">
+          <header class="dev-todo-card-head">
+            <div>
+              <strong>${esc(card.title)}</strong>
+              <small>${esc(copy.meta.projectBoard.devTodo.assignee)}</small>
+            </div>
+            <span class="dev-todo-progress">${format(copy.meta.projectBoard.progress, { done: entries[0].done, total: entries[0].total })}</span>
+          </header>
+          <ul class="dev-todo-items">
+            ${entries.map((entry) => `<li><span>○</span>${esc(entry.item.label)}</li>`).join("")}
+          </ul>
+          <button class="card-open" type="button">${esc(copy.meta.projectBoard.devTodo.openCard)} ↗</button>
+        </article>
+      `
+    }).join("")
   }
 
   function renderFlows() {
@@ -787,6 +836,14 @@
     state.selectedCard = card.dataset.card
     renderBoardFocus()
     renderBoardColumns()
+  })
+  $("#dev-todo-list").addEventListener("click", (event) => {
+    const card = event.target.closest("[data-card]")
+    if (!card) return
+    state.selectedCard = card.dataset.card
+    renderBoardFocus()
+    renderBoardColumns()
+    document.getElementById("board-columns")?.scrollIntoView({ behavior: "smooth", block: "start" })
   })
 
   applyTheme()

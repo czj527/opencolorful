@@ -4,8 +4,8 @@
     "subtitle": "把项目讲成人能读懂的运行结构",
     "brandSubtitle": "真实代码 · 可追溯的理解路径",
     "eyebrow": "真实代码 · 清晰边界 · 可追溯流程",
-    "statusLabel": "P1 Wave B 进行中",
-    "statusSummary": "当前仓库处在对话工作台收尾阶段：B0-B5b 已实现，B6 记录了边界缺陷，真实链路证据仍在补齐。",
+    "statusLabel": "P1 审计修复进行中",
+    "statusSummary": "立即修复 5/5、a4 令牌适配、B4/B5 Electron 真链与会话 SSE 首订重放修复已合并；审计修复队列剩余项与人工验收卡仍待收口。",
     "heroTitle": "先看懂它怎么运转，\n再走进每一层实现。",
     "heroCopy": "这不是一张把所有东西挤在一起的图。先用总览理解系统分层，再沿着真实调用链走一遍，最后进入某个模块的工作台，查看它负责什么、不能越过什么边界，以及对应的实现文件。",
     "generatedMeta": "{nodes} 个模块 · {files} 个生产文件 · 自动生成",
@@ -134,7 +134,14 @@
       "state": "状态",
       "priority": "优先级",
       "boardCards": "{count} 张卡片 · {active} 张活动卡片 · {risk} 张风险卡片",
-      "allModules": "全部关联模块"
+      "allModules": "全部关联模块",
+      "devTodo": {
+        "title": "开发者待办",
+        "intro": "聚合所有需要开发者本人完成的验收与跟进事项：人工验收卡、审计修复队列与发布实测。自动化证据不能替代这里的任何一项。",
+        "openCard": "打开卡片",
+        "assignee": "需要：开发者本人",
+        "empty": "没有待办——确认看板数据是否同步。"
+      }
     },
     "modules": {
       "eyebrow": "单模块视图",
@@ -757,18 +764,18 @@
   "knownGaps": [
     {
       "severity": "高风险",
-      "title": "Wave B 的真实链路证据还不完整",
-      "detail": "Compact 的 live / replay identity 和持久化 Todo 的真实链路覆盖仍留在收尾证据阶段；地图会把“代码已实现”和“验证未闭环”分开表达。"
-    },
-    {
-      "severity": "中风险",
-      "title": "BRANCH-03/04：切换分支后发送仍被禁用",
-      "detail": "分支切换后的发送路径仍是 B3 / B6 记录的已知缺陷，不能在地图上被悄悄标成完成。"
+      "title": "审计后续修复队列仍有未闭环项",
+      "detail": "立即修复 5/5、B4/B5 Electron 真链与会话 SSE 首订重放修复已合并；用量 spool、Fork 对账、设置回滚、分支 generation/token、SSE 合批去重与 Mock 入口收口仍在项目看板跟踪。"
     },
     {
       "severity": "中风险",
       "title": "Web 事件白名单还需要补齐",
-      "detail": "Web 协议客户端还需要把新增的 todo.updated 事件加入声明，已记录在 Wave B 收尾计划中。"
+      "detail": "Web 协议客户端还没有声明服务端已发送的 todo.updated、波次 B 分支事件与 turn 终态事件，已进入审计后续修复队列。"
+    },
+    {
+      "severity": "高风险",
+      "title": "发布验证仍未完成",
+      "detail": "v0.1.1 发布资产仍是 Draft；仓库外安装、更新、重启与数据恢复实测（G2）通过前不能做正式发布判断。"
     }
   ]
 }

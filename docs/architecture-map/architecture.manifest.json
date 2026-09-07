@@ -4,9 +4,9 @@
   "subtitle": "A living map of the local-first assistant platform",
   "sourceOfTruth": "This manifest owns semantic module responsibilities, invariants, critical flows, and the files that anchor each boundary. Generated file inventory and import evidence are derived from the repository.",
   "status": {
-    "label": "P1 Wave B in progress",
+    "label": "P1 audit remediation in progress",
     "tone": "active",
-    "summary": "The repository is on the conversation workbench closeout lane. B0-B5b are implemented; B6 recorded bounded defects and deferred true-chain evidence.",
+    "summary": "Immediate fixes (5/5), Wave A/B fixture token adaptation, B4/B5 Electron true-chain, and the session SSE replay fix are merged; the follow-up remediation queue and manual acceptance cards remain open.",
     "source": "docs/project-status.md",
     "sourceLabel": "Open current project status"
   },
@@ -1852,21 +1852,21 @@
   "knownGaps": [
     {
       "severity": "high",
-      "title": "Wave B true-chain evidence is not complete",
-      "detail": "Compact live/replay identity and durable todo true-chain coverage are still deferred to the closeout evidence; the architecture map records them as implemented code plus incomplete verification.",
-      "path": "plans/p1-conversation-workbench.en.md"
-    },
-    {
-      "severity": "medium",
-      "title": "BRANCH-03/04 send-disabled defect remains bounded",
-      "detail": "The post-branch-switch send path remains a known defect from B3/B6 and must not be silently represented as complete.",
+      "title": "Audit remediation queue still has open items",
+      "detail": "Immediate fixes (5/5), B4/B5 Electron true-chain, and the session SSE first-subscription replay fix are merged; usage durable spool, fork reconciliation, Desktop settings rollback, branch request generation/token, SSE notify dedupe, and Mock entry cleanup remain tracked on the project board.",
       "path": "docs/project-status.md"
     },
     {
       "severity": "medium",
       "title": "Web event allowlist follow-up",
-      "detail": "The Web protocol client still needs the additive todo.updated event declaration tracked in the Wave B closeout.",
-      "path": "plans/p1-conversation-workbench.en.md"
+      "detail": "The Web protocol client still lacks todo.updated, Wave B branch events, and turn terminal events that the server already emits; tracked in the audit remediation queue.",
+      "path": "docs/project-status.md"
+    },
+    {
+      "severity": "high",
+      "title": "Release verification remains pending",
+      "detail": "v0.1.1 assets are still Draft releases; out-of-repo install, update, restart, and data-recovery verification (G2) must pass before a public release decision.",
+      "path": "plans/g2-desktop-release.md"
     }
   ],
   "rules": [
