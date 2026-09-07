@@ -295,7 +295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/ipc-source.ts",
-          "lines": 1296
+          "lines": 1301
         },
         {
           "path": "desktop/src/data/local-prefs.ts",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10550
+      "totalLines": 10555
     },
     {
       "id": "web-client",
@@ -5183,13 +5183,13 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "updatedAt": "2026-09-07",
     "baseline": {
       "branch": "main",
-      "commit": "38519d2",
-      "label": "审计立即修复 5/5、a4 令牌适配与 B4/B5 真链已合并；后续修复队列与人工验收待收口"
+      "commit": "9992d3f",
+      "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、runtime single-flight 已合并；后续修复队列剩余 7 项与人工验收待收口"
     },
     "health": {
       "label": "修复队列与人工验收待收口",
       "tone": "risk",
-      "summary": "立即修复 5/5、B4/B5 Electron 真链与会话 SSE 首订重放缺陷修复已合并（全量真链 29/29）；后续修复队列剩余项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+      "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放与 runtime single-flight 已合并（全量真链 29/29）；后续修复队列剩余 7 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
       "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
     },
     "signals": [
@@ -5202,7 +5202,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "label": "当前活动轨道",
         "value": "审计修复队列",
-        "detail": "立即修复 5/5 与 B4/B5 真链已闭合，后续修复队列剩余 8 项按队列继续。",
+        "detail": "立即修复 5/5、B4/B5 真链与 runtime single-flight 已闭合，后续修复队列剩余 7 项按队列继续。",
         "source": "docs/project-status.md"
       },
       {
@@ -5251,7 +5251,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
             "priority": "P1",
             "state": "进行中",
             "title": "清完审计后续修复队列",
-            "summary": "审计 §10 后续修复 10 项中已闭合 2 项（B4/B5 真链 #72、Runtime single-flight #73），剩余 8 项按队列继续。",
+            "summary": "审计 §10 后续修复 10 项中已闭合 3 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74），剩余 7 项按队列继续。",
             "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
             "tags": [
               "P1",
@@ -5287,8 +5287,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
                 "done": false
               },
               {
-                "label": "SSE 合批通知去重",
-                "done": false
+                "label": "SSE 合批通知去重（#74）",
+                "done": true
               },
               {
                 "label": "B4/B5 Electron 真链（#72）",
@@ -6059,7 +6059,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 506,
     "mappedFileCount": 506,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113736,
+    "totalSourceLines": 113741,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },
