@@ -213,7 +213,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     // 真实恢复路径：openMetadataDatabase → applyMigrations（修复前在此报
     // "table memory_journal_v13 already exists"，数据库无法打开）
     const recovered = openMetadataDatabase(pathsFor(directory).database);
-    expect(readVersion(recovered)).toBe(15);
+    expect(readVersion(recovered)).toBe(CURRENT_SCHEMA_VERSION);
     expect(hasTable(recovered, "memory_journal_v13")).toBe(false);
     // 遗留临时表被丢弃（以正式表为准重拷），诱饵行不得并入
     const leftoverCount = recovered
@@ -255,7 +255,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     }
 
     const recovered = openMetadataDatabase(pathsFor(directory).database);
-    expect(readVersion(recovered)).toBe(15);
+    expect(readVersion(recovered)).toBe(CURRENT_SCHEMA_VERSION);
     expect(hasTable(recovered, "memory_journal_v13")).toBe(false);
     expect(hasTable(recovered, "memory_journal")).toBe(true);
     const row = recovered
@@ -282,7 +282,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     }
 
     const recovered = openMetadataDatabase(pathsFor(directory).database);
-    expect(readVersion(recovered)).toBe(15);
+    expect(readVersion(recovered)).toBe(CURRENT_SCHEMA_VERSION);
     expect(hasTable(recovered, "usage_records_v14")).toBe(false);
     const leftoverCount = recovered
       .prepare("SELECT COUNT(*) FROM usage_records WHERE session_id = 'leftover-session'")
@@ -310,7 +310,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     }
 
     const recovered = openMetadataDatabase(pathsFor(directory).database);
-    expect(readVersion(recovered)).toBe(15);
+    expect(readVersion(recovered)).toBe(CURRENT_SCHEMA_VERSION);
     // v15 的 CREATE TABLE IF NOT EXISTS 幂等吸收半成品：不重建、不丢数据
     const todo = recovered
       .prepare("SELECT content, status, priority FROM session_todos WHERE session_id = 's-half'")
@@ -365,7 +365,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
 
     // 重跑迁移（不再注入）：完整走 applyMigrations 恢复到当前版本
     applyMigrations(database);
-    expect(readVersion(database)).toBe(15);
+    expect(readVersion(database)).toBe(CURRENT_SCHEMA_VERSION);
     const count = database
       .prepare("SELECT COUNT(*) FROM memory_journal WHERE id = 'journal-1'")
       .pluck()
@@ -415,7 +415,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     expect(count).toBe(1);
 
     applyMigrations(database);
-    expect(readVersion(database)).toBe(15);
+    expect(readVersion(database)).toBe(CURRENT_SCHEMA_VERSION);
     const row = database
       .prepare("SELECT source, role, status, dedupe_key, input, total_tokens FROM usage_records WHERE session_id = 's-1'")
       .get() as {
@@ -474,7 +474,7 @@ describe("metadata 迁移中断自恢复（P0-2 审计回归）", () => {
     }
 
     const recovered = openMetadataDatabase(pathsFor(directory).database);
-    expect(readVersion(recovered)).toBe(15);
+    expect(readVersion(recovered)).toBe(CURRENT_SCHEMA_VERSION);
     expect(hasTable(recovered, "memory_journal_v13")).toBe(false);
     expect(hasTable(recovered, "usage_records_v14")).toBe(false);
 

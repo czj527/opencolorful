@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { UsageCallStatus } from "../../../contracts/usage.js";
 import { instrument } from "../../../observability/instrument.js";
 import type { UsageStore } from "../../../storage/usage-store.js";
+import type { UsageSpool } from "../../../storage/usage-spool.js";
 import type { SubagentRunTerminalUsageEvent } from "../stores/run-store.js";
 import type { SubagentRunStatus } from "../../../contracts/subagents.js";
 
@@ -47,6 +48,8 @@ export interface SubagentUsageIngestionDeps {
   readonly usageStore: UsageStore;
   /** thread model_provider_id/model_id 读取（直接 SQL，避免 RunStore→ThreadStore 环） */
   readonly database: Database.Database;
+  /** P1 审计修复（§10-2）：落账失败的 durable spool（缺省时维持旧 warn-only 行为） */
+  readonly spool?: UsageSpool;
 }
 
 /**
@@ -56,7 +59,7 @@ export interface SubagentUsageIngestionDeps {
 export function createSubagentUsageIngestion(
   deps: SubagentUsageIngestionDeps,
 ): (event: SubagentRunTerminalUsageEvent) => void {
-  const { usageStore, database } = deps;
+  const { usageStore, database, spool } = deps;
 
   const readThreadModel = (threadId: string): { provider: string; model: string } => {
     const row = database
@@ -75,7 +78,7 @@ export function createSubagentUsageIngestion(
         return;
       }
       const { provider, model } = readThreadModel(event.threadId);
-      usageStore.record({
+      const record: import("../../../storage/usage-store.js").UsageRecordInput = {
         source: "subagent",
         role: "secondary",
         status,
@@ -95,7 +98,13 @@ export function createSubagentUsageIngestion(
         createdAt: event.finishedAt,
         startedAt: event.startedAt,
         finishedAt: event.finishedAt,
-      });
+      };
+      // P1 审计修复（§10-2）：落账走 spool 包装（此前失败仅 warn，账目丢失）
+      if (spool !== undefined) {
+        spool.recordWithSpool(record);
+        return;
+      }
+      usageStore.record(record);
     } catch (error) {
       // 摄取失败不得影响 run 终态（终态事务已提交）；诊断走 instrument
       instrument.warn("usage.subagent.record_failed", "子代理终态用量摄取失败", {

@@ -10,6 +10,7 @@ import type { ActivityRecorder } from "../../observability/activity-recorder.js"
 import type { ModelService } from "../../runtime/model-service.js";
 import type { SubagentToolServices } from "../../pi-sdk/subagent-tools-context.js";
 import { UsageStore } from "../../storage/usage-store.js";
+import type { UsageSpool } from "../../storage/usage-spool.js";
 import { selectSecondary } from "../model-policy.js";
 import { createSubagentUsageIngestion } from "./runtime/usage-ingestion.js";
 import { ParentMailboxDeliveryCoordinator } from "./mailbox/parent-mailbox-delivery-coordinator.js";
@@ -63,6 +64,8 @@ export interface BuildSubagentCompositionInput {
   readonly audit: AuditRecorder;
   /** 当前 Server 启动 bootId（Lease 持有者身份） */
   readonly bootId: string;
+  /** P1 审计修复（§10-2）：用量 durable spool（子代理终态摄取失败时兜底；缺省维持 warn-only） */
+  readonly usageSpool?: UsageSpool;
   readonly now?: () => number;
 }
 
@@ -133,8 +136,14 @@ export function buildSubagentComposition(input: BuildSubagentCompositionInput): 
   const runs = new RunStore(database, threads);
   // A8a：Run 终态 → 统一 usage_records 账目摄取（completeRun 持久化累计 token 的
   // 同一转换点；try/catch 内部兜底，摄取失败不影响 Run 终态）。
+  // P1 审计修复（§10-2）：注入 usageSpool——落账失败入 durable spool 待对账，
+  // 不再只 warn 丢账。
   runs.setTerminalUsageIngestion(
-    createSubagentUsageIngestion({ usageStore: new UsageStore(database), database }),
+    createSubagentUsageIngestion({
+      usageStore: new UsageStore(database),
+      database,
+      ...(input.usageSpool !== undefined ? { spool: input.usageSpool } : {}),
+    }),
   );
   const messages = new MessageStore(database, threads);
   const artifacts = new ArtifactStore(database, threads);

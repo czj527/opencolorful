@@ -13,6 +13,7 @@ import { openMetadataDatabase } from "../storage/database.js";
 import { SessionIndex } from "../storage/session-index.js";
 import { SessionTodoStore } from "../storage/session-todos.js";
 import { UsageStore } from "../storage/usage-store.js";
+import { UsageSpool } from "../storage/usage-spool.js";
 import { UsageRecorder } from "../runtime/usage-recorder.js";
 import { MemoryTicker } from "../runtime/memory/memory-ticker.js";
 import { BackgroundReviewService } from "../runtime/memory/background-review.js";
@@ -355,6 +356,11 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
     const replayStore = new EventReplayStore();
     const wsRegistry = new ClientRegistry();
     const usageStore = new UsageStore(database);
+    // P1 审计修复（§10-2）：durable spool——三处用量摄取点（主会话 turn 终态 /
+    // utility 调用 / 子代理 Run 终态）落账失败时原始输入入 usage_pending（v16），
+    // 启动时与失败后延迟重试对账重放（dedupe 幂等），账目不再静默丢失。
+    const usageSpool = new UsageSpool({ database, usageStore });
+    usageSpool.reconcile();
     const usageRecorder = new UsageRecorder(replayStore, usageStore, (sessionId) => {
       try {
         const view = sessionService.getView(sessionId);
@@ -369,7 +375,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
       } catch {
         return null;
       }
-    });
+    }, usageSpool);
     // 记忆设置生效链路：per-Agent 覆盖 → 全局默认 → 平台默认（P0-2：生产必须读真实设置）
     const resolveMemorySettings = (agentId: string) => {
       const global = preferencesStore.get().memory ?? defaultMemoryAgentSettings();
@@ -422,6 +428,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
             ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
             ...(req.signal !== undefined ? { signal: req.signal } : {}),
           }),
+        usageSpool,
       );
     };
 
@@ -548,6 +555,7 @@ async function buildProductionResources(paths: RuntimePaths, version: string): P
         activity: observability.activity,
         audit: observability.audit,
         bootId: createBootId(version),
+        usageSpool,
       });
       subagentRecoveryReport = subagentComposition.runRecovery();
       subagentCompositionRef = subagentComposition;

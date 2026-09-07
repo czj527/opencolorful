@@ -84,7 +84,10 @@ describe("metadata schema v15（会话分支元数据 + durable todo 底座）",
       .pluck()
       .get() as number;
     expect(version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(CURRENT_SCHEMA_VERSION).toBe(15);
+    // v15 是"会话分支元数据 + durable todo 底座"步骤的版本；后续版本（如 v16
+    // usage durable spool）叠加在该步骤之上——本测试守护的是 v15 的表结构事实，
+    // 版本号断言只要求"不低于 15"。
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(15);
 
     const sessionColumns = columnNames(database, "sessions");
     for (const column of [
@@ -141,7 +144,8 @@ describe("metadata schema v15（会话分支元数据 + durable todo 底座）",
       .prepare("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1")
       .pluck()
       .get() as number;
-    expect(version).toBe(15);
+    // v14 → 迁移后版本不低于 v15（后续版本叠加，见 CURRENT_SCHEMA_VERSION 断言说明）
+    expect(version).toBeGreaterThanOrEqual(15);
 
     // 存量行保留，新列为 NULL（= PI 默认叶子语义 / 非 Fork 会话）
     const row = database

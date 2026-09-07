@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import type { PlatformEventEnvelope } from "../contracts/events.js";
 import type { UtilityCompletion, UsageRole, UsageTokenTotals } from "../contracts/usage.js";
 import type { EventReplayStore, EventSubscriber } from "./event-replay-store.js";
-import type { UsageStore } from "../storage/usage-store.js";
+import type { UsageRecordInput, UsageStore } from "../storage/usage-store.js";
+import type { UsageSpool } from "../storage/usage-spool.js";
 import { isAbortLikeError, UtilityTextCallError } from "../pi-sdk/complete-text.js";
 
 export interface ModelResolver {
@@ -48,6 +49,8 @@ export class UsageRecorder {
     private readonly usageStore: UsageStore,
     private readonly resolveModel: ModelResolver,
     private readonly resolveAgentId?: AgentIdResolver,
+    /** P1 审计修复（§10-2）：落账失败的 durable spool（缺省时失败退回吞错+诊断） */
+    private readonly spool?: UsageSpool,
   ) {
     const subscriber: EventSubscriber = (event) => {
       this.handleEvent(event);
@@ -88,7 +91,7 @@ export class UsageRecorder {
     const provider = model?.providerId ?? "unknown";
     const modelId = model?.modelId ?? "unknown";
 
-    this.usageStore.record({
+    const record: UsageRecordInput = {
       sessionId: event.sessionId,
       turnId: payload.turnId,
       provider,
@@ -103,7 +106,18 @@ export class UsageRecorder {
       createdAt: event.timestamp,
       status,
       agentId: this.resolveAgentId?.(event.sessionId) ?? null,
-    });
+    };
+    // P1 审计修复（§10-2）：主会话落账走 spool 包装——此前此处无守卫，record 抛错
+    // 会直接打穿 replayStore 订阅者分发（波及其他订阅者），账目也静默丢失。
+    if (this.spool !== undefined) {
+      this.spool.recordWithSpool(record);
+      return;
+    }
+    try {
+      this.usageStore.record(record);
+    } catch {
+      // 无 spool 时维持旧行为：吞错（usage 落账不得打断事件分发）
+    }
   }
 
   dispose(): void {
@@ -135,60 +149,72 @@ export async function runUtilityCallWithUsage(
   usageStore: UsageStore,
   context: UtilityCallContext,
   call: () => Promise<UtilityCompletion>,
+  /** P1 审计修复（§10-2）：落账失败的 durable spool（缺省时维持旧吞错行为） */
+  spool?: UsageSpool,
 ): Promise<string> {
   const callId = crypto.randomUUID();
   const startedAt = new Date().toISOString();
   try {
     const completion = await call();
     const finishedAt = new Date().toISOString();
-    try {
-      usageStore.record({
-        source: "utility",
-        role: context.role,
-        status: "completed",
-        provider: context.provider,
-        model: context.model,
-        agentId: context.agentId,
-        sessionId: context.sessionId,
-        callId,
-        startedAt,
-        finishedAt,
-        input: completion.usage?.input ?? 0,
-        output: completion.usage?.output ?? 0,
-        cacheRead: completion.usage?.cacheRead ?? 0,
-        cacheWrite: completion.usage?.cacheWrite ?? 0,
-        totalTokens: completion.usage?.totalTokens ?? 0,
-        createdAt: finishedAt,
-      });
-    } catch {
-      // 摄取失败不掩盖调用结果
+    const completed: UsageRecordInput = {
+      source: "utility",
+      role: context.role,
+      status: "completed",
+      provider: context.provider,
+      model: context.model,
+      agentId: context.agentId,
+      sessionId: context.sessionId,
+      callId,
+      startedAt,
+      finishedAt,
+      input: completion.usage?.input ?? 0,
+      output: completion.usage?.output ?? 0,
+      cacheRead: completion.usage?.cacheRead ?? 0,
+      cacheWrite: completion.usage?.cacheWrite ?? 0,
+      totalTokens: completion.usage?.totalTokens ?? 0,
+      createdAt: finishedAt,
+    };
+    if (spool !== undefined) {
+      spool.recordWithSpool(completed);
+    } else {
+      try {
+        usageStore.record(completed);
+      } catch {
+        // 摄取失败不掩盖调用结果
+      }
     }
     return completion.text;
   } catch (error) {
     const finishedAt = new Date().toISOString();
     const cancelled = isAbortLikeError(error, context.signal);
     const usage: UsageTokenTotals | null = error instanceof UtilityTextCallError ? error.usage : null;
-    try {
-      usageStore.record({
-        source: "utility",
-        role: context.role,
-        status: cancelled ? "cancelled" : "failed",
-        provider: context.provider,
-        model: context.model,
-        agentId: context.agentId,
-        sessionId: context.sessionId,
-        callId,
-        startedAt,
-        finishedAt,
-        input: usage?.input ?? 0,
-        output: usage?.output ?? 0,
-        cacheRead: usage?.cacheRead ?? 0,
-        cacheWrite: usage?.cacheWrite ?? 0,
-        totalTokens: usage?.totalTokens ?? 0,
-        createdAt: finishedAt,
-      });
-    } catch {
-      // 摄取失败不掩盖原错误
+    const terminal: UsageRecordInput = {
+      source: "utility",
+      role: context.role,
+      status: cancelled ? "cancelled" : "failed",
+      provider: context.provider,
+      model: context.model,
+      agentId: context.agentId,
+      sessionId: context.sessionId,
+      callId,
+      startedAt,
+      finishedAt,
+      input: usage?.input ?? 0,
+      output: usage?.output ?? 0,
+      cacheRead: usage?.cacheRead ?? 0,
+      cacheWrite: usage?.cacheWrite ?? 0,
+      totalTokens: usage?.totalTokens ?? 0,
+      createdAt: finishedAt,
+    };
+    if (spool !== undefined) {
+      spool.recordWithSpool(terminal);
+    } else {
+      try {
+        usageStore.record(terminal);
+      } catch {
+        // 摄取失败不掩盖原错误
+      }
     }
     throw error;
   }
