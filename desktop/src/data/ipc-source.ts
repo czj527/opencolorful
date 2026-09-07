@@ -324,6 +324,11 @@ interface ChatChannel {
    * 值 = 待重载的 branchId（"" 表示当前分支）。
    */
   pendingBranchReload: string | null;
+  /**
+   * P1 审计修复（§10-5）：分支条目重载代次——每次发出新重载请求前递增，
+   * 响应落地时校验，过期（被更新请求取代）的响应整包丢弃。
+   */
+  branchGeneration: number;
 }
 
 /** 后端可达性巡检间隔（连接状态动态化的慢路径；请求成功/失败是快路径） */
@@ -631,6 +636,10 @@ export class IpcDataSource implements DesktopDataSource {
    * 重载指定分支（缺省当前分支）的条目并整表重投影：timeline 回到
    * 「当前分支根→叶」的受控视图（条目锚点恢复，轮次导航可用）。
    * 流式中的会话跳过即时重载（避免打断在途流），改为挂起至 turn 终态。
+   * P1 审计修复（§10-5）：并发重载代次守卫——switch 兜底重载与
+   * session.branch.switched 事件重载、turn 终态挂起重载可能并发在途，
+   * 慢的旧分支响应不得覆盖快的新分支响应（每次发出前递增代次，
+   * 落地时校验，过期响应整包丢弃）。
    */
   private async reloadBranchEntries(sessionId: string, channel: ChatChannel, branchId?: string): Promise<void> {
     if (channel.projector.streaming || channel.projector.pendingPrompt) {
@@ -638,8 +647,11 @@ export class IpcDataSource implements DesktopDataSource {
       return;
     }
     channel.pendingBranchReload = null;
+    const generation = channel.branchGeneration + 1;
+    channel.branchGeneration = generation;
     try {
       const view = await this.getBranchEntries(sessionId, branchId);
+      if (channel.branchGeneration !== generation) return; // 已被更新的重载取代
       seedItems(channel.projector, projectBranchEntries(view.entries, channel.projector.agentName));
       this.notify(channel);
     } catch {
@@ -1129,7 +1141,7 @@ export class IpcDataSource implements DesktopDataSource {
         projector: createProjector(this.agentNameOf(null)),
         handlers: new Set(), sseSubId: null, historyLoaded: false,
         pending: [], flushToken: null,
-        branchHandlers: new Set(), pendingBranchReload: null,
+        branchHandlers: new Set(), pendingBranchReload: null, branchGeneration: 0,
       };
       this.chats.set(sessionId, channel);
     }
