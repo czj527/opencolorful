@@ -507,14 +507,31 @@ export function App() {
 
   /* ---- 会话设置变更（既有会话直接写服务端并本地乐观更新；新会话记草稿） ---- */
 
+  /**
+   * P1 审计修复（§10-4）：乐观更新失败回滚——写服务端失败时重拉服务端真值
+   * 恢复本地状态（重拉而非盲回旧值：并发写入/部分成功时真值才是对的）；
+   * 重拉也失败则保留当前显示值（用户看到的是错误提示 + 未生效的选择）。
+   */
+  const rollbackSessionSettings = useCallback((sessionId: string) => {
+    if (source === null) return;
+    source.getSessionSettings(sessionId).then((settings) => {
+      setSessionSettings(settings);
+    }).catch(() => {
+      // 真值不可得（连接已断）：显示值保持乐观值不动，错误提示已呈现
+    });
+  }, [source]);
+
   const changeModel = useCallback((next: ModelRef) => {
     if (isNew) {
       setDraftModel(next);
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, model: next }));
-    void source?.updateSessionModel(threadId, next).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeModel")));
-  }, [isNew, source, threadId]);
+    void source?.updateSessionModel(threadId, next).catch((cause: unknown) => {
+      setChatError(userErrorNode(cause, "changeModel"));
+      rollbackSessionSettings(threadId);
+    });
+  }, [isNew, source, threadId, rollbackSessionSettings]);
 
   const changeThinkingLevel = useCallback((level: string) => {
     if (isNew) {
@@ -523,8 +540,11 @@ export function App() {
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, thinkingLevel: level }));
-    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeThinking")));
-  }, [isNew, source, threadId]);
+    void source?.updateSessionSettings(threadId, { thinkingLevel: level }).catch((cause: unknown) => {
+      setChatError(userErrorNode(cause, "changeThinking"));
+      rollbackSessionSettings(threadId);
+    });
+  }, [isNew, source, threadId, rollbackSessionSettings]);
 
   const changeToolMode = useCallback((mode: string) => {
     if (isNew) {
@@ -533,8 +553,11 @@ export function App() {
       return;
     }
     setSessionSettings((current) => (current === null ? current : { ...current, toolMode: mode }));
-    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch((cause: unknown) => setChatError(userErrorNode(cause, "changeTool")));
-  }, [isNew, source, threadId]);
+    void source?.updateSessionSettings(threadId, { toolMode: mode }).catch((cause: unknown) => {
+      setChatError(userErrorNode(cause, "changeTool"));
+      rollbackSessionSettings(threadId);
+    });
+  }, [isNew, source, threadId, rollbackSessionSettings]);
 
   // 组件隔离：稳定回调使下游 memo（Composer 子组件）在流式刷新期间不被重渲染
   const onOpenDiff = useCallback(() => setDock("diff"), []);
