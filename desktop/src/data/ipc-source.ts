@@ -1169,19 +1169,22 @@ export class IpcDataSource implements DesktopDataSource {
    * SSE 事件按 channel 合批：leading 事件立即应用并通知（保住首个 token 的呈现延迟），
    * 同帧（rAF 不可用退 50ms）内到达的后续事件入队，trailing flush 时依次应用、只通知一次。
    * 波次 B3：turn 终态若挂有分支重载（pendingBranchReload），flush 后触发条目重载。
+   * 审计修复（§10-6 N+1 通知）：通知只发生在两个明确定位点——leading 应用后、
+   * trailing flush 全批应用后；applyChatEvent 自身不再逐事件 notify。
    */
   private enqueueChatEvent(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
     if (channel.flushToken === null) {
       this.applyChatEvent(channel, envelope, sessionId);
+      this.notify(channel);
       channel.flushToken = this.scheduleFlush(channel, sessionId);
     } else {
       channel.pending.push(envelope);
     }
   }
 
+  /** 只应用事件（含挂起分支重载消费）；通知由调用方在合批边界统一发出 */
   private applyChatEvent(channel: ChatChannel, envelope: LiveEnvelope, sessionId: string): void {
     applyEvent(channel.projector, envelope);
-    this.notify(channel);
     this.consumePendingBranchReload(channel, envelope, sessionId);
   }
 
@@ -1201,6 +1204,8 @@ export class IpcDataSource implements DesktopDataSource {
       if (channel.pending.length === 0) return;
       const queued = channel.pending;
       channel.pending = [];
+      // trailing flush：整批依次应用，只在批次末尾通知一次（合批语义的本意；
+      // 此前逐事件 notify 造成 N+1 次 handler 调用与 N+1 次 React 状态更新）
       for (const envelope of queued) this.applyChatEvent(channel, envelope, sessionId);
       this.notify(channel);
     };
