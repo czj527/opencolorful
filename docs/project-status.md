@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-07**
-**当前基线：** `main`  `801d68e`（#74 SSE 合批通知去重已合并，全量真链 29/29；#75 usage durable spool 完成后本条随之推进）
+**当前基线：** `main`  `83af7c2`（#75 usage durable spool 已合并，全量真链 29/29；#76 Fork 对账与孤儿清理完成后本条随之推进）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -28,6 +28,7 @@
 - **2026-09-07 Runtime single-flight + 开发者工作台看板（#73）**：审计 §10-1 `ensureRuntime` 并发缺陷修复——messages/compact/regenerate/branch switch 四入口共享同一 bootstrap，"检查→创建"横跨 `await SessionRuntime.create` 异步间隙可并发重复装配，`PromptService.register` 直写 Map 使输家覆盖赢家 Runtime（旧实例记忆/Skill/Todo/插件上下文泄漏，重建路径甚至可能注册已 dispose 实例）；修复为 per-session in-flight Promise 合并（并发共享同一次装配，结束即清条目、失败可重试、跨会话互不阻塞），新增 4 例并发集成回归并实证判别力（禁用修复后 3/4 失败）。同 PR 将架构地图升级为开发者工作台：看板真同步基线 38519d2（阻断项卡 4/4 闭环移入已完成列、B4/B5 真链清单勾销）、新增审计 §10 修复队列卡（10 项闭环 2 项）与人工验收卡 A1-A6/B1-B7（审计 §8 必须亲测项落图）、看板尾部新增"开发者待办"聚合面板（25 项待办一键定位卡片，UI 层保持通用不复制事实）、manifest knownGaps 同步（BRANCH-03/04 与 Wave B 真链缺口闭环移除，Web 事件白名单缺口按实测范围改写：`todo.updated`/branch/turn 终态事件服务端已发而 web 未声明）。验证：`npm run check` 全绿、全量真链 29/29、看板 UI 浏览器实证渲染与点击链路。
 - **2026-09-07 SSE 合批通知去重（#74）**：审计 §10-6 修复——trailing flush 对队列中每个事件调用 `applyChatEvent`，而其内部逐事件 notify，N 个排队事件产生 N+1 次 handler 调用与 N+1 次 React 状态更新（切片 1.5"合批节流"的既定语义是整批只通知一次，实现与设计意图相悖）；修复为通知只落在合批边界——leading 事件应用后一次（保首个 token 延迟）、trailing flush 整批应用后一次，`applyChatEvent` 收敛为纯应用（含挂起分支重载消费）。新增 `desktop/tests/unit/sse-batch-notify.test.ts` 3 例（经真实 `IpcDataSource.probe()` 装配链 + 桩 `window.desktopApi` + 手动 rAF 队列确定性驱动：4 delta 窗口共 2 次边界通知且正文完整、空 flush 不通知、turn 终态应用与窗口外分支重载语义不变），并实证判别力（回退为逐事件 notify 后 2/3 失败）。验证：desktop 单测 105/105、`npm run check` 全绿、全量真链 29/29。
 - **2026-09-07 Usage durable spool / reconciliation（#75）**：审计 §10-2 修复——三处用量摄取点（主会话 turn 终态、utility 调用、子代理 Run 终态）写 `usage_records` 失败时分别"无守卫（抛错打穿 replayStore 订阅者分发）/ 吞错 / 仅 warn"，账目静默丢失，违背 A8"所有来源用量可查"承诺；修复为 **durable spool**——v16 迁移新增 `usage_pending` 表，`UsageSpool.recordWithSpool` 落账失败时把原始输入（JSON）入队并安排延迟重试（30s，unref 不持有事件循环），`reconcile()` 启动时 + 失败后重放回账（dedupe 幂等对齐 usage_records UNIQUE），成功即删，毒行记 attempts 保留不阻塞队首；spool 本身失败（库完全不可写）按 `usage.spool.enqueue_failed` error 诊断后止损，不向调用方传播。三处摄取点全部走 spool（可选注入，缺省维持旧行为），组合根启动对账一次。新增 `usage-spool` 集成 3 例 + v16 迁移 3 例，判别性实证（回退吞错 2/3 失败）；既有迁移测试的版本字面值断言改为 `CURRENT_SCHEMA_VERSION`（恢复语义=迁移到当前）。验证：根套件 2334/2334、既有 usage 测试 49/49、`npm run check` 全绿、全量真链 29/29。
+- **2026-09-07 Fork JSONL/SQLite 对账与孤儿清理（#76）**：审计 §10-3 修复——`forkSession` 先写 JSONL（`forkSessionToNewSession`）后写 SQLite（`index.create`），索引失败直接抛错并遗留刚创建的 fork JSONL（`create()` 同型场景有完整补偿，Fork 路径没有），跨进程崩溃残留更无任何清理路径；修复两层——①同进程补偿：`index.create` 失败时经 `removeSessionFile`（路径护栏）删除 fork 产物，清理再失败以 `AggregateError` 同时携带两错；②启动对账：新增 `SessionService.reconcileOrphanForks()`（start.ts 构造后接线），扫描受控平面 sessions 目录（全局 `sessions/` + `agents/<id>/sessions/`，不递归——subagent 线程在 `subagents/` 子目录不在范围），删除条件三重保守（路径与会话 id 双查无索引行 + header `type:"session"` + `parentSession` 仍被索引），**索引整体缺失/损坏时条件三永不成立、零删除**——JSONL 作为消息正文唯一事实源不因库损坏被误清；非法/截断首行视为非 Fork 残留，删除失败 `session.fork_orphan_remove_failed` 诊断。新增 `session-fork-reconcile` 集成 7 例，判别性实证两轮（禁用补偿删除恰 2 例失败；放宽 parentSession 门恰 3 例保守性用例失败）。验证：新用例 7/7、相邻 fork/branch 回归 14/14、`npm run check` 全绿、全量真链 29/29。
 
 ## 阶段状态
 
@@ -46,7 +47,7 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75 已完成）：Fork JSONL/SQLite 对账、Desktop 设置失败回滚、分支请求 generation/token、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
+1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76 已完成）：Desktop 设置失败回滚、分支请求 generation/token、web `todo.updated`/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。

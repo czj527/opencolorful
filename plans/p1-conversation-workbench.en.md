@@ -568,3 +568,39 @@ RELEASE_PASS: no
 The full evidence and human acceptance cards are recorded in
 [`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`](../docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md).
 Historical B6/B7 implementation records are retained as historical records; this review supersedes only the current delivery status.
+
+## 11. Audit remediation #76 — Fork JSONL/SQLite reconciliation and orphan cleanup (2026-09-07)
+
+Audit §10-3 / §6 table row "Fork writes JSONL first, SQLite second — an index failure can leave an orphan JSONL" (`src/runtime/session-service.ts:434` at audit time). Two independent gaps:
+
+1. **Same-process index failure**: `forkSession()` wrote the fork JSONL via `forkSessionToNewSession()` and only then called `SessionIndex.create()`. Unlike `create()` (which has full compensation), an index failure here threw while leaving the freshly created fork JSONL on disk.
+2. **Cross-process crash residue**: if the process died between the JSONL write and the SQLite commit, the orphan persisted with no cleanup path at all.
+
+### Fix
+
+- `forkSession()` now wraps `index.create()` in try/catch; on failure it compensates by deleting the just-created fork JSONL (`removeSessionFile`, path-guarded). If the cleanup itself fails, an `AggregateError` carries both the index error and the cleanup error instead of masking either.
+- New `SessionService.reconcileOrphanForks()` (wired in `start.ts` right after service construction): scans controlled flat session directories (global `sessions/` + each `agents/<id>/sessions/`, non-recursive — subagent threads live under `subagents/` and are out of scope), and deletes a file only when **all** of the following hold:
+  1. its path has no index row AND its header session id has no index row (double lookup);
+  2. its first-line header parses as `type: "session"`;
+  3. `header.parentSession` points at a file that is still indexed.
+  Malformed/truncated/oversized first lines are treated as non-fork residue. When the index is wholly missing or corrupted (no rows at all), condition 3 can never hold and nothing is deleted — the JSONL files remain the single source of truth for message bodies. Removal failures are instrumented (`session.fork_orphan_remove_failed`) and reported; successful cleanups log `session.fork_orphans_removed`.
+
+### Deliberately out of scope
+
+- No general "adopt unindexed JSONL into the index" behavior: rebuilding index rows from files would need cwd/title/agent ownership inference and is a separate feature, not a defect fix.
+- No cleanup of non-fork stray files (no `parentSession` header) — they may be user-placed or from unknown writers.
+
+### Tests
+
+`tests/integration/session-fork-reconcile.test.ts` (7 cases): index-failure compensation leaves no new file and keeps the source session; cleanup failure surfaces as `AggregateError` with both errors; startup reconciliation removes a planted orphan whose parent is still indexed; zero deletions when the index is wholly empty (JSONL preservation); no `parentSession` files untouched; orphans whose parent lost its index row untouched; files whose header id is already indexed untouched (path/id double-lookup).
+
+Discriminating mutations (run then reverted): (1) skipping the compensation delete fails exactly the 2 compensation cases; (2) dropping the `parentSession` guard fails exactly the 3 preservation cases. Both confirmed the tests fail without the fix and pass with it.
+
+### Verification
+
+```text
+npx vitest run tests/integration/session-fork-reconcile.test.ts   -> 7/7
+npx vitest run tests/integration/session-fork.test.ts session-branch-api.test.ts -> 14/14
+npm run check                                                     -> green
+full true-chain desktop e2e suite                                 -> 29/29
+```
