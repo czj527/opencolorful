@@ -445,19 +445,34 @@ export class SessionService {
       }
       throw error;
     }
-    this.index.create({
-      id: fork.sessionId,
-      title: `${metadata.title}（Fork）`,
-      sessionPath: fork.sessionPath,
-      createdAt: new Date().toISOString(),
-      toolMode: metadata.toolMode,
-      ...(metadata.workspaceCwd !== null ? { workspaceCwd: metadata.workspaceCwd } : {}),
-      workspaceConfirmed: metadata.workspaceConfirmed,
-      thinkingLevel: metadata.thinkingLevel,
-      agentId: metadata.agentId,
-      sourceSessionId: metadata.id,
-      ...(targetLeafEntryId !== null ? { sourceLeafEntryId: targetLeafEntryId } : {}),
-    });
+    // P1 审计修复（§10-3）：Fork 先写 JSONL、后写 SQLite——索引写入失败时
+    // 补偿删除刚创建的会话文件（create() 同型补偿），不留孤儿 JSONL；
+    // 清理再失败则聚合抛出，不掩盖原始错误。
+    try {
+      this.index.create({
+        id: fork.sessionId,
+        title: `${metadata.title}（Fork）`,
+        sessionPath: fork.sessionPath,
+        createdAt: new Date().toISOString(),
+        toolMode: metadata.toolMode,
+        ...(metadata.workspaceCwd !== null ? { workspaceCwd: metadata.workspaceCwd } : {}),
+        workspaceConfirmed: metadata.workspaceConfirmed,
+        thinkingLevel: metadata.thinkingLevel,
+        agentId: metadata.agentId,
+        sourceSessionId: metadata.id,
+        ...(targetLeafEntryId !== null ? { sourceLeafEntryId: targetLeafEntryId } : {}),
+      });
+    } catch (error) {
+      try {
+        this.removeSessionFile(fork.sessionPath);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `Fork 索引写入失败，且孤儿会话文件清理未完成: ${fork.sessionId}`,
+        );
+      }
+      throw error;
+    }
     instrument.sessionCreated(fork.sessionId, metadata.agentId ?? undefined);
     return this.getView(fork.sessionId);
   }
@@ -465,6 +480,105 @@ export class SessionService {
   closeAll(): void {
     for (const session of this.active.values()) session.dispose();
     this.active.clear();
+  }
+
+  /**
+   * P1 审计修复（§10-3）：Fork 孤儿对账（启动期调用）。
+   *
+   * forkSession 的运行时补偿只覆盖同进程索引失败；跨进程崩溃残留
+   * （JSONL 已写、SQLite 行未落）由本方法清理。删除规则刻意保守，
+   * 孤儿指纹必须同时满足：
+   * 1. 位于受控平面 sessions 目录（全局 sessions/ 或 agents/<id>/sessions/
+   *    ——Fork 文件与源同目录，subagent 线程在 subagents/ 子目录不在范围内）；
+   * 2. 自身无索引行（文件路径与 header 会话 id 双查）；
+   * 3. header.parentSession 指向仍被索引的源会话文件。
+   *
+   * 索引整体缺失/损坏（任何文件都无行）时条件 3 永不成立——JSONL 作为消息
+   * 唯一事实源不会被误删；无 parentSession 的新建会话残留同理不触碰。
+   */
+  reconcileOrphanForks(): { scanned: number; removed: number } {
+    const rows = this.index.list({ includeArchived: true });
+    const indexedPaths = new Set(rows.map((metadata) => path.resolve(metadata.sessionPath)));
+    const indexedIds = new Set(rows.map((metadata) => metadata.id));
+    let scanned = 0;
+    let removed = 0;
+    for (const file of this.listControlledSessionFiles()) {
+      scanned += 1;
+      if (indexedPaths.has(path.resolve(file))) continue;
+      if (!this.hasOrphanForkFingerprint(file, indexedPaths, indexedIds)) continue;
+      try {
+        fs.rmSync(file, { force: true, maxRetries: 5, retryDelay: 20 });
+        removed += 1;
+      } catch (error) {
+        instrument.warn("session.fork_orphan_remove_failed", "孤儿 Fork 会话文件删除失败", {
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
+    if (removed > 0) {
+      instrument.warn(
+        "session.fork_orphans_removed",
+        "启动对账清理了索引缺失的孤儿 Fork 会话文件",
+        { removed, scanned },
+      );
+    }
+    return { scanned, removed };
+  }
+
+  /** 受控平面 sessions 目录下的 *.jsonl：全局根 + 每个 Agent 目录的 sessions/（不递归） */
+  private listControlledSessionFiles(): string[] {
+    const roots = [this.paths.sessions];
+    try {
+      for (const dirent of fs.readdirSync(this.paths.agents, { withFileTypes: true })) {
+        if (dirent.isDirectory()) roots.push(path.join(this.paths.agents, dirent.name, "sessions"));
+      }
+    } catch {
+      // agents 目录不存在：只扫全局 sessions 根
+    }
+    const files: string[] = [];
+    for (const root of roots) {
+      let dirents: fs.Dirent[];
+      try {
+        dirents = fs.readdirSync(root, { withFileTypes: true });
+      } catch {
+        continue; // 目录不存在 = 无候选
+      }
+      for (const dirent of dirents) {
+        if (dirent.isFile() && dirent.name.endsWith(".jsonl")) {
+          files.push(path.join(root, dirent.name));
+        }
+      }
+    }
+    return files;
+  }
+
+  /** 只读首行 header 判定孤儿指纹；非法/截断文件一律视为非 Fork 残留 */
+  private hasOrphanForkFingerprint(
+    file: string,
+    indexedPaths: ReadonlySet<string>,
+    indexedIds: ReadonlySet<string>,
+  ): boolean {
+    let handle: number;
+    try {
+      handle = fs.openSync(file, "r");
+    } catch {
+      return false;
+    }
+    let header: { type?: unknown; id?: unknown; parentSession?: unknown };
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const bytesRead = fs.readSync(handle, buffer, 0, buffer.length, 0);
+      const firstLine = buffer.toString("utf8", 0, bytesRead).split("\n", 1)[0] ?? "";
+      header = JSON.parse(firstLine) as typeof header;
+    } catch {
+      return false;
+    } finally {
+      fs.closeSync(handle);
+    }
+    if (header.type !== "session") return false;
+    if (typeof header.id !== "string" || indexedIds.has(header.id)) return false;
+    if (typeof header.parentSession !== "string" || header.parentSession === "") return false;
+    return indexedPaths.has(path.resolve(header.parentSession));
   }
 
   private toView(metadata: SessionMetadata): SessionView {
