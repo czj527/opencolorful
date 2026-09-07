@@ -5,13 +5,13 @@
   "updatedAt": "2026-09-07",
   "baseline": {
     "branch": "main",
-    "commit": "9992d3f",
-    "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、runtime single-flight 已合并；后续修复队列剩余 7 项与人工验收待收口"
+    "commit": "801d68e",
+    "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、single-flight、SSE 合批去重、usage spool 已合并；后续修复队列剩余 6 项与人工验收待收口"
   },
   "health": {
     "label": "修复队列与人工验收待收口",
     "tone": "risk",
-    "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放与 runtime single-flight 已合并（全量真链 29/29）；后续修复队列剩余 7 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+    "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放、runtime single-flight 与 usage durable spool 已合并（全量真链 29/29）；后续修复队列剩余 6 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
     "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
   },
   "signals": [
@@ -24,7 +24,7 @@
     {
       "label": "当前活动轨道",
       "value": "审计修复队列",
-      "detail": "立即修复 5/5、B4/B5 真链与 runtime single-flight 已闭合，后续修复队列剩余 7 项按队列继续。",
+      "detail": "立即修复 5/5、B4/B5 真链、single-flight、SSE 合批去重与 usage spool 已闭合，后续修复队列剩余 6 项按队列继续。",
       "source": "docs/project-status.md"
     },
     {
@@ -44,7 +44,7 @@
     {
       "number": "01",
       "title": "继续清修复队列",
-      "detail": "审计 §10 后续修复剩余 8 项按队列推进：用量 spool、Fork 对账、设置回滚、SSE 合批去重等。",
+      "detail": "审计 §10 后续修复剩余 6 项按队列推进：Fork 对账、设置回滚、分支 generation/token 等。",
       "cardId": "audit-remediation-queue"
     },
     {
@@ -73,7 +73,7 @@
           "priority": "P1",
           "state": "进行中",
           "title": "清完审计后续修复队列",
-          "summary": "审计 §10 后续修复 10 项中已闭合 3 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74），剩余 7 项按队列继续。",
+          "summary": "审计 §10 后续修复 10 项中已闭合 4 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74、Usage durable spool #75），剩余 6 项按队列继续。",
           "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
           "tags": [
             "P1",
@@ -93,8 +93,8 @@
               "done": true
             },
             {
-              "label": "Usage durable spool / reconciliation",
-              "done": false
+              "label": "Usage durable spool / reconciliation（#75）",
+              "done": true
             },
             {
               "label": "Fork JSONL/SQLite 对账与孤儿清理",

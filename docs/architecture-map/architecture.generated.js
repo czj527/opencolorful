@@ -1272,7 +1272,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/server/start.ts",
-          "lines": 636
+          "lines": 644
         },
         {
           "path": "src/server/trust-boundary.ts",
@@ -1292,7 +1292,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 29,
-      "totalLines": 7524
+      "totalLines": 7532
     },
     {
       "id": "ui-projection",
@@ -1553,11 +1553,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/runtime/usage-recorder.ts",
-          "lines": 196
+          "lines": 222
         }
       ],
       "fileCount": 12,
-      "totalLines": 2868
+      "totalLines": 2894
     },
     {
       "id": "pi-adapter",
@@ -2171,7 +2171,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/runtime/subagents/composition.ts",
-          "lines": 356
+          "lines": 365
         },
         {
           "path": "src/runtime/subagents/context-resolver.ts",
@@ -2227,7 +2227,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/runtime/subagents/runtime/usage-ingestion.ts",
-          "lines": 107
+          "lines": 116
         },
         {
           "path": "src/runtime/subagents/stores/artifact-store.ts",
@@ -2295,7 +2295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 31,
-      "totalLines": 9635
+      "totalLines": 9653
     },
     {
       "id": "storage",
@@ -2403,7 +2403,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/storage/migrations.ts",
-          "lines": 1154
+          "lines": 1182
         },
         {
           "path": "src/storage/plugin-binding-store.ts",
@@ -2446,12 +2446,16 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
           "lines": 217
         },
         {
+          "path": "src/storage/usage-spool.ts",
+          "lines": 190
+        },
+        {
           "path": "src/storage/usage-store.ts",
           "lines": 364
         }
       ],
-      "fileCount": 24,
-      "totalLines": 4935
+      "fileCount": 25,
+      "totalLines": 5153
     },
     {
       "id": "host-safety",
@@ -3515,7 +3519,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         "src/storage/session-index.ts",
         "src/storage/session-todos.ts"
       ],
-      "observedImports": 3,
+      "observedImports": 4,
       "observedEvidence": [
         {
           "importer": "src/runtime/session-service.ts",
@@ -3524,6 +3528,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "importer": "src/runtime/session-service.ts",
           "import": "../storage/session-todos.js"
+        },
+        {
+          "importer": "src/runtime/usage-recorder.ts",
+          "import": "../storage/usage-spool.js"
         },
         {
           "importer": "src/runtime/usage-recorder.ts",
@@ -5183,13 +5191,13 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "updatedAt": "2026-09-07",
     "baseline": {
       "branch": "main",
-      "commit": "9992d3f",
-      "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、runtime single-flight 已合并；后续修复队列剩余 7 项与人工验收待收口"
+      "commit": "801d68e",
+      "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、single-flight、SSE 合批去重、usage spool 已合并；后续修复队列剩余 6 项与人工验收待收口"
     },
     "health": {
       "label": "修复队列与人工验收待收口",
       "tone": "risk",
-      "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放与 runtime single-flight 已合并（全量真链 29/29）；后续修复队列剩余 7 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+      "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放、runtime single-flight 与 usage durable spool 已合并（全量真链 29/29）；后续修复队列剩余 6 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
       "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
     },
     "signals": [
@@ -5202,7 +5210,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "label": "当前活动轨道",
         "value": "审计修复队列",
-        "detail": "立即修复 5/5、B4/B5 真链与 runtime single-flight 已闭合，后续修复队列剩余 7 项按队列继续。",
+        "detail": "立即修复 5/5、B4/B5 真链、single-flight、SSE 合批去重与 usage spool 已闭合，后续修复队列剩余 6 项按队列继续。",
         "source": "docs/project-status.md"
       },
       {
@@ -5222,7 +5230,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "number": "01",
         "title": "继续清修复队列",
-        "detail": "审计 §10 后续修复剩余 8 项按队列推进：用量 spool、Fork 对账、设置回滚、SSE 合批去重等。",
+        "detail": "审计 §10 后续修复剩余 6 项按队列推进：Fork 对账、设置回滚、分支 generation/token 等。",
         "cardId": "audit-remediation-queue"
       },
       {
@@ -5251,7 +5259,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
             "priority": "P1",
             "state": "进行中",
             "title": "清完审计后续修复队列",
-            "summary": "审计 §10 后续修复 10 项中已闭合 3 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74），剩余 7 项按队列继续。",
+            "summary": "审计 §10 后续修复 10 项中已闭合 4 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74、Usage durable spool #75），剩余 6 项按队列继续。",
             "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
             "tags": [
               "P1",
@@ -5271,8 +5279,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
                 "done": true
               },
               {
-                "label": "Usage durable spool / reconciliation",
-                "done": false
+                "label": "Usage durable spool / reconciliation（#75）",
+                "done": true
               },
               {
                 "label": "Fork JSONL/SQLite 对账与孤儿清理",
@@ -6056,10 +6064,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "generatedFrom": "docs/architecture-map/architecture.manifest.json",
     "generatedBy": "scripts/generate-architecture-map.mjs",
     "nodeCount": 21,
-    "sourceFileCount": 506,
-    "mappedFileCount": 506,
+    "sourceFileCount": 507,
+    "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 113741,
+    "totalSourceLines": 114011,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },
@@ -7176,7 +7184,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "server",
       "to": "storage",
-      "count": 29,
+      "count": 30,
       "evidence": [
         {
           "importer": "src/server/app.ts",
@@ -7378,7 +7386,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "session-runtime",
       "to": "storage",
-      "count": 3,
+      "count": 4,
       "evidence": [
         {
           "importer": "src/runtime/session-service.ts",
@@ -7387,6 +7395,10 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         {
           "importer": "src/runtime/session-service.ts",
           "import": "../storage/session-todos.js"
+        },
+        {
+          "importer": "src/runtime/usage-recorder.ts",
+          "import": "../storage/usage-spool.js"
         },
         {
           "importer": "src/runtime/usage-recorder.ts",
@@ -7632,6 +7644,17 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       ]
     },
     {
+      "from": "storage",
+      "to": "observability",
+      "count": 1,
+      "evidence": [
+        {
+          "importer": "src/storage/usage-spool.ts",
+          "import": "../observability/instrument.js"
+        }
+      ]
+    },
+    {
       "from": "subagents",
       "to": "contracts",
       "count": 26,
@@ -7773,11 +7796,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "subagents",
       "to": "storage",
-      "count": 2,
+      "count": 4,
       "evidence": [
         {
           "importer": "src/runtime/subagents/composition.ts",
+          "import": "../../storage/usage-spool.js"
+        },
+        {
+          "importer": "src/runtime/subagents/composition.ts",
           "import": "../../storage/usage-store.js"
+        },
+        {
+          "importer": "src/runtime/subagents/runtime/usage-ingestion.ts",
+          "import": "../../../storage/usage-spool.js"
         },
         {
           "importer": "src/runtime/subagents/runtime/usage-ingestion.ts",

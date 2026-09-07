@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 /** 迁移进度上报（Phase 11 埋点用；observer 在迁移真正执行时才回调） */
 export interface MigrationObserver {
@@ -998,6 +998,34 @@ export function applyMigrations(database: Database.Database, observer?: Migratio
         );
       `);
       database.prepare("UPDATE schema_version SET version = 15").run();
+    })();
+  }
+
+  // v16：usage durable spool（P1 审计修复 §10-2，plans/p1-audit-remediation-usage-spool.en.md）。
+  // 三处用量摄取点（主会话 turn 终态 / utility 调用 / 子代理 Run 终态）写 usage_records
+  // 失败时，原始 UsageRecordInput JSON 落入本表等待对账重放——账目不因瞬时写库失败
+  // （锁竞争/迁移窗口/磁盘抖动）丢失。只存账目数值与关联维度（与 usage_records 同级
+  // 敏感度），无消息正文、无凭据。重放经 UsageSpool.reconcile（启动 + 失败后延迟），
+  // 成功即删行；dedupe_key 与 usage_records 的 UNIQUE 幂等对齐，重放不会重复计账。
+  if (current < 16) {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS usage_pending (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          dedupe_key TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          enqueued_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_usage_pending_enqueued
+          ON usage_pending (enqueued_at);
+      `);
+      database.prepare("UPDATE schema_version SET version = 16").run();
     })();
   }
 
