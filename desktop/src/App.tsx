@@ -560,8 +560,10 @@ export function App() {
     });
   }, [isNew, source, threadId, rollbackSessionSettings]);
 
-  // 组件隔离：稳定回调使下游 memo（Composer 子组件）在流式刷新期间不被重渲染
-  const onOpenDiff = useCallback(() => setDock("diff"), []);
+  // 组件隔离：稳定回调使下游 memo（Composer 子组件）在流式刷新期间不被重渲染。
+  // P1 审计修复（§7.5）：Diff 面板为静态演示已移除——file 事件详情不再提供
+  // "在右侧审查"跳转（真实 Diff 面板回归时恢复）
+  const onOpenDiff = useCallback(() => undefined, []);
 
   // 身份证卡状态行：仅由真实运行时状态推导（离线 > 运行中 > 空闲），不虚构
   const assistantStatus = useMemo<AssistantStatus>(() => {

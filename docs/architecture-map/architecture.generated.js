@@ -203,7 +203,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "desktop/src/App.tsx",
-          "lines": 899
+          "lines": 901
         },
         {
           "path": "desktop/src/components/AgentChip.tsx",
@@ -219,7 +219,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/ChatView.tsx",
-          "lines": 531
+          "lines": 533
         },
         {
           "path": "desktop/src/components/CompactionCard.tsx",
@@ -231,7 +231,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/Dock.tsx",
-          "lines": 125
+          "lines": 69
         },
         {
           "path": "desktop/src/components/MockBanner.tsx",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10647
+      "totalLines": 10595
     },
     {
       "id": "web-client",
@@ -5191,13 +5191,13 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "updatedAt": "2026-09-07",
     "baseline": {
       "branch": "main",
-      "commit": "56c478b",
-      "label": "审计立即修复 5/5 与后续修复队列 9/10 已合并（至 #80 secondary 模型入口）；剩余 1 项与人工验收待收口"
+      "commit": "f6bbc40",
+      "label": "审计立即修复 5/5 与后续修复队列 10/10 全部闭合（至 #81 Mock 入口收口）；剩余人工验收与发布验证"
     },
     "health": {
       "label": "修复队列与人工验收待收口",
       "tone": "risk",
-      "summary": "审计立即修复 5/5 与后续修复 9/10（至 Desktop secondary 模型入口 #80）已合并，全量真链 29/29；剩余 1 项（Mock 入口收口）、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+      "summary": "审计立即修复 5/5 与后续修复 10/10 全部闭合（至 Mock 入口收口 #81），全量真链 29/29；A/B 人工验收卡（§8 亲测）与 G2 发布验证是宣称产品完成前的最后两道门。",
       "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
     },
     "signals": [
@@ -5210,7 +5210,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "label": "当前活动轨道",
         "value": "审计修复队列",
-        "detail": "审计修复队列 10 项已闭合 9 项（#72-#80），剩余 1 项（Mock 入口收口）按队列继续。",
+        "detail": "审计修复队列 10/10 全部闭合（#72-#81）；下一轨道=审计 §8 人工验收卡亲测与 G2 发布验证。",
         "source": "docs/project-status.md"
       },
       {
@@ -5229,8 +5229,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "focus": [
       {
         "number": "01",
-        "title": "继续清修复队列",
-        "detail": "审计 §10 后续修复最后 1 项：Diff/Terminal/Approval Mock 入口隐藏或标注演示态。",
+        "title": "人工验收与发布验证",
+        "detail": "审计 §10 修复队列已全部闭合；转入 §8 人工验收卡（A1-A6/B1-B7）亲测与 G2 发布链路验证。",
         "cardId": "audit-remediation-queue"
       },
       {
@@ -5257,9 +5257,9 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
             "id": "audit-remediation-queue",
             "type": "审计修复",
             "priority": "P1",
-            "state": "进行中",
+            "state": "已完成",
             "title": "清完审计后续修复队列",
-            "summary": "审计 §10 后续修复 10 项中已闭合 9 项（#72-#80：真链/single-flight/合批去重/usage spool/Fork 对账/设置回滚/分支 generation/web 事件收口/secondary 入口），剩余 1 项。",
+            "summary": "审计 §10 后续修复 10 项全部闭合（#72-#81：真链/single-flight/合批去重/usage spool/Fork 对账/设置回滚/分支 generation/web 事件收口/secondary 入口/Mock 入口收口）；队列转入人工验收与发布验证。",
             "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
             "tags": [
               "P1",
@@ -5311,8 +5311,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
                 "done": true
               },
               {
-                "label": "Diff/Terminal/Approval Mock 入口收口",
-                "done": false
+                "label": "Diff/Terminal/Approval Mock 入口收口（#81）",
+                "done": true
               }
             ],
             "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114240,
+    "totalSourceLines": 114188,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },
