@@ -898,7 +898,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "web/src/lib/sse-client.ts",
-          "lines": 171
+          "lines": 178
         },
         {
           "path": "web/src/lib/types.ts",
@@ -914,7 +914,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 125,
-      "totalLines": 20147
+      "totalLines": 20154
     },
     {
       "id": "tui-client",
@@ -5191,13 +5191,13 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "updatedAt": "2026-09-07",
     "baseline": {
       "branch": "main",
-      "commit": "89dd6b4",
-      "label": "审计立即修复 5/5、a4 令牌适配、B4/B5 真链、single-flight、SSE 合批去重、usage spool、Fork 对账、设置回滚、分支 generation/token 已合并；后续修复队列剩余 3 项与人工验收待收口"
+      "commit": "57d1cb9",
+      "label": "审计立即修复 5/5 与后续修复队列 8/10 已合并（至 #79 web 事件收口）；剩余 2 项与人工验收待收口"
     },
     "health": {
       "label": "修复队列与人工验收待收口",
       "tone": "risk",
-      "summary": "立即修复 5/5、B4/B5 Electron 真链、会话 SSE 首订重放、runtime single-flight、SSE 合批通知去重、usage durable spool、Fork 孤儿对账、Desktop 设置失败回滚与分支 generation/token 已合并（全量真链 29/29）；后续修复队列剩余 3 项、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+      "summary": "审计立即修复 5/5 与后续修复 8/10（至 web 事件协议收口 #79）已合并，全量真链 29/29；剩余 2 项（Desktop secondary 模型入口、Mock 入口收口）、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
       "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
     },
     "signals": [
@@ -5210,7 +5210,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "label": "当前活动轨道",
         "value": "审计修复队列",
-        "detail": "审计修复队列 10 项已闭合 7 项（#72-#78），剩余 3 项（web 事件协议收口、Desktop secondary 模型入口、Mock 入口收口）按队列继续。",
+        "detail": "审计修复队列 10 项已闭合 8 项（#72-#79），剩余 2 项（Desktop secondary 模型入口、Mock 入口收口）按队列继续。",
         "source": "docs/project-status.md"
       },
       {
@@ -5230,7 +5230,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "number": "01",
         "title": "继续清修复队列",
-        "detail": "审计 §10 后续修复剩余 3 项按队列推进：web todo.updated/branch 事件收口、Desktop secondary 模型入口、Mock 入口隐藏或标注。",
+        "detail": "审计 §10 后续修复剩余 2 项按队列推进：Desktop secondary 模型入口、Diff/Terminal/Approval Mock 入口隐藏或标注。",
         "cardId": "audit-remediation-queue"
       },
       {
@@ -5259,7 +5259,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
             "priority": "P1",
             "state": "进行中",
             "title": "清完审计后续修复队列",
-            "summary": "审计 §10 后续修复 10 项中已闭合 7 项（B4/B5 真链 #72、Runtime single-flight #73、SSE 合批去重 #74、Usage durable spool #75、Fork 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支 generation/token #78），剩余 3 项按队列继续。",
+            "summary": "审计 §10 后续修复 10 项中已闭合 8 项（#72 B4/B5 真链、#73 single-flight、#74 SSE 合批去重、#75 usage spool、#76 Fork 对账、#77 设置回滚、#78 分支 generation/token、#79 web 事件协议收口），剩余 2 项按队列继续。",
             "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
             "tags": [
               "P1",
@@ -5303,8 +5303,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
                 "done": true
               },
               {
-                "label": "Web todo.updated / branch 事件协议收口",
-                "done": false
+                "label": "Web todo.updated / branch 事件协议收口（#79）",
+                "done": true
               },
               {
                 "label": "Desktop secondary 模型入口",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114170,
+    "totalSourceLines": 114177,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },

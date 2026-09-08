@@ -1,6 +1,7 @@
 import type { PlatformEventEnvelope } from "./types.js";
 
-// 与服务端 EVENT_TYPES 对齐（src/contracts/events.ts）
+// 与服务端 EVENT_TYPES 对齐（src/contracts/events.ts）；对齐由
+// web/src/lib/sse-contract.test.ts 契约回归锁定（集合相等，reset 为传输层特例除外）
 const KNOWN_EVENT_TYPES = [
   "health.changed",
   "session.status",
@@ -13,9 +14,15 @@ const KNOWN_EVENT_TYPES = [
   "tool.completed",
   "turn.started",
   "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+  "turn.interrupted",
   "session.compacting",
   "session.compacted",
   "plan.updated",
+  "session.branch.switched",
+  "session.branches.changed",
+  "todo.updated",
   "attachment.available",
   "error",
   "sandbox.denied",
