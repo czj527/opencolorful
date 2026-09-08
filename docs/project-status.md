@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-07**
-**当前基线：** `main`  `56c478b`（#79 web 事件协议收口已合并，全量真链 29/29；#80 Desktop secondary 模型入口完成后本条随之推进）
+**当前基线：** `main`  `f6bbc40`（#80 Desktop secondary 模型入口+扩展加载隔离已合并，全量真链 29/29；#81 Mock 入口收口完成后本条随之推进）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -37,6 +37,8 @@
 
 - **2026-09-08 Desktop secondary 模型入口（#80）**：审计 §7.4/§10-9 修复——后端 `PUT /api/settings/preferences` 早已支持 `subagents.defaultModel`（含 `modelService.resolveModel` 可用性校验 400），web 有入口，Desktop 的 `PreferencesView` 只带 `defaults` 段、设置页只有主模型行，用户无法在主要产品前端配置 Subagent/记忆摘要/后台复盘共用的 secondary 模型；修复为 `PreferencesView` 补 `subagents` 段（ipc 防御式映射缺失回退 null + mock 同形合并）、`updatePreferences` patch 类型扩展可选 `subagents` 段（对齐服务端 merge 语义）、`DefaultModelRow` 泛化 scope 两态（defaults 主模型行不变；subagents 行读写 `subagents.defaultModel`、同凭据过滤列表、并列展示）。新增 settings.mock SEC-01..04 4 例（行存在与初始未设置 / patch 形状恰为 `{subagents:{defaultModel}}` 且不触碰 defaults / 清除写 null / 服务端 400 拒绝错误行呈现且选择回退），判别实证：secondary 写入误接 defaults 恰 3/14 失败。已知边界：服务端 400 文案含"凭据"被共享错误分类器映射为凭据失效提示（语义可接受，后续可为 settings 错误设独立 context key）。验证：desktop 单测 120/120、`npm run check` 全绿、全量真链 29/29。
 
+- **2026-09-08 Mock 入口收口（#81）——审计 §10 修复队列收官**：审计 §7.5/§10-10 修复——Dock 的 Diff/Terminal 面板为纯静态演示（固定 `dockFiles`/固定脚本文本，Terminal 仅小字 mock chip），在真实 IPC 模式作为一级 tab 出现会让用户误以为查看了真实 Diff 或运行了真实 Terminal；file 事件详情的「在右侧审查」按钮跳向演示 Diff；聊天审批按钮只翻转组件本地 state 且无演示标注。数据源实证：真实 projector 只产 `memory/plan/status/thinking/tool` 五种 kind，`file`/`approval` 仅 mock 演示会话可达——故按审计"隐藏入口"选项收口：`DockTool` 收敛为 `"subagent"`（变更审查/终端按钮与静态面板移除，Dock 只承载真实接线的 SubagentDock，`dockFiles` 留在 mock-data 作演示资产）、假跳转按钮移除、审批按钮区加「演示」chip 显式声明本地状态机。新增 `mock-entry-gate.mock.test.tsx` 3 例（会话头仅 Subagent 一个入口/Dock 经唯一入口打开且无演示 tab/审批区演示标注可见），判别实证：恢复演示入口按钮恰 1/3 失败。**至此审计 §10 后续修复 10 项全部闭合（#72-#81），队列转入 §8 人工验收与 G2 发布验证**。验证：desktop 单测 123/123、`npm run check` 全绿、全量真链 29/29。
+
 ## 阶段状态
 
 | 阶段 | 主题 | 状态 | 权威记录 |
@@ -54,7 +56,7 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78、web `todo.updated`/branch 事件协议收口 #79、Desktop secondary 模型入口 #80 已完成）：Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
+1. **审计 §10"后续修复"队列——已全部闭合，不再有队列项**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78、web `todo.updated`/branch 事件协议收口 #79、Desktop secondary 模型入口 #80、Mock 入口收口 #81 已完成——**§10 修复队列 10/10 全部闭合**）；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。

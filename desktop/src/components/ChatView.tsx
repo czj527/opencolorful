@@ -175,9 +175,8 @@ function EventDetail({ event, onOpenDiff }: { readonly event: ChatEvent; readonl
             </div>
           ))}
         </div>
-        <button type="button" className="inline-action" onClick={onOpenDiff}>
-          <FileDiff size={13} />在右侧审查
-        </button>
+        {/* P1 审计修复（§7.5）：Diff 面板为静态演示已移除——不再提供
+            "在右侧审查"假跳转；真实 Diff 面板回归时恢复此按钮 */}
       </div>
     );
   }
@@ -278,6 +277,9 @@ const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, o
               <X size={13} />拒绝
             </button>
             <span className="approval-scope">{event.approval.action} · {event.approval.scope}</span>
+            {/* P1 审计修复（§7.5）：审批当前只改变本地状态（未接服务端），演示会话外不可达；
+                明确标注演示态，避免误以为完成了真实审批 */}
+            <span className="chip">演示</span>
           </div>
         ) : (
           <div className={`approval-result ${approval === "approved" ? "s-succeeded" : "s-failed"}`}>
