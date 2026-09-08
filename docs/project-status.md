@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
-**更新时间：2026-09-07**
-**当前基线：** `main`  `f6bbc40`（#80 Desktop secondary 模型入口+扩展加载隔离已合并，全量真链 29/29；#81 Mock 入口收口完成后本条随之推进）
+**更新时间：2026-09-08**
+**当前基线：** `main` `c0f8b46`（#81 Mock 入口收口已合并，全量真链 29/29）；Wave C 入口门禁修复在分支 `c22e601`、PR #82，尚未合并。
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -37,6 +37,7 @@
 
 - **2026-09-08 Desktop secondary 模型入口（#80）**：审计 §7.4/§10-9 修复——后端 `PUT /api/settings/preferences` 早已支持 `subagents.defaultModel`（含 `modelService.resolveModel` 可用性校验 400），web 有入口，Desktop 的 `PreferencesView` 只带 `defaults` 段、设置页只有主模型行，用户无法在主要产品前端配置 Subagent/记忆摘要/后台复盘共用的 secondary 模型；修复为 `PreferencesView` 补 `subagents` 段（ipc 防御式映射缺失回退 null + mock 同形合并）、`updatePreferences` patch 类型扩展可选 `subagents` 段（对齐服务端 merge 语义）、`DefaultModelRow` 泛化 scope 两态（defaults 主模型行不变；subagents 行读写 `subagents.defaultModel`、同凭据过滤列表、并列展示）。新增 settings.mock SEC-01..04 4 例（行存在与初始未设置 / patch 形状恰为 `{subagents:{defaultModel}}` 且不触碰 defaults / 清除写 null / 服务端 400 拒绝错误行呈现且选择回退），判别实证：secondary 写入误接 defaults 恰 3/14 失败。已知边界：服务端 400 文案含"凭据"被共享错误分类器映射为凭据失效提示（语义可接受，后续可为 settings 错误设独立 context key）。验证：desktop 单测 120/120、`npm run check` 全绿、全量真链 29/29。
 
+- **2026-09-08 波次 A/B 人工验收巡演执行完毕**：审计 §8 十三张验收卡以 L6 真链巡演（真实 Electron + stub，37 张截图证据，主 Agent 逐张视觉终审）执行——**11 PASS / 1 FAIL（A-3）/ 1 未覆盖（B-7）**。A-3「错误保留」预期不满足：运行错误行为内存态 status 条目，`seedItems` 整表重投影即消失（`desktop/src/data/projector.ts:100/554/601`），立项为验收发现 #2；巡演首轮另暴露 Electron api-proxy 偶发 `fetch failed` 错报「发送失败」而服务端回合实际成功（retain 现场 JSONL 复核属实），立项为发现 #1；另有六项低危打磨项（侧栏空会话预览滞后、原生条目行噪音、错误行 raw JSON、分支预览不可区分、标题 18 字符截断、Composer 英文 chip）。逐卡结果与复跑命令见 `docs/audits/2026-09-08-acceptance-tour.zh.md`；巡演 spec（`@acceptance`）已入库可复跑。
 - **2026-09-08 Mock 入口收口（#81）——审计 §10 修复队列收官**：审计 §7.5/§10-10 修复——Dock 的 Diff/Terminal 面板为纯静态演示（固定 `dockFiles`/固定脚本文本，Terminal 仅小字 mock chip），在真实 IPC 模式作为一级 tab 出现会让用户误以为查看了真实 Diff 或运行了真实 Terminal；file 事件详情的「在右侧审查」按钮跳向演示 Diff；聊天审批按钮只翻转组件本地 state 且无演示标注。数据源实证：真实 projector 只产 `memory/plan/status/thinking/tool` 五种 kind，`file`/`approval` 仅 mock 演示会话可达——故按审计"隐藏入口"选项收口：`DockTool` 收敛为 `"subagent"`（变更审查/终端按钮与静态面板移除，Dock 只承载真实接线的 SubagentDock，`dockFiles` 留在 mock-data 作演示资产）、假跳转按钮移除、审批按钮区加「演示」chip 显式声明本地状态机。新增 `mock-entry-gate.mock.test.tsx` 3 例（会话头仅 Subagent 一个入口/Dock 经唯一入口打开且无演示 tab/审批区演示标注可见），判别实证：恢复演示入口按钮恰 1/3 失败。**至此审计 §10 后续修复 10 项全部闭合（#72-#81），队列转入 §8 人工验收与 G2 发布验证**。验证：desktop 单测 123/123、`npm run check` 全绿、全量真链 29/29。
 
 ## 阶段状态
@@ -47,8 +48,9 @@
 | Governance G1 | 仓库收敛与 Desktop 优先 | 已完成（2026-08-26） | `plans/g1-repo-convergence.md` |
 | Governance G2 | 桌面发布分发与版本更新 | 热修已合并；`v0.1.1` tag 已存在但 GitHub Release 仍为 Draft，待正式发布与安装/更新实测 | `plans/g2-desktop-release.md` |
 | Product P1 | 个人助理基础体验 | 进行中（切片 1/1.5/1.75 代码已合并；波次八、发布实测和后续规划待收口） | `docs/superpowers/specs/2026-08-26-p1-personal-assistant-slice.md`、`docs/superpowers/specs/2026-08-27-p1-slice-1.5-usability.md`、`docs/superpowers/specs/2026-08-28-p1-slice-1.75-memory-activation.md`、`plans/desktop-parity.md`、`plans/p1-t1~t15-*.md` |
-| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | **工程实现已合并；独立质量评估未通过**（2026-09-06）：A0-A9 已合并（PR #40-#54），常规类型检查、根测试、Web、Desktop Mock/构建和 Web Playwright 通过；但 Plugin import 检查是假通过，v13/v14 迁移中断恢复失败，人工验收和发布验证未完成。状态：`HUMAN_PENDING`、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md` |
-| Product P1 内部波次 B | 对话工作台能力 | **工程实现基本完成；独立质量评估未通过**（2026-09-06）：B0-B5b 已合并（PR #55-#61，B6/B7 收尾记录在 #62）。Web Playwright 60/60、Desktop 单测 102/102、B 聚焦测试 52/52；Desktop 真链 26/27，B3 `BRANCH-03/04` 重复 3 次仅 1 次通过；B4/B5 Electron 真链、人工验收和发布验证未完成。状态：`HUMAN_PENDING`、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md` |
+| Product P1 内部波次 A | 质量体系、两档模型与统一用量 | **工程实现已合并；独立质量评估未通过**（2026-09-06）：A0-A9 已合并（PR #40-#54），常规类型检查、根测试、Web、Desktop Mock/构建和 Web Playwright 通过；但 Plugin import 检查是假通过，v13/v14 迁移中断恢复失败，人工验收和发布验证未完成。**审计修复队列 10/10 已闭合（#63-#81），全量真链 29/29；2026-09-08 人工验收巡演 A-1~A-6：A-3 FAIL（错误行不持久，发现 #2 立项），其余通过**（验收报告）。状态：`HUMAN_PENDING`（A-3 修复复验后翻转）、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-quality-model-usage.md`、`plans/p1-quality-model-usage.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`、`docs/audits/2026-09-08-acceptance-tour.zh.md` |
+| Product P1 内部波次 B | 对话工作台能力 | **工程实现基本完成；独立质量评估未通过**（2026-09-06）：B0-B5b 已合并（PR #55-#61，B6/B7 收尾记录在 #62）。Web Playwright 60/60、Desktop 单测 102/102、B 聚焦测试 52/52。**B3 间歇性与 B4/B5 Electron 真链已随 #69-#72 闭合，全量真链 29/29；2026-09-08 人工验收巡演 B-1~B-6 全过，B-7 长时混用留日用**（验收报告）。状态：`HUMAN_PENDING`（仅余 B-7 日用观察）、`RELEASE_PENDING`。 | `docs/superpowers/specs/2026-08-31-p1-conversation-workbench.md`、`plans/p1-conversation-workbench.en.md`、`docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md`、`docs/audits/2026-09-08-acceptance-tour.zh.md` |
+| Product P1 Wave D | Desktop 后端能力覆盖 | **规划中**；进入真实使用前必须完成。旧 `desktop-parity.md` 仅作历史盘点，当前按 D0-D6 执行端点到 Desktop 入口矩阵、逐波次自动化/人工/发布验收 | `plans/p1-desktop-surface-completion.en.md`、`plans/desktop-parity.md` |
 | Product P1 独立专项 | 浏览器能力与安全边界 | 规划中（独立于波次 B，尚未实施） | `docs/superpowers/specs/2026-08-31-browser-capability.md`、`plans/browser-capability.en.md` |
 | Product P2 | 个人效率工作台 | 未排期 | `docs/positioning-and-roadmap.md` |
 | Product P3 | 扩展生态与连接能力 | 未排期 | `docs/positioning-and-roadmap.md` |
@@ -56,11 +58,11 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列——已全部闭合，不再有队列项**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78、web `todo.updated`/branch 事件协议收口 #79、Desktop secondary 模型入口 #80、Mock 入口收口 #81 已完成——**§10 修复队列 10/10 全部闭合**）；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
-2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
-3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
-4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。
-5. **五天真实日用后置**：在安全、迁移、B3 稳定性、Desktop 真实交互和有效发布/安装链路完成前，不把五天体验作为下一步唯一任务。
+1. **Wave C 入口门禁**：完成并合并 PR #82，随后以新的 main 基线重核文档和 CI；Wave C 不等于产品验收或发布验收。
+2. **执行 Wave D Desktop 能力覆盖**：先由 D0 建立端点到 Desktop 入口的唯一矩阵，再按 D1-D6 串行接入尚未覆盖的 Agent/Workspace、Subagent、Plugin、Skill、Memory/Usage 和 Observability/发布能力。计划见 `plans/p1-desktop-surface-completion.en.md`。
+3. **处理人工巡演发现并完成 A/B 验收收口**：发现 #1/#2 及 A-3 复验优先；B-7 长时混用作为真实使用观察项，不提前宣称通过。
+4. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
+5. **五天真实日用最后进行**：必须同时满足 `BACKEND_SURFACE_COVERED`、`AUTO_PASS`、`HUMAN_PASS` 和 `RELEASE_PASS`，再进入真实使用。
 
 ## 状态更新规则
 
