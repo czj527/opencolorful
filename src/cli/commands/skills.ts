@@ -28,6 +28,7 @@ import readline from "node:readline/promises";
 
 import { getRuntimePaths } from "../../config/paths.js";
 import { loadEnvironment } from "../../config/environment.js";
+import { readPresentServerToken } from "../../server/trust-boundary.js";
 import type { SkillErrorCode } from "../../contracts/skill-protocol.js";
 import { LinkedSourceRegistry } from "../../runtime/skills/sources/linked-source-registry.js";
 import { SkillSourceTrustStore } from "../../runtime/skills/sources/trust-config.js";
@@ -526,11 +527,15 @@ interface HttpEnvelope {
 
 async function requestRaw(method: string, pathName: string, body?: unknown): Promise<HttpEnvelope> {
   const url = `${baseUrl()}${pathName}`;
+  const token = readPresentServerToken(process.env, getRuntimePaths().runtime);
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (token !== null) headers.Authorization = `Bearer ${token}`;
   let response: Response;
   try {
     response = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      headers,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (error) {

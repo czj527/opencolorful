@@ -29,6 +29,7 @@ import path from "node:path";
 
 import { loadEnvironment } from "../../config/environment.js";
 import { getRuntimePaths } from "../../config/paths.js";
+import { readPresentServerToken } from "../../server/trust-boundary.js";
 
 export async function runPluginsCommand(args: readonly string[]): Promise<void> {
   const command = args[0] ?? "dev";
@@ -268,11 +269,15 @@ function baseUrl(): string {
 
 async function request(method: string, path: string, body?: unknown): Promise<unknown> {
   const url = `${baseUrl()}${path}`;
+  const token = readPresentServerToken(process.env, getRuntimePaths().runtime);
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (token !== null) headers.Authorization = `Bearer ${token}`;
   let response: Response;
   try {
     response = await fetch(url, {
       method,
-      headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+      headers,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch (error) {

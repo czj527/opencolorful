@@ -207,6 +207,20 @@ describe("AgentStore", () => {
     expect(settings.version).toBe(defaultAgentSettings().version);
   });
 
+  it("rejects corrupted settings instead of defaulting away sandbox policy", () => {
+    const dir = makeTempAgentsDir();
+    const store = new AgentStore(dir);
+    store.create({
+      id: "broken-settings",
+      name: "损坏设置",
+      baseColor: blankBaseColor,
+      sandbox: { protectedPaths: ["finance-private/"] },
+    });
+    fs.writeFileSync(path.join(dir, "broken-settings", "settings.json"), "{ broken json", "utf8");
+
+    expect(() => store.getSettings("broken-settings")).toThrow("Agent settings 数据损坏，无法读取");
+  });
+
   it("rejects base-color and settings access for a missing agent without creating a ghost directory", () => {
     const dir = makeTempAgentsDir();
     const store = new AgentStore(dir);
