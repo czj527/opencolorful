@@ -1,7 +1,7 @@
 # OpenColorful 当前项目状态
 
 **更新时间：2026-09-07**
-**当前基线：** `main`  `57d1cb9`（#78 分支请求 generation/token 已合并，全量真链 29/29；#79 web 事件协议收口完成后本条随之推进）
+**当前基线：** `main`  `56c478b`（#79 web 事件协议收口已合并，全量真链 29/29；#80 Desktop secondary 模型入口完成后本条随之推进）
 **状态维护规则：** 本文件只记录当前状态；历史平台实施细节归 `plans/`，产品路线归 `positioning-and-roadmap.md`。当前仓库治理使用 G 编号，产品路线使用 P/R 编号，桌面补齐波次使用 D 编号；历史 Phase 编号永久封存。
 
 **开发者工作台：** [项目看板与架构地图](architecture-map/index.html) 提供当前状态的日常排序、
@@ -35,6 +35,8 @@
 
 - **2026-09-07 Web SSE 事件协议收口（#79）**：审计 §7.2/§10-8 修复——服务端以命名事件（`event: <type>`）发送 SSE，客户端只为已注册的类型收帧，`web/src/lib/sse-client.ts` 的 `KNOWN_EVENT_TYPES` 缺服务端契约 6 项（`turn.failed`/`turn.cancelled`/`turn.interrupted`、`session.branch.switched`/`session.branches.changed`、`todo.updated`），web 作为协议验收客户端（G1：desktop 产品面、web 运维/协议面）静默丢帧形成跨客户端契约缺口；修复为补齐全 38 项契约类型（顺序对齐服务端，`reset` 为传输层特例注释保留）并新增**契约对齐回归** `web/src/lib/sse-contract.test.ts` 3 例——文件级正则提取两侧数组（web 不能 import Node 侧契约源码）断言集合相等（不漏/不滥、reset 白名单）+ 波次 B 事件存在性防提取失真守卫；仓库根按 cwd 向上双文件存在定位（workspace 测试 cwd=web/，vitest 转换后 import.meta.url 非 file 协议）。判别实证：删 `todo.updated` 恰 1/3 失败且错误信息点名缺失类型。已知边界：web 仍不渲染 todo/branch 状态（协议客户端职责边界，G1 既有决策）。验证：web 单测 431/431、`npm run check` 全绿、全量真链 29/29。
 
+- **2026-09-08 Desktop secondary 模型入口（#80）**：审计 §7.4/§10-9 修复——后端 `PUT /api/settings/preferences` 早已支持 `subagents.defaultModel`（含 `modelService.resolveModel` 可用性校验 400），web 有入口，Desktop 的 `PreferencesView` 只带 `defaults` 段、设置页只有主模型行，用户无法在主要产品前端配置 Subagent/记忆摘要/后台复盘共用的 secondary 模型；修复为 `PreferencesView` 补 `subagents` 段（ipc 防御式映射缺失回退 null + mock 同形合并）、`updatePreferences` patch 类型扩展可选 `subagents` 段（对齐服务端 merge 语义）、`DefaultModelRow` 泛化 scope 两态（defaults 主模型行不变；subagents 行读写 `subagents.defaultModel`、同凭据过滤列表、并列展示）。新增 settings.mock SEC-01..04 4 例（行存在与初始未设置 / patch 形状恰为 `{subagents:{defaultModel}}` 且不触碰 defaults / 清除写 null / 服务端 400 拒绝错误行呈现且选择回退），判别实证：secondary 写入误接 defaults 恰 3/14 失败。已知边界：服务端 400 文案含"凭据"被共享错误分类器映射为凭据失效提示（语义可接受，后续可为 settings 错误设独立 context key）。验证：desktop 单测 120/120、`npm run check` 全绿、全量真链 29/29。
+
 ## 阶段状态
 
 | 阶段 | 主题 | 状态 | 权威记录 |
@@ -52,7 +54,7 @@
 
 ## 当前优先级
 
-1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78、web `todo.updated`/branch 事件协议收口 #79 已完成）：Desktop secondary 模型入口、Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
+1. **审计 §10"后续修复"队列**（a4 fixture 令牌适配 #71、B4/B5 Electron 真链 #72、runtime single-flight #73、SSE 合批去重 #74、usage durable spool #75、Fork JSONL/SQLite 对账与孤儿清理 #76、Desktop 设置失败回滚 #77、分支请求 generation/token #78、web `todo.updated`/branch 事件协议收口 #79、Desktop secondary 模型入口 #80 已完成）：Mock 入口隐藏或标注；并补齐审计报告 §8 人工验收卡执行（已落图至架构地图"开发者待办"）。A/B 产品完成状态在人工与发布验收前不翻转。
 2. **执行独立报告中的 A/B 人工验收卡**（compact/todo Electron 真链已随 #72 补齐）：确认错误、恢复、长期使用和用户可理解性。
 3. **G2 发布事实单独收口**：清理重复 Draft Release，完成仓库外安装启动、更新、重启安装、数据恢复和发布资产验证；不能以 tag 或 CI 绿替代。
 4. **浏览器作为独立专项后续实施**：先做安全契约和威胁模型，再做只读 Inspect、Desktop 右侧 Browser Panel、受控动作和人工元素选取，最后才评估 Agent/Plan/Cron 接线。规划见 `docs/superpowers/specs/2026-08-31-browser-capability.md` 与 `plans/browser-capability.en.md`；不与波次 B 混做。

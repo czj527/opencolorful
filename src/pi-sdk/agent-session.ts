@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +38,17 @@ import { getSessionManager } from "./session-manager-registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/**
+ * P1 审计修复（§10 收口伴生缺陷）：平台扩展加载与用户全局 PI 配置隔离。
+ *
+ * PI 的 discoverAndLoadExtensions 缺省 agentDir=getAgentDir()（~/.pi/agent），
+ * 会把用户全局 extensions/ 目录下的第三方扩展一并卷进加载结果——沙箱扩展
+ * 的数量 fail-closed 校验（expected 1）随之误伤：用户装了任何 pi 扩展，
+ * 平台所有 Session Runtime 创建直接 500。四个平台扩展加载点显式传一个
+ * 保证不存在的 agentDir，全局目录扫描恒为空，加载面收敛到显式路径。
+ */
+const ISOLATED_AGENT_DIR = path.join(os.tmpdir(), "opencolorful-no-agent-dir");
 
 // 沙箱扩展文件路径：开发环境 .ts，生产构建 .js
 const SANDBOX_EXTENSION_JS = path.resolve(__dirname, "sandbox-extension.js");
@@ -150,6 +162,7 @@ async function ensureSandboxExtensionLoaded(): Promise<void> {
   const result = await discoverAndLoadExtensions(
     [SANDBOX_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
+    ISOLATED_AGENT_DIR,
   );
   validateSandboxExtensionLoadResult(result);
   sandboxExtensionsLoaded = result;
@@ -166,6 +179,7 @@ async function ensureMemoryToolsExtensionLoaded(): Promise<void> {
   const result = await discoverAndLoadExtensions(
     [MEMORY_TOOLS_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
+    ISOLATED_AGENT_DIR,
   );
   if (result.errors.length > 0) {
     const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
@@ -185,6 +199,7 @@ async function ensureSkillToolsExtensionLoaded(): Promise<void> {
   const result = await discoverAndLoadExtensions(
     [SKILL_TOOLS_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
+    ISOLATED_AGENT_DIR,
   );
   if (result.errors.length > 0) {
     const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");
@@ -204,6 +219,7 @@ async function ensureSubagentToolsExtensionLoaded(): Promise<void> {
   const result = await discoverAndLoadExtensions(
     [SUBAGENT_TOOLS_EXTENSION_PATH],
     path.resolve(__dirname, "..", ".."),
+    ISOLATED_AGENT_DIR,
   );
   if (result.errors.length > 0) {
     const msg = result.errors.map((e) => `${e.path}: ${e.error}`).join("; ");

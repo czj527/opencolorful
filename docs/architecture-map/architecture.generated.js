@@ -203,7 +203,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "desktop/src/App.tsx",
-          "lines": 898
+          "lines": 899
         },
         {
           "path": "desktop/src/components/AgentChip.tsx",
@@ -259,7 +259,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/SettingsModal.tsx",
-          "lines": 331
+          "lines": 344
         },
         {
           "path": "desktop/src/components/Sidebar.tsx",
@@ -295,7 +295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/ipc-source.ts",
-          "lines": 1313
+          "lines": 1325
         },
         {
           "path": "desktop/src/data/local-prefs.ts",
@@ -303,7 +303,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/mock-source.ts",
-          "lines": 1016
+          "lines": 1027
         },
         {
           "path": "desktop/src/data/pick-directory.ts",
@@ -315,7 +315,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/source.ts",
-          "lines": 483
+          "lines": 493
         },
         {
           "path": "desktop/src/env.d.ts",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10600
+      "totalLines": 10647
     },
     {
       "id": "web-client",
@@ -1617,7 +1617,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/pi-sdk/agent-session.ts",
-          "lines": 821
+          "lines": 837
         },
         {
           "path": "src/pi-sdk/complete-text.ts",
@@ -1677,7 +1677,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 15,
-      "totalLines": 4644
+      "totalLines": 4660
     },
     {
       "id": "memory",
@@ -5191,13 +5191,13 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "updatedAt": "2026-09-07",
     "baseline": {
       "branch": "main",
-      "commit": "57d1cb9",
-      "label": "审计立即修复 5/5 与后续修复队列 8/10 已合并（至 #79 web 事件收口）；剩余 2 项与人工验收待收口"
+      "commit": "56c478b",
+      "label": "审计立即修复 5/5 与后续修复队列 9/10 已合并（至 #80 secondary 模型入口）；剩余 1 项与人工验收待收口"
     },
     "health": {
       "label": "修复队列与人工验收待收口",
       "tone": "risk",
-      "summary": "审计立即修复 5/5 与后续修复 8/10（至 web 事件协议收口 #79）已合并，全量真链 29/29；剩余 2 项（Desktop secondary 模型入口、Mock 入口收口）、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
+      "summary": "审计立即修复 5/5 与后续修复 9/10（至 Desktop secondary 模型入口 #80）已合并，全量真链 29/29；剩余 1 项（Mock 入口收口）、A/B 人工验收卡与发布验证仍需收口后才能宣称产品完成。",
       "source": "docs/audits/2026-09-06-wave-a-b-delivery-quality.zh.md"
     },
     "signals": [
@@ -5210,7 +5210,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "label": "当前活动轨道",
         "value": "审计修复队列",
-        "detail": "审计修复队列 10 项已闭合 8 项（#72-#79），剩余 2 项（Desktop secondary 模型入口、Mock 入口收口）按队列继续。",
+        "detail": "审计修复队列 10 项已闭合 9 项（#72-#80），剩余 1 项（Mock 入口收口）按队列继续。",
         "source": "docs/project-status.md"
       },
       {
@@ -5230,7 +5230,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       {
         "number": "01",
         "title": "继续清修复队列",
-        "detail": "审计 §10 后续修复剩余 2 项按队列推进：Desktop secondary 模型入口、Diff/Terminal/Approval Mock 入口隐藏或标注。",
+        "detail": "审计 §10 后续修复最后 1 项：Diff/Terminal/Approval Mock 入口隐藏或标注演示态。",
         "cardId": "audit-remediation-queue"
       },
       {
@@ -5259,7 +5259,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
             "priority": "P1",
             "state": "进行中",
             "title": "清完审计后续修复队列",
-            "summary": "审计 §10 后续修复 10 项中已闭合 8 项（#72 B4/B5 真链、#73 single-flight、#74 SSE 合批去重、#75 usage spool、#76 Fork 对账、#77 设置回滚、#78 分支 generation/token、#79 web 事件协议收口），剩余 2 项按队列继续。",
+            "summary": "审计 §10 后续修复 10 项中已闭合 9 项（#72-#80：真链/single-flight/合批去重/usage spool/Fork 对账/设置回滚/分支 generation/web 事件收口/secondary 入口），剩余 1 项。",
             "detail": "每项独立开 PR：先源码确认缺陷现状，再修复 + 并发/恢复负例测试，全量真链与 npm run check 通过后合并。顺序可按上下文连续性调整，但不得跳过验收证据。",
             "tags": [
               "P1",
@@ -5307,8 +5307,8 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
                 "done": true
               },
               {
-                "label": "Desktop secondary 模型入口",
-                "done": false
+                "label": "Desktop secondary 模型入口（#80）",
+                "done": true
               },
               {
                 "label": "Diff/Terminal/Approval Mock 入口收口",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114177,
+    "totalSourceLines": 114240,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },

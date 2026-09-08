@@ -832,6 +832,10 @@ export class IpcDataSource implements DesktopDataSource {
     const data = await this.request<Record<string, unknown>>("GET", "/api/settings/preferences");
     const defaults = (data["defaults"] ?? {}) as Record<string, unknown>;
     const model = defaults["model"] as Record<string, unknown> | null;
+    // P1 审计修复（§7.4/§10-9）：subagents.defaultModel（secondary 模型），
+    // 旧后端/缺段时防御式回退 null
+    const subagents = (data["subagents"] ?? {}) as Record<string, unknown>;
+    const subagentModel = subagents["defaultModel"] as Record<string, unknown> | null;
     return {
       defaults: {
         model: model !== null && typeof model === "object"
@@ -840,10 +844,18 @@ export class IpcDataSource implements DesktopDataSource {
         toolMode: String(defaults["toolMode"] ?? "read-only"),
         thinkingLevel: String(defaults["thinkingLevel"] ?? "medium"),
       },
+      subagents: {
+        defaultModel: subagentModel !== null && typeof subagentModel === "object"
+          ? { providerId: String(subagentModel["providerId"] ?? ""), modelId: String(subagentModel["modelId"] ?? "") }
+          : null,
+      },
     };
   }
 
-  async updatePreferences(patch: { defaults: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string } }): Promise<void> {
+  async updatePreferences(patch: {
+    defaults?: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string };
+    subagents?: { defaultModel?: ModelRef | null };
+  }): Promise<void> {
     await this.request("PUT", "/api/settings/preferences", patch);
   }
 
