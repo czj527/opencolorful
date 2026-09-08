@@ -163,12 +163,19 @@ export interface SessionUsageView {
   readonly contextPercent: number | null;
 }
 
-/** 全局偏好（对齐 GET /api/settings/preferences 的 defaults 段） */
+/**
+ * 全局偏好（对齐 GET /api/settings/preferences 的 defaults 段）。
+ * P1 审计修复（§7.4/§10-9）：补 subagents 段——secondary 模型
+ * （Subagent / Memory utility / 后台任务共用）的 Desktop 配置入口。
+ */
 export interface PreferencesView {
   readonly defaults: {
     readonly model: ModelRef | null;
     readonly toolMode: string;
     readonly thinkingLevel: string;
+  };
+  readonly subagents: {
+    readonly defaultModel: ModelRef | null;
   };
 }
 
@@ -414,12 +421,15 @@ export interface DesktopDataSource {
   listModels(): Promise<readonly ModelOption[]>;
   /** 全局偏好（IPC 实现由主会话按 GET /api/settings/preferences 补齐；缺失时桌面端退回兜底默认） */
   getPreferences?(): Promise<PreferencesView>;
-  /** 更新全局偏好 defaults 子树（对齐 PUT /api/settings/preferences；服务端 merge 后归一化校验） */
+  /** 更新全局偏好子树（对齐 PUT /api/settings/preferences；服务端 merge 后归一化校验） */
   updatePreferences(patch: {
-    readonly defaults: {
+    readonly defaults?: {
       readonly model?: ModelRef | null;
       readonly toolMode?: string;
       readonly thinkingLevel?: string;
+    };
+    readonly subagents?: {
+      readonly defaultModel?: ModelRef | null;
     };
   }): Promise<void>;
   getSessionSettings(sessionId: string): Promise<SessionSettingsView>;

@@ -359,6 +359,7 @@ it("PROV-04: 默认模型指向未配置凭据模型——设置页出现中文�
     getPreferences: () =>
       Promise.resolve({
         defaults: { model: { providerId: "openai", modelId: "gpt-5.2" }, thinkingLevel: "medium", toolMode: "read-only" },
+        subagents: { defaultModel: null },
       }),
   });
   const app = await renderApp();
@@ -433,4 +434,113 @@ it("SET-05: 关于页——版本与连接信息（无桥 dev/离线 mock；有�
     second.consoleTracker.restore();
   }
   second.consoleTracker.expectNoErrors();
+});
+
+/* ── P1 审计修复（§7.4/§10-9）：Secondary 模型 Desktop 入口 ──
+ * 缺陷：后端 PUT /api/settings/preferences 已支持 subagents.defaultModel
+ * （带 resolve 校验），web 有入口，Desktop 设置页只有主模型——用户无法在
+ * 主要产品前端配置 Subagent / Memory utility / 后台任务共用的 secondary 模型。
+ * 修复：DefaultModelRow 泛化为 scope 两态；PreferencesView 补 subagents 段。
+ */
+
+it("SEC-01: 设置页模型类目出现 Secondary 模型行——与主模型行并列、初始未设置", async () => {
+  const app = await renderApp();
+  try {
+    const settings = await openModelsSettings(app);
+    const dialog = settings.dialog();
+    const secondary = (await within(dialog).findByLabelText("Secondary 模型")) as HTMLSelectElement;
+    expect(secondary.value).toBe(""); // mock 初始 defaultModel=null
+    // 主模型行不受影响，两行并存
+    expect(within(dialog).getByLabelText("全局默认模型")).toBeTruthy();
+  } finally {
+    app.consoleTracker.restore();
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("SEC-02: 切 Secondary 模型——走 subagents.defaultModel patch 保存，回显新值", async () => {
+  const base = new MockDataSource();
+  const patches: unknown[] = [];
+  injected.current = overrideSource(base, {
+    updatePreferences: (patch) => {
+      patches.push(patch);
+      return base.updatePreferences(patch);
+    },
+  });
+  const app = await renderApp();
+  try {
+    const settings = await openModelsSettings(app);
+    const dialog = settings.dialog();
+    const secondary = (await within(dialog).findByLabelText("Secondary 模型")) as HTMLSelectElement;
+
+    await app.user.selectOptions(secondary, JSON.stringify({ providerId: "deepseek-local", modelId: "deepseek-v3.2" }));
+    await waitFor(() => expect(secondary.value).toBe(JSON.stringify({ providerId: "deepseek-local", modelId: "deepseek-v3.2" })));
+
+    // patch 形状契约：只带 subagents 段，不触碰 defaults
+    expect(patches).toEqual([{ subagents: { defaultModel: { providerId: "deepseek-local", modelId: "deepseek-v3.2" } } }]);
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("SEC-03: 清除 Secondary 模型（回到未设置）——patch 值为 null", async () => {
+  const base = new MockDataSource();
+  const patches: unknown[] = [];
+  injected.current = overrideSource(base, {
+    updatePreferences: (patch) => {
+      patches.push(patch);
+      return base.updatePreferences(patch);
+    },
+  });
+  const app = await renderApp();
+  try {
+    const settings = await openModelsSettings(app);
+    const dialog = settings.dialog();
+    const secondary = (await within(dialog).findByLabelText("Secondary 模型")) as HTMLSelectElement;
+
+    // 先设置再清除
+    await app.user.selectOptions(secondary, JSON.stringify({ providerId: "moonshot", modelId: "kimi-k3" }));
+    await waitFor(() => expect(secondary.value).toBe(JSON.stringify({ providerId: "moonshot", modelId: "kimi-k3" })));
+    await app.user.selectOptions(secondary, "");
+    await waitFor(() => expect(secondary.value).toBe(""));
+    expect(patches[patches.length - 1]).toEqual({ subagents: { defaultModel: null } });
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
+});
+
+it("SEC-04: 服务端校验拒绝（400）——错误行呈现，选择回退为保存前的值", async () => {
+  const base = new MockDataSource();
+  let failNext = true;
+  injected.current = overrideSource(base, {
+    updatePreferences: (patch) => {
+      // 只拒绝 secondary patch（模拟服务端 resolve 校验 400：模型不存在或凭据不可用）
+      if (failNext && patch.subagents !== undefined) {
+        failNext = false;
+        return Promise.reject(new Error("Subagent 默认模型不存在或凭据不可用"));
+      }
+      return base.updatePreferences(patch);
+    },
+  });
+  const app = await renderApp();
+  try {
+    const settings = await openModelsSettings(app);
+    const dialog = settings.dialog();
+    const secondary = (await within(dialog).findByLabelText("Secondary 模型")) as HTMLSelectElement;
+
+    await app.user.selectOptions(secondary, JSON.stringify({ providerId: "deepseek-local", modelId: "deepseek-v3.2" }));
+    // 失败：错误行呈现（服务端"凭据不可用"文案经 toUserError 分类为凭据失效提示）
+    await screen.findByText("API Key 可能已失效或权限不足，无法完成请求。");
+    // 选择回退（保存失败后 onChanged 不触发，displayed value 回弹由重拉驱动——
+    // 这里 Mock 保存被拒后本地未变更，select 回到 ""）
+    await waitFor(() => expect(secondary.value).toBe(""));
+  } finally {
+    app.consoleTracker.restore();
+    injected.current = null;
+  }
+  app.consoleTracker.expectNoErrors();
 });

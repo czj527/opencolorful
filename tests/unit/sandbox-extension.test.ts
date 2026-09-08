@@ -100,9 +100,12 @@ describe("sandbox extension loading", () => {
       "pi-sdk",
       "sandbox-extension.ts",
     );
+    // 隔离 agentDir：与生产加载点同参——用户全局 ~/.pi/agent/extensions/ 的
+    // 第三方扩展不得卷入本测试（数量校验 expected 1 会被环境漂移误伤）
     const result = await discoverAndLoadExtensions(
       [extensionPath],
       process.cwd(),
+      path.join(os.tmpdir(), "opencolorful-no-agent-dir"),
     );
 
     expect(() => validateSandboxExtensionLoadResult(result)).not.toThrow();

@@ -260,6 +260,9 @@ export class MockDataSource implements DesktopDataSource {
       thinkingLevel: "medium",
       toolMode: "read-only",
     },
+    subagents: {
+      defaultModel: null,
+    },
   };
   private mockMemorySettings: MemoryAgentSettingsView = {
     enabled: true,
@@ -852,12 +855,20 @@ export class MockDataSource implements DesktopDataSource {
     return Promise.resolve(this.mockPreferences);
   }
 
-  updatePreferences(patch: { defaults: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string } }): Promise<void> {
+  updatePreferences(patch: {
+    defaults?: { model?: ModelRef | null; toolMode?: string; thinkingLevel?: string };
+    subagents?: { defaultModel?: ModelRef | null };
+  }): Promise<void> {
     this.mockPreferences = {
-      defaults: {
+      defaults: patch.defaults === undefined ? this.mockPreferences.defaults : {
         model: patch.defaults.model === undefined ? this.mockPreferences.defaults.model : patch.defaults.model,
         thinkingLevel: patch.defaults.thinkingLevel ?? this.mockPreferences.defaults.thinkingLevel,
         toolMode: patch.defaults.toolMode ?? this.mockPreferences.defaults.toolMode,
+      },
+      subagents: patch.subagents === undefined ? this.mockPreferences.subagents : {
+        defaultModel: patch.subagents.defaultModel === undefined
+          ? this.mockPreferences.subagents.defaultModel
+          : patch.subagents.defaultModel,
       },
     };
     return Promise.resolve();

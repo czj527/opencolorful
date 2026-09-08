@@ -45,17 +45,23 @@ function Toggle({ checked, onChange, label }: { readonly checked: boolean; reado
   );
 }
 
-/** 全局默认模型选择：数据源为 App 已加载的 models/preferences，保存走 PUT /api/settings/preferences */
-function DefaultModelRow({ source, models, preferences, onChanged }: {
+/** 全局模型选择行：数据源为 App 已加载的 models/preferences，保存走 PUT /api/settings/preferences。
+ * scope=defaults 主模型（新会话缺省）；scope=subagents secondary 模型
+ * （P1 审计 §7.4/§10-9：Subagent / Memory utility / 后台任务共用的模型入口）。 */
+function DefaultModelRow({ source, models, preferences, onChanged, scope }: {
   readonly source: DesktopDataSource;
   readonly models: readonly ModelOption[];
   readonly preferences: PreferencesView | null;
   readonly onChanged: () => void;
+  readonly scope: "defaults" | "subagents";
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const available = models.filter((option) => option.credentialConfigured);
-  const current = preferences?.defaults.model ?? null;
+  const isPrimary = scope === "defaults";
+  const current = isPrimary
+    ? preferences?.defaults.model ?? null
+    : preferences?.subagents.defaultModel ?? null;
   const currentKey = current === null ? "" : JSON.stringify({ providerId: current.providerId, modelId: current.modelId });
   const disabled = saving || source.updatePreferences === undefined;
 
@@ -65,7 +71,9 @@ function DefaultModelRow({ source, models, preferences, onChanged }: {
     setSaving(true);
     setError(null);
     try {
-      await source.updatePreferences({ defaults: { model } });
+      await source.updatePreferences(
+        isPrimary ? { defaults: { model } } : { subagents: { defaultModel: model } },
+      );
       onChanged();
     } catch (cause) {
       setError(formatErrorAdvice(toUserError(cause, "saveProvider")));
@@ -76,11 +84,15 @@ function DefaultModelRow({ source, models, preferences, onChanged }: {
 
   return (
     <section className="setting-section">
-      <h3>默认模型</h3>
+      <h3>{isPrimary ? "默认模型" : "Secondary 模型"}</h3>
       <div className="setting-row">
         <span className="setting-copy">
-          <strong>全局默认模型</strong>
-          <small>新会话缺省使用的模型；会话内仍可单独切换</small>
+          <strong>{isPrimary ? "全局默认模型" : "Subagent / 后台任务模型"}</strong>
+          <small>
+            {isPrimary
+              ? "新会话缺省使用的模型；会话内仍可单独切换"
+              : "Subagent、记忆摘要与后台复盘等工具型调用共用的模型；未设置时相关功能不可用并明确报错"}
+          </small>
         </span>
         <span className="setting-control">
           {available.length === 0 ? (
@@ -88,7 +100,7 @@ function DefaultModelRow({ source, models, preferences, onChanged }: {
           ) : (
             <select
               className="setting-select"
-              aria-label="全局默认模型"
+              aria-label={isPrimary ? "全局默认模型" : "Secondary 模型"}
               value={currentKey}
               disabled={disabled}
               onChange={(event) => void change(event.target.value)}
@@ -104,7 +116,7 @@ function DefaultModelRow({ source, models, preferences, onChanged }: {
       </div>
       {current !== null && available.length > 0
         && !available.some((option) => option.providerId === current.providerId && option.modelId === current.modelId) && (
-        <p className="setting-note">当前默认模型 {current.providerId}/{current.modelId} 未配置凭据或已不在列表中。</p>
+        <p className="setting-note">当前{isPrimary ? "默认" : "Secondary "}模型 {current.providerId}/{current.modelId} 未配置凭据或已不在列表中。</p>
       )}
       {error !== null && <p className="setting-note is-error" role="alert">{error}</p>}
     </section>
@@ -282,7 +294,8 @@ export function SettingsModal({ category, onCategory, onClose, themeMode, onThem
             )}
             {category === "models" && (
               <>
-                <DefaultModelRow source={source} models={models} preferences={preferences} onChanged={onPreferencesChanged} />
+                <DefaultModelRow scope="defaults" source={source} models={models} preferences={preferences} onChanged={onPreferencesChanged} />
+                <DefaultModelRow scope="subagents" source={source} models={models} preferences={preferences} onChanged={onPreferencesChanged} />
                 <ProvidersSettings source={source} onChanged={onProvidersChanged} />
               </>
             )}

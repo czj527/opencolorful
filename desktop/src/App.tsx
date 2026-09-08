@@ -41,6 +41,7 @@ const NEW_THREAD = "new";
 /** 偏好接口缺失/不可用时的安全兜底；模型保持未选择，避免静默选模型。 */
 const FALLBACK_PREFERENCES: PreferencesView = {
   defaults: { model: null, thinkingLevel: "medium", toolMode: "read-only" },
+  subagents: { defaultModel: null },
 };
 
 /**

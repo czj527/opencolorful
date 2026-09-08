@@ -78,6 +78,7 @@ it("A7: 高级新建会话不会静默回退首个凭据模型", async () => {
         thinkingLevel: "medium",
         toolMode: "read-only",
       },
+      subagents: { defaultModel: null },
     }),
     createThread: (agentId, title, options) => {
       createThreadCalls.push(`${agentId}:${title}:${options?.toolMode ?? "-"}`);
