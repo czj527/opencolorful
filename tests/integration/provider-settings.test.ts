@@ -172,13 +172,13 @@ describe("provider settings", () => {
       supportsReasoningEffort: false,
       maxTokensField: "max_tokens",
     };
-    const withCompat = providerInput({
-      models: [{ ...providerInput().models[0], compat }],
-    });
+    const baseModel = providerInput().models[0];
+    if (!baseModel) throw new Error("providerInput() 必须带一个模型");
+    const withCompat = providerInput({ models: [{ ...baseModel, compat }] });
 
     // 契约层：合法 compat 通过解析并原样保留
     const parsed = parseProviderInput(withCompat);
-    expect(parsed.models[0].compat).toEqual(compat);
+    expect(parsed.models[0]?.compat).toEqual(compat);
 
     // 注册链：经 ModelService.upsert（含凭据）后，resolveModel 返回的模型携带
     // compat（PI SDK 据此覆盖请求形状）
@@ -192,16 +192,18 @@ describe("provider settings", () => {
 
     // 持久化层：compat 落盘 providers.json 并在重开后保留
     const reread = new ProviderStore(paths.providerSettings).list();
-    expect(reread[0].models[0].compat).toEqual(compat);
+    expect(reread[0]?.models[0]?.compat).toEqual(compat);
     close();
   });
 
   it("rejects unknown compat fields and values", () => {
+    const baseModel = providerInput().models[0];
+    if (!baseModel) throw new Error("providerInput() 必须带一个模型");
     // 白名单外字段拒绝（additionalProperties: false）
     expect(() =>
       parseProviderInput(
         providerInput({
-          models: [{ ...providerInput().models[0], compat: { supportsStore: true, evilField: true } }],
+          models: [{ ...baseModel, compat: { supportsStore: true, evilField: true } }],
         }),
       ),
     ).toThrow();
@@ -209,11 +211,11 @@ describe("provider settings", () => {
     expect(() =>
       parseProviderInput(
         providerInput({
-          models: [{ ...providerInput().models[0], compat: { maxTokensField: "unlimited" } }],
+          models: [{ ...baseModel, compat: { maxTokensField: "unlimited" } }],
         }),
       ),
     ).toThrow();
     // 无 compat 的既有配置仍正常解析（向后兼容）
-    expect(parseProviderInput(providerInput()).models[0].compat).toBeUndefined();
+    expect(parseProviderInput(providerInput()).models[0]?.compat).toBeUndefined();
   });
 });
