@@ -161,4 +161,61 @@ describe("provider settings", () => {
       }
     }
   });
+
+  // 发布验证发现（2026-09-09）：自定义代理站常与 OpenAI 新式默认不兼容
+  // （developer 角色 / reasoning_effort 取值），model.compat 必须从契约一路
+  // 透传到 pi-ai 注册链，否则自定义 Provider 无法声明站点兼容性。
+  it("persists model compat overrides and passes them through to the PI runtime", async () => {
+    const paths = createPaths();
+    const compat = {
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      maxTokensField: "max_tokens",
+    };
+    const baseModel = providerInput().models[0];
+    if (!baseModel) throw new Error("providerInput() 必须带一个模型");
+    const withCompat = providerInput({ models: [{ ...baseModel, compat }] });
+
+    // 契约层：合法 compat 通过解析并原样保留
+    const parsed = parseProviderInput(withCompat);
+    expect(parsed.models[0]?.compat).toEqual(compat);
+
+    // 注册链：经 ModelService.upsert（含凭据）后，resolveModel 返回的模型携带
+    // compat（PI SDK 据此覆盖请求形状）
+    const { audit, close } = makeAudit(paths);
+    const service = await ModelService.create(paths, new ProviderStore(paths.providerSettings), audit);
+    await service.upsert(parsed, API_KEY);
+    const resolved = service.resolveModel("local-openai", "local-model") as unknown as {
+      model?: { compat?: Record<string, unknown> };
+    };
+    expect(resolved.model?.compat).toMatchObject(compat);
+
+    // 持久化层：compat 落盘 providers.json 并在重开后保留
+    const reread = new ProviderStore(paths.providerSettings).list();
+    expect(reread[0]?.models[0]?.compat).toEqual(compat);
+    close();
+  });
+
+  it("rejects unknown compat fields and values", () => {
+    const baseModel = providerInput().models[0];
+    if (!baseModel) throw new Error("providerInput() 必须带一个模型");
+    // 白名单外字段拒绝（additionalProperties: false）
+    expect(() =>
+      parseProviderInput(
+        providerInput({
+          models: [{ ...baseModel, compat: { supportsStore: true, evilField: true } }],
+        }),
+      ),
+    ).toThrow();
+    // 越界取值拒绝
+    expect(() =>
+      parseProviderInput(
+        providerInput({
+          models: [{ ...baseModel, compat: { maxTokensField: "unlimited" } }],
+        }),
+      ),
+    ).toThrow();
+    // 无 compat 的既有配置仍正常解析（向后兼容）
+    expect(parseProviderInput(providerInput()).models[0]?.compat).toBeUndefined();
+  });
 });

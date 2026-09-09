@@ -25,11 +25,35 @@ const ModelCapabilitiesSchema = Type.Object(
   { additionalProperties: false },
 );
 
+// openai-completions 站点兼容性覆盖（透传给 pi-ai 的 model.compat）。
+// 白名单子集：只开放发布验证/自建代理站实测需要的开关，防任意字段注入 SDK。
+const ProviderModelCompatSchema = Type.Object(
+  {
+    supportsDeveloperRole: Type.Optional(Type.Boolean()),
+    supportsReasoningEffort: Type.Optional(Type.Boolean()),
+    supportsStore: Type.Optional(Type.Boolean()),
+    supportsStrictMode: Type.Optional(Type.Boolean()),
+    maxTokensField: Type.Optional(Type.Union([Type.Literal("max_tokens"), Type.Literal("max_completion_tokens")])),
+    thinkingFormat: Type.Optional(
+      Type.Union([
+        Type.Literal("openai"),
+        Type.Literal("deepseek"),
+        Type.Literal("zai"),
+        Type.Literal("together"),
+        Type.Literal("openrouter"),
+        Type.Literal("qwen"),
+      ]),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const ProviderModelSettingSchema = Type.Object(
   {
     modelId: Type.String({ minLength: 1, maxLength: 200 }),
     name: Type.String({ minLength: 1, maxLength: 200 }),
     capabilities: ModelCapabilitiesSchema,
+    compat: Type.Optional(ProviderModelCompatSchema),
   },
   { additionalProperties: false },
 );
@@ -86,6 +110,15 @@ export interface ProviderModelSetting {
   readonly modelId: string;
   readonly name: string;
   readonly capabilities: ProviderModelCapabilities;
+  /** openai-completions 站点兼容性覆盖（透传 pi-ai model.compat），缺省走 SDK 自动探测 */
+  readonly compat?: {
+    readonly supportsDeveloperRole?: boolean;
+    readonly supportsReasoningEffort?: boolean;
+    readonly supportsStore?: boolean;
+    readonly supportsStrictMode?: boolean;
+    readonly maxTokensField?: "max_tokens" | "max_completion_tokens";
+    readonly thinkingFormat?: "openai" | "deepseek" | "zai" | "together" | "openrouter" | "qwen";
+  };
 }
 
 export interface ProviderInput {
