@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 自定义 OpenAI 兼容 Provider 无法声明站点兼容性：引导接入部分代理站（如仅支持经典 `system` 角色、`reasoning_effort` 取值受限的中转站）后，首条消息一律 400「角色信息不正确」。模型设置现在支持 `compat` 覆盖（developer 角色开关、reasoning_effort 开关、max tokens 字段、thinking 格式等），并一路透传到模型运行时；未配置时行为与原先完全一致。
+
 ## [0.1.2] - 2026-09-09
 
 ### Added

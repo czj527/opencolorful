@@ -1080,7 +1080,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/contracts/provider-settings.ts",
-          "lines": 187
+          "lines": 220
         },
         {
           "path": "src/contracts/sandbox.ts",
@@ -1116,7 +1116,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 20,
-      "totalLines": 3806
+      "totalLines": 3839
     },
     {
       "id": "server",
@@ -1633,7 +1633,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/pi-sdk/model-runtime.ts",
-          "lines": 94
+          "lines": 97
         },
         {
           "path": "src/pi-sdk/sandbox-extension.ts",
@@ -1669,7 +1669,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/pi-sdk/types.ts",
-          "lines": 278
+          "lines": 290
         },
         {
           "path": "src/pi-sdk/version.ts",
@@ -1677,7 +1677,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 15,
-      "totalLines": 4660
+      "totalLines": 4675
     },
     {
       "id": "memory",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114200,
+    "totalSourceLines": 114248,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },

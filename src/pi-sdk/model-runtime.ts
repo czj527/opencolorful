@@ -21,6 +21,9 @@ function registerProvider(runtime: ModelRuntime, provider: PiProviderDefinition)
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: model.capabilities.contextWindow,
       maxTokens: model.capabilities.maxTokens,
+      // 站点兼容性覆盖：自定义代理站常与 OpenAI 新式默认不兼容
+      // （developer 角色 / reasoning_effort 取值等），无覆盖时 SDK 按 baseUrl 自动探测
+      ...(model.compat !== undefined ? { compat: { ...model.compat } } : {}),
     })),
   });
 }

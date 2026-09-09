@@ -144,7 +144,19 @@ export interface PiProviderDefinition {
     readonly modelId: string;
     readonly name: string;
     readonly capabilities: PiModelCapabilities;
+    /** openai-completions 站点兼容性覆盖（透传 pi-ai model.compat） */
+    readonly compat?: ProviderModelCompat;
   }[];
+}
+
+/** 白名单化的 openai-completions 兼容性覆盖（与 ProviderModelSetting["compat"] 同形） */
+export interface ProviderModelCompat {
+  readonly supportsDeveloperRole?: boolean;
+  readonly supportsReasoningEffort?: boolean;
+  readonly supportsStore?: boolean;
+  readonly supportsStrictMode?: boolean;
+  readonly maxTokensField?: "max_tokens" | "max_completion_tokens";
+  readonly thinkingFormat?: "openai" | "deepseek" | "zai" | "together" | "openrouter" | "qwen";
 }
 
 export interface PiModelSummary {
