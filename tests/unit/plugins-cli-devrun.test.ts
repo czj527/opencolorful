@@ -18,6 +18,7 @@ import { runPluginsCommand } from "../../src/cli/commands/plugins.js";
 interface FetchCall {
   url: string;
   body: Record<string, unknown>;
+  authorization?: string;
 }
 
 const INSTALLED_DEV_RUN_ID = "dev-run-11111111-aaaa-1111-1111-111111111111";
@@ -26,11 +27,12 @@ const RELOADED_DEV_RUN_ID = "dev-run-22222222-bbbb-2222-2222-222222222222";
 function stubDevServer(records: FetchCall[]): void {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
+    vi.fn(async (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
       const body = init?.body !== undefined
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : {};
-      records.push({ url, body });
+      const authorization = init?.headers?.authorization ?? init?.headers?.Authorization;
+      records.push({ url, body, ...(authorization === undefined ? {} : { authorization }) });
       let payload: unknown;
       if (url.endsWith("/install")) {
         payload = {
@@ -122,6 +124,17 @@ describe("plugins dev：devRunId 保存与自动传递", () => {
     expect(fs.existsSync(statePath())).toBe(true);
     expect(readDevRuns()["example.p"]).toBe(INSTALLED_DEV_RUN_ID);
     expect(records[0]?.body).toMatchObject({ sourceDir: "C:\\work\\example-p", fullAccess: true });
+  });
+
+  it("向 Server 请求携带本地启动令牌", async () => {
+    const records: FetchCall[] = [];
+    fs.mkdirSync(path.join(process.env.OPENCOLORFUL_HOME!, "runtime"), { recursive: true });
+    fs.writeFileSync(path.join(process.env.OPENCOLORFUL_HOME!, "runtime", "server-token"), "cli-token\n", "utf8");
+    stubDevServer(records);
+
+    await runPluginsCommand(["dev", "install", "C:\\work\\example-p"]);
+
+    expect(records[0]?.authorization).toBe("Bearer cli-token");
   });
 
   it("reload 未指定 --dev-run-id 时自动读取保存值，且 reload 返回新 devRunId 后同步更新", async () => {

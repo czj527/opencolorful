@@ -176,6 +176,32 @@ describe("Runtime Bootstrap：Agent 设置读取失败 fail-closed（P1 审计�
     expect(world.promptService.hasRuntime(world.sessionId)).toBe(false);
   });
 
+  it("Agent settings.json 损坏：ensureRuntime 拒绝且不回退为无沙箱默认值", async () => {
+    const world = await createAgentBoundWorld();
+    fs.writeFileSync(
+      path.join(world.paths.agents, world.agentId, "settings.json"),
+      "{ broken json",
+      "utf8",
+    );
+    const bootstrap = createRuntimeBootstrap({
+      promptService: world.promptService,
+      sessionService: world.sessionService,
+      replayStore: world.replayStore,
+      paths: world.paths,
+      agentStore: world.agentStore,
+      database: world.database,
+    });
+
+    await expect(bootstrap.ensureRuntime(world.sessionId)).rejects.toMatchObject({
+      status: 500,
+      apiError: {
+        code: "SESSION_ERROR",
+        message: "Agent 设置读取失败，已拒绝启动运行时",
+      },
+    });
+    expect(world.promptService.hasRuntime(world.sessionId)).toBe(false);
+  });
+
   it("同一失败经 messages 路由映射为 500 稳定错误响应，且重试仍拒绝", async () => {
     const world = await createAgentBoundWorld();
     const failingStore = new SettingsReadFailureAgentStore(world.paths.agents);

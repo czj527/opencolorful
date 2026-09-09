@@ -381,7 +381,9 @@ export class AgentStore {
       if (needsReviewFill) {
         (memory as Record<string, unknown>)["reviewEnabled"] = true;
       }
-      if (!Value.Check(AgentSettingsSchema, raw)) return null;
+      if (!Value.Check(AgentSettingsSchema, raw)) {
+        throw new Error("Agent settings 数据损坏，无法读取");
+      }
       const settings = raw as AgentSettings;
       // v1 → v2 自动迁移：补 sandbox 默认值，升级 version，写回磁盘
       if (settings.version === 1) {
@@ -398,7 +400,7 @@ export class AgentStore {
       if (needsReviewFill) this.writeSettings(agentId, v2);
       return v2;
     } catch {
-      return null;
+      throw new Error("Agent settings 数据损坏，无法读取");
     }
   }
 

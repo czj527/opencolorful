@@ -22,6 +22,7 @@ interface FetchCall {
   url: string;
   method: string;
   body: unknown;
+  authorization?: string;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -40,10 +41,12 @@ function stubServer(records: FetchCall[], handler: (call: FetchCall) => Response
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("authorization");
       const call: FetchCall = {
         url: String(input),
         method: init?.method ?? "GET",
         body: jsonBody(init),
+        ...(authorization === null ? {} : { authorization }),
       };
       records.push(call);
       return handler(call) ?? jsonResponse({ message: "未匹配 mock" }, 500);
@@ -199,6 +202,22 @@ describe("skills list / search / inspect（HTTP 命令）", () => {
     expect(printed).toContain('"name": "Demo Skill"');
     expect(printed).toContain('"version": "1.0.0"');
     expect(printed).toContain('"ok": true');
+  });
+
+  it("向 Server 请求携带本地启动令牌", async () => {
+    const calls: FetchCall[] = [];
+    fs.mkdirSync(path.join(home, "runtime"), { recursive: true });
+    fs.writeFileSync(path.join(home, "runtime", "server-token"), "cli-token\n", "utf8");
+    stubServer(calls, (call) => {
+      if (call.url.endsWith("/api/skills/inspect") && call.method === "POST") {
+        return jsonResponse({ ok: true, skillId: "demo-skill" });
+      }
+      return null;
+    });
+
+    await runSkillsCommand(["inspect", "C:\\tmp\\demo"]);
+
+    expect(calls[0]?.authorization).toBe("Bearer cli-token");
   });
 });
 
