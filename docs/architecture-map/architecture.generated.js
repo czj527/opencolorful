@@ -2513,7 +2513,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "src/config/agent-store.ts",
-          "lines": 547
+          "lines": 549
         },
         {
           "path": "src/config/environment.ts",
@@ -2565,7 +2565,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 13,
-      "totalLines": 1757
+      "totalLines": 1759
     },
     {
       "id": "observability",
@@ -3283,11 +3283,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/cli/commands/plugins.ts",
-          "lines": 376
+          "lines": 381
         },
         {
           "path": "src/cli/commands/skills.ts",
-          "lines": 710
+          "lines": 715
         },
         {
           "path": "src/cli/main.ts",
@@ -3307,7 +3307,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 16,
-      "totalLines": 3030
+      "totalLines": 3040
     }
   ],
   "edges": [
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114188,
+    "totalSourceLines": 114200,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },
@@ -6125,11 +6125,19 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     {
       "from": "cli-governance",
       "to": "server",
-      "count": 3,
+      "count": 5,
       "evidence": [
         {
           "importer": "src/cli/chat-command.ts",
           "import": "../server/trust-boundary.js"
+        },
+        {
+          "importer": "src/cli/commands/plugins.ts",
+          "import": "../../server/trust-boundary.js"
+        },
+        {
+          "importer": "src/cli/commands/skills.ts",
+          "import": "../../server/trust-boundary.js"
         },
         {
           "importer": "src/cli/server-command.ts",
