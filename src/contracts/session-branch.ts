@@ -58,6 +58,8 @@ export interface SessionEntryView {
     readonly status: "completed" | "error";
     readonly result?: string;
   }[];
+  /** 仅 assistant stopReason="error" 的失败条目携带：持久化的运行错误文本（已经 sanitizeSensitiveText 脱敏截断） */
+  readonly errorMessage?: string;
 }
 
 /** GET /api/sessions/:id/entries 响应体 */

@@ -49,3 +49,13 @@
 - **lane-b45 四挂为 main 既有回归，与本 PR 无关**：B-1/B-4/B-5/B-6 在纯 origin/main（ae7186f，git stash 对照实验证明）上同样失败——后端 turn 完整落盘但前端不渲染助手回复。根因调查中（最大嫌疑 eaa8656 Wave C 入口门禁），将单独立项修复，不阻塞本 PR。
 - A-3 错误行持久化（发现 #2）与 api-proxy 错报（发现 #1）仍为既有立项项，不在本 PR 范围。
 - 侧栏会话行首轮后仍显示「（空会话）」（live 预览不刷新）为已知低危打磨项。
+
+## 后续收口（2026-09-11）：A-3 错误行持久化已实现
+
+「运行错误」状态卡此前只存在于渲染进程内存，任何 seedItems 整表重投影（历史装载/分支切换/SSE 重连追平）都会冲掉它，重启后历史里也无失败痕迹。修复沿投影链透出 PI 已持久化的失败（assistant message 条目 `stopReason="error"` + `errorMessage`，不写新数据、不改 SQLite schema）：
+
+- `src/pi-sdk/session-tree.ts` / `src/pi-sdk/types.ts`：`PiSessionTreeEntry` / `PiMessageEntry` 新增可选 `errorMessage`（adapter 只搬运原始值，不截断不脱敏）；树/分支条目与 `flattenMessageEntries`（messageEntries 视图）均透出。
+- `src/contracts/session-branch.ts` + `src/runtime/session-service.ts`：`SessionEntryView` 透传 `errorMessage`；`buildEntryViews` 与 `toView` 的 messageEntries 装配点统一脱敏截断（`sanitizeSensitiveText(…, 200)`，与 event-mapper live 路径同规）。
+- `desktop/src/data/projector.ts` + `source.ts` + `ipc-source.ts`：`BranchEntry` / `HistoryEntry` / `BranchEntryView` 透传；`projectBranchEntries` / `projectHistory` 对失败条目——正文非空 → 消息 meta 标「生成失败」（对齐 live turn.failed 文案）；正文为空 → 不渲染空气泡；随后追加「运行错误」状态卡（id `entry-error-<entryId>` / `history-error-<index>`，meta「历史」）。
+
+验证：`npx vitest run tests/contract/session-tree.test.ts`（8/8，新增失败条目用例）、`npx vitest run tests/integration/session-branch-api.test.ts`（9/9，新增条目视图脱敏截断用例）、desktop `npx vitest run tests/unit/branch-data.test.ts`（17/17，新增投影用例）、`npm run check` 全量（见提交证据）。已知偏差中 A-3 项就此关闭；api-proxy 错报仍为独立立项项。

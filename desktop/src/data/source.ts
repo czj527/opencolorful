@@ -50,6 +50,8 @@ export interface BranchEntryView {
     readonly status: "completed" | "error";
     readonly result?: string;
   }[];
+  /** 仅 assistant stopReason="error" 的失败条目携带：持久化的运行错误文本（服务端已脱敏截断） */
+  readonly errorMessage?: string;
 }
 
 /** GET /api/sessions/:id/entries 响应视图 */

@@ -64,6 +64,27 @@ function assistantMessage(text: string, timestamp: number, extraContent: unknown
   };
 }
 
+function assistantErrorMessage(text: string, timestamp: number, errorMessage: string) {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "faux",
+    provider: "faux",
+    model: "faux-1",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "error",
+    errorMessage,
+    timestamp,
+  };
+}
+
 function writeSessionFile(sessionFile: string, lines: string[]): void {
   fs.writeFileSync(sessionFile, `${lines.join("\n")}\n`, "utf8");
 }
@@ -225,6 +246,49 @@ describe("PI 会话树受控适配器（B1）", () => {
       expect((error as PiSessionTreeError).code).toBe("entry_not_found");
       expect((error as Error).message).toContain("会话条目不存在");
     }
+
+    session.dispose();
+  });
+
+  it("失败条目（stopReason=error）：errorMessage 沿树/分支/messageEntries 透出；普通条目不带", () => {
+    const dir = createSessionDir("opencolorful-tree-error-");
+    const sessionFile = path.join(dir, "session.jsonl");
+    writeSessionFile(sessionFile, [
+      headerLine("s-err"),
+      JSON.stringify({
+        type: "message", id: "e1", parentId: null, timestamp: "2026-01-01T00:00:00Z",
+        message: userMessage("会失败的提问", 1000000),
+      }),
+      JSON.stringify({
+        type: "message", id: "e2", parentId: "e1", timestamp: "2026-01-01T00:01:00Z",
+        message: assistantErrorMessage("", 1000001, "401: invalid api key"),
+      }),
+      JSON.stringify({
+        type: "message", id: "e3", parentId: "e2", timestamp: "2026-01-01T00:02:00Z",
+        message: assistantMessage("重试成功", 1000002),
+      }),
+    ]);
+
+    const session = openPersistentSession(sessionFile, dir);
+    const branch = getBranchEntries(session);
+    expect(branch.map((entry) => entry.entryId)).toEqual(["e1", "e2", "e3"]);
+
+    // 失败条目：空正文 + 携带原始 errorMessage（adapter 只搬运，不脱敏）
+    const failed = branch[1]!;
+    expect(failed.role).toBe("assistant");
+    expect(failed.text).toBe("");
+    expect(failed.errorMessage).toBe("401: invalid api key");
+    expect(failed.toolCalls).toBeUndefined();
+
+    // 树视图与 resolveEntry 同样携带
+    expect(resolveEntry(session, "e2")?.errorMessage).toBe("401: invalid api key");
+
+    // messageEntries（web 历史与 desktop 回退链的来源）同样携带
+    const entries = session.messageEntries;
+    expect(entries[1]?.errorMessage).toBe("401: invalid api key");
+    // 普通条目（stopReason="stop"）不带该字段
+    expect(entries[2]?.errorMessage).toBeUndefined();
+    expect(entries[0]?.errorMessage).toBeUndefined();
 
     session.dispose();
   });

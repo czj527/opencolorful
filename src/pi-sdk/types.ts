@@ -51,6 +51,8 @@ export interface PiMessageEntry {
   readonly content: string;
   readonly thinking?: string;
   readonly toolCalls?: readonly HistoryToolCall[];
+  /** 仅 assistant 消息且 stopReason="error" 时携带的原始错误文本，脱敏截断由上层负责 */
+  readonly errorMessage?: string;
 }
 
 export interface PiSessionHandle {

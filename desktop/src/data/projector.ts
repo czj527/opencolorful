@@ -21,6 +21,8 @@ export interface HistoryEntry {
     status: "completed" | "error";
     result?: string;
   }[];
+  /** 仅 assistant stopReason="error" 的失败条目携带：持久化的运行错误文本 */
+  readonly errorMessage?: string;
 }
 
 /**
@@ -42,6 +44,8 @@ export interface BranchEntry {
     status: "completed" | "error";
     result?: string;
   }[];
+  /** 仅 assistant stopReason="error" 的失败条目携带：持久化的运行错误文本（服务端已脱敏截断） */
+  readonly errorMessage?: string;
 }
 
 export interface ChatSnapshot {
@@ -136,7 +140,20 @@ export function projectHistory(entries: readonly HistoryEntry[], agentName: stri
         title: "工具调用", summary: `${tools.length} 个工具`, meta: "历史", tools,
       });
     }
-    items.push({ id: `history-${index}`, type: "message", role: "assistant", author: agentName, body: entry.content, meta: "" });
+    const failedMessage = entry.errorMessage;
+    if (failedMessage !== undefined && failedMessage !== "") {
+      // 失败条目：正文非空 → 照常渲染但 meta 标「生成失败」；正文为空 → 不渲染空气泡
+      if (entry.content !== "") {
+        items.push({ id: `history-${index}`, type: "message", role: "assistant", author: agentName, body: entry.content, meta: "生成失败" });
+      }
+      // 随后追加持久化运行错误卡（重投影/重启后仍可见；对齐 live turn.failed 的文案）
+      items.push({
+        id: `history-error-${index}`, type: "event", kind: "status",
+        title: "运行错误", summary: failedMessage, meta: "历史",
+      });
+    } else {
+      items.push({ id: `history-${index}`, type: "message", role: "assistant", author: agentName, body: entry.content, meta: "" });
+    }
   });
   return items;
 }
@@ -186,6 +203,24 @@ export function projectBranchEntries(entries: readonly BranchEntry[], agentName:
         id: `entry-tools-${entry.entryId}`, type: "event", kind: "tool",
         title: "工具调用", summary: `${tools.length} 个工具`, meta: "历史", tools,
       });
+    }
+    const failedMessage = entry.errorMessage;
+    if (failedMessage !== undefined && failedMessage !== "") {
+      // 失败条目（stopReason="error"）：正文非空 → 照常渲染但 meta 标「生成失败」
+      //（对齐 live turn.failed 文案）；正文为空 → 不渲染空气泡
+      if (entry.text !== "") {
+        items.push({
+          id: `entry-${entry.entryId}`, type: "message", role: "assistant", author: agentName,
+          body: entry.text, meta: "生成失败", entryId: entry.entryId, timestamp: entry.timestamp,
+          ...(entry.turnId !== null ? { turnId: entry.turnId } : {}),
+        });
+      }
+      // 随后追加持久化运行错误卡（整表重投影/重启后仍可见）
+      items.push({
+        id: `entry-error-${entry.entryId}`, type: "event", kind: "status",
+        title: "运行错误", summary: failedMessage, meta: "历史",
+      });
+      continue;
     }
     items.push({
       id: `entry-${entry.entryId}`, type: "message", role: "assistant", author: agentName,
