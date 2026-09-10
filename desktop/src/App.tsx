@@ -373,7 +373,7 @@ export function App() {
           setChatError("还没有可用助理，请先完成引导或新建助理");
           return;
         }
-        const title = text.length > 18 ? `${text.slice(0, 18)}…` : text;
+        const title = text.length > 30 ? `${text.slice(0, 30)}…` : text;
         const thread = await source.createThread(draftAgent.id, title);
         setThreads((current) => [thread, ...current]);
         target = thread.id;

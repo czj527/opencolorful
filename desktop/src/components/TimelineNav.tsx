@@ -8,10 +8,15 @@ export interface TimelineTurn {
   readonly turnId: string;
   readonly index: number;
   readonly summary: string;
+  /** 相对时间文案（复用消息行 meta：刚刚 / N 分钟前…） */
   readonly relativeTime: string;
 }
 
-/** 从 timeline 消息行派生当前分支的轮次节点（每条用户消息一个轮次起点） */
+/**
+ * 从 timeline 消息行派生当前分支的轮次节点（每条用户消息一个轮次起点）。
+ * 摘要取用户消息正文截断——让用户一眼定位「我当时在问什么」，
+ * 不展示工具调用等过程条目（参考 lobe-chat 话题列表的信息密度取舍）。
+ */
 export function deriveTimelineTurns(items: readonly TimelineItem[]): TimelineTurn[] {
   const turns: TimelineTurn[] = [];
   let index = 0;
@@ -22,8 +27,8 @@ export function deriveTimelineTurns(items: readonly TimelineItem[]): TimelineTur
     turns.push({
       turnId: item.turnId,
       index,
-      summary: trimmed.length <= 20 ? trimmed : `${trimmed.slice(0, 20)}…`,
-      relativeTime: item.timestamp ?? "",
+      summary: trimmed.length <= 36 ? trimmed : `${trimmed.slice(0, 36)}…`,
+      relativeTime: item.meta,
     });
   }
   return turns;
@@ -37,7 +42,7 @@ interface TimelineNavProps {
 }
 
 /**
- * 波次 B3：当前分支的线性 timeline 导航（仅当前分支；分支切换器是独立视图）。
+ * 当前分支的对话时间线：对话区左侧竖排导航（圆点 + 竖线串联轮次）。
  * 节点以 turnId 为稳定锚点：entryId 在 JSONL 中不可变，跨刷新/重启/replay 有效。
  * 无锚点条目（旧会话回退投影/流式中）不产生节点。
  */
@@ -57,8 +62,11 @@ export function TimelineNav({ items, activeTurnId, onSelectTurn }: TimelineNavPr
             title={turn.summary}
             onClick={() => onSelectTurn(turn.turnId)}
           >
-            <span className="timeline-index" aria-hidden="true">{turn.index}</span>
-            <span className="timeline-summary">{turn.summary}</span>
+            <span className="timeline-dot" aria-hidden="true" />
+            <span className="timeline-text">
+              <span className="timeline-summary">{turn.summary}</span>
+              {turn.relativeTime !== "" && <span className="timeline-time">{turn.relativeTime}</span>}
+            </span>
           </button>
         ))}
       </div>

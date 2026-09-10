@@ -1,42 +1,46 @@
-/* 波次 B3：当前分支线性 timeline 导航（sticky 悬浮于 chat-scroll 顶部） */
+/* 对话时间线：对话区左侧竖排导航（圆点 + 竖线串联轮次，sticky 随滚动钉住） */
 
 .timeline-nav {
+  flex: none;
+  align-self: flex-start;
   position: sticky;
-  top: 0;
-  z-index: 20;
-  max-width: 740px;
-  margin: 0 auto;
-  padding: 6px 24px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--border);
+  top: 18px;
+  width: 176px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px 14px 2px 2px;
 }
 
 .timeline-track {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.timeline-track::-webkit-scrollbar {
-  display: none;
+  flex-direction: column;
 }
 
 .timeline-node {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 200px;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 12px;
+  text-align: left;
   cursor: pointer;
+}
+
+/* 竖线：圆点中心向下串联到下一个节点 */
+.timeline-node:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 26px;
+  bottom: -6px;
+  width: 1px;
+  background: var(--border);
 }
 
 .timeline-node:hover {
@@ -44,33 +48,53 @@
   color: var(--text);
 }
 
+.timeline-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--bg-active);
+  box-shadow: 0 0 0 1.5px var(--border);
+}
+
 .timeline-node.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
   color: var(--text);
 }
 
-.timeline-index {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--bg-active);
-  color: var(--text-2);
-  font-size: 9.5px;
-  font-weight: 650;
+.timeline-node.is-active .timeline-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 2.5px var(--accent-soft);
 }
 
-.timeline-node.is-active .timeline-index {
-  background: var(--accent);
-  color: #fff;
+.timeline-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .timeline-summary {
-  min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.45;
+  word-break: break-all;
+}
+
+.timeline-node.is-active .timeline-summary {
+  font-weight: 550;
+}
+
+.timeline-time {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+
+/* 窄窗口回退：时间线让位给消息流 */
+@media (max-width: 940px) {
+  .timeline-nav {
+    display: none;
+  }
 }

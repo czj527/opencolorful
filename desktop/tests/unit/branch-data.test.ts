@@ -37,11 +37,16 @@ describe("projectBranchEntries", () => {
     expect(assistant).toMatchObject({ type: "message", role: "assistant", entryId: "e-a1", turnId: "turn-e-u1", body: "第一答" });
   });
 
-  it("compaction 条目投影为压缩卡（B4）；其余非 message 条目为状态行，均不产生消息锚点", () => {
+  it("compaction 条目投影为压缩卡（B4）；session_info/model_change 等簿记条目不投影（对话体验修复）", () => {
     const items = projectBranchEntries([
+      entry({ entryId: "e-info", type: "session_info", text: "新会话" }),
+      entry({ entryId: "e-m1", type: "model_change", text: "" }),
+      entry({ entryId: "e-m2", type: "model_change", text: "" }),
+      entry({ entryId: "e-t1", type: "thinking_level_change", text: "" }),
       entry({ entryId: "e-c1", type: "compaction", text: "压缩摘要" }),
       entry({ entryId: "e-u1", turnId: "turn-e-u1", role: "user", text: "问" }),
     ], AGENT);
+    // 簿记条目（session_info/model_change/thinking_level_change）不产生任何 timeline 行
     expect(items).toHaveLength(2);
     // 波次 B4：历史 compaction 条目 → 压缩卡（status=completed，summary 保留）
     expect(items[0]).toMatchObject({ type: "compaction", status: "completed", summary: "压缩摘要" });

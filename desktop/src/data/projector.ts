@@ -145,8 +145,11 @@ export function projectHistory(entries: readonly HistoryEntry[], agentName: stri
  * 波次 B3：分支条目 → timeline 投影（当前分支根→叶）。
  * 优先于 projectHistory：条目携带不可变 entryId/turnId/timestamp，
  * 消息行据此产出稳定锚点（timeline 导航跨刷新/重启存活）。
- * 波次 B4：compaction 条目投影为压缩卡（与 live 事件同一卡片结构），
- * 其余非 message 条目（label 等）仍渲染为状态事件行，不产生锚点。
+ * 波次 B4：compaction 条目投影为压缩卡（与 live 事件同一卡片结构）；
+ * 其余非 message 条目（session_info / model_change / thinking_level_change /
+ * label 等簿记条目）不对用户投影——对话流只承载消息与有语义的状态卡，
+ * 簿记状态的可见性由 Composer chip 与会话头部承担（2026-09 对话体验修复：
+ * 新建会话不再弹出「条目 model_change」类开发味噪音行）。
  */
 export function projectBranchEntries(entries: readonly BranchEntry[], agentName: string): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -160,14 +163,8 @@ export function projectBranchEntries(entries: readonly BranchEntry[], agentName:
         });
         continue;
       }
-      // label / 其他受控条目：一行状态事件（无锚点语义）
-      if (entry.type !== "message") {
-        items.push({
-          id: `entry-${entry.entryId}`, type: "event", kind: "status",
-          title: "条目",
-          summary: entry.text !== "" ? entry.text.slice(0, 80) : entry.type, meta: "历史",
-        });
-      }
+      // label / session_info / model_change / thinking_level_change 等簿记条目：
+      // 不投影（簿记状态的可见性由 Composer chip 与会话头部承担）
       continue;
     }
     const meta = relativeEntryTime(entry.timestamp);

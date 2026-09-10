@@ -146,8 +146,8 @@ it("WS-02(L5): 会话 toolMode=all 未确认 → WorkspaceBanner 出现；点「
     });
     // 写出的补丁真值：workspaceConfirmed=true（工具解锁的服务端语义在 L6 对照）
     expect(patches.some((record) => record.patch.workspaceConfirmed === true)).toBe(true);
-    // 工具模式 chip 保持 all（确认 ≠ 降级）
-    expect(screen.getByRole("button", { name: "all" })).toBeTruthy();
+    // 工具模式 chip 保持全部工具（确认 ≠ 降级；中文文案 chip=「全部工具」）
+    expect(screen.getByRole("button", { name: "全部工具" })).toBeTruthy();
   } finally {
     app.consoleTracker.restore();
     injected.current = null;
@@ -167,9 +167,9 @@ it("WS-03(L5): 横幅上点「切换为只读」→ 横幅消失、chip 变 read
       expect(screen.queryByRole("region", { name: "工作区确认" })).toBeNull();
     });
     expect(patches.some((record) => record.patch.toolMode === "read-only")).toBe(true);
-    // Composer 工具模式 chip 跟随切换
+    // Composer 工具模式 chip 跟随切换（中文文案 chip=「只读」）
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "read-only" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "只读" })).toBeTruthy();
     });
   } finally {
     app.consoleTracker.restore();
