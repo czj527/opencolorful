@@ -16,6 +16,7 @@ import {
   markPromptSent,
   projectBranchEntries,
   projectHistory,
+  pushChannelStatus,
   seedItems,
   snapshotOf,
   applyTodoSnapshot,
@@ -312,7 +313,10 @@ interface ChatChannel {
   readonly projector: ProjectorState;
   readonly handlers: Set<(snapshot: ChatSnapshot) => void>;
   sseSubId: string | null;
+  /** 历史装载成功后才置位（失败可重试，见 loadChannelHistory） */
   historyLoaded: boolean;
+  /** 历史装载/重试进行中（ensureChatStream 幂等守卫，防止并发装载链） */
+  historyLoading: boolean;
   /** 合批窗内排队的事件（leading 事件已立即应用，不在此列） */
   pending: LiveEnvelope[];
   /** 当前 pendingFlush 的调度句柄；null 表示无进行中的合批窗口 */
@@ -333,6 +337,9 @@ interface ChatChannel {
 
 /** 后端可达性巡检间隔（连接状态动态化的慢路径；请求成功/失败是快路径） */
 const HEALTH_POLL_MS = 8_000;
+
+/** 历史装载失败退避重试间隔（毫秒；最多 3 次，耗尽后推状态行） */
+const HISTORY_LOAD_RETRY_DELAYS = [300, 900, 2000] as const;
 
 /** 真实数据源：经 Electron 主进程代理访问 Supervisor/Agent Server */
 export class IpcDataSource implements DesktopDataSource {
@@ -1151,7 +1158,7 @@ export class IpcDataSource implements DesktopDataSource {
     if (channel === undefined) {
       channel = {
         projector: createProjector(this.agentNameOf(null)),
-        handlers: new Set(), sseSubId: null, historyLoaded: false,
+        handlers: new Set(), sseSubId: null, historyLoaded: false, historyLoading: false,
         pending: [], flushToken: null,
         branchHandlers: new Set(), pendingBranchReload: null, branchGeneration: 0,
       };
@@ -1162,11 +1169,26 @@ export class IpcDataSource implements DesktopDataSource {
 
   /** 历史装载 + SSE 订阅（subscribeChat 与 subscribeBranchState 共用；幂等） */
   private ensureChatStream(channel: ChatChannel, sessionId: string): void {
-    if (channel.historyLoaded) return;
-    channel.historyLoaded = true;
+    if (channel.historyLoaded || channel.historyLoading) return;
+    channel.historyLoading = true;
     const path = `/api/sessions/${encodeURIComponent(sessionId)}`;
+    void this.loadChannelHistory(channel, sessionId, path, 0);
+    // SSE 订阅独立于历史装载成败（现状保持）：断线由代理重连 + Last-Event-ID 补发，
+    // 重连成功后由 onReconnect 回调追平时间线
+    channel.sseSubId = this.api.subscribeEvents(`${path}/events`);
+  }
+
+  /**
+   * 历史装载独立错误处理：GET 失败按 300/900/2000ms 退避重试最多 3 次（幂等 GET），
+   * 任一成功即正常装载；3 次均失败只推一条独立状态行（不触碰 streaming/pendingPrompt，
+   * 历史装载失败不得误报为「发送失败」）。historyLoaded 在装载成功后才置位——
+   * 此前 GET 前置位导致首装失败后永不重试（2026-09 flaky 回归根因之二）。
+   */
+  private loadChannelHistory(channel: ChatChannel, sessionId: string, path: string, attempt: number): void {
     void this.request<SessionViewWire>("GET", path)
       .then((session) => {
+        channel.historyLoaded = true;
+        channel.historyLoading = false;
         channel.projector.agentName = this.agentNameOf(session.agentId);
         // 波次 B3：entries（条目视图，带不可变锚点）优先；缺失时回退 messageEntries
         const entries = session.entries !== undefined && Array.isArray(session.entries) && session.entries.length > 0
@@ -1177,11 +1199,16 @@ export class IpcDataSource implements DesktopDataSource {
         applyTodoSnapshot(channel.projector, sessionTodos(session.todos));
         this.notify(channel);
       })
-      .catch((cause: unknown) => {
-        pushChannelError(channel, cause);
+      .catch(() => {
+        const delay = HISTORY_LOAD_RETRY_DELAYS[attempt];
+        if (delay !== undefined) {
+          setTimeout(() => this.loadChannelHistory(channel, sessionId, path, attempt + 1), delay);
+          return;
+        }
+        channel.historyLoading = false;
+        pushChannelStatus(channel.projector, "历史加载失败", "请刷新重试");
         this.notify(channel);
       });
-    channel.sseSubId = this.api.subscribeEvents(`${path}/events`);
   }
 
   private notify(channel: ChatChannel) {
@@ -1291,6 +1318,16 @@ export class IpcDataSource implements DesktopDataSource {
         }
       }
     });
+    // F3 flaky 回归：SSE 断线重连成功 → 幂等 GET 追平重连窗口内丢失的 turn 事件
+    // （message.delta/tool.*/turn.completed 不做服务端重放，靠 entries 重载线性化）。
+    // streaming 中 reloadBranchEntries 自身会挂起 pendingBranchReload，由 turn 终态 flush。
+    this.api.onReconnect?.(({ subId }) => {
+      for (const [sessionId, channel] of this.chats) {
+        if (channel.sseSubId !== subId) continue;
+        void this.reloadBranchEntries(sessionId, channel);
+        return;
+      }
+    });
   }
 
   /**
@@ -1312,10 +1349,6 @@ export class IpcDataSource implements DesktopDataSource {
         : { kind: "branchesChanged", reason: payload["reason"] === "switch" || payload["reason"] === "fork" ? payload["reason"] : "regenerate" });
     }
   }
-}
-
-function pushChannelError(channel: ChatChannel, cause: unknown) {
-  markPromptFailed(channel.projector, cause instanceof Error ? cause.message : "加载失败");
 }
 
 /** PromptResponseWire 防御式取 streamId（202 响应必须携带） */

@@ -65,12 +65,23 @@ async function apiRequest(request) {
     // P0-1：受信客户端统一附加令牌（主进程是唯一可信持钥点，renderer 沙箱不见令牌）
     const token = resolveToken();
     if (token !== null) headers.authorization = `Bearer ${token}`;
-    response = await fetch(base + path, {
+    const doFetch = () => fetch(base + path, {
       method,
       headers,
       body: request.body !== undefined ? JSON.stringify(request.body) : undefined,
       signal: AbortSignal.timeout(30000),
     });
+    try {
+      response = await doFetch();
+    } catch (cause) {
+      // 瞬时网络抖动窗口自愈（2026-09 真链回归根因）：幂等 GET 失败（含
+      // AbortSignal.timeout 超时）等待 200ms 后用同一 base 重试一次，仅此一次；
+      // 重试期间不置 activeBase=null，重试成功走正常路径，仍失败才由外层
+      // catch 清缓存并返回 NETWORK。非 GET 不重试。
+      if (method !== "GET") throw cause;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      response = await doFetch();
+    }
   } catch (cause) {
     activeBase = null;
     return { ok: false, status: 0, data: { code: "NETWORK", message: `网络请求失败：${cause instanceof Error ? cause.message : String(cause)}`, retryable: true }, base };

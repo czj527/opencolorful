@@ -336,6 +336,14 @@ export function markPromptFailed(state: ProjectorState, message: string) {
   pushStatusEvent(state, `error-${Date.now()}`, "发送失败", message);
 }
 
+/**
+ * 独立状态行（不触碰 streaming/pendingPrompt）：与 markPromptFailed 的区别是
+ * 只插入一条状态事件，不改变发送/流式状态——用于历史装载失败等非发送失败场景。
+ */
+export function pushChannelStatus(state: ProjectorState, title: string, summary: string) {
+  pushStatusEvent(state, `status-${Date.now()}`, title, summary);
+}
+
 /** 波次 B5b：todo.updated 条目的防御式解析（形状分歧按缺省兜底，不抛错） */
 function parseTodoItem(value: unknown): SessionTodoItem {
   const row = value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
