@@ -18,7 +18,10 @@
 3. 提交并经 PR 合并到 `main`，确认 required checks 通过。
 4. `git tag v<版本号> && git push origin v<版本号>`。
 5. `.github/workflows/release.yml` 自动执行：打包（同 `npm run desktop:pack`，含 `verify:pack` 断言）→ 创建 **draft** GitHub Release 并上传产物 → **逐资产断言**（安装器/`latest.yml`/blockmap，缺失自动用 `gh release upload` 补传，仍缺则工作流失败）。
-6. 在 GitHub 上检查 draft Release：粘贴 CHANGELOG 内容，确认资产完整（`.exe` + `.exe.blockmap` + `latest.yml`）后手动发布。
+6. 上传 release notes（**禁止手动粘贴或经 PowerShell 管道传递中文**——v0.1.3 曾因此产生不可逆的双重编码乱码）：
+   - 把 CHANGELOG 对应版本段写入 UTF-8 无 BOM 临时文件（用编辑器/`node fs.writeFileSync`，不用 `echo`/`Out-File`）；
+   - `gh release edit v<版本号> --notes-file <临时文件>`（gh 按文件字节直传，不经 shell 字符串转码）；
+   - `gh release view v<版本号> --json body --jq .body` 复核中文无乱码，再确认资产完整（`.exe` + `.exe.blockmap` + `latest.yml`）后手动发布。
 
 非发布验证：手动触发 release.yml（workflow_dispatch）只打包并上传 workflow artifacts，不创建 Release。
 
