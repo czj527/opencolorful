@@ -219,6 +219,12 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
   const runtimeSystemPrompt = new Map<string, string | undefined>();
   // P0-2：插件状态签名（绑定/授权修订/版本/运行实例），变化时重建 Runtime（下一 turn 生效）
   const pluginSignatures = new Map<string, string>();
+  // Provider 配置代次跟踪（ModelService.configVersion）：端点/凭据/模型清单变更后
+  // 下一回合重建 runtime，已打开会话立即使用新配置（无需新建会话）
+  const providerConfigVersions = new Map<string, number>();
+  // 显式强制重建标记（forgetRuntimeTracking 测试钩子置位）：与「从未跟踪」
+  // （直挂 promptService.register 的 runtime，不做漂移检测）区分开
+  const forceRebuildSessions = new Set<string>();
   // P1 审计修复（§10-1）：per-session single-flight。ensureRuntime 的"检查→创建"
   // 横跨 await SessionRuntime.create 异步间隙，messages/compact/regenerate/branch
   // switch 四个入口可并发进入同一会话的装配——PromptService.register 是直接
@@ -765,6 +771,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
+        providerConfigVersions.set(sessionId, modelService?.configVersion ?? 0);
       } else {
         const runtime = await SessionRuntime.create({
           sessionId,
@@ -812,6 +819,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
         promptService.register(runtime);
         runtimeSystemPrompt.set(sessionId, systemPrompt);
         pluginSignatures.set(sessionId, pluginSignature(view.agentId ?? undefined));
+        providerConfigVersions.set(sessionId, modelService?.configVersion ?? 0);
       }
     };
 
@@ -832,25 +840,41 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
       return;
     }
 
-    // Runtime 已存在：检查 Agent profile 或插件状态是否有更新，如有则重建 runtime
+    // Runtime 已存在：检查 Agent profile / 插件状态 / Provider 配置代次是否有更新，如有则重建 runtime
     const view = sessionService?.getView(sessionId);
-    if (view?.agentId && agentStore) {
-      const currentPrompt = buildSystemPrompt(view.agentId);
+    if (view !== undefined) {
+      const currentPrompt = view.agentId && agentStore ? buildSystemPrompt(view.agentId) : undefined;
       const lastPrompt = runtimeSystemPrompt.get(sessionId);
       // P0-2：插件绑定/授权/版本/运行实例变化（解绑、新绑定、授权变更、插件更新）
       // 必须触发重建——否则下一 turn 仍看到旧工具集
       const currentPluginSig = pluginSignature(view.agentId ?? undefined);
       const lastPluginSig = pluginSignatures.get(sessionId);
-      if (currentPrompt !== lastPrompt || currentPluginSig !== lastPluginSig) {
-        // profile 或插件状态已更新，使旧 runtime 失效并重建
-        promptService.invalidate(sessionId);
-        runtimeSystemPrompt.delete(sessionId);
-        pluginSignatures.delete(sessionId);
-        try {
-          await createRuntime(currentPrompt);
-        } catch (error) {
-          if (error instanceof EnsureRuntimeError) throw error;
-          throw new EnsureRuntimeError(createApiError("SESSION_ERROR", "无法重建 Session Runtime"), 500);
+      // Provider 端点/凭据/模型清单变化同样必须重建——否则旧 runtime 持有失效
+      // 凭据继续 401，且用户改完配置要新建会话才生效（对话体验阻塞）
+      const currentProviderVersion = modelService?.configVersion ?? 0;
+      const lastProviderVersion = providerConfigVersions.get(sessionId);
+      // 跟踪条目缺失 = runtime 非本 bootstrap 创建（测试/TUI 直挂 promptService.register）：
+      // 不做漂移检测，保持原样复用——否则「无条目 ≠ 空签名」会误判为已变化而反复重建。
+      // 例外：forgetRuntimeTracking（测试钩子，模拟跟踪丢失）显式置位强制重建标记。
+      const forced = forceRebuildSessions.has(sessionId);
+      if (forced || lastProviderVersion !== undefined) {
+        const drifted = forced
+          || currentPrompt !== lastPrompt
+          || currentPluginSig !== lastPluginSig
+          || currentProviderVersion !== (lastProviderVersion ?? 0);
+        if (drifted) {
+          // profile / 插件状态 / Provider 配置已更新，使旧 runtime 失效并重建
+          promptService.invalidate(sessionId);
+          runtimeSystemPrompt.delete(sessionId);
+          pluginSignatures.delete(sessionId);
+          providerConfigVersions.delete(sessionId);
+          forceRebuildSessions.delete(sessionId);
+          try {
+            await createRuntime(currentPrompt);
+          } catch (error) {
+            if (error instanceof EnsureRuntimeError) throw error;
+            throw new EnsureRuntimeError(createApiError("SESSION_ERROR", "无法重建 Session Runtime"), 500);
+          }
         }
       }
     }
@@ -878,6 +902,8 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions): Runtim
     forgetRuntimeTracking: (sessionId: string): void => {
       runtimeSystemPrompt.delete(sessionId);
       pluginSignatures.delete(sessionId);
+      providerConfigVersions.delete(sessionId);
+      forceRebuildSessions.add(sessionId);
     },
     peekTrackedSystemPrompt: (sessionId: string): string | undefined => runtimeSystemPrompt.get(sessionId),
     peekTrackedPluginSignature: (sessionId: string): string | undefined => pluginSignatures.get(sessionId),

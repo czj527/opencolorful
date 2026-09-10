@@ -15,6 +15,13 @@ export interface ProviderView extends ProviderSetting {
 }
 
 export class ModelService {
+  /**
+   * Provider 配置代次：upsert（端点/模型清单/凭据变更）后递增。
+   * runtime-bootstrap 将其纳入运行中会话的 runtime 重建白名单——
+   * 修改 Provider 配置后，已打开会话的下一回合自动使用新配置，无需新建会话。
+   */
+  private version = 0;
+
   private constructor(
     private readonly paths: RuntimePaths,
     private readonly store: ProviderStore,
@@ -29,6 +36,11 @@ export class ModelService {
   ): Promise<ModelService> {
     const runtime = await createPiModelRuntime({ authPath: paths.authFile, providers: store.list() });
     return new ModelService(paths, store, runtime, audit);
+  }
+
+  /** Provider 配置代次（单调递增）：runtime 重建白名单的一项 */
+  get configVersion(): number {
+    return this.version;
   }
 
   listProviders(): ProviderView[] {
@@ -77,6 +89,7 @@ export class ModelService {
       authPath: this.paths.authFile,
       providers: this.store.list(),
     });
+    this.version += 1;
     if (apiKey !== undefined) {
       await this.runtime.setApiKey(setting.providerId, apiKey);
       // 凭据变更属 notable + audit 镜像（不记录 apiKey 本身）
