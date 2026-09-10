@@ -464,6 +464,63 @@ describe("会话分支 API（B2）", () => {
     }
   });
 
+  it("失败条目（stopReason=error）的 errorMessage 透传条目视图并脱敏截断；普通条目不带", async () => {
+    const context = createContext();
+    try {
+      const created = context.service.create({ title: "错误持久化会话", cwd: process.cwd() });
+      context.service.closeAll();
+      // 手工追加一条失败 assistant 条目（PI JSONL 真实语义：模型调用失败写入
+      // stopReason="error" + errorMessage 的 assistant message 条目）
+      const lines = fs.readFileSync(created.path, "utf8").split("\n").filter((line) => line.trim().length > 0);
+      const lastId = (JSON.parse(lines[lines.length - 1]!) as { id: string }).id;
+      const longDetails = "上游网关持续 502，".repeat(60);
+      fs.appendFileSync(created.path, [
+        JSON.stringify({
+          type: "message", id: "e-err-u", parentId: lastId, timestamp: "2026-01-01T00:00:00Z",
+          message: { role: "user", content: "会失败的提问", timestamp: 1 },
+        }),
+        JSON.stringify({
+          type: "message", id: "e-err-a", parentId: "e-err-u", timestamp: "2026-01-01T00:01:00Z",
+          message: {
+            role: "assistant", content: [], api: "faux", provider: "faux", model: "faux-1",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            stopReason: "error", errorMessage: `调用失败 sk-abcdef123456 ${longDetails}`, timestamp: 2,
+          },
+        }),
+        JSON.stringify({
+          type: "message", id: "e-err-ok", parentId: "e-err-a", timestamp: "2026-01-01T00:02:00Z",
+          message: {
+            role: "assistant", content: [{ type: "text", text: "重试成功" }], api: "faux", provider: "faux", model: "faux-1",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            stopReason: "stop", timestamp: 3,
+          },
+        }),
+      ].join("\n") + "\n", "utf8");
+
+      const view = context.service.getEntries(created.id);
+      const failed = view.entries.find((entry) => entry.entryId === "e-err-a");
+      expect(failed?.role).toBe("assistant");
+      expect(failed?.errorMessage).toBeDefined();
+      // 脱敏：API key 形态被替换
+      expect(failed?.errorMessage).toContain("[API_KEY]");
+      expect(failed?.errorMessage).not.toContain("sk-abcdef123456");
+      // 截断到 200 字符
+      expect(failed?.errorMessage!.length).toBeLessThanOrEqual(200);
+      // 普通条目不带该字段
+      expect(view.entries.find((entry) => entry.entryId === "e-err-ok")?.errorMessage).toBeUndefined();
+      expect(view.entries.find((entry) => entry.entryId === "e-err-u")?.errorMessage).toBeUndefined();
+      // messageEntries 回退链（web 历史 / desktop projectHistory）同规脱敏截断
+      const sessionView = context.service.getView(created.id);
+      const failedMessage = sessionView.messageEntries.find((entry) => entry.errorMessage !== undefined);
+      expect(failedMessage?.errorMessage).toContain("[API_KEY]");
+      expect(failedMessage?.errorMessage).not.toContain("sk-abcdef123456");
+      expect(failedMessage?.errorMessage!.length).toBeLessThanOrEqual(200);
+      expect(sessionView.messageEntries.filter((entry) => entry.errorMessage !== undefined)).toHaveLength(1);
+    } finally {
+      disposeContext(context);
+    }
+  });
+
   it("读取路径一致性：turn 进行中 getEntries 走活跃句柄（无半写读取）", async () => {
     const context = createContext();
     try {

@@ -41,6 +41,8 @@ export interface PiSessionTreeEntry {
   readonly timestamp: string;
   /** 仅 assistant 消息携带；与现有 PiMessageEntry 完全一致的拍平规则（500 字符结果截断） */
   readonly toolCalls?: HistoryToolCall[];
+  /** 仅 assistant 消息且 stopReason="error" 时携带的原始错误文本，脱敏截断由上层负责 */
+  readonly errorMessage?: string;
 }
 
 export interface PiSessionTreeNode {
@@ -154,6 +156,8 @@ export function flattenMessageEntries(branch: readonly SessionEntry[]): PiMessag
     const message = entry.message as {
       role?: string;
       content?: unknown;
+      stopReason?: string;
+      errorMessage?: string;
     };
     if (message.role !== "user" && message.role !== "assistant") continue;
     const content = extractTextContent(message.content);
@@ -164,11 +168,16 @@ export function flattenMessageEntries(branch: readonly SessionEntry[]): PiMessag
       // assistant 消息
       const thinking = extractThinkingContent(message.content);
       const toolCalls = buildHistoryToolCalls(message.content, toolResults);
+      const errorMessage =
+        message.stopReason === "error" && typeof message.errorMessage === "string" && message.errorMessage !== ""
+          ? message.errorMessage
+          : undefined;
       const entry: PiMessageEntry = {
         role: "assistant",
         content,
         ...(thinking ? { thinking } : {}),
         ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        ...(errorMessage !== undefined ? { errorMessage } : {}),
       };
       entries.push(entry);
     }
@@ -197,7 +206,12 @@ function toPiSessionTreeEntry(
     timestamp: entry.timestamp,
   };
   if (entry.type === "message") {
-    const message = entry.message as { role?: string; content?: unknown };
+    const message = entry.message as {
+      role?: string;
+      content?: unknown;
+      stopReason?: string;
+      errorMessage?: string;
+    };
     const role =
       message.role === "user" || message.role === "assistant" || message.role === "toolResult"
         ? message.role
@@ -205,11 +219,16 @@ function toPiSessionTreeEntry(
     const text = extractTextContent(message.content);
     if (message.role === "assistant") {
       const toolCalls = buildHistoryToolCalls(message.content, toolResults);
+      const errorMessage =
+        message.stopReason === "error" && typeof message.errorMessage === "string" && message.errorMessage !== ""
+          ? message.errorMessage
+          : undefined;
       return {
         ...base,
         ...(role === undefined ? {} : { role }),
         text,
         ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        ...(errorMessage !== undefined ? { errorMessage } : {}),
       };
     }
     // toolResult 条目自身的正文沿用 500 字符限长约定，避免整段工具输出进入导航视图

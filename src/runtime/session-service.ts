@@ -30,6 +30,7 @@ import type { SessionTodoItemView } from "../contracts/events.js";
 import type { SessionIndex, SessionMetadata } from "../storage/session-index.js";
 import type { SessionTodoStore } from "../storage/session-todos.js";
 import { registerBranchHeadWriter, unregisterBranchHeadWriter } from "./session-runtime.js";
+import { sanitizeSensitiveText } from "./sanitize.js";
 import { instrument } from "../observability/instrument.js";
 
 export interface CreateSessionRequest {
@@ -591,7 +592,8 @@ export class SessionService {
     return {
       ...metadata,
       messages: session.messages,
-      messageEntries: session.messageEntries,
+      // messageEntries 的失败条目错误文本与条目视图同规脱敏截断（adapter 只搬运原始值）
+      messageEntries: sanitizeEntryErrorMessages(session.messageEntries),
       model: session.model,
       currentBranchId,
       entries,
@@ -625,6 +627,15 @@ function hasAnyMessageEntry(handle: PiSessionHandle): boolean {
   return walk(getSessionTree(handle));
 }
 
+/** messageEntries 失败条目的 errorMessage 统一脱敏截断（与 buildEntryViews 同规，200 字符） */
+function sanitizeEntryErrorMessages(entries: readonly PiMessageEntry[]): readonly PiMessageEntry[] {
+  return entries.map((entry) =>
+    entry.errorMessage !== undefined
+      ? { ...entry, errorMessage: sanitizeSensitiveText(entry.errorMessage, 200) }
+      : entry,
+  );
+}
+
 /** 把分支路径（根→叶）映射为带 turnId 分组的条目视图。
  * turnId = `turn-<userEntryId>`：user message 条目开启 turn，其后同路径条目
  * 继承；首个 user message 之前的条目 turnId = null（§3.1 确定性标识）。
@@ -644,6 +655,8 @@ function buildEntryViews(branch: readonly PiSessionTreeEntry[]): SessionEntryVie
       text: entry.text,
       timestamp: entry.timestamp,
       ...(entry.toolCalls !== undefined ? { toolCalls: entry.toolCalls } : {}),
+      // 失败条目（stopReason="error"）的持久化错误文本：透传并脱敏截断（200 字符，与 event-mapper 一致）
+      ...(entry.errorMessage !== undefined ? { errorMessage: sanitizeSensitiveText(entry.errorMessage, 200) } : {}),
     };
   });
 }

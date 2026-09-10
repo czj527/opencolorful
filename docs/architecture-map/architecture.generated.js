@@ -295,7 +295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/ipc-source.ts",
-          "lines": 1358
+          "lines": 1360
         },
         {
           "path": "desktop/src/data/local-prefs.ts",
@@ -311,11 +311,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/projector.ts",
-          "lines": 614
+          "lines": 649
         },
         {
           "path": "desktop/src/data/source.ts",
-          "lines": 493
+          "lines": 495
         },
         {
           "path": "desktop/src/env.d.ts",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10660
+      "totalLines": 10699
     },
     {
       "id": "web-client",
@@ -1088,7 +1088,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/contracts/session-branch.ts",
-          "lines": 69
+          "lines": 71
         },
         {
           "path": "src/contracts/session-settings.ts",
@@ -1116,7 +1116,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 20,
-      "totalLines": 3839
+      "totalLines": 3841
     },
     {
       "id": "server",
@@ -1545,7 +1545,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/runtime/session-service.ts",
-          "lines": 650
+          "lines": 663
         },
         {
           "path": "src/runtime/tool-policy.ts",
@@ -1557,7 +1557,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 12,
-      "totalLines": 3021
+      "totalLines": 3034
     },
     {
       "id": "pi-adapter",
@@ -1645,7 +1645,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/pi-sdk/session-tree.ts",
-          "lines": 350
+          "lines": 369
         },
         {
           "path": "src/pi-sdk/skill-loader.ts",
@@ -1669,7 +1669,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/pi-sdk/types.ts",
-          "lines": 290
+          "lines": 292
         },
         {
           "path": "src/pi-sdk/version.ts",
@@ -1677,7 +1677,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 15,
-      "totalLines": 4675
+      "totalLines": 4696
     },
     {
       "id": "memory",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114388,
+    "totalSourceLines": 114463,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },

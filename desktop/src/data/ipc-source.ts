@@ -111,6 +111,7 @@ interface BranchEntryWire {
   readonly text?: unknown;
   readonly timestamp?: unknown;
   readonly toolCalls?: unknown;
+  readonly errorMessage?: unknown;
 }
 
 interface BranchEntriesWire {
@@ -223,6 +224,7 @@ function mapBranchEntry(wire: BranchEntryWire, index: number): BranchEntryView {
     text: typeof wire.text === "string" ? wire.text : "",
     timestamp: typeof wire.timestamp === "string" ? wire.timestamp : "",
     ...(toolCalls !== undefined ? { toolCalls } : {}),
+    ...(typeof wire.errorMessage === "string" && wire.errorMessage !== "" ? { errorMessage: wire.errorMessage } : {}),
   };
 }
 

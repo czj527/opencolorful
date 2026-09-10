@@ -66,6 +66,63 @@ describe("projectBranchEntries", () => {
     expect(projectBranchEntries([], AGENT)).toHaveLength(0);
     expect(projectHistory([{ role: "user", content: "旧会话" }], AGENT)).toHaveLength(1);
   });
+
+  it("失败条目（errorMessage）：正文为空不出空气泡，仅追加运行错误状态卡", () => {
+    const items = projectBranchEntries([
+      entry({ entryId: "e-u1", turnId: "turn-e-u1", role: "user", text: "问" }),
+      entry({ entryId: "e-a1", parentId: "e-u1", turnId: "turn-e-u1", role: "assistant", text: "", errorMessage: "401: invalid api key" }),
+      entry({ entryId: "e-a2", parentId: "e-u1", turnId: "turn-e-u1", role: "assistant", text: "重试成功" }),
+    ], AGENT);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatchObject({ type: "message", entryId: "e-u1" });
+    expect(items[1]).toMatchObject({
+      id: "entry-error-e-a1", type: "event", kind: "status",
+      title: "运行错误", summary: "401: invalid api key", meta: "历史",
+    });
+    expect(items[2]).toMatchObject({ type: "message", entryId: "e-a2", body: "重试成功" });
+    // 空气泡确实没有出现
+    expect(items.filter((item) => item.type === "message" && item.entryId === "e-a1")).toHaveLength(0);
+  });
+
+  it("失败条目正文非空：消息 meta 标「生成失败」，随后追加运行错误状态卡", () => {
+    const items = projectBranchEntries([
+      entry({ entryId: "e-a1", role: "assistant", text: "部分输出", errorMessage: "上游 502" }),
+    ], AGENT);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ type: "message", entryId: "e-a1", body: "部分输出", meta: "生成失败" });
+    expect(items[1]).toMatchObject({
+      id: "entry-error-e-a1", type: "event", kind: "status",
+      title: "运行错误", summary: "上游 502", meta: "历史",
+    });
+  });
+
+  it("普通条目（无 errorMessage）不产生运行错误状态卡", () => {
+    const items = projectBranchEntries([
+      entry({ entryId: "e-a1", role: "assistant", text: "正常回答" }),
+    ], AGENT);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "message", entryId: "e-a1", meta: expect.not.stringContaining("生成失败") });
+    expect(items[0]?.type === "event").toBe(false);
+  });
+
+  it("projectHistory 失败条目：history-error-<index> 状态卡 + 生成失败/空气泡语义一致", () => {
+    const items = projectHistory([
+      { role: "assistant", content: "部分输出", errorMessage: "上游 502" },
+      { role: "assistant", content: "", errorMessage: "401: invalid api key" },
+      { role: "assistant", content: "正常回答" },
+    ], AGENT);
+    expect(items).toHaveLength(4);
+    expect(items[0]).toMatchObject({ id: "history-0", type: "message", body: "部分输出", meta: "生成失败" });
+    expect(items[1]).toMatchObject({
+      id: "history-error-0", type: "event", kind: "status",
+      title: "运行错误", summary: "上游 502", meta: "历史",
+    });
+    expect(items[2]).toMatchObject({
+      id: "history-error-1", type: "event", kind: "status",
+      title: "运行错误", summary: "401: invalid api key", meta: "历史",
+    });
+    expect(items[3]).toMatchObject({ id: "history-2", type: "message", body: "正常回答", meta: "" });
+  });
 });
 
 describe("applyEvent 分支事件放行", () => {
