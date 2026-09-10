@@ -77,10 +77,11 @@ describe("会话设置乐观更新失败回滚（P1 审计 §10-4）", () => {
     });
     const app = await openDemoSession();
     try {
-      await settingChipDriver(app.user, /^all/)("工具模式", /^read-only/);
-      // 收敛断言：新值不滞留（缺陷形态 = read-only 滞留，此断言超时失败）
-      await expectChip(app.user, /^all/);
-      expect(screen.queryByRole("button", { name: /^read-only/ })).toBeNull();
+      // 中文工具模式文案：chip=「全部工具」，菜单项 strong=「只读」+ small=描述
+      await settingChipDriver(app.user, /^全部工具/)("工具模式", /^只读/);
+      // 收敛断言：新值不滞留（缺陷形态 = 只读滞留，此断言超时失败）
+      await expectChip(app.user, /^全部工具/);
+      expect(screen.queryByRole("button", { name: /^只读/ })).toBeNull();
     } finally {
       app.unmount();
     }
@@ -93,9 +94,10 @@ describe("会话设置乐观更新失败回滚（P1 审计 §10-4）", () => {
     });
     const app = await openDemoSession();
     try {
-      await settingChipDriver(app.user, /^high/)("思考级别", "low");
-      await expectChip(app.user, /^high/);
-      expect(screen.queryByRole("button", { name: /^low/ })).toBeNull();
+      // 中文思考档位文案：chip=「高」/「低」，菜单项 strong=档位 + small=协议值（如 low）
+      await settingChipDriver(app.user, /^高/)("思考级别", /^低/);
+      await expectChip(app.user, /^高/);
+      expect(screen.queryByRole("button", { name: /^低/ })).toBeNull();
     } finally {
       app.unmount();
     }
@@ -127,12 +129,12 @@ describe("会话设置乐观更新失败回滚（P1 审计 §10-4）", () => {
     });
     const app = await openDemoSession();
     try {
-      await settingChipDriver(app.user, /^all/)("工具模式", /^read-only/);
-      await expectChip(app.user, /^read-only/);
+      await settingChipDriver(app.user, /^全部工具/)("工具模式", /^只读/);
+      await expectChip(app.user, /^只读/);
       expect(calls).toBe(1);
       // 新值稳定保持（无回滚抖动）
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(screen.getByRole("button", { name: /^read-only/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^只读/ })).toBeTruthy();
     } finally {
       app.unmount();
     }
@@ -145,10 +147,10 @@ describe("会话设置乐观更新失败回滚（P1 审计 §10-4）", () => {
     });
     const app = await openDemoSession();
     try {
-      await settingChipDriver(app.user, /^all/)("工具模式", /^read-only/);
+      await settingChipDriver(app.user, /^全部工具/)("工具模式", /^只读/);
       // 错误行出现（errors.ts 稳定文案）；chip 同时被回滚
       await screen.findByText("工具模式更新失败，请重试。");
-      await expectChip(app.user, /^all/);
+      await expectChip(app.user, /^全部工具/);
     } finally {
       app.unmount();
     }

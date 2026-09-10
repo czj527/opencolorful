@@ -253,6 +253,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .chat-head-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10.5px; font-family: var(--mono); }
 .dock-toggles { display: flex; gap: 2px; }
 .chat-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+/* 对话页布局：左侧竖排对话时间线 + 主消息列（无轮次时 nav 不渲染，主列自动占满） */
+.chat-layout { display: flex; align-items: flex-start; max-width: 1072px; margin: 0 auto; }
+.chat-main { flex: 1; min-width: 0; }
+.chat-main > .session-todo-card { margin-left: auto; margin-right: auto; }
 .chat-column { max-width: 740px; margin: 0 auto; padding: 22px 24px 28px; }
 .chat-composer { flex: 0 0 auto; max-width: 740px; width: 100%; margin: 0 auto; padding: 8px 24px 14px; }
 

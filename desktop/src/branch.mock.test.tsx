@@ -69,10 +69,11 @@ it("BRANCH-03: 点击其他分支 → timeline 呈现该分支条目（两视图
   try {
     await user.click(screen.getByTestId("oc-branch-switcher"));
     await user.click(screen.getByTestId("oc-branch-item-e-a1b"));
-    // timeline 切到分支 B 的根→叶（分支 A 的 turn2 不再出现）
-    await screen.findByText("给我一个更小的方案：亮暗主题最少要做哪些事？");
-    await screen.findByText(BRANCH_B_REPLY);
-    expect(screen.queryByText(TURN2_TEXT)).toBeNull();
+    // timeline 切到分支 B 的根→叶（分支 A 的 turn2 不再出现）；
+    // 左侧时间线导航的 timeline-summary 也展示轮次摘要文本（≤36 字全文），用 *AllBy 查询
+    await screen.findAllByText("给我一个更小的方案：亮暗主题最少要做哪些事？");
+    await screen.findAllByText(BRANCH_B_REPLY);
+    expect(screen.queryAllByText(TURN2_TEXT)).toHaveLength(0);
     // 导航节点只含分支 B 的轮次
     const nav = screen.getByTestId("oc-timeline-nav");
     expect(within(nav).getByTestId("oc-timeline-node-turn-e-u1b")).toBeTruthy();

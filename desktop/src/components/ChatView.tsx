@@ -231,12 +231,18 @@ interface EventRowProps {
 }
 
 const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, onOpenLogs }: EventRowProps) {
-  const [expanded, setExpanded] = useState(false);
+  // 单个工具调用的 live 行默认展开（单步动作直接铺开，多步折叠为计数——openhanako 取舍）；
+  // 历史行（meta="历史"）一律收起，避免长会话重放刷屏
+  const [expanded, setExpanded] = useState(() =>
+    event.kind === "tool" && event.meta !== "历史" && (event.tools?.length ?? 0) <= 1);
   const [approval, setApproval] = useState<"pending" | "approved" | "denied">("pending");
   const Icon = eventIcons[event.kind];
   const hasDetail = Boolean(
     event.detail || event.tools?.length || event.files?.length || event.plan?.length || event.subagent || event.recalled?.length,
   );
+  // thinking 进行中强制展开（思考过程流动可见，lobe-chat 取舍），完成后回到收起
+  const autoExpanded = event.kind === "thinking" && event.summary === "正在思考…";
+  const shown = expanded || autoExpanded;
   const showCorrelation = errorCorrelation !== undefined && errorCorrelation !== null && onOpenLogs !== undefined;
 
   return (
@@ -244,7 +250,7 @@ const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, o
       <button
         type="button"
         className="event-summary"
-        aria-expanded={hasDetail ? expanded : undefined}
+        aria-expanded={hasDetail ? shown : undefined}
         onClick={() => hasDetail && setExpanded((v) => !v)}
       >
         <span className="event-icon" aria-hidden="true"><Icon size={14} strokeWidth={1.8} /></span>
@@ -254,7 +260,7 @@ const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, o
         </span>
         <span className="event-meta">
           <span>{event.meta}</span>
-          {hasDetail && <ChevronRight size={13} className={expanded ? "is-rotated" : ""} />}
+          {hasDetail && <ChevronRight size={13} className={shown ? "is-rotated" : ""} />}
         </span>
       </button>
       {showCorrelation && (
@@ -288,7 +294,7 @@ const EventRow = memo(function EventRow({ event, onOpenDiff, errorCorrelation, o
           </div>
         )
       )}
-      {expanded && hasDetail && (
+      {shown && hasDetail && (
         <div className="event-detail"><EventDetail event={event} onOpenDiff={onOpenDiff} /></div>
       )}
     </article>
@@ -491,42 +497,44 @@ export function ChatView({ source, threadId, onOpenDiff, onStreamingChange, onOp
   }, [source, threadId, errorRowId]);
 
   return (
-    <>
+    <div className="chat-layout">
       <TimelineNav items={visible} activeTurnId={activeTurnId} onSelectTurn={scrollToAnchor} />
-      {actionError !== null && (
-        <div className="branch-strip branch-strip-error" role="alert" data-testid="oc-branch-action-strip">
-          <span>{actionError.message}</span>
-          <span className="branch-state-actions">
-            {actionError.code === "SESSION_BUSY" && (
-              <button
-                type="button"
-                className="inline-action"
-                data-testid="oc-branch-strip-stop"
-                onClick={() => {
-                  void source.abort(threadId).catch(() => undefined);
-                  setActionError(null);
-                }}
-              >
-                停止
-              </button>
-            )}
-            {actionError.code === "NOT_FOUND" && (
-              <button type="button" className="inline-action" onClick={() => setActionError(null)}>刷新后重试</button>
-            )}
-            <button type="button" className="inline-action" onClick={() => setActionError(null)}>知道了</button>
-          </span>
-        </div>
-      )}
-      {/* 波次 B5b：durable session todo 只读卡（时间线上方的持久状态卡，非 timeline item） */}
-      {todos.length > 0 && <SessionTodoCard todos={todos} />}
-      <Timeline
-        items={visible}
-        onOpenDiff={onOpenDiff}
-        errorCorrelation={correlation}
-        onOpenLogs={onOpenLogs}
-        messageActions={messageActions}
-        canRegenerate={!streaming && !branchActionBusy}
-      />
-    </>
+      <div className="chat-main">
+        {actionError !== null && (
+          <div className="branch-strip branch-strip-error" role="alert" data-testid="oc-branch-action-strip">
+            <span>{actionError.message}</span>
+            <span className="branch-state-actions">
+              {actionError.code === "SESSION_BUSY" && (
+                <button
+                  type="button"
+                  className="inline-action"
+                  data-testid="oc-branch-strip-stop"
+                  onClick={() => {
+                    void source.abort(threadId).catch(() => undefined);
+                    setActionError(null);
+                  }}
+                >
+                  停止
+                </button>
+              )}
+              {actionError.code === "NOT_FOUND" && (
+                <button type="button" className="inline-action" onClick={() => setActionError(null)}>刷新后重试</button>
+              )}
+              <button type="button" className="inline-action" onClick={() => setActionError(null)}>知道了</button>
+            </span>
+          </div>
+        )}
+        {/* 波次 B5b：durable session todo 只读卡（时间线上方的持久状态卡，非 timeline item） */}
+        {todos.length > 0 && <SessionTodoCard todos={todos} />}
+        <Timeline
+          items={visible}
+          onOpenDiff={onOpenDiff}
+          errorCorrelation={correlation}
+          onOpenLogs={onOpenLogs}
+          messageActions={messageActions}
+          canRegenerate={!streaming && !branchActionBusy}
+        />
+      </div>
+    </div>
   );
 }

@@ -5,7 +5,7 @@ import type { Agent, Thread } from "../mock-data.js";
 import { pickDirectory } from "../data/pick-directory.js";
 import type { DesktopDataSource, ModelOption, ModelRef } from "../data/source.js";
 import { toUserError } from "../errors.js";
-import { THINKING_LEVELS, TOOL_MODES } from "./Composer.js";
+import { THINKING_LEVEL_LABELS, THINKING_LEVELS, TOOL_MODES } from "./Composer.js";
 import "./NewSessionDialog.css";
 
 interface NewSessionDialogProps {
@@ -222,7 +222,7 @@ export function NewSessionDialog({
             <span>思考级别</span>
             <select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)} disabled={busy}>
               {THINKING_LEVELS.map((level) => (
-                <option key={level} value={level}>{level}</option>
+                <option key={level} value={level}>{THINKING_LEVEL_LABELS[level]}（{level}）</option>
               ))}
             </select>
           </label>

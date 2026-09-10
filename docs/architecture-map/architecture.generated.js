@@ -219,7 +219,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/ChatView.tsx",
-          "lines": 533
+          "lines": 541
         },
         {
           "path": "desktop/src/components/CompactionCard.tsx",
@@ -227,7 +227,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/Composer.tsx",
-          "lines": 216
+          "lines": 222
         },
         {
           "path": "desktop/src/components/Dock.tsx",
@@ -271,7 +271,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/components/TimelineNav.tsx",
-          "lines": 68
+          "lines": 76
         },
         {
           "path": "desktop/src/components/Titlebar.tsx",
@@ -311,7 +311,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/projector.ts",
-          "lines": 609
+          "lines": 606
         },
         {
           "path": "desktop/src/data/source.ts",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10595
+      "totalLines": 10614
     },
     {
       "id": "web-client",
@@ -1224,7 +1224,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/server/routes/runtime-bootstrap.ts",
-          "lines": 886
+          "lines": 912
         },
         {
           "path": "src/server/routes/sandbox.ts",
@@ -1292,7 +1292,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 29,
-      "totalLines": 7532
+      "totalLines": 7558
     },
     {
       "id": "ui-projection",
@@ -1525,7 +1525,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "src/runtime/model-service.ts",
-          "lines": 93
+          "lines": 106
         },
         {
           "path": "src/runtime/prompt-service.ts",
@@ -1557,7 +1557,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 12,
-      "totalLines": 3008
+      "totalLines": 3021
     },
     {
       "id": "pi-adapter",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114248,
+    "totalSourceLines": 114306,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },

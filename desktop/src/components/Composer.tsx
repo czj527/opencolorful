@@ -7,10 +7,15 @@ import "./composer.css";
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/** 思考强度 chip/选项的显示文案（id 是协议值，界面只展示中文档） */
+export const THINKING_LEVEL_LABELS: Record<ThinkingLevel, string> = {
+  off: "关", minimal: "极简", low: "低", medium: "中", high: "高", xhigh: "很高", max: "最高",
+};
+
 export const TOOL_MODES = [
-  { id: "off", label: "off", description: "不调用工具" },
-  { id: "read-only", label: "read-only", description: "只读" },
-  { id: "all", label: "all", description: "可写入需确认工作区" },
+  { id: "off", label: "免工具", description: "不调用工具" },
+  { id: "read-only", label: "只读", description: "工具只读，不修改文件" },
+  { id: "all", label: "全部工具", description: "可写入需确认工作区" },
 ] as const;
 export type ToolMode = (typeof TOOL_MODES)[number]["id"];
 
@@ -120,7 +125,7 @@ export function Composer({
               aria-expanded={openMenu === "tool"}
               onClick={() => toggle("tool")}
             >
-              {toolMode}<ChevronDown size={11} />
+              {TOOL_MODES.find((mode) => mode.id === toolMode)?.label ?? toolMode}<ChevronDown size={11} />
             </button>
             {openMenu === "tool" && (
               <div className="composer-menu" role="menu" aria-label="工具模式">
@@ -148,7 +153,7 @@ export function Composer({
               aria-expanded={openMenu === "thinking"}
               onClick={() => toggle("thinking")}
             >
-              {thinkingLevel}<ChevronDown size={11} />
+              {THINKING_LEVEL_LABELS[thinkingLevel as ThinkingLevel] ?? thinkingLevel}<ChevronDown size={11} />
             </button>
             {openMenu === "thinking" && (
               <div className="composer-menu" role="menu" aria-label="思考级别">
@@ -159,7 +164,8 @@ export function Composer({
                     className={thinkingLevel === level ? "is-active" : ""}
                     onClick={() => { onThinkingLevel(level); setOpenMenu(null); }}
                   >
-                    <strong>{level}</strong>
+                    <strong>{THINKING_LEVEL_LABELS[level]}</strong>
+                    <small>{level}</small>
                   </button>
                 ))}
               </div>

@@ -381,17 +381,21 @@ it("CHAT-03: L5 回放底座（事件行）——工具/计划/记忆事件行�
     // 定稿
     await screen.findByText(assistantText, undefined, { timeout: 5_000 });
 
-    /* 工具事件行：完成态摘要 + 展开/收起 */
+    /* 工具事件行：完成态摘要 + 展开/收起
+     * 新行为：单个工具调用的 live 行默认展开——先断言初始展开态，
+     * 再点击收起（内容隐藏），再点击展开恢复，保持双向覆盖 */
     const toolRow = screen.getByRole("button", { name: /工具调用/ });
     expect(within(toolRow).getByText("1 个工具已完成")).toBeTruthy();
     expect(within(toolRow).getByText("完成")).toBeTruthy();
-    await app.user.click(toolRow);
     expect(toolRow.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("read_file")).toBeTruthy();
     expect(screen.getByText("oc-e2e-目标文件.md")).toBeTruthy();
     await app.user.click(toolRow);
     expect(toolRow.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("oc-e2e-目标文件.md")).toBeNull();
+    await app.user.click(toolRow);
+    expect(toolRow.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("oc-e2e-目标文件.md")).toBeTruthy();
 
     /* 计划事件行：排队态摘要 + 展开 */
     const planRow = screen.getByRole("button", { name: /工作计划/ });
