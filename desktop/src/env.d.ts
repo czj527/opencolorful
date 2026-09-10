@@ -24,6 +24,11 @@ interface DesktopApi {
   subscribeEvents(path: string, lastEventId?: string): string;
   unsubscribeEvents(subId: string): void;
   onEvent(handler: (payload: { readonly subId: string; readonly frame: DesktopApiFrame }) => void): () => void;
+  /**
+   * F3 flaky 回归：订阅的 SSE 断线重连成功通知（可选：旧 preload 桥无此能力时
+   * renderer 静默降级为不追平）。payload.subId 为重连成功的订阅 id。
+   */
+  onReconnect?(handler: (payload: { readonly subId: string }) => void): () => void;
 }
 
 /** G2 T2：应用内版本更新状态（主进程 auto-update.cjs 状态机，renderer 侧同名） */

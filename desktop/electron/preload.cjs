@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld("desktopApi", {
       ipcRenderer.removeListener("desktop:sse-event", listener);
     };
   },
+  // F3 flaky 回归：断线重连成功通知（主进程 sse-proxy 发出，renderer 据此追平时间线）
+  onReconnect: (handler) => {
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on("desktop:sse-reconnect", listener);
+    return () => {
+      ipcRenderer.removeListener("desktop:sse-reconnect", listener);
+    };
+  },
 });
 
 // 更新桥：应用内版本更新（electron-updater 状态机，仅 packaged 真实工作）

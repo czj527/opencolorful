@@ -103,7 +103,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
       "files": [
         {
           "path": "desktop/electron/api-proxy.cjs",
-          "lines": 95
+          "lines": 106
         },
         {
           "path": "desktop/electron/auto-update.cjs",
@@ -115,11 +115,11 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/electron/preload.cjs",
-          "lines": 43
+          "lines": 51
         },
         {
           "path": "desktop/electron/sse-proxy.cjs",
-          "lines": 134
+          "lines": 151
         },
         {
           "path": "desktop/electron/token-source.cjs",
@@ -143,7 +143,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 10,
-      "totalLines": 953
+      "totalLines": 989
     },
     {
       "id": "desktop-renderer",
@@ -295,7 +295,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/ipc-source.ts",
-          "lines": 1325
+          "lines": 1358
         },
         {
           "path": "desktop/src/data/local-prefs.ts",
@@ -311,7 +311,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/data/projector.ts",
-          "lines": 606
+          "lines": 614
         },
         {
           "path": "desktop/src/data/source.ts",
@@ -319,7 +319,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         },
         {
           "path": "desktop/src/env.d.ts",
-          "lines": 54
+          "lines": 59
         },
         {
           "path": "desktop/src/errors.ts",
@@ -359,7 +359,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
         }
       ],
       "fileCount": 39,
-      "totalLines": 10614
+      "totalLines": 10660
     },
     {
       "id": "web-client",
@@ -6067,7 +6067,7 @@ window.__OPENCOLORFUL_ARCHITECTURE__ = {
     "sourceFileCount": 507,
     "mappedFileCount": 507,
     "unmappedFileCount": 0,
-    "totalSourceLines": 114306,
+    "totalSourceLines": 114388,
     "missingReferenceCount": 0,
     "projectBoardCardCount": 16
   },
