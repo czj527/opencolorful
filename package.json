@@ -40,7 +40,7 @@
     "desktop:test": "npm run test --workspace=@opencolorful/desktop"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-agent-core": "0.87.1",
     "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@hono/node-server": "2.0.11",
